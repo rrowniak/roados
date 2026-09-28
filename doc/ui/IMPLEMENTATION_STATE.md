@@ -12,12 +12,12 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 03 done and committed** — operator commit `5e564c7`, 2026-09-28,
-"doc/ui/TASK_UI_PRIM_03.md done". One review pass, *Approve* with two minor
-findings, both fixed. Static linking applied and verified: the binary has no
-`libSDL3.so.0` dependency.
+**Status: 04 done and committed** — operator commit `a8f3147`, 2026-09-28,
+"doc/ui/TASK_UI_PRIM_04.md done". One review pass, *Approve*, no findings. The
+reviewer independently mutation-tested the code (9 mutations, 6 caught, 3
+correctly uncaught as implementation details).
 
-**Current task: 04 — Arena Allocator.**
+**Current task: 05 — Property System.**
 
 ## Ratified by the operator (2026-09-28)
 
@@ -160,8 +160,8 @@ verified. A blank cell is unknown, not "none".
 | 01 | Crossbuild Environment Setup | done | `2f27127` | 3 review passes, 4 fix rounds | 9 open, 2 closed |
 | 02 | Project Scaffolding | done | `89b67b7` | 4 review passes, 3 fix rounds | — |
 | 03 | SDL3 + OpenGL ES 3.1 Context | done | `5e564c7` | 1 review pass, 1 fix round | — |
-| 04 | Arena Allocator | in progress | | | |
-| 05 | Property System | pending | | | |
+| 04 | Arena Allocator | done | `a8f3147` | 1 review pass, 0 fix rounds | — |
+| 05 | Property System | in progress | | | |
 | 06 | Rendering Pipeline | pending | | | |
 | 07 | Layout System | pending | | | |
 | 08 | Theme System | pending | | | |
@@ -537,3 +537,7 @@ operator's rule, none of these is treated as satisfied.
   version-string edge case and a discarded `sdl3::Error` type), both fixed.
   Static linking applied and verified: the binary has no `libSDL3.so.0`
   dependency, only `libm`, `libgcc_s`, `libc`, `ld-linux`.
+- 2026-09-28 — **task 04 committed by the operator**, `a8f3147`, and task 05
+  started. One review pass, *Approve*, no findings. The reviewer independently
+  mutation-tested the code (9 mutations, 6 caught, 3 correctly uncaught as
+  implementation details).

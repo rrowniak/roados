@@ -12,19 +12,12 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 02 done and committed** — operator commit `89b67b7`, 2026-09-28,
-"doc/ui/TASK_UI_PRIM_02.md implemented". Four review passes, three fix rounds;
-the defects were all in documentation, mostly self-invalidating line-number
-citations. The Rust and the manifests were clean from round 1 onward.
+**Status: 03 done and committed** — operator commit `5e564c7`, 2026-09-28,
+"doc/ui/TASK_UI_PRIM_03.md done". One review pass, *Approve* with two minor
+findings, both fixed. Static linking applied and verified: the binary has no
+`libSDL3.so.0` dependency.
 
-**Linkage decision (2026-09-28):** static linking. `build-from-source-static` on
-`sdl3` in both manifests. The binary carries SDL and has no runtime dependency
-on `libSDL3.so.0`. Chosen over an rpath because `SDL_RPATH` is unreachable from
-a manifest and an rpath into `ui/target/` is worthless on the head unit. The
-binary is larger and the target still `dlopen`s X11 libs at runtime, but those
-are already a known requirement.
-
-**Current task: 03 — SDL3 + OpenGL ES 3.1 Context.**
+**Current task: 04 — Arena Allocator.**
 
 ## Ratified by the operator (2026-09-28)
 
@@ -166,8 +159,8 @@ verified. A blank cell is unknown, not "none".
 |---|---|---|---|---|---|
 | 01 | Crossbuild Environment Setup | done | `2f27127` | 3 review passes, 4 fix rounds | 9 open, 2 closed |
 | 02 | Project Scaffolding | done | `89b67b7` | 4 review passes, 3 fix rounds | — |
-| 03 | SDL3 + OpenGL ES 3.1 Context | in progress | | | |
-| 04 | Arena Allocator | pending | | | |
+| 03 | SDL3 + OpenGL ES 3.1 Context | done | `5e564c7` | 1 review pass, 1 fix round | — |
+| 04 | Arena Allocator | in progress | | | |
 | 05 | Property System | pending | | | |
 | 06 | Rendering Pipeline | pending | | | |
 | 07 | Layout System | pending | | | |
@@ -539,3 +532,8 @@ operator's rule, none of these is treated as satisfied.
   self-invalidating line-number citations. The Rust and the manifests were
   clean from round 1 onward. The `libSDL3.so.0` linkage question is carried
   open into task 03 — see *Current position*.
+- 2026-09-28 — **task 03 committed by the operator**, `5e564c7`, and task 04
+  started. One review pass, *Approve* with two minor findings (a suffix-less
+  version-string edge case and a discarded `sdl3::Error` type), both fixed.
+  Static linking applied and verified: the binary has no `libSDL3.so.0`
+  dependency, only `libm`, `libgcc_s`, `libc`, `ld-linux`.

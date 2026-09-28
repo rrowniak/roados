@@ -80,6 +80,10 @@ starting with `idea-to-code.md`. Do not skip its gates — an unconfirmed
 verdict, an unverified build, or a waived finding are each a decision, not an
 oversight.
 
+For a `doc/ui/TASK_UI_PRIM_*.md` sequence, `task-sequence.md` is canonical and
+additionally owns the per-task loop and the operator-commit gate. It is not
+restated here.
+
 ## Planned, not yet written
 
 Referenced by the design, absent from the repository. Do not assume their

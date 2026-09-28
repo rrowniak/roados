@@ -13,6 +13,34 @@ replaces it. Keep entries short. A long entry is a rule nobody reads twice.
 
 ---
 
+## 2026-09-28 — Asserting a window opened, from a snapshot of a dead process
+
+Task 02's acceptance criterion is that `cargo run` opens a window. The demo was
+launched with `nohup … &` from a tool call that then exceeded its timeout; the
+tool killed the process group, so the window was gone a second later. The
+evidence — an `xwininfo` line naming the window — was real when it was taken and
+useless afterwards, and it would have been quoted as proof.
+
+**Rule:** anything that has to stay alive across tool calls is launched with
+`setsid` and checked with `pgrep` in the *same* call as the observation. A GUI
+claim is only evidence if the owning process was alive when the window was seen.
+
+## 2026-09-28 — "The window opened" as evidence for a vendored build
+
+Task 02 was reviewed as "fix first" for running the host's SDL 3.5.0 instead of
+the 3.4.16 it builds. The handoff had quoted an `xwininfo` line and called the
+acceptance criterion verified, without ever establishing *which* `libSDL3.so.0`
+opened the window. The gap is not a lie — `cargo run` does load the vendored
+library, because Cargo puts the crate's native link-search directory on
+`LD_LIBRARY_PATH` — but the same binary executed directly resolves
+`/usr/local/lib/libSDL3.so.0`, because `sdl3-sys` emits a plain
+`cargo::rustc-link-lib=SDL3` and no rpath. The claim was true of the command
+and unverified for the reason that mattered.
+
+**Rule:** on a `build-from-source` dependency, a passing run proves nothing
+about which library served it. Check `/proc/<pid>/maps` or `LD_DEBUG=libs` for
+the file that was actually mapped, and say which invocation was measured.
+
 ## 2026-09-27 — Instructions pointing at files that do not exist
 
 `AGENTS.md` referred to eight artifacts that had never been written:

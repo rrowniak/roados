@@ -11,6 +11,44 @@ when that document exists.
 
 Target architectures: aarch64 and x86_64. OpenGL ES 3.1.
 
+## Rust
+
+The Rust workspace is `ui/`: the `ui_core` library, the `ui_demo` binary, and
+`ui/Cargo.lock`, which is committed because the workspace ships a binary.
+Build output is `/ui/target/` and is ignored.
+
+Before changing a manifest, read `doc/ui/CROSSBUILD.md` §5.4 for the SDL
+features and the video-driver split, and `doc/ui/IMPLEMENTATION_STATE.md` for
+the operator's decisions. Dependency **versions** are in
+`doc/ui/PRIMITIVES_ARCHITECTURE.md` § *Dependencies*, and only there — that
+section's **feature list is known to be incomplete**;
+`doc/ui/IMPLEMENTATION_STATE.md:346` records it as wrong in two places, and its
+`features = ["build-from-source"]` would delete
+`build-from-source-unix-console`, which
+`doc/ui/IMPLEMENTATION_STATE.md:221` makes mandatory for the aarch64 target.
+
+The list below is a pointer document, not a second owner of any rule.
+`.ai/agents/developer.md` owns the agent rules and must be read before
+non-trivial work. Its **verification suite**, its **panic and `unsafe` policy**
+and its **doc-comment and `#[must_use]`** rules are not restated here, because a
+second copy of a rule is a divergence waiting to happen; only what
+`developer.md` does not say appears below, and where this section records an
+exception it names the rule it excepts.
+
+- **Edition 2021, `rust-version = "1.85"`** — the floor `sdl3-sys` declares.
+- **No new dependency** without the operator, per `.ai/agents/developer.md`.
+  The approved **direct** dependencies are `sdl3 0.20` and `glow 0.18`; the
+  resolved graph is larger and is not gated.
+- **Error handling deviates from `developer.md` on purpose.** It prescribes
+  `thiserror` and `anyhow`; neither is an approved dependency, so a binary
+  returns `Result<(), Box<dyn std::error::Error>>` and a library returns the
+  underlying error — `sdl3::Error` — and lets `?` carry it. Revisit when an
+  error-type dependency is approved.
+- **Tests** go in a `#[cfg(test)] mod tests` beside the code, or in
+  `<crate>/tests/` when they test the public API. No test framework, no
+  `dev-dependencies`. No test that needs a display, a network, a filesystem or
+  the wall clock. `developer.md`'s suite is run from `ui/`.
+
 ## Never again
 
 Common AI pitfalls for this project are recorded in `.ai/NEVERAGAIN.md` —

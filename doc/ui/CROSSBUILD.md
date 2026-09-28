@@ -7,12 +7,12 @@ cross-compiled aarch64 Linux, both targeting OpenGL ES 3.1.
 **Applies to:** the dependency set pinned in
 `doc/ui/PRIMITIVES_ARCHITECTURE.md` § *Dependencies*.
 
-> **There is no project yet.** `Cargo.toml`, `ui/src/ui_core/` and
-> `ui/src/ui_demo/` do not exist in the repository as of 2026-09-28; they are
-> owned by `doc/ui/TASK_UI_PRIM_02.md`. The commands below that say `cargo build`
-> therefore describe what task 02 must be able to run, not something that has
-> been run against this repository. What *was* executed, and what it proved, is
-> in [§6 Verification](#6-verification) — read it before trusting a command
+> **The project exists as of 2026-09-28.** `Cargo.toml`, `ui/src/ui_core/` and
+> `ui/src/ui_demo/` were created by `doc/ui/TASK_UI_PRIM_02.md`; the task table
+> in `doc/ui/IMPLEMENTATION_STATE.md` says how far each task got. Commands here
+> were written before the project existed, so read them as the procedure and
+> check them against the current tree. What *was* executed, and what it proved,
+> is in [§6 Verification](#6-verification) — read it before trusting a command
 > here.
 
 ---
@@ -418,12 +418,16 @@ No toolchain file. CMake detects the host, and `sdl3-sys` builds SDL with
 `/usr/bin/cc`.
 
 ```sh
+# from ui/ — the workspace root, and the only place Cargo.toml lives
 cargo build
 cargo build --release
 cargo test
 ```
 
-With a real project, that is the whole story for x86_64. To see what SDL itself
+For x86_64 that is the whole story. The directory matters only because the
+cross build in §4.2 is the one command that must be issued from the repository
+root: it addresses `cmake/aarch64-toolchain.cmake` as `$PWD/…`, so §4.2 carries
+a `--manifest-path` and this section does not. To see what SDL itself
 does underneath — useful when a subsystem is missing at runtime and you need to
 know whether it was even compiled in — configure the vendored source directly.
 This is the exact command whose output is quoted below and summarised in §6.5,
@@ -538,22 +542,57 @@ confusing way.
 # the repo root
 export CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu="$PWD/cmake/aarch64-toolchain.cmake"
 
-cargo build --target aarch64-unknown-linux-gnu
+cargo build --target aarch64-unknown-linux-gnu --manifest-path ui/Cargo.toml
 ```
+
+`--manifest-path` is needed because the workspace root is `ui/Cargo.toml`, not
+the repository root; the two snippets below add an environment variable to the
+last command and keep its arguments.
+
+**This command has been run, 2026-09-28, and it succeeds.** From scratch, into a
+throwaway target directory, with no sysroot: exit 0 in 46.7 s, and the artifact
+is the architecture it claims to be.
+
+```
+$ aarch64-linux-gnu-readelf -h …/aarch64-unknown-linux-gnu/debug/ui_demo \
+    | grep -E 'Class|Machine|Type'
+  Class:   ELF64
+  Type:    DYN (Position-Independent Executable file)
+  Machine: AArch64
+```
+
+The build carries this tree's thirteen source files — twelve in
+`libui_core.rlib`, one in the binary itself — and the SDL it links is the
+vendored 3.4.16. What it does **not** show is a target that runs: no sysroot, no
+runtime, no video driver (§6.7) — and the artifact still asks for
+`libSDL3.so.0` at load time, with no `RPATH` or `RUNPATH` to say where that
+should come from. That is the open linkage question, recorded in
+`doc/ui/IMPLEMENTATION_STATE.md` § *History*.
+
+**The linker comes from `.cargo/config.toml`,** which sets
+`[target.aarch64-unknown-linux-gnu] linker = "aarch64-linux-gnu-gcc"`. It is at
+the repository root and not under `ui/`, because Cargo reads config from the
+working directory and its ancestors and never from beside a manifest. Without it
+rustc drives the host `cc`, an x86_64 compiler, and the link fails with
+`rust-lld: error: --fix-cortex-a53-843419 is only supported on AArch64` — an
+aarch64 hardening flag rustc always passes, rejected by the host linker. Nothing
+else in the target build is a Cargo setting; the SDL options come from the
+toolchain file and from the manifest's features, so a native build gets X11 and
+the target does not.
 
 `ROADOS_ARCH_FLAGS` defaults to `-march=armv8-a`. If the head unit SoC supports
 more and the renderer can use it:
 
 ```sh
 ROADOS_ARCH_FLAGS="-march=armv8.2-a+crc" \
-  cargo build --target aarch64-unknown-linux-gnu
+  cargo build --target aarch64-unknown-linux-gnu --manifest-path ui/Cargo.toml
 ```
 
 With a real sysroot — Buildroot, Yocto, a hand-made rootfs:
 
 ```sh
 ROADOS_SYSROOT=/opt/sysroot-aarch64 \
-  cargo build --target aarch64-unknown-linux-gnu
+  cargo build --target aarch64-unknown-linux-gnu --manifest-path ui/Cargo.toml
 ```
 
 ### 4.3 The toolchain file
@@ -1382,9 +1421,9 @@ cmake --build /tmp/opencode/sdlcross-real -j"$(nproc)"
 ```
 
 `-DSDL_UNIX_CONSOLE_BUILD=ON` stands in for the manifest feature
-`build-from-source-unix-console` of §5.4, which does not exist yet — the
-`Cargo.toml` that would supply it is task 02. Without it, configure fails at
-`cmake/macros.cmake:415`; see §7.6.
+`build-from-source-unix-console` of §5.4, which did not exist when this was
+written and now does (task 02, 2026-09-28; §4.2 runs the real cargo build with
+it). Without it, configure fails at `cmake/macros.cmake:415`; see §7.6.
 
 **Configure: exit 0** (26.9 s). **Build: exit 0** (33.4 s, `user 2m50s`),
 `Linking C shared library libSDL3.so`.
@@ -1476,11 +1515,12 @@ on the real toolchain rather than leaving it a hypothesis.
 
 **What this closes, and what it does not.** It closes the last task-01
 cross-compilation waiver: the build runs, the compiler is cross, the flag is
-valid for aarch64, and the artifact is `AArch64`. It does **not** close
-"a `cargo build --target aarch64-unknown-linux-gnu` succeeds", because the
-manifest does not exist yet (task 02), and it does **not** give the target a
-video driver (§6.7, task 26). No runtime, no device, and no sysroot — this build
-needed none, and §6.4 explains why that is expected.
+valid for aarch64, and the artifact is `AArch64`. The one thing it did not
+close — "a `cargo build --target aarch64-unknown-linux-gnu` succeeds" — was
+closed the same day once the manifest existed (task 02); see §4.2. What it
+still does **not** give the target is a video driver (§6.7, task 26). No
+runtime, no device, and no sysroot — this build needed none, and §6.4 explains
+why that is expected.
 
 ### 6.5 Native SDL 3.4.16 configure — **pass**
 
@@ -2087,8 +2127,10 @@ grep CMAKE_LIBRARY_ARCHITECTURE <build-dir>/CMakeCache.txt
 2. **How SDL subsystems get configured.** `sdl3` 0.20.0 exposes no subsystem
    features, so the configuration `PRIMITIVES_ARCHITECTURE.md` asks for needs
    either a direct `sdl3-sys` dependency carrying the features, or options forced
-   from the toolchain file. §5.1. This is the one item that task 02 cannot start
-   without, and it is a design decision rather than a build-environment one.
+   from the toolchain file. §5.1. **Decided** for now: default subsystems,
+   recorded as a deviation in `doc/ui/IMPLEMENTATION_STATE.md`, to be revisited
+   before `roados_ui` rather than before task 02 — which is why task 02 was not
+   blocked on it.
 3. **`pkg-config`, `libdrm` and `libgbm` are hard requirements for any aarch64
    build.** §6.7, §2.2. This is the highest-value item on the list because the
    failure it causes is silent: the build succeeds, and the head unit ends up
@@ -2097,11 +2139,13 @@ grep CMAKE_LIBRARY_ARCHITECTURE <build-dir>/CMakeCache.txt
    the sysroot — and with `ROADOS_SYSROOT` unset a host `pkg-config` will satisfy
    the check and then record the *host's* `libdrm`, so item 1 gates this one.
    Verified on the host that the absence really is silent; not verified that
-   installing them fixes an aarch64 build, because no aarch64 build exists yet.
-4. **aarch64 cross toolchain.** Not installed. §2.5. The install is the
-   operator's call, and `binutils-aarch64-linux-gnu` is required as well as the
-   compiler, for the `gcc-ar` reason in §2.5. `rustup target add
-   aarch64-unknown-linux-gnu` is also still outstanding.
+   installing them fixes an aarch64 build, because the aarch64 builds so far run
+   with no sysroot and no target `pkg-config` (§6.4.2).
+4. **aarch64 cross toolchain — installed and in use.** §2.5,
+   `rustup target add aarch64-unknown-linux-gnu` included, verified
+   2026-09-28. The builds in §6.4.2 and §4.2 ran on it. `binutils-aarch64-linux-gnu`
+   is present as well as the compiler, for the `gcc-ar` reason in §2.5. What
+   remains on the target side is the runtime half: item 1.
 5. **Filesystem subsystem.** Cannot be disabled with SDL 3.4.16 +
    `sdl3-sys` 0.7.1. §5.2. `PRIMITIVES_ARCHITECTURE.md` and reality disagree.
 6. **Haptics, HID and audio.** §5.1. Whether `sdl-hidapi` stays on (USB gamepads
@@ -2110,18 +2154,20 @@ grep CMAKE_LIBRARY_ARCHITECTURE <build-dir>/CMakeCache.txt
    which is item 3's doing, not a decision.
 7. **Target video drivers — settled, with one part deferred.** §5.4. X11 and
    Wayland are **off** for the target and `SDL_UNIX_CONSOLE_BUILD` is **on**;
-   `cmake/aarch64-toolchain.cmake` forces the first two and the manifest must
-   carry the third. KMSDRM is **required** but not yet configured, because it
-   needs libdrm and gbm `.pc` files for the target and the target image is
-   undecided. What remains open is only the sysroot story — which is item 1.
-8. **The "cross" configures in §6.4 are not aarch64 builds.** A real
-   `cargo build --target aarch64-unknown-linux-gnu` has never been run on this
-   machine, and cannot be until items 1 and 4 are settled. What §6.4 does
-   establish is that the committed toolchain file's variables and its default
-   `-march` reach a real `project()` configure, and the new `SDL_X11` /
-   `SDL_WAYLAND` forcing has been verified on all four of its branches in script
-   mode and in a real configure with a stand-in compiler (§5.4, §7.7) — but never
-   against an aarch64 compiler.
+   `cmake/aarch64-toolchain.cmake` forces the first two and the manifest **does**
+   carry the third, since task 02. KMSDRM is **required** but not yet configured,
+   because it needs libdrm and gbm `.pc` files for the target and the target image
+   is undecided. What remains open is only the sysroot story — which is item 1.
+8. **A real `cargo build --target aarch64-unknown-linux-gnu` has been run on
+   this machine**, and it succeeds, with no sysroot (§4.2 records the command
+   and `readelf -h`). The §6.4 configures below it remain *not* aarch64 builds
+   in the narrower sense that they configure SDL's CMake directly instead of
+   going through Cargo — but they no longer stand as the only cross evidence
+   there is. What they establish is that the committed toolchain file's variables
+   and its default `-march` reach a real `project()` configure, and the new
+   `SDL_X11` / `SDL_WAYLAND` forcing has been verified on all four of its
+   branches in script mode and in a real configure with a stand-in compiler
+   (§5.4, §7.7).
 9. **The `pkg-config` harness artefact.** §6.4.1 and §5.4. Any cross
    verification done with a stub `pkg-config` will report host libraries as
    found. When items 1 and 4 are settled, re-run the cross configure with a real

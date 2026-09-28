@@ -1,0 +1,41 @@
+# The UI primitives library.
+#
+# `build-from-source` compiles SDL 3.4.16 from the vendored C sources that
+# `sdl3-src` carries, so no system SDL is needed and the version is pinned by
+# `sdl3-sys`.
+#
+# `build-from-source-unix-console` sets `SDL_UNIX_CONSOLE_BUILD`, and it is
+# **not** optional even though this build keeps X11. `cmake/aarch64-toolchain.cmake`
+# turns X11 and Wayland off for the aarch64 target, and SDL then raises a
+# FATAL_ERROR at `cmake/macros.cmake:415` unless the console build is on. The
+# feature is read at exactly that one place and enables no driver and no source
+# file, so natively it costs nothing — the check it suppresses would pass anyway
+# — and one manifest serves both targets. It is not a video-driver switch: it is
+# SDL's Unix console main-loop switch, and it is the only SDL option of any kind
+# that `sdl3` 0.20.0 re-exports. `SDL_X11`, `SDL_WAYLAND` and `SDL_KMSDRM` are
+# not in `sdl3-sys`'s `cmake_vars!` list at all, so no feature on either crate
+# can reach them and the toolchain file is the only channel. Do not remove this
+# one as unused.
+#
+# Subsystems are left at SDL's defaults. `PRIMITIVES_ARCHITECTURE.md` asks for
+# four of them to be off, and `sdl3` 0.20.0 re-exports no subsystem features at
+# all, so honouring it would need a second direct `sdl3-sys` dependency. The
+# operator accepted default subsystems for now; the deviation is recorded in
+# `doc/ui/IMPLEMENTATION_STATE.md`.
+#
+# Sources: `doc/ui/CROSSBUILD.md` §5.1 and §5.4.
+[package]
+name = "ui_core"
+version = "0.1.0"
+edition = "2021"
+# The floor `sdl3-sys` 0.7.1 declares, and what `doc/ui/CROSSBUILD.md` §7.1
+# calls for; this workspace does not need anything above it.
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+sdl3 = { version = "0.20", features = [
+    "build-from-source",
+    "build-from-source-unix-console",
+] }
+glow = "0.18"

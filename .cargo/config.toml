@@ -1,0 +1,22 @@
+# Cargo reads this from the working directory and its ancestors, so it belongs
+# at the repository root: `cargo build --manifest-path ui/Cargo.toml` run from
+# here has to see it, and Cargo does not look next to the workspace manifest.
+#
+# The linker for the aarch64 target, and the only thing in the target build
+# that is not an SDL option. Without it rustc drives the host `cc`, which is an
+# x86_64 compiler, and the link fails with a message about the wrong thing:
+#
+#   rust-lld: error: --fix-cortex-a53-843419 is only supported on AArch64
+#
+# `--fix-cortex-a53-843419` is an aarch64 hardening flag rustc always passes;
+# the host linker rejects it because it is not producing an AArch64 object.
+#
+# Override per build with
+# CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=<linker>.
+#
+# The SDL configuration is not here: X11, Wayland and the console build are
+# decided by `cmake/aarch64-toolchain.cmake` and by the manifest's features, so
+# that a native build gets X11 and the target does not. See
+# `doc/ui/CROSSBUILD.md` §4.2 and §5.4.
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"

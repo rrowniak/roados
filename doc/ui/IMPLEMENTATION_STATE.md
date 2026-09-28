@@ -12,11 +12,12 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 01 implemented and reviewed twice. Awaiting operator approval and
-commit.** Nothing is committed yet; the repository still has no Rust source.
+**Status: 01 done and committed** — operator commit `2f27127`, 2026-09-28,
+"doc/ui/TASK_UI_PRIM_01.md done". Both blockers that held 02 are resolved: the
+X11 development headers are installed, and the toolchain is 1.98.1.
 
-**Next task: 02 — Project Scaffolding**, once 01 is committed and the X11
-development-header blocker above is settled.
+**Current task: 02 — Project Scaffolding.** It is the first task that writes
+Rust source, so it also establishes the repository's conventions.
 
 ## Ratified by the operator (2026-09-28)
 
@@ -81,7 +82,7 @@ GL through `SDL_GL_GetProcAddress`.
 **Enforcement is asymmetric, necessarily.** `SDL_X11`/`SDL_WAYLAND` are not
 forwarded by `sdl3-sys`, so they are unreachable from `Cargo.toml` and the
 toolchain file is the only channel. `SDL_UNIX_CONSOLE_BUILD` *is* forwarded, and
-is required: with both desktop drivers off, `cmake/macros.cmake:412` raises
+is required: with both desktop drivers off, `cmake/macros.cmake:415` raises
 `FATAL_ERROR` unless it is set, so it belongs in the manifest as
 `build-from-source-unix-console` on `sdl3`.
 
@@ -111,6 +112,13 @@ sysroot mandatory.
   binary carries audio and camera code it will not use, and no choice is being
   made about HID, haptics, or which video driver the target image wants.
   Revisit before `roados_ui`, not before task 02.
+- **`ui_core`'s entry point is `src/lib.rs`, not `src/mod.rs`.** Task 02
+  specifies `lib.rs`, which is also what Cargo expects, so
+  `PRIMITIVES_ARCHITECTURE.md:332` is stale on this one point and was left
+  alone. Nothing else in that document's *Module Layout* conflicts with the
+  tree: the module list matches, and its `roados_ui/` line is a sibling
+  directory rather than a module of `ui_core`, so it is not a workspace member
+  at this stage.
 
 ## Protocol in force
 
@@ -149,8 +157,8 @@ verified. A blank cell is unknown, not "none".
 
 | # | Task | Status | Commit | Review | AC waived |
 |---|---|---|---|---|---|
-| 01 | Crossbuild Environment Setup | awaiting approval | — | 3 review passes, 4 fix rounds | 9 open, 2 closed |
-| 02 | Project Scaffolding | pending | | | |
+| 01 | Crossbuild Environment Setup | done | `2f27127` | 3 review passes, 4 fix rounds | 9 open, 2 closed |
+| 02 | Project Scaffolding | in progress | | 3 review passes, 3 fix rounds | |
 | 03 | SDL3 + OpenGL ES 3.1 Context | pending | | | |
 | 04 | Arena Allocator | pending | | | |
 | 05 | Property System | pending | | | |
@@ -205,22 +213,28 @@ not the build.
 | 28 | Reconcile the SDL Configuration | none — but item 5 must land **before task 04** |
 | 29 | Head-Unit Smoke Test | 25, 26, 27 |
 
-**Three things do gate the cross-build requirement**, and they are not all in
-these tasks:
+**Three things were recorded as gating the cross-build requirement**, and they
+were not all in these tasks. All three are closed as of task 02, 2026-09-28.
+What remains open is the sysroot — `CROSSBUILD.md` §8 item 1 — which is a runtime
+question, not a build one.
 
 1. **`build-from-source-unix-console` must be in the manifest.** Without it the
    cross configure dies at `cmake/macros.cmake:415`. It is the one option that
    makes the target build possible, it lives in the file task 02 creates, and
-   task 01 only documents it. **Task 02's brief must carry this.**
+   task 01 only documents it. **Task 02's brief must carry this.** — carried, in
+   both manifests, and no longer removable; see `AGENTS.md` § Rust.
 2. **The aarch64 cross toolchain is now installed** (2026-09-28), and the real
-   cross build passes — `CROSSBUILD.md` §6.4.2. What remains for a
-   `cargo build --target aarch64-unknown-linux-gnu` is the **`Cargo.toml`**, which
-   does not exist yet: it is task 02, and it must carry
-   `build-from-source-unix-console` or SDL's configure dies at
-   `cmake/macros.cmake:415`. This is now the *only* mechanical thing between the
-   current tree and a target build.
-3. Every cross run so far used an x86_64 `gcc` symlink. The CMake plumbing is
-   proven; a real aarch64 compile is not.
+   cross build passes — `CROSSBUILD.md` §6.4.2. A
+   `cargo build --target aarch64-unknown-linux-gnu` **now passes as well**, with
+   no sysroot: the manifest task 02 created exists and carries
+   `build-from-source-unix-console`, and the artifact is
+   `ELF 64-bit LSB pie executable, ARM aarch64` — `CROSSBUILD.md` §4.2 records
+   the command and the `readelf -h` output. Nothing mechanical is left between
+   this tree and a target build.
+3. The earlier caveat that every cross run used an x86_64 `gcc` symlink is
+   superseded by item 2 and by §6.4.2: a real aarch64 compile happened, twice —
+   once as a direct CMake configure and once through Cargo. What a sysroot would
+   still add is the *runtime* side, which is item 1.
 
 ## Resolved since task 01 was reviewed
 
@@ -422,7 +436,7 @@ operator's rule, none of these is treated as satisfied.
   `SDL_UNIX_CONSOLE_BUILD`. Six findings remained, all mechanical: stale
   evidence, two wrong counts, two stale statements, two nits.
 - 2026-09-28 — fix round 4 cleared them, and produced a correction the reviewer
-  had missed: `message_tested_option` (`cmake/macros.cmake:56`) prints
+  had missed: `message_tested_option` (`cmake/macros.cmake:55`) prints
   `(Wanted: ${_REQVALUE}): ${HAVE_<name>}` — **two different variables**. So
   `(Wanted: ON): OFF` means the option was on and the *backend test* failed, not
   that the option was off. Verified: of 31 such lines, 29 are `BOOL=ON`, two
@@ -456,3 +470,59 @@ operator's rule, none of these is treated as satisfied.
   KMSDRM driver blocks the sequence: it does not, because a cross build needs
   neither the driver nor a sysroot — `CROSSBUILD.md` §6.4.2 now proves the
   cross build works with no sysroot at all.
+- 2026-09-28 — **task 01 committed by the operator**, `2f27127`, and task 02
+  started. The `Pending` statuses of 25–29 are unchanged: they are still outside
+  the confirmed 24-task spec, and 02–24 do not depend on them — except that item
+  5 of task 28 must land before task 04, which is the next place that bites.
+- 2026-09-28 — **task 02, review round 1: six findings, five fixed, one
+  escalated to the operator.** Fixed: `AGENTS.md` duplicated rules
+  `developer.md` owns; `CROSSBUILD.md` §4.2 documented a command with no
+  evidence and never said where `.cargo/config.toml` comes from;
+  `IMPLEMENTATION_STATE.md` never recorded that `PRIMITIVES_ARCHITECTURE.md:332`
+  is stale on the `lib.rs` entry point; `ui_core/src/lib.rs` claimed the module
+  tree follows that document when the task file lists the modules; and the
+  `ui_demo` manifest comment did not say the feature list is a mirror. All five
+  held on re-review.
+- 2026-09-28 — **task 02, review round 1, escalated blocker: SDL is linked
+  dynamically and nothing says where the target's copy comes from.** Measured,
+  not inferred: `readelf -d` on both artifacts gives `NEEDED libSDL3.so.0` and
+  no `RPATH`/`RUNPATH`; run directly, the host's `/usr/local/lib` SDL 3.5.0
+  wins over the vendored 3.4.16, and `cargo run` only gets the vendored one
+  because Cargo puts the crate's link-search directory on `LD_LIBRARY_PATH`. The
+  static route works but is not free: `SDL_DEPS_SHARED` stays ON under
+  `SDL_STATIC`, so the statically linked binary still carries the X11 chain's
+  `dlopen` sonames — measured on this host, `libX11.so.6`, `libXcursor.so.1`,
+  `libXrandr.so.2`, `libX11-xcb.so.1` — and what the target `dlopen`s is whatever
+  its `pkg-config` supplies, which today is nothing (§6.4.2 records zero
+  sonames). And rpath or install-prefix packaging is unreachable while SDL is a
+  cross build, because `sdl3-sys` is written in Rust and SDL's CMake never sees
+  the manifest.
+  **Not the developer's to decide and not fixed:** the operator owns the
+  linkage strategy. Unchanged by either review round, and no acceptance
+  criterion is waived over it — all four were verified.
+- 2026-09-28 — **task 02, review round 2: six findings, all documentation or
+  one-sentence corrections.** The escalation above was accepted as correctly
+  handled, and all five round-1 fixes were confirmed to hold. Fixed here: the
+  three lossy restatements of `developer.md` rules that round 1 had left
+  standing; two documents that still claimed no aarch64 cargo build had ever
+  been run, when the artifact and a from-scratch build prove otherwise; the
+  `CROSSBUILD.md` preamble that still said the project did not exist, and §3's
+  missing working directory; two manifest comments that stated the feature
+  mechanics wrongly; one stale `cmake/macros.cmake` line number; and the
+  review-rounds bookkeeping — two History lines and the `Review` cell — that
+  this round's own finding 4 asked for. The
+  reviewer's own three settled facts — the `sdl3` licence, `SDL_RPATH`
+  reachability, and `wait_event_timeout`'s `None` on error — were offered for
+  elsewhere and deliberately not taken here.
+- 2026-09-28 — **task 02, review round 3: four findings, all fixed.** All four
+  were documentation corrections, and the reviewer confirmed the change is
+  otherwise ready for commit. Fixed here: §8 item 3's stale reason — "no aarch64
+  build exists yet" replaced with the measured one, that the aarch64 builds so
+  far run with no sysroot and no target `pkg-config`; the round-2 History
+  undercount — "five findings" corrected to six and the review-rounds
+  bookkeeping added to the list; §4.2's pronoun — the binary's DWARF references
+  one tree source, the other twelve are in `libui_core.rlib`, so the sentence now
+  says the build carries thirteen with the split named — and its timing figure,
+  46.8 s adjusted to the reproducible 46.7 s; and one off-by-one citation,
+  `cmake/macros.cmake:56` → `:55`, the `message(STATUS …)` line rather than the
+  `endmacro()` below it.

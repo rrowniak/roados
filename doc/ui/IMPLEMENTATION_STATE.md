@@ -12,12 +12,19 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 01 done and committed** — operator commit `2f27127`, 2026-09-28,
-"doc/ui/TASK_UI_PRIM_01.md done". Both blockers that held 02 are resolved: the
-X11 development headers are installed, and the toolchain is 1.98.1.
+**Status: 02 done and committed** — operator commit `89b67b7`, 2026-09-28,
+"doc/ui/TASK_UI_PRIM_02.md implemented". Four review passes, three fix rounds;
+the defects were all in documentation, mostly self-invalidating line-number
+citations. The Rust and the manifests were clean from round 1 onward.
 
-**Current task: 02 — Project Scaffolding.** It is the first task that writes
-Rust source, so it also establishes the repository's conventions.
+**Linkage decision (2026-09-28):** static linking. `build-from-source-static` on
+`sdl3` in both manifests. The binary carries SDL and has no runtime dependency
+on `libSDL3.so.0`. Chosen over an rpath because `SDL_RPATH` is unreachable from
+a manifest and an rpath into `ui/target/` is worthless on the head unit. The
+binary is larger and the target still `dlopen`s X11 libs at runtime, but those
+are already a known requirement.
+
+**Current task: 03 — SDL3 + OpenGL ES 3.1 Context.**
 
 ## Ratified by the operator (2026-09-28)
 
@@ -158,8 +165,8 @@ verified. A blank cell is unknown, not "none".
 | # | Task | Status | Commit | Review | AC waived |
 |---|---|---|---|---|---|
 | 01 | Crossbuild Environment Setup | done | `2f27127` | 3 review passes, 4 fix rounds | 9 open, 2 closed |
-| 02 | Project Scaffolding | in progress | | 3 review passes, 3 fix rounds | |
-| 03 | SDL3 + OpenGL ES 3.1 Context | pending | | | |
+| 02 | Project Scaffolding | done | `89b67b7` | 4 review passes, 3 fix rounds | — |
+| 03 | SDL3 + OpenGL ES 3.1 Context | in progress | | | |
 | 04 | Arena Allocator | pending | | | |
 | 05 | Property System | pending | | | |
 | 06 | Rendering Pipeline | pending | | | |
@@ -526,3 +533,9 @@ operator's rule, none of these is treated as satisfied.
   46.8 s adjusted to the reproducible 46.7 s; and one off-by-one citation,
   `cmake/macros.cmake:56` → `:55`, the `message(STATUS …)` line rather than the
   `endmacro()` below it.
+- 2026-09-28 — **task 02 committed by the operator**, `89b67b7`, and task 03
+  started. Four review passes, three fix rounds; every defect was in
+  documentation, and three of the four across the last two rounds were
+  self-invalidating line-number citations. The Rust and the manifests were
+  clean from round 1 onward. The `libSDL3.so.0` linkage question is carried
+  open into task 03 — see *Current position*.

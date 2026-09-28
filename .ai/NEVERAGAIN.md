@@ -13,6 +13,18 @@ replaces it. Keep entries short. A long entry is a rule nobody reads twice.
 
 ---
 
+## 2026-09-28 — Backgrounding a long-running process without redirecting output
+
+The developer agent ran `setsid cargo run --bin ui_demo &` to verify the demo
+launched. The background process inherited the shell's stdout/stderr, and since
+`ui_demo` is a GUI app that runs indefinitely, those file descriptors never
+closed. The bash tool waits for all output to close before returning, so the
+command hung forever.
+
+**Rule:** when backgrounding a long-running process, always redirect stdout and
+stderr to a file (`>/tmp/app.log 2>&1`) and separate `cargo build` from
+execution so compilation time does not race with `sleep`.
+
 ## 2026-09-28 — Asserting a window opened, from a snapshot of a dead process
 
 Task 02's acceptance criterion is that `cargo run` opens a window. The demo was

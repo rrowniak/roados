@@ -19,6 +19,7 @@ ui_core = { path = "../ui_core" }
 # without saying so. `doc/ui/CROSSBUILD.md` §5.4 has the reasoning.
 sdl3 = { version = "0.20", features = [
     "build-from-source",
+    "build-from-source-static",
     "build-from-source-unix-console",
 ] }
 # `glow` and `ui_core` are unused until the render context lands: the window

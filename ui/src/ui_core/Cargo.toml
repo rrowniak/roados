@@ -4,6 +4,13 @@
 # `sdl3-src` carries, so no system SDL is needed and the version is pinned by
 # `sdl3-sys`.
 #
+# `build-from-source-static` links SDL statically into the binary. The operator
+# chose this over an rpath: `SDL_RPATH` is unreachable from a manifest (same
+# asymmetry as `SDL_X11`), and an rpath into `ui/target/` is worthless on the head
+# unit. Static linking removes the runtime dependency on `libSDL3.so.0` entirely.
+# The binary is larger (~18 MB vs ~7 MB) and the target still `dlopen`s X11 libs
+# at runtime, but those are already a known requirement.
+#
 # `build-from-source-unix-console` sets `SDL_UNIX_CONSOLE_BUILD`, and it is
 # **not** optional even though this build keeps X11. `cmake/aarch64-toolchain.cmake`
 # turns X11 and Wayland off for the aarch64 target, and SDL then raises a
@@ -36,6 +43,7 @@ publish = false
 [dependencies]
 sdl3 = { version = "0.20", features = [
     "build-from-source",
+    "build-from-source-static",
     "build-from-source-unix-console",
 ] }
 glow = "0.18"

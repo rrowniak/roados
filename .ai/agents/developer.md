@@ -196,6 +196,11 @@ Verification is not a step you report on; it is a step you perform.
 - **Report honestly.** If something fails and you could not fix it, say so,
   with the output. A change handed over as complete when it is not is the
   single most expensive thing this agent can do.
+- **Backgrounding long-running processes.** When launching a GUI app or server
+  for verification, always redirect stdout/stderr to a file
+  (`>/tmp/app.log 2>&1`) and run `cargo build` first so compilation time does
+  not race with `sleep`. Without redirection the bash tool hangs forever
+  waiting on inherited file descriptors.
 - If there is no test infrastructure yet, the first change creates it. That is
   part of the change, not a follow-up.
 

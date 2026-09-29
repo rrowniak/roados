@@ -7,7 +7,8 @@ pub mod context;
 
 use crate::arena::{Arena, Handle};
 use crate::batch::{Batch, Batcher, ShaderKind};
-use crate::paint::{DrawCommand, PaintState, Rect};
+use crate::node::WidgetNode;
+use crate::paint::{DrawCommand, Rect};
 use crate::property::Color;
 use context::Context;
 use glow::HasContext;
@@ -484,10 +485,14 @@ impl Renderer {
     /// Records the draw commands of the node `handle` points to.
     ///
     /// The commands are recorded into this frame's batches only when the
-    /// node's [`PaintState`] is dirty; recording clears the dirty flag. A
-    /// stale handle is ignored.
-    pub fn draw_node(&mut self, handle: Handle, nodes: &mut Arena<PaintState>) {
-        let Some(state) = nodes.get_mut(handle) else {
+    /// node's [`crate::node::WidgetNode`] paint state is dirty; recording clears
+    /// the dirty flag. A stale handle is ignored.
+    ///
+    /// The order the nodes are drawn in is the order they appear on screen, so
+    /// this is the caller's to choose: a widget tree walks itself depth first,
+    /// and a widget that overlaps another is drawn after it.
+    pub fn draw_node(&mut self, handle: Handle, nodes: &mut Arena<WidgetNode>) {
+        let Some(state) = nodes.get_mut(handle).map(|node| node.paint_mut()) else {
             return;
         };
         if !state.is_dirty() {
@@ -509,7 +514,9 @@ impl Renderer {
     /// The scissor applies to the whole frame: draw commands are recorded
     /// during [`Renderer::draw_node`] and submitted together in
     /// [`Renderer::end_frame`], so there is no per-node clip to hook a
-    /// scissor to yet. Per-node clip rects arrive with the widget tree.
+    /// scissor to yet. [`crate::layout::LayoutState::clip`] already carries
+    /// the per-node rect; applying it per node is deferred, because a
+    /// recorded command has no scissor state of its own to carry.
     pub fn set_scissor(&self, rect: Option<Rect>) {
         let gl = self.context.gl();
         // SAFETY: The GL context is current on this thread.

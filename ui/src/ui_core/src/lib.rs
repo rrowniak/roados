@@ -5,9 +5,10 @@
 //! entry-point filename and what that document says about it are recorded in
 //! `doc/ui/IMPLEMENTATION_STATE.md` § *Deviations from the spec, and why*.
 //!
-//! Every module is a stub at this point. The stages of the frame pipeline they
-//! will own — input, animation, layout, paint, batching, submission — are
-//! listed in that document's *Frame lifecycle*.
+//! The stages of the frame pipeline each module owns — input, animation,
+//! layout, paint, batching, submission — are listed in that document's *Frame
+//! lifecycle*. Some are still stubs; `layout`, `node` and `paint` are not, and
+//! a module's own docs say which it is.
 #![warn(missing_docs)]
 
 pub mod animation;

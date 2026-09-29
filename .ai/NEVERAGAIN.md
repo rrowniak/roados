@@ -125,3 +125,19 @@ unable to compound.
 
 **Rule:** a mechanism that only produces value over time needs a storage
 convention in the same change that introduces it.
+
+## 2026-09-29 — A deliberate break's backup silently reverted the fix, and the report described the intent
+
+Task 07, round 3. A mutation test proved a fix worked, but a later deliberate
+break of the same line left the suite green. Cause: the `cp file /tmp/x.bak`
+backup was taken *before* the test was improved, and restored *after* — so the
+restore put the pre-improvement file back, dropping the edit that made the test
+discriminate. The report for the round in between described the test as it was
+written, not as it stood in the tree, and the reviewer found the divergence by
+running the same mutation.
+
+**Rule:** a deliberate break is a three-step ritual — snapshot, mutate, **diff
+the restore against the snapshot you intend to keep**, and re-read the file that
+was mutated before reporting on it. Never report a file's intended state; read
+its state. If a backup is taken before an edit and restored after, the edit is
+gone, and nothing but a fresh `grep` will say so.

@@ -8,16 +8,21 @@ and this file gets corrected.
 **Spec:** `doc/ui/PRIMITIVES.md`, `doc/ui/PRIMITIVES_ARCHITECTURE.md`, and
 `doc/ui/TASK_UI_PRIM_01..24.md`.
 
-**Last updated:** 2026-09-28
+**Last updated:** 2026-09-29
 
 ## Current position
 
-**Status: 05 done and committed** — operator commit `8c3657b`, 2026-09-28,
-"doc/ui/TASK_UI_PRIM_05.md done". Implemented directly after the developer
-agent returned empty twice; one fix round for clippy `type_complexity`, cascade
-propagation, and a doc test.
+**Status: 07 implemented and reviewed, awaiting the operator's commit.** Four
+review rounds: *Approve with required changes* (1 blocker, 1 major, 5 minor),
+then three rounds of minor findings, then *Approve* with nothing outstanding.
+Nothing waived except `cargo audit`, which is not installed on this host.
 
-**Current task: 06 — Rendering Pipeline.**
+**Last task: 07 — Layout System.** 100 unit tests + 12 doctests, up from 38
+unit + 3 doctests before the task. All five acceptance criteria verified by
+named tests.
+
+**Current task: 07 — awaiting commit. Task 08 starts after the operator
+reports the SHA.**
 
 ## Ratified by the operator (2026-09-28)
 
@@ -119,6 +124,88 @@ sysroot mandatory.
   tree: the module list matches, and its `roados_ui/` line is a sibling
   directory rather than a module of `ui_core`, so it is not a workspace member
   at this stage.
+- **`WidgetNode` has `children`, `parent`, `layout` and `paint`, not the
+  `kind`/`properties`/`flags` of `PRIMITIVES_ARCHITECTURE.md:51-59`.** A node
+  is a place in a tree with a layout cache and a paint cache; what it *is* and
+  what properties it holds are not needed until a widget that has them is
+  written, and an empty `kind` would be a lie until then. The reviewer's
+  finding is the same one the note further down this file already makes about
+  tasks 04 and 05 — that block is the one to settle, and this line only records
+  what task 07 did in the meantime.
+- **A node's clip rect is computed, not applied.** `LayoutState::clip()` holds
+  the rect a renderer would scissor to, and the layout pass fills it in
+  correctly, but nothing sets a scissor per node yet: `Renderer::set_scissor`
+  applies to the whole frame, and a recorded draw command has no scissor state
+  of its own to carry. Applying the rect is deferred to the task that draws
+  within a node's own bounds, not to the layout pass, which is where the rect
+  belongs either way.
+- **Skipping a clean node costs a walk of its subtree, so a pass is
+  O(n·d).** `visit` cannot skip a node that is clean, placed under the same box
+  and clipped the same unless it also knows nothing below it is dirty, and the
+  only way it can know is to look. It looks once per level on the path down to
+  a change, so the worst case is the whole tree read once per level, not once.
+  This is a **known and accepted cost, not an oversight**, and it was measured
+  rather than guessed.
+
+  **The shapes are the numbers.** A ratio here is a property of the tree, not
+  of the code, so the fixture is part of the claim. Measured on `x86_64` dev
+  host, 2026-09-29, release, best of 1000 (flat) or 20 (deep) passes, by the
+  `#[ignore]`d harness `layout_walk_cost` in
+  `ui/src/ui_core/src/layout.rs` — run it, do not trust this table:
+
+  ```text
+  cargo test -p ui_core --release --all-features --lib \
+      layout_walk_cost -- --ignored --nocapture
+  ```
+
+  | fixture | one dirty leaf under a clean root | cold pass | ratio |
+  | --- | --- | --- | --- |
+  | 2041 nodes in one row, all clean | — | 27 ns without the walk, ~10 µs with it | ~370× |
+  | 200-deep chain, links declare `tight(10,10)` | 172 µs | 39.6 µs | 4.3× |
+  | 1000-deep chain, links declare `tight(10,10)` | 4.43 ms | 198 µs | 22× |
+  | 200-deep chain, links declare nothing | 5.02 ms | 4.77 ms | 1.1× |
+  | 1000-deep chain, links declare nothing | 146 ms | 142 ms | 1.0× |
+
+  Two things follow, and both were got wrong in earlier drafts of this entry.
+  The **clean pass is the real cost**: a frame where nothing changed — the
+  common case, and the one the 27 ns was bought for — now reads the tree, and
+  no other row here matters as much. The **honest ratio range is 1.0× to
+  22×**, not one number: a chain whose links declare constraints is linear
+  apart from the walk, so the walk is nearly the whole cost; a chain whose links
+  declare none is *already* O(n·d) through `resolve_box` → `content_size`, and
+  the walk adds about 1% on top of it. Quoting the second shape as "the" cost
+  overstates the walk by 20×; quoting the first as the only shape understates
+  the clean-pass regression. Quote the range.
+
+  There is no "before" number for the dirty-leaf rows to be compared against,
+  and that is the point: without the walk the pass skipped the change entirely
+  and returned the wrong answer, so it was fast by being broken.
+
+  **The alternative, and why it is not taken.** A per-subtree "has a dirty
+  descendant" bit maintained in `place` is refused for a reason that is a fact
+  rather than a judgement: `LayoutState::set_mode`, `set_flex_config`,
+  `set_constraints`, `set_flex` and `set_position` are `pub` and reachable
+  through the `pub layout_mut()`, and they mark only `self.dirty` — never the
+  parent links. A cached bit therefore says "clean" when a descendant is
+  dirty, which is the exact bug the walk exists to prevent. Making the bit
+  correct means giving those setters a way to reach the parent links, i.e.
+  arena-taking setters, which is a public API change declined in this task.
+
+  **A global mutation epoch is a different matter, and this entry should not be
+  read as refusing it.** An epoch closes that gap without touching the setters,
+  makes the guard O(1), and costs exactly one recomputation after an edit —
+  after which the tree is fast again. It is better than the walk on most
+  workloads, and on any workload that does not edit on every frame it is
+  strictly better. It is declined *only* for the per-frame case: an edit on
+  every frame invalidates every bit on every frame, so there the epoch buys
+  nothing over the walk while adding a field and a global, and task 09's
+  animation clock is exactly that workload. **That per-frame claim is argued,
+  not measured** — no epoch prototype exists, and building one to measure it is
+  the work it would save. What would settle it is a prototype run over the same
+  three shapes as the harness above, once an animation actually exists to
+  measure against. **Revisit in task 09**: re-evaluate the epoch on the
+  non-per-frame case, which is most of a UI, rather than on the reasoning in
+  earlier drafts of this entry, which was wrong about what an epoch does.
 
 ## Protocol in force
 
@@ -162,8 +249,8 @@ verified. A blank cell is unknown, not "none".
 | 03 | SDL3 + OpenGL ES 3.1 Context | done | `5e564c7` | 1 review pass, 1 fix round | — |
 | 04 | Arena Allocator | done | `a8f3147` | 1 review pass, 0 fix rounds | — |
 | 05 | Property System | done | `8c3657b` | 0 review passes, 1 fix round | — |
-| 06 | Rendering Pipeline | in progress | | | |
-| 07 | Layout System | pending | | | |
+| 06 | Rendering Pipeline | done | `0b1c3e7` | 1 review pass, 0 fix rounds | — |
+| 07 | Layout System | approved | | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
 | 08 | Theme System | pending | | | |
 | 09 | Animation System | pending | | | |
 | 10 | Input Handling | pending | | | |
@@ -545,3 +632,29 @@ operator's rule, none of these is treated as satisfied.
   started. Implemented directly after the developer agent returned empty twice.
   One fix round: clippy `type_complexity` (type alias for callbacks), cascade
   propagation in `recompute`, and a doc test that moved a non-`Copy` property.
+- 2026-09-29 — **task 06 committed by the operator**, `0b1c3e7`, and task 07
+  started. Implemented by a developer subagent (first attempt returned empty;
+  second attempt with a focused prompt succeeded). One review pass, *Approve
+  with minor findings* — all non-blocking: stale state file, gradient shader
+  deferral, layer boundary deferral, no automated GL test, O(n) batching.
+  Two bugs found and fixed during verification: VAO not re-bound in
+  `draw_solid_batch`, and demo loop's `continue` on event timeout skipping all
+  drawing. Demo verified live with GPU capture showing correct premultiplied
+  alpha blending.
+- 2026-09-29 — **task 07 implemented and reviewed; awaiting the operator's
+  commit.** Four review rounds, three fix rounds, no finding outstanding and
+  none waived except `cargo audit`, which is not installed here. The reviewer
+  mutation-tested every fix rather than trusting the reported counts, and
+  three times found a test that did not discriminate the change it was written
+  for — the attach/detach cache-invalidation fix took four attempts before a
+  test actually killed the mutant. Four deviations recorded above: the node
+  struct, the clip rect, the O(n·d) walk cost, and the walk's revisit point.
+  Two things a reader should know before starting task 08:
+  1. **The dirty-flag contract is the tightest constraint in this change.** A
+     `LayoutState` setter marks only its own node; the pass reaches a dirty
+     descendant through `subtree_is_dirty` because the five setters are
+     reachable through `pub layout_mut()` without the arena, so a cached
+     dirty-descendant bit cannot be kept honest. Any new way to dirty a node
+     must keep that walk's cost in view.
+  2. **`layout_walk_cost` is a committed `#[ignore]`d benchmark**, not a test.
+     Run it before and after changing the pass, not during `cargo test`.

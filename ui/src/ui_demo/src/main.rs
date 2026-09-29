@@ -1,19 +1,27 @@
 //! Demo harness for `ui_core`.
 //!
-//! Opens a window with an OpenGL ES 3.1 context and draws three pads. A pad
-//! has one property — how far it is pressed, from 0 at rest to 1 held — and
-//! paints itself by interpolating between its rest and held colours from that
-//! value at paint time: the animation writes a single number, and the pad's
-//! whole appearance follows.
+//! Opens a window with an OpenGL ES 3.1 context and draws three pads on a
+//! themed background. A pad has one property — how far it is pressed, from 0
+//! at rest to 1 held — and paints itself by interpolating between its rest
+//! and held colours from that value at paint time: the animation writes a
+//! single number, and the pad's whole appearance follows.
+//!
+//! Every colour in the demo comes from the theme: the background from
+//! `Background`, each pad's rest colour from `Error`, `Success` or `Primary`.
+//! Pressing `T` switches between the dark and light themes over 300 ms, and
+//! the property graph carries the change to every colour — no widget is
+//! told, and none needs to be.
 //!
 //! Pressing the left mouse button over a pad presses it; holding the space bar
 //! presses all three, cascading across them with a stagger. Releasing springs
-//! them back to rest. Every press property carries an `on_change` callback that
-//! marks its pad's node dirty — the link from an animation to the node arena,
-//! which the animation module itself knows nothing about.
+//! them back to rest. Every colour property carries an `on_change` callback
+//! that marks its node dirty — the link from an animation or a theme switch to
+//! the node arena, which the animation and theme modules know nothing about.
 
 use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::Keycode;
+#[cfg(test)]
+use sdl3::keyboard::Mod;
 use sdl3::mouse::MouseButton;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -29,6 +37,7 @@ use ui_core::paint::{Color, PaintState, Painter};
 use ui_core::property::Property;
 use ui_core::render::context::Context;
 use ui_core::render::Renderer;
+use ui_core::theme::{PropertyValue, Theme, ThemeToken};
 
 /// The window, and the box the root is laid out in.
 const WINDOW: Size = Size {
@@ -52,50 +61,18 @@ const PAD_SPACING: f32 = 52.0;
 /// The corner radius a pad is painted with.
 const PAD_RADIUS: f32 = 28.0;
 
-/// The pads' rest and held colours: a dark tone at rest, a bright one held.
-const PAD_COLORS: [(Color, Color); 3] = [
-    (
-        Color {
-            r: 64,
-            g: 32,
-            b: 32,
-            a: 255,
-        },
-        Color {
-            r: 224,
-            g: 64,
-            b: 64,
-            a: 255,
-        },
-    ),
-    (
-        Color {
-            r: 32,
-            g: 64,
-            b: 48,
-            a: 255,
-        },
-        Color {
-            r: 64,
-            g: 192,
-            b: 96,
-            a: 255,
-        },
-    ),
-    (
-        Color {
-            r: 32,
-            g: 48,
-            b: 96,
-            a: 255,
-        },
-        Color {
-            r: 64,
-            g: 112,
-            b: 224,
-            a: 255,
-        },
-    ),
+/// How long the demo's theme switch takes.
+const THEME_TRANSITION: u32 = 300;
+
+/// How far a pad's held colour is lifted toward white from its rest colour.
+const HELD_LIGHTEN: f32 = 0.4;
+
+/// The theme token each pad's rest colour comes from: a red, a green and a
+/// blue pad, from the theme's error, success and primary colours.
+const PAD_TOKENS: [ThemeToken; 3] = [
+    ThemeToken::Error,
+    ThemeToken::Success,
+    ThemeToken::Primary,
 ];
 
 /// How long a pad takes to press down.
@@ -166,80 +143,120 @@ fn f32_to_u32(value: f32) -> u32 {
     value as u32
 }
 
+/// Lifts a colour toward white, for a pad's held colour: the pad's rest colour
+/// is a theme token, and its held colour is that token lifted toward white, so
+/// a press reads as the same hue brightened.
+fn lighten(color: Color) -> Color {
+    Color::interpolate(&color, &Color::new(255, 255, 255, 255), HELD_LIGHTEN)
+}
+
 /// A pad that presses: one property says how far down it is, and its colour
 /// follows.
 struct Pad {
     /// How far the pad is pressed: 0 at rest, 1 held.
     press: Property<f32>,
-    /// The colour the pad paints at while it is at rest.
-    rest: Color,
-    /// The colour the pad paints at while it is held.
-    held: Color,
+    /// The pad's colour at its current press, bound to the press and the theme.
+    color: Property<PropertyValue>,
     /// The node the pad paints itself with.
     node: Handle,
 }
 
 impl Pad {
-    /// Creates a pad whose press property is `press`, that paints at `rest`
-    /// while the press is zero and at `held` while it is one.
+    /// Creates a pad whose press property is `press`, and whose colour is
+    /// bound to it and to the theme.
     ///
-    /// The pad has one property — how far pressed it is — and no colour
-    /// property of its own: the colour is interpolated from the press at
-    /// paint time, so an animation moves a single number and the pad's whole
-    /// appearance follows it.
-    fn new(press: Property<f32>, rest: Color, held: Color, node: Handle) -> Self {
+    /// The pad has one property of its own — how far pressed it is — and a
+    /// colour property bound to that and to the theme: the colour is
+    /// interpolated from the press at recompute time, so an animation moves a
+    /// single number and the pad's whole appearance follows it, and a theme
+    /// switch moves the rest and held colours it interpolates between.
+    fn new(press: Property<f32>, color: Property<PropertyValue>, node: Handle) -> Self {
         Pad {
             press,
-            rest,
-            held,
+            color,
             node,
         }
     }
 
-    /// Returns the colour to paint this pad at `press`: `rest` at zero, `held`
-    /// at one, and the premultiplied interpolation between them at every value
-    /// in between.
-    fn color_at(&self, press: f32) -> Color {
-        Color::interpolate(&self.rest, &self.held, press)
-    }
-
     /// Returns the colour to paint this pad at its current press.
+    ///
+    /// The bound colour property always holds a colour; the fallback is for a
+    /// theme that put something else in the colour token the pad reads, and
+    /// paints black rather than panicking.
     fn color(&self) -> Color {
-        self.color_at(self.press.get())
+        self.color
+            .get()
+            .as_color()
+            .unwrap_or(Color::new(0, 0, 0, 255))
     }
 }
 
-/// The demo's widget tree, the pads that press, and the clock that drives
-/// them.
+/// The demo's widget tree, the pads that press, the theme every colour comes
+/// from, and the clock that drives the pads.
 struct Demo {
     nodes: Rc<RefCell<Arena<WidgetNode>>>,
     root: Handle,
     order: Vec<Handle>,
     pads: Vec<Pad>,
+    /// The node painted with the theme's background colour.
+    background: Handle,
+    /// The window's background colour, bound to the theme's `Background` token.
+    background_color: Property<PropertyValue>,
     clock: AnimationClock,
+    /// The theme the demo's colours come from.
+    theme: Theme,
+    /// Whether the theme is currently the dark one.
+    dark: bool,
     mouse_pressed: Option<usize>,
 }
 
 impl Demo {
-    /// Builds the demo: a centred row of three pads, each with a press
-    /// property that starts the pad's node dirty whenever it is written.
+    /// Builds the demo: a themed background behind a centred row of three
+    /// pads, each with a press property and a colour bound to it and to the
+    /// theme.
     ///
     /// The error is a message rather than a type of its own: the tree is
     /// written out here, so a node that cannot be attached is a bug in this
     /// file and not a runtime condition a caller could act on.
     fn new() -> Result<Self, &'static str> {
+        let theme = Theme::new();
         let mut nodes = Arena::new();
         let mut pads = Vec::new();
 
-        for &(rest, held) in &PAD_COLORS {
+        // The window's background: a node that fills the window, painted with
+        // the theme's Background token. It is a stack child that asks for the
+        // window's own size, so it covers whatever the window is.
+        let background = node::create(
+            &mut nodes,
+            LayoutState::new().with_constraints(Constraints::tight(WINDOW)),
+        );
+        let background_color = {
+            let background_prop = theme.property(ThemeToken::Background);
+            Property::bind(move || background_prop.get())
+        };
+
+        for &rest_token in &PAD_TOKENS {
             let node = node::create(
                 &mut nodes,
                 LayoutState::new().with_constraints(Constraints::tight(PAD_SIZE)),
             );
-            pads.push(Pad::new(Property::new(0.0), rest, held, node));
+            let press = Property::new(0.0);
+            let color = {
+                let rest = theme.property(rest_token);
+                let press = press.clone();
+                Property::bind(move || {
+                    let rest = rest
+                        .get()
+                        .as_color()
+                        .unwrap_or(Color::new(0, 0, 0, 255));
+                    let held = lighten(rest);
+                    PropertyValue::Color(Color::interpolate(&rest, &held, press.get()))
+                })
+            };
+            pads.push(Pad::new(press, color, node));
         }
 
-        let root = container(
+        let row = container(
             &mut nodes,
             LayoutMode::row(),
             FlexConfig::new()
@@ -249,17 +266,36 @@ impl Demo {
             &[pads[0].node, pads[1].node, pads[2].node],
         )?;
 
-        // The link from an animation to a node: every write a pad's press
-        // property receives — from a clock tick, or from `animate_to` putting
-        // the property at its start value — marks the pad's node dirty, so the
-        // next pass picks up the colour the press implies. The animation
-        // module knows nothing about nodes; this wiring is the demo's.
+        // A stack: the background fills the window behind the centred row of
+        // pads, and the row is painted over it.
+        let root = container(
+            &mut nodes,
+            LayoutMode::Stack,
+            FlexConfig::new(),
+            &[background, row],
+        )?;
+
+        // The link from an animation or a theme switch to a node: every write
+        // a pad's colour property receives — from a clock tick, from
+        // `animate_to` putting the property at its start value, or from the
+        // theme switching — marks the pad's node dirty, so the next pass picks
+        // up the colour the press and the theme imply. The animation and theme
+        // modules know nothing about nodes; this wiring is the demo's.
         let nodes = Rc::new(RefCell::new(nodes));
         for pad in &pads {
             let nodes = Rc::clone(&nodes);
             let node = pad.node;
-            pad.press.on_change(move |_| {
+            pad.color.on_change(move |_| {
                 mark_dirty(&mut nodes.borrow_mut(), node);
+            });
+        }
+
+        // The same link for the background: a theme switch marks it dirty so
+        // the next pass repaints it with the new background colour.
+        {
+            let nodes = Rc::clone(&nodes);
+            background_color.on_change(move |_| {
+                mark_dirty(&mut nodes.borrow_mut(), background);
             });
         }
 
@@ -270,16 +306,26 @@ impl Demo {
             root,
             order,
             pads,
+            background,
+            background_color,
             clock: AnimationClock::new(),
+            theme,
+            dark: true,
             mouse_pressed: None,
         })
     }
 
-    /// Handles one input event: the space bar presses all three pads with a
-    /// stagger and releases them on the spring, and the left mouse button
-    /// presses and releases the pad under the cursor.
+    /// Handles one input event: `T` switches between the dark and light
+    /// themes, the space bar presses all three pads with a stagger and
+    /// releases them on the spring, and the left mouse button presses and
+    /// releases the pad under the cursor.
     fn handle_event(&mut self, event: Event) {
         match event {
+            Event::KeyDown {
+                keycode: Some(Keycode::T),
+                repeat: false,
+                ..
+            } => self.toggle_theme(),
             Event::KeyDown {
                 keycode: Some(Keycode::Space),
                 repeat: false,
@@ -312,23 +358,34 @@ impl Demo {
         }
     }
 
-    /// Advances the clock by one frame's worth of time, lays the tree out in
-    /// `size`, and records every pad's draw commands.
+    /// Advances the clocks by one frame's worth of time, lays the tree out in
+    /// `size`, and records every node's draw commands.
     ///
-    /// The clock goes first: an animation that finished mid-frame has to have
-    /// written its last value — and marked its pad dirty through the
-    /// property's callback — before the pass below reads the tree.
+    /// The clocks go first: an animation that finished mid-frame has to have
+    /// written its last value — and marked its node dirty through the
+    /// property's callback — before the pass below reads the tree. The theme's
+    /// clock is ticked alongside the pads': a theme switch is an animation
+    /// like any other, and its frames have to land before the pass too.
     fn frame(&mut self, size: Size, delta: Duration) {
         let _ = self.clock.tick(delta);
+        let _ = self.theme.tick(delta);
 
         let mut nodes = self.nodes.borrow_mut();
         Layout::new(&mut nodes).layout(self.root, Constraints::tight(size));
 
         for handle in self.order.iter().copied() {
-            let Some(pad) = self.pads.iter().find(|pad| pad.node == handle) else {
+            let Some(node) = nodes.get_mut(handle) else {
                 continue;
             };
-            let Some(node) = nodes.get_mut(handle) else {
+            if handle == self.background {
+                let mut painter = Painter::new();
+                if let Some(rect) = node.layout().rect() {
+                    painter.rect(rect.into(), self.background_color());
+                }
+                *node.paint_mut() = PaintState::from_commands(painter.finish());
+                continue;
+            }
+            let Some(pad) = self.pads.iter().find(|pad| pad.node == handle) else {
                 continue;
             };
             let mut painter = Painter::new();
@@ -342,12 +399,29 @@ impl Demo {
         }
     }
 
+    /// Returns the window's background colour: the theme's `Background` token,
+    /// or black if the theme ever holds something else there.
+    fn background_color(&self) -> Color {
+        self.background_color
+            .get()
+            .as_color()
+            .unwrap_or(Color::new(0, 0, 0, 255))
+    }
+
     /// Hands the recorded commands to the renderer, in paint order.
     fn draw(&mut self, renderer: &mut Renderer) {
         let mut nodes = self.nodes.borrow_mut();
         for handle in self.order.iter().copied() {
             renderer.draw_node(handle, &mut nodes);
         }
+    }
+
+    /// Switches between the dark and light themes, animated over
+    /// `THEME_TRANSITION` milliseconds.
+    fn toggle_theme(&mut self) {
+        self.dark = !self.dark;
+        let new_theme = if self.dark { Theme::dark() } else { Theme::light() };
+        self.theme.switch_to(new_theme, THEME_TRANSITION);
     }
 
     /// Presses every pad, cascading across them one `STAGGER_STEP` apart.
@@ -480,21 +554,45 @@ mod tests {
         demo
     }
 
+    /// Returns the `T` key-down event that switches the theme.
+    fn toggle_theme_event() -> Event {
+        Event::KeyDown {
+            timestamp: 0,
+            window_id: 0,
+            keycode: Some(Keycode::T),
+            scancode: None,
+            keymod: Mod::empty(),
+            repeat: false,
+            which: 0,
+            raw: 0,
+        }
+    }
+
     #[test]
     fn a_new_pad_is_at_rest_and_paints_its_rest_colour() {
         let demo = Demo::new().unwrap();
         let pad = &demo.pads[0];
         assert_eq!(pad.press.get(), 0.0);
         assert!(!pad.press.is_bound());
-        assert_eq!(pad.color(), pad.rest);
-        assert_eq!(pad.color_at(0.0), pad.rest);
+        let rest = demo.theme.get(ThemeToken::Error).as_color().unwrap();
+        assert_eq!(
+            pad.color.get(),
+            PropertyValue::Color(rest),
+            "at rest the pad paints the theme's Error token"
+        );
     }
 
     #[test]
     fn a_fully_pressed_pad_paints_its_held_colour() {
         let demo = Demo::new().unwrap();
         let pad = &demo.pads[0];
-        assert_eq!(pad.color_at(1.0), pad.held);
+        pad.press.set(1.0);
+        let rest = demo.theme.get(ThemeToken::Error).as_color().unwrap();
+        assert_eq!(
+            pad.color.get(),
+            PropertyValue::Color(lighten(rest)),
+            "fully pressed, the pad paints the lightened Error token"
+        );
     }
 
     #[test]
@@ -504,7 +602,13 @@ mod tests {
         // between its rest and held colours.
         let demo = Demo::new().unwrap();
         let pad = &demo.pads[0];
-        assert_eq!(pad.color_at(0.5), Color::new(144, 48, 48, 255));
+        pad.press.set(0.5);
+        let rest = demo.theme.get(ThemeToken::Error).as_color().unwrap();
+        let held = lighten(rest);
+        assert_eq!(
+            pad.color.get(),
+            PropertyValue::Color(Color::interpolate(&rest, &held, 0.5))
+        );
     }
 
     #[test]
@@ -514,6 +618,95 @@ mod tests {
         for pad in &demo.pads {
             assert_eq!(pad.press.get(), 0.0);
         }
+    }
+
+    #[test]
+    fn the_demo_starts_with_the_dark_theme() {
+        let demo = Demo::new().unwrap();
+        assert!(demo.dark);
+        assert_eq!(
+            demo.theme.get(ThemeToken::Background),
+            Theme::dark().get(ThemeToken::Background)
+        );
+        assert_eq!(
+            demo.background_color.get(),
+            Theme::dark().get(ThemeToken::Background),
+            "the background is bound to the dark theme's Background token"
+        );
+    }
+
+    #[test]
+    fn pressing_t_switches_the_theme_with_animation() {
+        // Pressing T switches to the light theme over THEME_TRANSITION
+        // milliseconds: the background holds its start value, moves half way
+        // through, and arrives at the light theme's background.
+        let mut demo = laid_out();
+        let dark_background = demo.background_color.get();
+        demo.handle_event(toggle_theme_event());
+        assert!(!demo.dark, "the demo is now on the light theme");
+        assert_eq!(
+            demo.background_color.get(),
+            dark_background,
+            "the switch has started but its first tick has not written yet"
+        );
+
+        for _ in 0..15 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_ne!(
+            demo.background_color.get(),
+            dark_background,
+            "half way through, the background has moved"
+        );
+
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(
+            demo.background_color.get(),
+            Theme::light().get(ThemeToken::Background),
+            "and it arrived at the light theme's background"
+        );
+    }
+
+    #[test]
+    fn the_pads_follow_the_theme_switch() {
+        // The pads' rest colours come from the theme, so a switch carries the
+        // new colours to them through the property graph: after the switch,
+        // each pad paints the light theme's token.
+        let mut demo = laid_out();
+        let dark_color = demo.pads[0].color.get();
+        demo.handle_event(toggle_theme_event());
+        for _ in 0..35 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_ne!(
+            demo.pads[0].color.get(),
+            dark_color,
+            "the pad's colour has moved"
+        );
+        let rest = Theme::light().get(ThemeToken::Error).as_color().unwrap();
+        assert_eq!(
+            demo.pads[0].color.get(),
+            PropertyValue::Color(rest),
+            "and it arrived at the light theme's Error token"
+        );
+    }
+
+    #[test]
+    fn a_theme_switch_marks_the_background_dirty() {
+        // The link from a theme switch to a node: the background colour's
+        // on_change callback marks the background node dirty, so the next pass
+        // repaints it. The demo is laid out first, because a node is born
+        // dirty and only a pass clears the flag — without that, the assertion
+        // would hold whatever the callback did.
+        let mut demo = laid_out();
+        demo.handle_event(toggle_theme_event());
+        let nodes = demo.nodes.borrow();
+        assert!(
+            nodes.get(demo.background).unwrap().layout().is_dirty(),
+            "the background node was marked dirty by the theme switch"
+        );
     }
 
     #[test]
@@ -564,7 +757,7 @@ mod tests {
 
     #[test]
     fn an_animated_press_marks_its_pad_dirty() {
-        // The link from an animation to a node: the press property's
+        // The link from an animation to a node: the pad colour property's
         // on_change callback marks the pad's node dirty, so the next pass
         // repaints it. The demo is laid out first, because a node is born
         // dirty and only a pass clears the flag — without that, the

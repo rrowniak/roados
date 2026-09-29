@@ -71,7 +71,6 @@ impl std::error::Error for ContextError {}
 /// (destroys the window), then `sdl` (quits SDL).
 pub struct Context {
     /// GLES function pointers. Kept alive so the pointers remain valid.
-    #[allow(dead_code)]
     gl: glow::Context,
     /// The SDL3 GL context. Kept alive so the context remains current.
     #[allow(dead_code)]
@@ -164,7 +163,20 @@ impl Context {
         self.window.gl_swap_window();
     }
 
+    /// Returns a reference to the GLES function pointers.
+    #[must_use]
+    pub fn gl(&self) -> &glow::Context {
+        &self.gl
+    }
+
+    /// Returns the window size in points.
+    #[must_use]
+    pub fn window_size(&self) -> (u32, u32) {
+        self.window.size()
+    }
+
     /// Returns a reference to the SDL3 context, for obtaining the event pump.
+    #[must_use]
     pub fn sdl(&self) -> &sdl3::Sdl {
         &self.sdl
     }

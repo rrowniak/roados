@@ -209,7 +209,7 @@ impl<T: 'static> Property<T> {
 }
 
 /// A minimal RGBA color with premultiplied alpha.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Color {
     /// Red component (0-255).
     pub r: u8,

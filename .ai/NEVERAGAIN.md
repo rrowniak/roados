@@ -53,6 +53,20 @@ and unverified for the reason that mattered.
 about which library served it. Check `/proc/<pid>/maps` or `LD_DEBUG=libs` for
 the file that was actually mapped, and say which invocation was measured.
 
+## 2026-09-28 — `pkill -f <pattern>` killing the invoking shell
+
+While stopping background demo processes, the developer ran
+`pkill -f ui_demo`. The pattern matched the bash tool's own command line
+(which contained the string `ui_demo`), so pkill killed the shell running
+the command: the rest of the command never executed, the persistent
+session's working directory reset to the workspace root, and the next
+command failed with "No such file or directory" for a relative path that
+had worked minutes earlier.
+
+**Rule:** never `pkill -f` a pattern that appears in the invoking command
+line. Collect PIDs with `pgrep -a` and `kill` them by number, or use
+`setsid` + a pidfile from the start.
+
 ## 2026-09-27 — Instructions pointing at files that do not exist
 
 `AGENTS.md` referred to eight artifacts that had never been written:

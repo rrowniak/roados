@@ -12,12 +12,12 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 04 done and committed** — operator commit `a8f3147`, 2026-09-28,
-"doc/ui/TASK_UI_PRIM_04.md done". One review pass, *Approve*, no findings. The
-reviewer independently mutation-tested the code (9 mutations, 6 caught, 3
-correctly uncaught as implementation details).
+**Status: 05 done and committed** — operator commit `8c3657b`, 2026-09-28,
+"doc/ui/TASK_UI_PRIM_05.md done". Implemented directly after the developer
+agent returned empty twice; one fix round for clippy `type_complexity`, cascade
+propagation, and a doc test.
 
-**Current task: 05 — Property System.**
+**Current task: 06 — Rendering Pipeline.**
 
 ## Ratified by the operator (2026-09-28)
 
@@ -161,8 +161,8 @@ verified. A blank cell is unknown, not "none".
 | 02 | Project Scaffolding | done | `89b67b7` | 4 review passes, 3 fix rounds | — |
 | 03 | SDL3 + OpenGL ES 3.1 Context | done | `5e564c7` | 1 review pass, 1 fix round | — |
 | 04 | Arena Allocator | done | `a8f3147` | 1 review pass, 0 fix rounds | — |
-| 05 | Property System | in progress | | | |
-| 06 | Rendering Pipeline | pending | | | |
+| 05 | Property System | done | `8c3657b` | 0 review passes, 1 fix round | — |
+| 06 | Rendering Pipeline | in progress | | | |
 | 07 | Layout System | pending | | | |
 | 08 | Theme System | pending | | | |
 | 09 | Animation System | pending | | | |
@@ -541,3 +541,7 @@ operator's rule, none of these is treated as satisfied.
   started. One review pass, *Approve*, no findings. The reviewer independently
   mutation-tested the code (9 mutations, 6 caught, 3 correctly uncaught as
   implementation details).
+- 2026-09-28 — **task 05 committed by the operator**, `8c3657b`, and task 06
+  started. Implemented directly after the developer agent returned empty twice.
+  One fix round: clippy `type_complexity` (type alias for callbacks), cascade
+  propagation in `recompute`, and a doc test that moved a non-`Copy` property.

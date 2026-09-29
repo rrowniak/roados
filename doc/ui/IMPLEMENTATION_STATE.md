@@ -12,20 +12,39 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 07 implemented and reviewed, awaiting the operator's commit.** Four
-review rounds: *Approve with required changes* (1 blocker, 1 major, 5 minor),
-then three rounds of minor findings, then *Approve* with nothing outstanding.
-Nothing waived except `cargo audit`, which is not installed on this host.
+**Status: 09 approved, awaiting the operator's commit.** Four review rounds:
+*Approve with required changes* (4 minor), then a bad revert lost two files and
+a rebuild, then *Approve with required changes* again (1 minor), then two more
+minor comment corrections, then *Approve* with nothing outstanding. Nothing
+waived except `cargo audit`, which is not installed on this host.
 
-**Last task: 07 — Layout System.** 100 unit tests + 12 doctests, up from 38
-unit + 3 doctests before the task. All five acceptance criteria verified by
-named tests.
+**Last task: 09 — Animation System.** 143 unit tests + 25 doctests, up from 100
+unit + 12 doctests before the task. All six acceptance criteria verified by
+named tests. `animation.rs` is new (+1907); `property.rs` gained three defect
+fixes; `ui_demo` gained the animation demo.
 
-**Current task: 07 — awaiting commit. Task 08 starts after the operator
+**Task 09 ran before task 08 by the operator's decision, 2026-09-29.** Task 08
+requires `Property::animate` and `Easing`, which task 09 owns. The dependency
+inversion is real: 08's spec names an API that only 09 creates. Recorded in
+*Ratified by the operator* below.
+
+**A bad revert during fix round 1 lost the uncommitted work in `property.rs` and
+`main.rs`.** `git checkout --` restored both from HEAD, discarding the
+developer's fixes and demo. `animation.rs` and `.ai/NEVERAGAIN.md` survived. A
+fresh developer rebuilt both files on top of the intact `animation.rs`; the
+reviewer confirmed the rebuild was correct. The lesson is in `.ai/NEVERAGAIN.md`.
+
+**Current task: 09 — awaiting commit. Task 08 starts after the operator
 reports the SHA.**
 
-## Ratified by the operator (2026-09-28)
+## Ratified by the operator (2026-09-28, 2026-09-29)
 
+- **Task 09 lands before task 08**, decided 2026-09-29. Task 08's
+  `Theme::switch_to` requires `Property::animate` per token and lists
+  `EasingStandard`/`Decelerate`/`Accelerate` as theme token values — both are
+  task 09's. The task files place 09's API inside 08, an inversion. 09 does not
+  depend on 08, so 09 runs first. The numeric order is broken at this one point;
+  every other cross-reference in the task files is honoured.
 - The 24 task files are the **confirmed spec**. The
   `.ai/workflows/idea-to-code.md` stage 1 gate is satisfied by the operator for
   the whole sequence — no `idea-evaluator` pass per task. Work enters at
@@ -250,9 +269,9 @@ verified. A blank cell is unknown, not "none".
 | 04 | Arena Allocator | done | `a8f3147` | 1 review pass, 0 fix rounds | — |
 | 05 | Property System | done | `8c3657b` | 0 review passes, 1 fix round | — |
 | 06 | Rendering Pipeline | done | `0b1c3e7` | 1 review pass, 0 fix rounds | — |
-| 07 | Layout System | approved | | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
+| 07 | Layout System | done | `58957d8` | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
 | 08 | Theme System | pending | | | |
-| 09 | Animation System | pending | | | |
+| 09 | Animation System | approved | | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
 | 10 | Input Handling | pending | | | |
 | 11 | Widget — Label | pending | | | |
 | 12 | Widget — Button | pending | | | |
@@ -656,5 +675,23 @@ operator's rule, none of these is treated as satisfied.
      reachable through `pub layout_mut()` without the arena, so a cached
      dirty-descendant bit cannot be kept honest. Any new way to dirty a node
      must keep that walk's cost in view.
-  2. **`layout_walk_cost` is a committed `#[ignore]`d benchmark**, not a test.
-     Run it before and after changing the pass, not during `cargo test`.
+   2. **`layout_walk_cost` is a committed `#[ignore]`d benchmark**, not a test.
+      Run it before and after changing the pass, not during `cargo test`.
+- 2026-09-29 — **the operator decided task 09 runs before task 08**, because 08's
+  spec requires `Property::animate` and `Easing`, which 09 owns. Recorded under
+  *Ratified by the operator*.
+- 2026-09-29 — **task 09 implemented and approved; awaiting the operator's
+  commit.** Four review rounds, three fix rounds, no finding outstanding and
+  none waived except `cargo audit`, which is not installed here. The reviewer
+  mutation-tested the fixes and found the suite genuinely discriminating. Three
+  pre-existing `property.rs` defects were found and fixed: `set` dropped the
+  callback list (`mem::take`), a bound property recomputed without notifying,
+  and `bind`'s recompute closure captured `Rc<PropertyInner>` and leaked every
+  bound property. The animation module has no dependency on the node arena; the
+  demo wires `on_change` to `layout::mark_dirty`.
+- 2026-09-29 — **a bad revert during fix round 1 lost the uncommitted work in
+  `property.rs` and `main.rs`.** `git checkout --` restored both from HEAD. A
+  fresh developer rebuilt both files on top of the intact `animation.rs`, and
+  the reviewer confirmed the rebuild was correct. The lesson — never revert
+  uncommitted work with `git checkout --` when a targeted edit will do — is in
+  `.ai/NEVERAGAIN.md`.

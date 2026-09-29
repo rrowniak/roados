@@ -141,3 +141,38 @@ the restore against the snapshot you intend to keep**, and re-read the file that
 was mutated before reporting on it. Never report a file's intended state; read
 its state. If a backup is taken before an edit and restored after, the edit is
 gone, and nothing but a fresh `grep` will say so.
+
+## 2026-09-29 — The same backup trap, one task later
+
+Task 09 repeated the entry above exactly: a whole-file snapshot taken before the
+demo's dirty-queue test was written was restored after the test existed, and
+the restore deleted the test. It survived one green suite — the suite that ran
+during the restore simply did not contain the test yet.
+
+**Rule:** refresh the snapshot *immediately before each* mutation, not once per
+session. After every restore, `grep` for the symbols that were added since the
+snapshot was taken; a test count is not enough, because the count is printed by
+the build that no longer has them.
+
+## 2026-09-29 — Expectations remembered instead of derived
+
+Six spring, bounce and composition tests failed on their first run. Every one
+asserted something about the curve that was plausible and wrong: that a spring
+oscillates past *zero* (it oscillates about its target, so it swings between
+0.72 and 1.53 and never below 0), and that a bounce overshoots (it touches its
+target and comes back, never passing it).
+
+**Rule:** write down the closed form and get the number from it before writing
+the assertion. When a test fails on its first run, the expectation is the
+suspect, not the code.
+
+## 2026-09-29 — An assertion that cannot fail, in a test named for what it checks
+
+`a_color_component_is_clamped_rather_than_wrapped` checked
+`value.r == value.r.clamp(0, 255)` on a `u8` — true for every value the type
+can hold. The test passed through a mutation that replaced the clamp with a
+wrap, and was only noticed when the mutation check was run.
+
+**Rule:** an assertion that cannot fail for reasons of type cannot test
+anything. The only way to know is to run the mutation it was written to catch.
+

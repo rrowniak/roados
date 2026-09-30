@@ -7,7 +7,7 @@ pub mod context;
 
 use crate::arena::{Arena, Handle};
 use crate::batch::{Batch, Batcher, ShaderKind};
-use crate::font::{Font, GlyphAtlas};
+use crate::font::{Font, GlyphAtlas, GlyphPlacement};
 use crate::node::WidgetNode;
 use crate::paint::{DrawCommand, Rect};
 use crate::property::Color;
@@ -308,6 +308,65 @@ fn text_quad(
             color: c,
         },
     ]
+}
+
+/// Returns how far the pen moves after drawing `ch`.
+///
+/// The advance comes from `placement` when the glyph was rasterized, and from
+/// `fallback` when it was not. The second case is not an error path: a **space**
+/// rasterizes to a zero-width bitmap, so there is no quad to draw and no
+/// placement to read an advance from, yet the space still occupies width.
+/// Treating "no quad" as "no advance" ran every word together on screen —
+/// "Hello,World!" — and no test could see it, because the run is assembled
+/// against a GL context and a real font, and both are unavailable to a unit
+/// test. A character the font genuinely has no glyph for takes the same path
+/// and is given the width it would have had, which is the honest answer.
+///
+/// `extra_advance` is the letter spacing the command carries, and is added in
+/// both cases: a space is spaced like any other character.
+fn advance_for(placement: Option<&GlyphPlacement>, fallback: f32, extra_advance: f32) -> f32 {
+    let advance = match placement {
+        Some(placement) => placement.advance,
+        None => fallback,
+    };
+    advance + extra_advance
+}
+
+/// Walks one text run, calling `emit` for every character that produced a quad,
+/// with the glyph's placement and the pen position it is drawn at, and
+/// returning the pen's final position.
+///
+/// A character `lookup` returns `None` for emits nothing and still advances the
+/// pen, by `fallback`. That is what keeps a space a space: see
+/// [`advance_for`]. The lookups are closures so the rule can be exercised
+/// without a GL context or a font file, neither of which a unit test may open.
+fn walk_run<E, L, F>(
+    text: &str,
+    start_x: f32,
+    extra_advance: f32,
+    lookup: &mut L,
+    fallback: &mut F,
+    emit: &mut E,
+) -> f32
+where
+    E: FnMut(&GlyphPlacement, f32),
+    L: FnMut(char) -> Option<GlyphPlacement>,
+    F: FnMut(char) -> f32,
+{
+    let mut pen_x = start_x;
+    for ch in text.chars() {
+        let placement = lookup(ch);
+        if let Some(ref placement) = placement {
+            emit(placement, pen_x);
+        }
+        let unrasterized = if placement.is_none() {
+            fallback(ch)
+        } else {
+            0.0
+        };
+        pen_x += advance_for(placement.as_ref(), unrasterized, extra_advance);
+    }
+    pen_x
 }
 
 /// Converts a color to normalized premultiplied components.
@@ -943,19 +1002,21 @@ impl Renderer {
             // the ascenders above the command's own rect, off the top of the
             // window for a label laid out at the origin.
             let baseline = *y + font.ascent(*font_size);
-            let mut pen_x = *x;
-            for ch in text.chars() {
-                let Some(placement) = self.atlas.get_or_insert(ch, *font_size, font) else {
-                    continue;
-                };
-                let gx = pen_x + i32_to_f32(placement.bearing_x);
-                let gy = baseline - i32_to_f32(placement.bearing_y);
-                let w = u32_to_f32(placement.width);
-                let h = u32_to_f32(placement.height);
-                let uv = (placement.u0, placement.v0, placement.u1, placement.v1);
-                vertices.extend_from_slice(&text_quad(gx, gy, w, h, uv, *color));
-                pen_x += placement.advance + *extra_advance;
-            }
+            walk_run(
+                text,
+                *x,
+                *extra_advance,
+                &mut |ch| self.atlas.get_or_insert(ch, *font_size, font),
+                &mut |ch| font.advance(ch, *font_size),
+                &mut |placement, pen_x| {
+                    let gx = pen_x + i32_to_f32(placement.bearing_x);
+                    let gy = baseline - i32_to_f32(placement.bearing_y);
+                    let w = u32_to_f32(placement.width);
+                    let h = u32_to_f32(placement.height);
+                    let uv = (placement.u0, placement.v0, placement.u1, placement.v1);
+                    vertices.extend_from_slice(&text_quad(gx, gy, w, h, uv, *color));
+                },
+            );
         }
         if vertices.is_empty() {
             return Ok(());
@@ -1323,5 +1384,118 @@ mod tests {
         assert!(err.to_string().contains("bad link"));
         let err = RenderError::Gl("no memory".to_string());
         assert!(err.to_string().contains("no memory"));
+    }
+
+    /// The tests below cover the run walk, and they exist because a space
+    /// renders as a zero-width bitmap: there is no quad to draw and no
+    /// placement to read an advance from, and treating that as "no advance" ran
+    /// every word together on screen ("Hello,World!"). Nothing caught it — not
+    /// one of the 384 tests, and not a still screenshot, because the run is
+    /// assembled against a GL context and a real font and both are unavailable
+    /// to a unit test. `walk_run` takes its lookups as closures so the rule can
+    /// be pinned here instead.
+    ///
+    /// A placement standing in for a rasterized glyph, `advance` wide.
+    fn glyph(advance: f32) -> GlyphPlacement {
+        GlyphPlacement {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 0.1,
+            v1: 0.1,
+            row_y: 0,
+            width: 8,
+            height: 8,
+            bearing_x: 0,
+            bearing_y: 0,
+            advance,
+        }
+    }
+
+    /// Lays out `text` where every character but `blank` is `wide` and draws,
+    /// and `blank` is `blank_wide` wide and produces nothing. Returns the pen
+    /// position each drawn glyph was placed at, in order.
+    fn run_pen_positions(text: &str, blank: char, wide: f32, blank_wide: f32) -> Vec<f32> {
+        let mut positions = Vec::new();
+        walk_run(
+            text,
+            0.0,
+            0.0,
+            &mut |ch: char| (ch != blank).then(|| glyph(wide)),
+            &mut |_ch: char| blank_wide,
+            &mut |_placement, pen_x| positions.push(pen_x),
+        );
+        positions
+    }
+
+    #[test]
+    fn a_space_leaves_a_gap_even_though_it_draws_nothing() {
+        // The regression: "Hello, World!" drawn with no space between the words.
+        let positions = run_pen_positions("a b", ' ', 10.0, 5.0);
+        assert_eq!(
+            positions,
+            vec![0.0, 15.0],
+            "the second glyph starts one advance plus the space's width in, so \
+             the space is a gap rather than nothing"
+        );
+    }
+
+    #[test]
+    fn a_character_the_font_has_no_glyph_for_still_occupies_its_width() {
+        // U+FFFD is the stand-in here, but the rule is not about that character:
+        // it is about any character the font cannot rasterize, which is the same
+        // `None` a space produces.
+        let positions = run_pen_positions("a\u{fffd}b", '\u{fffd}', 10.0, 4.0);
+        assert_eq!(
+            positions,
+            vec![0.0, 14.0],
+            "an unrasterizable character is not silently deleted"
+        );
+    }
+
+    #[test]
+    fn a_run_of_nothing_but_spaces_still_advances_the_pen() {
+        let mut positions = Vec::new();
+        let end = walk_run(
+            "   ",
+            7.0,
+            0.0,
+            &mut |_ch: char| None,
+            &mut |_ch: char| 5.0,
+            &mut |_placement, pen_x| positions.push(pen_x),
+        );
+        assert!(positions.is_empty(), "no glyph to draw");
+        assert_eq!(end, 22.0, "three spaces of five from a start of seven");
+    }
+
+    #[test]
+    fn letter_spacing_is_added_to_a_space_too() {
+        let mut positions = Vec::new();
+        walk_run(
+            "a b",
+            0.0,
+            2.0,
+            &mut |ch: char| (ch != ' ').then(|| glyph(10.0)),
+            &mut |_ch: char| 5.0,
+            &mut |_placement, pen_x| positions.push(pen_x),
+        );
+        // 10 (the 'a', plus 2 of spacing) + 5 (the space) + 2 (its spacing)
+        assert_eq!(
+            positions,
+            vec![0.0, 19.0],
+            "a space is spaced like any other character"
+        );
+    }
+
+    #[test]
+    fn advance_for_uses_the_placement_when_there_is_one() {
+        let placement = glyph(7.0);
+        assert_eq!(advance_for(Some(&placement), 99.0, 0.0), 7.0);
+        assert_eq!(advance_for(Some(&placement), 99.0, 1.0), 8.0);
+    }
+
+    #[test]
+    fn advance_for_falls_back_to_the_font_when_there_is_no_placement() {
+        assert_eq!(advance_for(None, 5.0, 0.0), 5.0);
+        assert_eq!(advance_for(None, 5.0, 2.0), 7.0);
     }
 }

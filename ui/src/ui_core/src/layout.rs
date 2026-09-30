@@ -568,6 +568,7 @@ pub struct LayoutState {
     clip: Option<Rect>,
     dirty: bool,
     placed_under: Option<Constraints>,
+    visible: bool,
 }
 
 impl Default for LayoutState {
@@ -582,6 +583,7 @@ impl Default for LayoutState {
             clip: None,
             dirty: true,
             placed_under: None,
+            visible: true,
         }
     }
 }
@@ -721,6 +723,26 @@ impl LayoutState {
     #[must_use]
     pub fn placed_under(&self) -> Option<Constraints> {
         self.placed_under
+    }
+
+    /// Returns `true` if this node takes part in hit testing.
+    ///
+    /// Visibility is a property of the node rather than of the layout pass: the
+    /// pass places every node it reaches, visible or not, so hiding a node
+    /// leaves its rect — and its siblings' rects — untouched, and only hit
+    /// testing consults the flag.
+    #[must_use]
+    pub fn visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Sets whether this node takes part in hit testing.
+    ///
+    /// Unlike the other setters this one does not mark the node dirty: the
+    /// layout inputs are unchanged, so the cached rect stays valid and the
+    /// pass has nothing to recompute.
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
     }
 
     /// Marks this node dirty without touching its ancestors.

@@ -380,16 +380,46 @@ impl Theme {
     #[must_use]
     pub fn dark() -> Self {
         Theme::from_table(&[
-            (ThemeToken::Background, PropertyValue::Color(Color::new(18, 18, 18, 255))),
-            (ThemeToken::Surface, PropertyValue::Color(Color::new(30, 30, 30, 255))),
-            (ThemeToken::Primary, PropertyValue::Color(Color::new(187, 134, 252, 255))),
-            (ThemeToken::OnPrimary, PropertyValue::Color(Color::new(0, 0, 0, 255))),
-            (ThemeToken::Text, PropertyValue::Color(Color::new(255, 255, 255, 255))),
-            (ThemeToken::TextMuted, PropertyValue::Color(Color::new(158, 158, 158, 255))),
-            (ThemeToken::Border, PropertyValue::Color(Color::new(51, 51, 51, 255))),
-            (ThemeToken::Error, PropertyValue::Color(Color::new(207, 102, 121, 255))),
-            (ThemeToken::Warning, PropertyValue::Color(Color::new(255, 183, 77, 255))),
-            (ThemeToken::Success, PropertyValue::Color(Color::new(102, 187, 106, 255))),
+            (
+                ThemeToken::Background,
+                PropertyValue::Color(Color::new(18, 18, 18, 255)),
+            ),
+            (
+                ThemeToken::Surface,
+                PropertyValue::Color(Color::new(30, 30, 30, 255)),
+            ),
+            (
+                ThemeToken::Primary,
+                PropertyValue::Color(Color::new(187, 134, 252, 255)),
+            ),
+            (
+                ThemeToken::OnPrimary,
+                PropertyValue::Color(Color::new(0, 0, 0, 255)),
+            ),
+            (
+                ThemeToken::Text,
+                PropertyValue::Color(Color::new(255, 255, 255, 255)),
+            ),
+            (
+                ThemeToken::TextMuted,
+                PropertyValue::Color(Color::new(158, 158, 158, 255)),
+            ),
+            (
+                ThemeToken::Border,
+                PropertyValue::Color(Color::new(51, 51, 51, 255)),
+            ),
+            (
+                ThemeToken::Error,
+                PropertyValue::Color(Color::new(207, 102, 121, 255)),
+            ),
+            (
+                ThemeToken::Warning,
+                PropertyValue::Color(Color::new(255, 183, 77, 255)),
+            ),
+            (
+                ThemeToken::Success,
+                PropertyValue::Color(Color::new(102, 187, 106, 255)),
+            ),
             (ThemeToken::SpacingXs, PropertyValue::Number(4.0)),
             (ThemeToken::SpacingSm, PropertyValue::Number(8.0)),
             (ThemeToken::SpacingMd, PropertyValue::Number(16.0)),
@@ -422,9 +452,18 @@ impl Theme {
                 ThemeToken::DurationSlow,
                 PropertyValue::Duration(Duration::from_millis(500)),
             ),
-            (ThemeToken::EasingStandard, PropertyValue::Easing(Easing::EaseInOut)),
-            (ThemeToken::EasingDecelerate, PropertyValue::Easing(Easing::EaseOut)),
-            (ThemeToken::EasingAccelerate, PropertyValue::Easing(Easing::EaseIn)),
+            (
+                ThemeToken::EasingStandard,
+                PropertyValue::Easing(Easing::EaseInOut),
+            ),
+            (
+                ThemeToken::EasingDecelerate,
+                PropertyValue::Easing(Easing::EaseOut),
+            ),
+            (
+                ThemeToken::EasingAccelerate,
+                PropertyValue::Easing(Easing::EaseIn),
+            ),
         ])
     }
 
@@ -437,16 +476,46 @@ impl Theme {
     #[must_use]
     pub fn light() -> Self {
         Theme::from_table(&[
-            (ThemeToken::Background, PropertyValue::Color(Color::new(255, 255, 255, 255))),
-            (ThemeToken::Surface, PropertyValue::Color(Color::new(245, 245, 245, 255))),
-            (ThemeToken::Primary, PropertyValue::Color(Color::new(98, 0, 238, 255))),
-            (ThemeToken::OnPrimary, PropertyValue::Color(Color::new(255, 255, 255, 255))),
-            (ThemeToken::Text, PropertyValue::Color(Color::new(0, 0, 0, 255))),
-            (ThemeToken::TextMuted, PropertyValue::Color(Color::new(117, 117, 117, 255))),
-            (ThemeToken::Border, PropertyValue::Color(Color::new(224, 224, 224, 255))),
-            (ThemeToken::Error, PropertyValue::Color(Color::new(176, 0, 32, 255))),
-            (ThemeToken::Warning, PropertyValue::Color(Color::new(245, 124, 0, 255))),
-            (ThemeToken::Success, PropertyValue::Color(Color::new(56, 142, 60, 255))),
+            (
+                ThemeToken::Background,
+                PropertyValue::Color(Color::new(255, 255, 255, 255)),
+            ),
+            (
+                ThemeToken::Surface,
+                PropertyValue::Color(Color::new(245, 245, 245, 255)),
+            ),
+            (
+                ThemeToken::Primary,
+                PropertyValue::Color(Color::new(98, 0, 238, 255)),
+            ),
+            (
+                ThemeToken::OnPrimary,
+                PropertyValue::Color(Color::new(255, 255, 255, 255)),
+            ),
+            (
+                ThemeToken::Text,
+                PropertyValue::Color(Color::new(0, 0, 0, 255)),
+            ),
+            (
+                ThemeToken::TextMuted,
+                PropertyValue::Color(Color::new(117, 117, 117, 255)),
+            ),
+            (
+                ThemeToken::Border,
+                PropertyValue::Color(Color::new(224, 224, 224, 255)),
+            ),
+            (
+                ThemeToken::Error,
+                PropertyValue::Color(Color::new(176, 0, 32, 255)),
+            ),
+            (
+                ThemeToken::Warning,
+                PropertyValue::Color(Color::new(245, 124, 0, 255)),
+            ),
+            (
+                ThemeToken::Success,
+                PropertyValue::Color(Color::new(56, 142, 60, 255)),
+            ),
             (ThemeToken::SpacingXs, PropertyValue::Number(4.0)),
             (ThemeToken::SpacingSm, PropertyValue::Number(8.0)),
             (ThemeToken::SpacingMd, PropertyValue::Number(16.0)),
@@ -479,9 +548,18 @@ impl Theme {
                 ThemeToken::DurationSlow,
                 PropertyValue::Duration(Duration::from_millis(500)),
             ),
-            (ThemeToken::EasingStandard, PropertyValue::Easing(Easing::EaseInOut)),
-            (ThemeToken::EasingDecelerate, PropertyValue::Easing(Easing::EaseOut)),
-            (ThemeToken::EasingAccelerate, PropertyValue::Easing(Easing::EaseIn)),
+            (
+                ThemeToken::EasingStandard,
+                PropertyValue::Easing(Easing::EaseInOut),
+            ),
+            (
+                ThemeToken::EasingDecelerate,
+                PropertyValue::Easing(Easing::EaseOut),
+            ),
+            (
+                ThemeToken::EasingAccelerate,
+                PropertyValue::Easing(Easing::EaseIn),
+            ),
         ])
     }
 
@@ -886,7 +964,10 @@ mod tests {
             ThemeToken::FontFamily,
             PropertyValue::Text("Roboto".to_string()),
         );
-        theme.set(ThemeToken::EasingStandard, PropertyValue::Easing(Easing::Linear));
+        theme.set(
+            ThemeToken::EasingStandard,
+            PropertyValue::Easing(Easing::Linear),
+        );
 
         theme.switch_to(Theme::light(), 100);
         theme.tick(ms(50));
@@ -1064,7 +1145,11 @@ mod tests {
 
         theme.borrow_mut().switch_to(Theme::light(), 100);
         theme.borrow_mut().tick(ms(50));
-        assert_ne!(background.get(), dark, "half way through, the colour has moved");
+        assert_ne!(
+            background.get(),
+            dark,
+            "half way through, the colour has moved"
+        );
 
         theme.borrow_mut().tick(ms(50));
         assert_eq!(

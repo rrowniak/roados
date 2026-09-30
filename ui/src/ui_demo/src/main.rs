@@ -69,11 +69,7 @@ const HELD_LIGHTEN: f32 = 0.4;
 
 /// The theme token each pad's rest colour comes from: a red, a green and a
 /// blue pad, from the theme's error, success and primary colours.
-const PAD_TOKENS: [ThemeToken; 3] = [
-    ThemeToken::Error,
-    ThemeToken::Success,
-    ThemeToken::Primary,
-];
+const PAD_TOKENS: [ThemeToken; 3] = [ThemeToken::Error, ThemeToken::Success, ThemeToken::Primary];
 
 /// How long a pad takes to press down.
 const PRESS_DURATION: Duration = Duration::from_millis(150);
@@ -171,11 +167,7 @@ impl Pad {
     /// single number and the pad's whole appearance follows it, and a theme
     /// switch moves the rest and held colours it interpolates between.
     fn new(press: Property<f32>, color: Property<PropertyValue>, node: Handle) -> Self {
-        Pad {
-            press,
-            color,
-            node,
-        }
+        Pad { press, color, node }
     }
 
     /// Returns the colour to paint this pad at its current press.
@@ -245,10 +237,7 @@ impl Demo {
                 let rest = theme.property(rest_token);
                 let press = press.clone();
                 Property::bind(move || {
-                    let rest = rest
-                        .get()
-                        .as_color()
-                        .unwrap_or(Color::new(0, 0, 0, 255));
+                    let rest = rest.get().as_color().unwrap_or(Color::new(0, 0, 0, 255));
                     let held = lighten(rest);
                     PropertyValue::Color(Color::interpolate(&rest, &held, press.get()))
                 })
@@ -420,7 +409,11 @@ impl Demo {
     /// `THEME_TRANSITION` milliseconds.
     fn toggle_theme(&mut self) {
         self.dark = !self.dark;
-        let new_theme = if self.dark { Theme::dark() } else { Theme::light() };
+        let new_theme = if self.dark {
+            Theme::dark()
+        } else {
+            Theme::light()
+        };
         self.theme.switch_to(new_theme, THEME_TRANSITION);
     }
 

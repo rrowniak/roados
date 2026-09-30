@@ -12,29 +12,23 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 09 approved, awaiting the operator's commit.** Four review rounds:
-*Approve with required changes* (4 minor), then a bad revert lost two files and
-a rebuild, then *Approve with required changes* again (1 minor), then two more
-minor comment corrections, then *Approve* with nothing outstanding. Nothing
-waived except `cargo audit`, which is not installed on this host.
+**Status: 10 approved, awaiting the operator's commit.** Two review rounds:
+*Approve with required changes* (3 minor gesture defects), then *Approve* with
+nothing outstanding after the fixes. Nothing waived except `cargo audit`, which
+is not installed on this host.
 
-**Last task: 09 — Animation System.** 143 unit tests + 25 doctests, up from 100
-unit + 12 doctests before the task. All six acceptance criteria verified by
-named tests. `animation.rs` is new (+1907); `property.rs` gained three defect
-fixes; `ui_demo` gained the animation demo.
+**Last task: 10 — Input Handling.** 207 unit tests + 30 doctests, up from 163
+unit + 27 doctests before the task. `input.rs` is new (+1987); `layout.rs`
+gained a `visible` flag on `LayoutState`. Three gesture defects found and fixed:
+two-finger hold firing long presses, canceled touch leaving a stuck pointer,
+pinch with coincident start never arming.
 
 **Task 09 ran before task 08 by the operator's decision, 2026-09-29.** Task 08
 requires `Property::animate` and `Easing`, which task 09 owns. The dependency
 inversion is real: 08's spec names an API that only 09 creates. Recorded in
 *Ratified by the operator* below.
 
-**A bad revert during fix round 1 lost the uncommitted work in `property.rs` and
-`main.rs`.** `git checkout --` restored both from HEAD, discarding the
-developer's fixes and demo. `animation.rs` and `.ai/NEVERAGAIN.md` survived. A
-fresh developer rebuilt both files on top of the intact `animation.rs`; the
-reviewer confirmed the rebuild was correct. The lesson is in `.ai/NEVERAGAIN.md`.
-
-**Current task: 09 — awaiting commit. Task 08 starts after the operator
+**Current task: 10 — awaiting commit. Task 11 starts after the operator
 reports the SHA.**
 
 ## Ratified by the operator (2026-09-28, 2026-09-29)
@@ -270,9 +264,9 @@ verified. A blank cell is unknown, not "none".
 | 05 | Property System | done | `8c3657b` | 0 review passes, 1 fix round | — |
 | 06 | Rendering Pipeline | done | `0b1c3e7` | 1 review pass, 0 fix rounds | — |
 | 07 | Layout System | done | `58957d8` | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
-| 08 | Theme System | pending | | | |
-| 09 | Animation System | approved | | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
-| 10 | Input Handling | pending | | | |
+| 08 | Theme System | done | `d9041f9` | 0 review passes, 0 fix rounds | — |
+| 09 | Animation System | done | `6726e21` | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
+| 10 | Input Handling | approved | | 2 review passes, 1 fix round | 1 (`cargo audit` not installed) |
 | 11 | Widget — Label | pending | | | |
 | 12 | Widget — Button | pending | | | |
 | 13 | Widget — Container | pending | | | |
@@ -695,3 +689,15 @@ operator's rule, none of these is treated as satisfied.
   the reviewer confirmed the rebuild was correct. The lesson — never revert
   uncommitted work with `git checkout --` when a targeted edit will do — is in
   `.ai/NEVERAGAIN.md`.
+- 2026-09-29 — **task 08 committed by the operator**, `d9041f9`, and task 10
+  started. The implementation was already in the working tree from the previous
+  session; two clippy warnings were fixed before commit. Doctests require
+  `TMPDIR` on the main filesystem — `/tmp` is a tmpfs with a user quota that
+  causes `Disk quota exceeded` during linking.
+- 2026-09-30 — **task 10 implemented and approved; awaiting the operator's
+  commit.** Two review rounds, one fix round, no finding outstanding and none
+  waived except `cargo audit`, which is not installed here. Three gesture
+  defects found and fixed: two-finger hold firing long presses, canceled touch
+  leaving a stuck pointer, pinch with coincident start never arming. The
+  reviewer mutation-tested each fix. `layout.rs` gained a `visible` flag on
+  `LayoutState` for hit testing.

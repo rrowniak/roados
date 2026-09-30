@@ -266,7 +266,7 @@ verified. A blank cell is unknown, not "none".
 | 08 | Theme System | done | `d9041f9` | 0 review passes, 0 fix rounds | — |
 | 09 | Animation System | done | `6726e21` | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
 | 10 | Input Handling | done | `4e51b09` | 2 review passes, 1 fix round | 1 (`cargo audit` not installed) |
-| 11 | Widget — Label | implemented, rendered | | visual proof captured 2026-09-30 | |
+| 11 | Widget — Label | done | `ffbb4d6` | **none — committed without review** | 0 |
 | 12 | Widget — Button | pending | | | |
 | 13 | Widget — Container | pending | | | |
 | 14 | Widget — Slider | pending | | | |
@@ -777,3 +777,16 @@ operator's rule, none of these is treated as satisfied.
   confirmed visually by capturing the demo built at a 40px default instead, which
   re-wraps the panel. Injecting synthetic input into a running demo is a tooling
   gap, not a task; SDL's own event path is already covered by task 10.
+- 2026-09-30 — **task 11 committed by the operator, `ffbb4d6`, with the review
+  step skipped.** The commit carries the label widget, the text pipeline, the
+  `ui_demo` panel, the three gap tasks (30–32) and the docs. The
+  `task-sequence.md` loop puts the review **before** the operator's commit —
+  step 2 dispatches `reviewer.md` in a different session from the developer, and
+  the *No self-review* gate says the developer does not clear its own work. That
+  did not happen here, so the task table records the review column as **none**
+  rather than as a pass. The tree is clean, the suite is green at the commit
+  (246 unit + 22 demo + 33 doctests, fmt, clippy, doc, aarch64), and the commit
+  is a sound review target: a reviewer can be dispatched against `ffbb4d6`
+  without a revert point being at risk. What is lost until that happens is the
+  second pair of eyes on ~3200 lines, and the recorded fact that nobody has
+  looked for the findings a reviewer would look for.

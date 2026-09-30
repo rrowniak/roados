@@ -319,3 +319,35 @@ around the suspect change — here task 10 read 5/300 jiffies and task 11 read
 arrive", check `XTestFakeMotionEvent` actually moves the pointer before
 believing it; on this host it does not, and a click sent to a pointer that never
 moved lands outside the window and proves nothing.
+
+## 2026-09-30 — A distance field has to binarize, and the bit it drops is the edge
+
+Text rendered through a signed distance field looked "scanned", with stair-stepped
+diagonals and hard aliased edges. The field itself was innocent: measured against
+brute force, the two-pass chamfer transform was accurate to **0.008 px mean,
+0.25 px max** on real glyphs. The defect was one line above it —
+`bitmap.pixels.iter().map(|&p| p > 127)` — because a distance field is built by
+deciding what is *inside*, and that decision throws away the sub-pixel edge
+position FreeType had already rasterized. The field's 50% contour then lands on
+whole pixels, and an edge on a pixel boundary has no half-covered pixel to sit
+in. The stem edge measured `18 18 18 18 255 255`: a hard step from background to
+solid with nothing between.
+
+Two fixes were tried and both made it **worse**, and the measurements said so
+before the screenshots did: supersampling the threshold, then averaging the field
+back down, dilated the glyph and left a halo (background beside the stem went
+`18` → `43`, ink `3.26M` → `3.50M`); sampling the supersampled field at pixel
+centres instead of averaging gave the same halo. The field was measuring distance
+to a mask that had itself grown. The fix that worked was to stop building a field
+and carry FreeType's coverage through unchanged — it was already antialiased, at
+exactly the size the glyph is drawn, and the field was rebuilding a worse
+approximation of it.
+
+**Rule:** a transformation that quantizes cannot be repaired downstream, and the
+repair is usually worse than the original — measure the halo, not the intent.
+When a pipeline throws away a producer's output and reconstructs it, check
+whether the reconstruction is actually more faithful before defending it. And
+size a suspected component against a brute-force reference before rewriting it:
+two of the three hypotheses here were wrong (the per-call `set_pixel_sizes`
+resize, then the chamfer approximation), and only a reference measurement
+separated them from the one that was right.

@@ -1,9 +1,15 @@
-//! Font loading, glyph rasterization, SDF generation and the glyph atlas.
+//! Font loading, glyph rasterization and the glyph atlas.
 //!
-//! FreeType rasterizes glyphs from a font file; this module turns each glyph
-//! into a signed distance field and packs those into an atlas the text shader
-//! samples. The pipeline is CPU-side and font-agnostic: the renderer uploads
-//! the atlas to a GL texture and draws per-glyph quads.
+//! FreeType rasterizes glyphs from a font file, antialiased and at exactly the
+//! size they will be drawn; this module packs those coverage bitmaps into an
+//! atlas the text shader samples. The pipeline is CPU-side and font-agnostic:
+//! the renderer uploads the atlas to a GL texture and draws per-glyph quads.
+//!
+//! The coverage is carried through as rasterized. It was previously turned into
+//! a signed distance field here and reconstructed in the shader, which is how
+//! text is drawn when it may be scaled; for text drawn at the size it was
+//! rasterized for it threw away the sub-pixel edge position and made the
+//! rendering look scanned. See [`GlyphCoverage`].
 //!
 //! Text *shaping* (ligatures, complex scripts, bidirectional text) is not done
 //! here. It needs HarfBuzz, whose safe Rust binding exposes no shaping API —
@@ -17,9 +23,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// The default SDF radius in pixels: how far past the glyph edge the distance
-/// field reaches. Wide enough for smooth anti-aliasing at UI sizes.
-const SDF_RADIUS: f32 = 8.0;
+/// The transparent margin stored around a glyph's ink, in pixels.
+///
+/// One pixel, and no more than one is needed: the quad drawn for a glyph covers
+/// its margin as well as its ink, so the margin's transparent pixels fall on
+/// screen pixels of their own and the ink's coverage lands on the texels it was
+/// rasterized into. A wider margin would only waste atlas.
+const COVERAGE_PAD: u32 = 1;
 
 /// The gap in pixels kept between neighbouring glyphs in the atlas. The text
 /// shader filters with `GL_LINEAR`, which samples texels on both sides of the
@@ -291,154 +301,128 @@ pub struct GlyphBitmap {
     pub pixels: Vec<u8>,
 }
 
-/// The signed distance field of one glyph, normalized to `0..=255`.
+/// One glyph's coverage, as the atlas stores it and the text shader reads it.
 ///
-/// 128 is the glyph edge; above is inside, below is outside. The text shader
-/// turns this back into a coverage with a smoothstep, which is what makes the
-/// text crisp at any size.
+/// This is FreeType's own 8-bit antialiased coverage, carried through unchanged.
+/// The module used to build a signed distance field here instead, and recover a
+/// coverage from it in the shader with a `smoothstep`; that round trip is what
+/// made the text look scanned rather than drawn, and the reason is one line:
+/// **a distance field has to binarize.** Deciding what is inside the glyph
+/// throws away the sub-pixel position of the edge that FreeType rasterized, so
+/// the field's 50% contour lands on whole pixels, and an edge on a pixel
+/// boundary has no half-covered pixel to sit in. It renders as a hard aliased
+/// step. Recovering the lost precision by supersampling the threshold was tried
+/// and made it worse — it dilates the glyph and leaves a halo of low-alpha
+/// pixels around every one — because the distance transform then measures to a
+/// mask that has itself grown.
+///
+/// Carrying the coverage needs none of that. FreeType already antialiases, with
+/// sub-pixel accuracy, and at exactly the size the glyph will be drawn; the
+/// field threw that away and rebuilt a worse approximation of it. What is given
+/// up is resolution independence: a magnified glyph will blur, because there is
+/// no longer a scale-free description of the edge. Nothing magnifies text today
+/// — the atlas is keyed by size, so a new size re-rasterizes — and an
+/// unblurred edge at the size actually drawn is worth more than the ability to
+/// scale one that is not.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Sdf {
-    /// Field width in pixels.
+pub struct GlyphCoverage {
+    /// Coverage width in pixels, including the transparent margin.
     pub width: u32,
-    /// Field height in pixels.
+    /// Coverage height in pixels, including the transparent margin.
     pub height: u32,
-    /// Horizontal bearing: offset from the pen to the field's left edge.
+    /// Horizontal bearing: offset from the pen to the coverage's left edge.
     pub bearing_x: i32,
-    /// Vertical bearing: offset from the baseline to the field's top edge.
+    /// Vertical bearing: offset from the baseline to the coverage's top edge.
     pub bearing_y: i32,
     /// Advance width in pixels.
     pub advance: f32,
-    /// Signed distances, top-down, `width * height` of them.
-    pub distances: Vec<u8>,
+    /// Coverage, top-down, `width * height` of them. 255 is solid ink.
+    pub coverage: Vec<u8>,
 }
 
-/// Converts a coverage bitmap into a signed distance field.
-///
-/// Each output pixel holds the signed distance to the nearest glyph edge,
-/// clamped to `±radius` and normalized to `0..=255` with 128 as the edge. The
-/// distance is computed with a two-pass chamfer transform, which is a good
-/// approximation of the Euclidean distance and linear in the pixel count.
+/// Wraps a glyph's coverage bitmap as the atlas stores it, with no scaling or
+/// filtering of the values.
 ///
 /// # Examples
 ///
 /// ```
-/// use ui_core::font::{make_sdf, GlyphBitmap};
+/// use ui_core::font::{make_coverage, GlyphBitmap};
 ///
-/// // A 3x3 bitmap with the centre pixel set: the edge is one pixel away from
-/// // the centre in every direction.
 /// let bitmap = GlyphBitmap {
-///     width: 3,
-///     height: 3,
+///     width: 2,
+///     height: 1,
 ///     bearing_x: 0,
-///     bearing_y: 3,
-///     advance: 3.0,
-///     pixels: vec![
-///         0, 0, 0,
-///         0, 255, 0,
-///         0, 0, 0,
-///     ],
+///     bearing_y: 1,
+///     advance: 2.0,
+///     // A half-covered pixel: the edge runs through the middle of it, which
+///     // is exactly the sub-pixel information a distance field would discard.
+///     pixels: vec![255, 128],
 /// };
-/// let sdf = make_sdf(&bitmap, 4.0);
-/// assert_eq!(sdf.width, 3);
-/// assert_eq!(sdf.height, 3);
-/// // The centre is inside, so it is above the 128 edge.
-/// assert!(sdf.distances[4] > 128);
-/// // The corners are outside, so they are below it.
-/// assert!(sdf.distances[0] < 128);
+/// let coverage = make_coverage(&bitmap);
+/// assert_eq!(coverage.coverage, vec![255, 128], "carried through unchanged");
+/// assert_eq!(coverage.width, 2);
 /// ```
-pub fn make_sdf(bitmap: &GlyphBitmap, radius: f32) -> Sdf {
-    let w = usize::try_from(bitmap.width).unwrap_or(0);
-    let h = usize::try_from(bitmap.height).unwrap_or(0);
-    if w == 0 || h == 0 {
-        return Sdf {
-            width: bitmap.width,
-            height: bitmap.height,
-            bearing_x: bitmap.bearing_x,
-            bearing_y: bitmap.bearing_y,
-            advance: bitmap.advance,
-            distances: Vec::new(),
-        };
-    }
-    let radius = radius.max(1.0);
-    let inside: Vec<bool> = bitmap.pixels.iter().map(|&p| p > 127).collect();
-    let outside: Vec<bool> = inside.iter().map(|&b| !b).collect();
-    let dt_inside = distance_transform(&inside, w, h);
-    let dt_outside = distance_transform(&outside, w, h);
-    let mut distances = vec![0u8; w * h];
-    for i in 0..(w * h) {
-        let signed = dt_outside[i] - dt_inside[i];
-        let clamped = signed.clamp(-radius, radius);
-        let normalized = (clamped / radius * 127.0 + 128.0).round();
-        distances[i] = normalized.clamp(0.0, 255.0) as u8;
-    }
-    Sdf {
+pub fn make_coverage(bitmap: &GlyphBitmap) -> GlyphCoverage {
+    GlyphCoverage {
         width: bitmap.width,
         height: bitmap.height,
         bearing_x: bitmap.bearing_x,
         bearing_y: bitmap.bearing_y,
         advance: bitmap.advance,
-        distances,
+        coverage: bitmap.pixels.clone(),
     }
 }
 
-/// Computes, for each pixel, the distance to the nearest `mask` pixel.
+/// Returns a copy of `bitmap` with `pad` transparent pixels on every side.
 ///
-/// This is the two-pass chamfer distance transform: a forward sweep and a
-/// backward sweep, each propagating the smallest distance seen so far through
-/// the 8 neighbours. It runs in linear time and approximates the Euclidean
-/// distance.
-fn distance_transform(mask: &[bool], w: usize, h: usize) -> Vec<f32> {
-    let mut dist = vec![f32::INFINITY; w * h];
-    for (i, &m) in mask.iter().enumerate() {
-        if m {
-            dist[i] = 0.0;
-        }
+/// A glyph's bitmap from FreeType is the **tight** box around its ink, so its
+/// border pixels are edge pixels with partial coverage. A distance field needs
+/// room to develop on both sides of that edge, and there is none: the field is
+/// cut off mid-gradient at the bitmap border, so it never reaches the flat
+/// "fully outside" value the shader's `smoothstep` needs to draw a crisp edge.
+/// Worse, the quad drawn for the glyph is exactly the bitmap, so the truncated
+/// border is also the quad's geometric edge, and linear filtering blends it
+/// with the zero-valued atlas padding beside it. Every stroke then loses its
+/// outer half-pixel and the text reads soft and slightly eaten.
+///
+/// Padding fixes both: the field develops across the padding and saturates at
+/// the new border, and the cut-off edge moves inside the quad where the shader
+/// can resolve it.
+///
+/// The bearings move with the ink: the bitmap's left edge is `pad` further
+/// left of the pen (`bearing_x -= pad`) and its top `pad` higher above the
+/// baseline (`bearing_y += pad`), so a padded glyph lands in the same place at
+/// the same size, with the padding falling outside the ink.
+pub fn pad_bitmap(bitmap: &GlyphBitmap, pad: u32) -> GlyphBitmap {
+    let p = usize::try_from(pad).unwrap_or(0);
+    let src_w = usize::try_from(bitmap.width).unwrap_or(0);
+    let src_h = usize::try_from(bitmap.height).unwrap_or(0);
+    if p == 0 {
+        return bitmap.clone();
     }
-    for y in 0..h {
-        for x in 0..w {
-            let i = y * w + x;
-            if dist[i] == 0.0 {
+    let w = src_w + 2 * p;
+    let h = src_h + 2 * p;
+    let mut pixels = vec![0u8; w * h];
+    for y in 0..src_h {
+        for x in 0..src_w {
+            let Some(&coverage) = bitmap.pixels.get(y * src_w + x) else {
                 continue;
+            };
+            let dst = (y + p) * w + (x + p);
+            if let Some(slot) = pixels.get_mut(dst) {
+                *slot = coverage;
             }
-            let mut d = dist[i];
-            if x > 0 && y > 0 {
-                d = d.min(dist[i - w - 1] + std::f32::consts::SQRT_2);
-            }
-            if y > 0 {
-                d = d.min(dist[i - w] + 1.0);
-            }
-            if x + 1 < w && y > 0 {
-                d = d.min(dist[i - w + 1] + std::f32::consts::SQRT_2);
-            }
-            if x > 0 {
-                d = d.min(dist[i - 1] + 1.0);
-            }
-            dist[i] = d;
         }
     }
-    for y in (0..h).rev() {
-        for x in (0..w).rev() {
-            let i = y * w + x;
-            if dist[i] == 0.0 {
-                continue;
-            }
-            let mut d = dist[i];
-            if x + 1 < w {
-                d = d.min(dist[i + 1] + 1.0);
-            }
-            if y + 1 < h {
-                d = d.min(dist[i + w] + 1.0);
-            }
-            if x > 0 && y + 1 < h {
-                d = d.min(dist[i + w - 1] + std::f32::consts::SQRT_2);
-            }
-            if x + 1 < w && y + 1 < h {
-                d = d.min(dist[i + w + 1] + std::f32::consts::SQRT_2);
-            }
-            dist[i] = d;
-        }
+    let pad_i32 = i32::try_from(pad).unwrap_or(0);
+    GlyphBitmap {
+        width: u32::try_from(w).unwrap_or(0),
+        height: u32::try_from(h).unwrap_or(0),
+        bearing_x: bitmap.bearing_x.saturating_sub(pad_i32),
+        bearing_y: bitmap.bearing_y.saturating_add(pad_i32),
+        advance: bitmap.advance,
+        pixels,
     }
-    dist
 }
 
 /// Where a glyph lives in the atlas, in UV coordinates and pixels.
@@ -568,20 +552,21 @@ impl GlyphAtlas {
             return Some(placement);
         }
         let bitmap = font.rasterize(ch, size)?;
-        let sdf = make_sdf(&bitmap, SDF_RADIUS);
-        let (x, y) = self.allocate(sdf.width, sdf.height)?;
-        self.blit(x, y, &sdf);
+        let padded = pad_bitmap(&bitmap, COVERAGE_PAD);
+        let glyph = make_coverage(&padded);
+        let (x, y) = self.allocate(glyph.width, glyph.height)?;
+        self.blit(x, y, &glyph);
         let placement = GlyphPlacement {
             u0: u32_to_f32(x) / u32_to_f32(self.size),
             v0: u32_to_f32(y) / u32_to_f32(self.size),
-            u1: u32_to_f32(x + sdf.width) / u32_to_f32(self.size),
-            v1: u32_to_f32(y + sdf.height) / u32_to_f32(self.size),
+            u1: u32_to_f32(x + glyph.width) / u32_to_f32(self.size),
+            v1: u32_to_f32(y + glyph.height) / u32_to_f32(self.size),
             row_y: y,
-            width: sdf.width,
-            height: sdf.height,
-            bearing_x: sdf.bearing_x,
-            bearing_y: sdf.bearing_y,
-            advance: sdf.advance,
+            width: glyph.width,
+            height: glyph.height,
+            bearing_x: glyph.bearing_x,
+            bearing_y: glyph.bearing_y,
+            advance: glyph.advance,
         };
         self.glyphs.insert(key, placement);
         if let Some(row) = self.row_at_mut(y) {
@@ -692,10 +677,10 @@ impl GlyphAtlas {
         self.dirty = true;
     }
 
-    /// Copies an SDF into the atlas at `(x, y)`.
-    fn blit(&mut self, x: u32, y: u32, sdf: &Sdf) {
-        let w = usize::try_from(sdf.width).unwrap_or(0);
-        let h = usize::try_from(sdf.height).unwrap_or(0);
+    /// Copies a glyph's coverage into the atlas at `(x, y)`.
+    fn blit(&mut self, x: u32, y: u32, glyph: &GlyphCoverage) {
+        let w = usize::try_from(glyph.width).unwrap_or(0);
+        let h = usize::try_from(glyph.height).unwrap_or(0);
         let size = usize::try_from(self.size).unwrap_or(0);
         for row in 0..h {
             let dst_y = usize::try_from(y).unwrap_or(0) + row;
@@ -704,8 +689,8 @@ impl GlyphAtlas {
             }
             let src = row * w;
             let dst = dst_y * size + usize::try_from(x).unwrap_or(0);
-            if dst + w <= self.pixels.len() && src + w <= sdf.distances.len() {
-                self.pixels[dst..dst + w].copy_from_slice(&sdf.distances[src..src + w]);
+            if dst + w <= self.pixels.len() && src + w <= glyph.coverage.len() {
+                self.pixels[dst..dst + w].copy_from_slice(&glyph.coverage[src..src + w]);
             }
         }
         self.dirty = true;
@@ -725,45 +710,51 @@ fn u32_to_f32(value: u32) -> f32 {
 mod tests {
     use super::*;
 
-    /// A 3×3 bitmap with the centre pixel set.
-    fn centre_bitmap() -> GlyphBitmap {
+    /// A 3×3 bitmap with the centre pixel set, and an edge pixel at partial
+    /// coverage so the sub-pixel information is visible to the assertions.
+    fn edge_bitmap() -> GlyphBitmap {
         GlyphBitmap {
             width: 3,
             height: 3,
             bearing_x: 0,
             bearing_y: 3,
             advance: 3.0,
-            pixels: vec![0, 0, 0, 0, 255, 0, 0, 0, 0],
+            pixels: vec![0, 0, 0, 0, 255, 0, 0, 96, 0],
         }
     }
 
     #[test]
-    fn sdf_marks_inside_and_outside() {
-        let sdf = make_sdf(&centre_bitmap(), 4.0);
-        assert_eq!(sdf.width, 3);
-        assert_eq!(sdf.height, 3);
-        assert!(sdf.distances[4] > 128, "the centre is inside");
-        assert!(sdf.distances[0] < 128, "the corner is outside");
+    fn coverage_is_carried_through_unchanged() {
+        // The whole point of storing coverage rather than a distance field: a
+        // half-covered pixel stays half covered. A distance field had to
+        // binarize to be built, which is what made the text look scanned.
+        let coverage = make_coverage(&edge_bitmap());
+        assert_eq!(coverage.width, 3);
+        assert_eq!(coverage.height, 3);
+        assert_eq!(coverage.coverage, edge_bitmap().pixels);
     }
 
     #[test]
-    fn sdf_edge_is_near_128() {
-        // A fully-set bitmap has no outside, so every pixel is inside and the
-        // field is positive everywhere; the minimum is still above the edge.
-        let bitmap = GlyphBitmap {
-            width: 2,
-            height: 2,
-            bearing_x: 0,
-            bearing_y: 2,
-            advance: 2.0,
-            pixels: vec![255, 255, 255, 255],
-        };
-        let sdf = make_sdf(&bitmap, 4.0);
-        assert!(sdf.distances.iter().all(|&d| d >= 128));
+    fn a_partly_covered_pixel_is_not_rounded_to_whole_or_empty() {
+        let coverage = make_coverage(&edge_bitmap());
+        assert_eq!(
+            coverage.coverage[7], 96,
+            "an edge pixel between 1 and 254 must survive as itself, not become \
+             0 or 255 — that rounding is precisely the defect"
+        );
+        assert!(coverage.coverage[7] > 0 && coverage.coverage[7] < 255);
     }
 
     #[test]
-    fn sdf_empty_bitmap_is_empty() {
+    fn coverage_carries_the_metrics_through() {
+        let coverage = make_coverage(&edge_bitmap());
+        assert_eq!(coverage.bearing_x, 0);
+        assert_eq!(coverage.bearing_y, 3);
+        assert_eq!(coverage.advance, 3.0);
+    }
+
+    #[test]
+    fn an_empty_bitmap_produces_no_coverage() {
         let bitmap = GlyphBitmap {
             width: 0,
             height: 0,
@@ -772,23 +763,13 @@ mod tests {
             advance: 0.0,
             pixels: Vec::new(),
         };
-        let sdf = make_sdf(&bitmap, 4.0);
-        assert!(sdf.distances.is_empty());
-    }
-
-    #[test]
-    fn distance_transform_zero_at_mask() {
-        let mask = vec![false, true, false];
-        let dist = distance_transform(&mask, 3, 1);
-        assert_eq!(dist[1], 0.0);
-        assert!(dist[0] > 0.0);
-        assert!(dist[2] > 0.0);
+        assert!(make_coverage(&bitmap).coverage.is_empty());
     }
 
     #[test]
     fn atlas_starts_empty() {
         // A real font is needed to rasterize, so this checks the atlas
-        // geometry directly: a `size`×`size` texture of zeroed SDF pixels.
+        // geometry directly: a `size`×`size` texture of zeroed coverage.
         let atlas = GlyphAtlas::new(64);
         assert_eq!(atlas.size(), 64);
         assert_eq!(atlas.pixels().len(), 64 * 64);
@@ -816,16 +797,16 @@ mod tests {
 mod atlas_tests {
     use super::*;
 
-    /// An SDF of `w` × `h` at the origin, fully inside — the tests here are
-    /// about where the atlas puts a glyph, not what is in it.
-    fn sdf(w: u32, h: u32) -> Sdf {
-        Sdf {
+    /// A glyph's coverage of `w` × `h` at the origin, fully covered — the
+    /// tests here are about where the atlas puts a glyph, not what is in it.
+    fn coverage(w: u32, h: u32) -> GlyphCoverage {
+        GlyphCoverage {
             width: w,
             height: h,
             bearing_x: 0,
             bearing_y: 0,
             advance: 0.0,
-            distances: vec![255; usize::try_from(w).unwrap_or(0) * usize::try_from(h).unwrap_or(0)],
+            coverage: vec![255; usize::try_from(w).unwrap_or(0) * usize::try_from(h).unwrap_or(0)],
         }
     }
 
@@ -841,7 +822,7 @@ mod atlas_tests {
     fn an_evicted_shelf_clears_its_pixels() {
         let mut atlas = GlyphAtlas::new(64);
         let (x, y) = atlas.allocate(16, 16).unwrap();
-        atlas.blit(x, y, &sdf(16, 16));
+        atlas.blit(x, y, &coverage(16, 16));
         assert!(
             atlas.pixels().iter().any(|&pixel| pixel != 0),
             "the blitted glyph is in the atlas"
@@ -882,7 +863,7 @@ mod atlas_tests {
         let mut atlas = GlyphAtlas::new(64);
         assert!(atlas.take_dirty_pixels().is_none(), "a new atlas is clean");
         let (x, y) = atlas.allocate(8, 8).unwrap();
-        atlas.blit(x, y, &sdf(8, 8));
+        atlas.blit(x, y, &coverage(8, 8));
         assert!(atlas.take_dirty_pixels().is_some(), "a blit dirties it");
         assert!(
             atlas.take_dirty_pixels().is_none(),

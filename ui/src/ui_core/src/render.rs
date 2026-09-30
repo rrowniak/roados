@@ -150,14 +150,22 @@ void main() {
 }
 "#;
 
-/// The text fragment shader. Samples the glyph's signed distance field and
-/// turns it into a coverage, which is what makes the text crisp at any size:
-/// the SDF is resolution-independent, so scaling the quad scales the distance
-/// smoothly instead of re-rasterizing the glyph. The transition width comes
-/// from `fwidth`, the field's rate of change per screen pixel, so the edge is
-/// always about one pixel wide — a fixed band would be blurry when the quad is
-/// magnified and aliased when it is shrunk. The color is premultiplied by the
-/// coverage because the text pass blends with `ONE, ONE_MINUS_SRC_ALPHA`.
+/// The text fragment shader. It samples the glyph's antialiased coverage
+/// straight out of the atlas and uses it as the alpha, which is what keeps the
+/// text sharp: the coverage is FreeType's own, rasterized at exactly the size
+/// the glyph is drawn, so each glyph's edge is as finely resolved as the
+/// display can show it.
+///
+/// The color is premultiplied by the coverage because the text pass blends with
+/// `ONE, ONE_MINUS_SRC_ALPHA`.
+///
+/// This shader used to reconstruct a coverage from a signed distance field with
+/// a `smoothstep` whose width came from `fwidth`. That is a good way to draw
+/// text at a size other than the one it was rasterized for, and a poor way to
+/// draw it at exactly that size: the field had to binarize the coverage to be
+/// built, so the sub-pixel edge position was already gone before the shader saw
+/// it, and the edge rendered as a hard aliased step. See `ui_core::font`'s
+/// module docs for the measurement.
 const TEXT_FRAGMENT_SHADER_SRC: &str = r#"#version 300 es
 precision mediump float;
 in vec2 v_uv;
@@ -165,9 +173,7 @@ in vec4 v_color;
 uniform sampler2D u_atlas;
 out vec4 frag_color;
 void main() {
-    float dist = texture(u_atlas, v_uv).r;
-    float width = max(fwidth(dist), 0.0005);
-    float coverage = smoothstep(0.5 - width, 0.5 + width, dist);
+    float coverage = texture(u_atlas, v_uv).r;
     frag_color = vec4(v_color.rgb * coverage, v_color.a * coverage);
 }
 "#;
@@ -881,7 +887,7 @@ impl Renderer {
         for batch in &batched.transparent {
             self.draw_solid_batch(batch)?;
         }
-        // Text is drawn last, with blending on: the SDF coverage is a
+        // Text is drawn last, with blending on: the glyph coverage is a
         // per-fragment alpha, so even fully-opaque text composites its
         // anti-aliased edges.
         for batch in &batched.opaque {
@@ -971,7 +977,7 @@ impl Renderer {
         Ok(())
     }
 
-    /// Draws one text batch with the SDF text shader.
+    /// Draws one text batch with the text shader.
     ///
     /// Each text command is expanded into one quad per glyph, positioned by the
     /// glyph's bearing and advance, and sampling its signed distance field from

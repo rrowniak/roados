@@ -220,3 +220,71 @@ one by the other needs a ceiling written down as a named constant with a reason.
 When an effect has a word like *slight* or *subtle* in its spec, assert the
 number that word fixes — here `shadow.a < 128` — because a shape assertion will
 not.
+
+## 2026-09-30 — A filled rounded rectangle is not an outline
+
+`Slider::paint` drew its focus ring as a rounded rectangle grown around the
+slider's whole rect, and every draw-command assertion in the module called it
+correct: a real rect, the right colour, recorded first, with the track and the
+thumb after it. But `DrawCommand::RoundedRect` *fills* its rect, and a slider has
+no background of its own to draw over the middle of one — so on screen a focused
+slider was a white card with a track lying on it, 240 by 44 of it. The `Button`
+never hits this because it draws its background over its own ring; a slider has
+nothing to draw with.
+
+The capture is what found it. The unit test that covers it was asserting
+`grow(rect, ring)` — the right shape, the right colour, the right place, and a
+filled rectangle rather than an outline, which is a difference no
+draw-command assertion can express.
+
+*How that capture was taken, since it is the evidence the entry rests on:* no
+injected event reached the app in either the developer's session or the reviewer's
+— see `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws* — so the
+focused state was produced by a build that wrote the widget's `focused` property
+directly at construction, from an environment variable, in a temporary seed that
+has since been reverted. The seed is quoted in that section and is reproducible.
+That is a real capture of the real widget and it found a real defect; what it is
+**not** is evidence that `Tab` focuses a slider on screen.
+
+**Rule:** a filled primitive only reads as an outline if something is drawn over
+its middle. Decide what that something is *before* drawing the outline, and assert
+on the pair — the grown shape **and** the fact that the shape covering it is
+recorded after it — because the shape alone is satisfied by a filled rectangle of
+exactly the right size, colour and place. This is the third defect in this
+repository found only by looking at the screen, after the undersized vertex
+buffer and the opaque press overlay, and the second that no draw-command
+assertion could see.
+
+## 2026-09-30 — A rect's origin and a rect's extent are different numbers
+
+`Slider::travel` computed how far the thumb could move as
+`extent - origin - radius * 2`, where `extent` was already a *length*. Every unit
+test in the module laid its slider out at `(0, 0)`, where subtracting the origin
+subtracts nothing, so all 53 of them passed — while every slider drawn anywhere
+else in a window reported a negative run, pinned its two ends to its own centre,
+and put every pointer position at the minimum. The demo found it within an hour of
+landing the widget, because the demo's slider is at `(664, 496)` and nothing else
+in the repository is at the origin.
+
+**Rule:** a geometry fixture at the origin cannot see an origin being read as an
+extent. Give a geometry test suite one rect that is *not* at the origin, and when a
+fixture is easy to place at `(0, 0)`, place it somewhere else instead. The same
+applies to any two same-typed numbers that are not the same number — a size and an
+origin, a width and a left edge, a count and an index.
+
+## 2026-09-30 — A capture whose only route was instrumented
+
+The task 14 record said the slider was "seen on screen at 0, 25 and 70". The
+captures were real and the seed that produced two of them was reverted — but the
+record did not say so, and the demo's own keys write **0 and 100**, so they could
+not have produced 25 and 70. Those two came from a rebuilt binary whose
+`Demo::new` read a value and a focus out of the environment, because no key and
+no click had reached the app and the demo had no other route to either. A reader
+therefore took pixels for the demo's input, and *A filled rounded rectangle is
+not an outline* rests on one of them.
+
+**Rule:** when a capture needed a seed, a rebuild or any other instrument, name it
+in the record that cites it, and check the method's own arithmetic against the
+numbers claimed *before* writing either down — the same class of error as task
+12's withdrawn tap waiver, where two timestamps read in the wrong unit turned a
+real defect into a tooling excuse.

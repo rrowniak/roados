@@ -53,7 +53,6 @@
 //! ```
 
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::Duration;
 
 use crate::animation::{AnimationClock, Easing, Interpolate};
@@ -131,87 +130,23 @@ const PRESS_SHADOW_INSET: f32 = 2.0;
 /// from a black one. Both are "a rounded rect of near-black at some alpha".
 const PRESS_SHADOW_ALPHA: f32 = 0.28;
 
-/// A callback a widget invokes, such as a button's click handler.
+/// A button's click handler: an action callback with nothing to carry.
 ///
-/// A newtype rather than a bare `Rc<dyn Fn()>`, because a bare trait object is
-/// not nameable in a struct field or a return type, and this type is one of the
-/// fields a caller writes. The callback takes no argument: a click carries no
-/// payload, and the handler closes over whatever it needs — a counter, a
-/// [`Property`], a `Weak` to something it owns.
+/// This used to be the button's own callback type, and its own doc said it
+/// would move somewhere a second widget could reach it. That second widget is
+/// [`slider::Callback`](crate::widgets::Callback): a slider reports the value it
+/// moved to, so its handler takes one, and a type that cannot carry a payload
+/// could not be it. The type itself is now
+/// [`widgets::Callback`](crate::widgets::Callback), parameterised, and this alias
+/// is the button's spelling of the `()` case — so `button::Callback` still names
+/// what it named, and a caller writes `Callback::new(move || …)` exactly as
+/// before.
 ///
-/// It is deliberately *not* the `Callback<T>` of
-/// [`property`](crate::property): that one is private, it is `Fn(&T)`, and it is
-/// the notification a property fires on every write, which is a different job
-/// from an action a widget performs. When a second widget needs an action
-/// callback this moves somewhere both can reach; today the only one is the
-/// button.
-#[derive(Clone, Default)]
-pub struct Callback(Option<Rc<dyn Fn()>>);
-
-impl Callback {
-    /// Returns a callback that does nothing, which is what a widget holds until
-    /// a caller gives it one.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use ui_core::widgets::button::Callback;
-    ///
-    /// let mut callback = Callback::none();
-    /// assert!(!callback.is_set());
-    /// callback.call();
-    /// assert!(!callback.is_set(), "an unset callback cannot be set by calling it");
-    ///
-    /// callback = Callback::new(|| println!("clicked"));
-    /// assert!(callback.is_set());
-    /// ```
-    #[must_use]
-    pub fn none() -> Self {
-        Callback(None)
-    }
-
-    /// Returns a callback that runs `f` when it is called.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::cell::Cell;
-    /// use std::rc::Rc;
-    /// use ui_core::widgets::button::Callback;
-    ///
-    /// let clicks = Rc::new(Cell::new(0));
-    /// let counted = Rc::clone(&clicks);
-    /// let callback = Callback::new(move || counted.set(counted.get() + 1));
-    ///
-    /// callback.call();
-    /// callback.call();
-    /// assert_eq!(clicks.get(), 2);
-    /// ```
-    #[must_use]
-    pub fn new<F>(f: F) -> Self
-    where
-        F: Fn() + 'static,
-    {
-        Callback(Some(Rc::new(f)))
-    }
-
-    /// Returns whether a callback is set.
-    #[must_use]
-    pub fn is_set(&self) -> bool {
-        self.0.is_some()
-    }
-
-    /// Runs the callback, if one is set.
-    ///
-    /// An unset callback is not an error: a button that does nothing on a click
-    /// is a button whose caller has not given it anything to do, and it is a
-    /// perfectly ordinary one to put on screen.
-    pub fn call(&self) {
-        if let Some(callback) = &self.0 {
-            callback();
-        }
-    }
-}
+/// One thing did change, and it is the cost of the payload: the shared type's
+/// [`call`](crate::widgets::Callback::call) takes the payload, so calling this
+/// one directly is `call(())`. That is inside this module; a caller goes through
+/// [`Button::activate`], which is the button's contract with the world.
+pub type Callback = crate::widgets::Callback<()>;
 
 /// The colours a button's states are derived from.
 ///
@@ -696,7 +631,7 @@ impl Button {
         if !self.on_click.is_set() {
             return false;
         }
-        self.on_click.call();
+        self.on_click.call(());
         true
     }
 
@@ -1073,6 +1008,7 @@ mod tests {
     use crate::paint::DrawCommand;
     use crate::theme::ThemeToken;
     use std::cell::Cell;
+    use std::rc::Rc;
 
     /// A monospace advance of 5 pixels per character.
     fn mono(_: char) -> f32 {
@@ -2115,10 +2051,10 @@ mod tests {
         // the empty one is a no-op rather than a panic.
         let unset = Callback::none();
         assert!(!unset.is_set());
-        unset.call();
+        unset.call(());
         let set = Callback::new(|| {});
         assert!(set.is_set());
-        set.call();
+        set.call(());
     }
 
     #[test]

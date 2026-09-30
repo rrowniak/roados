@@ -76,6 +76,25 @@ A dedicated task will inventory all needed assets:
 - Vehicle images (for status display)
 - Album art (for media player)
 
+## Library gaps
+
+Identified 2026-09-30 by comparing this document's requirements against the
+shipped widgets (tasks 1–13: Label, Button, Container) and the planned widgets
+(tasks 14–23: Slider, Toggle, Image, Progress, List/Scroll, TextInput, Gauge,
+Chart, Dialog, Toast). Each gap must be addressed — by a `TASK_UI_PRIM_n`
+amendment or a `TASK_UI_DEMO_n` task — before or during the demo implementation.
+
+| # | Gap | Severity | Blocks |
+|---|---|---|---|
+| 1 | **Map widget** — no map renderer exists or is planned. The demo's centerpiece. | Critical | Map/navigation screen |
+| 2 | **Grid layout non-functional** — `Grid` mode lays out no children and reports no rects; `wrap` is accepted and not honoured. | High | App launcher screen |
+| 3 | **No screen/navigation system** — no screen stack, tab controller, or transition system in the library. | High | Multi-screen app structure |
+| 4 | **No Icon widget** — `Image` (task 16) displays textures but icons need vector rendering, theme tinting, and uniform sizing. | Medium | Visual quality — "real icons" requirement |
+| 5 | **Scissor/clipping not applied** — clip rects are computed but never set on the GPU. | High | Map viewport, scroll view clipping |
+| 6 | **No Card widget** — `Container` can be stretched to cover this, but a dedicated card with elevation/shadow matches the Tesla design language better. | Low | Visual polish |
+| 7 | **No TabBar/Dock widget** — the bottom dock can be built from `Button` + `Container`, but a dedicated widget with active-state indication and icon+label layout is the right primitive. | Low | Bottom dock implementation |
+| 8 | **Transform transitions** — screen transitions need translation, scale, and opacity animation support. The animation system handles property interpolation but transforms are not implemented in the render pipeline. | Medium | Screen transition animations |
+
 ## Task structure
 
 The new category `TASK_UI_DEMO_n` will be defined incrementally. The first
@@ -87,6 +106,9 @@ tasks will be:
 
 Each task will follow the same workflow as `TASK_UI_PRIM_n`: developer →
 review → operator commit.
+
+Gap closure tasks (see *Library gaps* above) may be interleaved with demo
+tasks when a gap blocks a demo screen.
 
 ## Open questions
 

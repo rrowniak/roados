@@ -61,6 +61,11 @@ use ui_core::theme::{PropertyValue, Theme, ThemeToken};
 use ui_core::widgets::button::{Button, Callback, Motion, Palette};
 use ui_core::widgets::container::Container;
 use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapMode};
+use ui_core::widgets::slider::{Orientation, Palette as SliderPalette, Slider};
+// The button band's `Callback` is the payload-free alias of this same type, so
+// the demo imports it under a second name: a slider's handler takes the value it
+// moved to, and `Callback::from_fn` on the alias would be `Callback<()>`.
+use ui_core::widgets::Callback as ValueCallback;
 
 /// The window, and the box the root is laid out in.
 const WINDOW: Size = Size {
@@ -198,11 +203,12 @@ const BUTTON_ORIGIN: (f32, f32) = (664.0, 396.0);
 /// The gap between the buttons in the row.
 const BUTTON_SPACING: f32 = 16.0;
 
-/// The font size the buttons and their click counter are drawn at.
+/// The font size the buttons, their click counter and the slider's readout are
+/// drawn at.
 ///
-/// The panel's labels are at [`TEXT_SIZE_START`]; the band's own text is a row
-/// of short labels rather than a column of prose, and `+` and `-` move the
-/// panel alone.
+/// The panel's labels are at [`TEXT_SIZE_START`]; everything below the pads is
+/// short strings rather than a column of prose, and `+` and `-` move the panel
+/// alone.
 const BUTTON_FONT: f32 = 20.0;
 
 /// How far below the row the click counter sits.
@@ -217,6 +223,38 @@ const COUNTER_DROP: f32 = 60.0;
 /// ever shows: it counts up, and a label laid out narrower than its text would
 /// wrap it onto a second line.
 const COUNTER_WIDTH: f32 = 320.0;
+
+/// Where the slider sits in the window, below the click counter.
+///
+/// The same column as the button band and the counter above it — right of the
+/// text panel, whose widest line ends at `TEXT_PANEL_ORIGIN.0 +
+/// TEXT_COLUMN_WIDTH` — and below the counter, whose line ends at
+/// [`BUTTON_ORIGIN`]'s 396 plus [`COUNTER_DROP`]'s 60 and its own 24 pixels.
+const SLIDER_ORIGIN: (f32, f32) = (664.0, 496.0);
+
+/// How far below the slider its value readout sits.
+///
+/// A slider asks for the same minimum touch target the button band does, 44
+/// pixels tall, so this clears it and leaves the readout's own 24-pixel line
+/// inside the window.
+const SLIDER_READOUT_DROP: f32 = 52.0;
+
+/// The width the value readout is given, wide enough for the longest string it
+/// shows: a value out of the maximum, and a count of the adjustments so far.
+const SLIDER_READOUT_WIDTH: f32 = 320.0;
+
+/// The value the demo's slider starts at, and its minimum.
+const SLIDER_MIN: f32 = 0.0;
+
+/// The maximum of the demo's slider.
+const SLIDER_MAX: f32 = 100.0;
+
+/// The grid the demo's slider snaps to, in the same units as its range.
+///
+/// Five is a step that divides the range, so every grid point is reachable — the
+/// widget snaps to the nearest step whatever the range is, and a step that does
+/// not divide it leaves the top unreachable.
+const SLIDER_STEP: f32 = 5.0;
 
 /// What a button in the demo's band does when it is clicked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -511,6 +549,29 @@ fn button_callback(clicks: &Property<u32>, action: ButtonAction) -> Callback {
     })
 }
 
+/// A slider in the demo: the widget, and the dragging state the demo last wrote
+/// to it and last aimed it at.
+///
+/// The two records are the [`DemoButton`] records again, and for the same
+/// reason: a property write notifies the node's `on_change` callback and marks
+/// the node dirty, and aiming restarts the slider's transition, so both are done
+/// only when the state has actually moved.
+struct DemoSlider {
+    /// The slider widget, with its node in the arena.
+    widget: Slider,
+    /// The dragging state the demo last wrote to the widget.
+    written: bool,
+    /// The dragging state the widget was last aimed at.
+    aimed: bool,
+}
+
+impl DemoSlider {
+    /// Returns the slider's node in the arena.
+    fn node(&self) -> Handle {
+        self.widget.handle()
+    }
+}
+
 /// The demo's widget tree, the pads that press, the labels that show what text
 /// rendering does, the theme every colour comes from, and the clock that drives
 /// the pads.
@@ -560,6 +621,13 @@ struct Demo {
     /// background: it is the card that shows what a container with a background
     /// and padding looks like, and the other five draw nothing.
     containers: Vec<Container>,
+    /// The slider, under the click counter.
+    slider: DemoSlider,
+    /// The label showing the slider's value, and how many times it has been
+    /// adjusted.
+    slider_readout: DemoLabel,
+    /// Whether a pointer is holding the slider down.
+    slider_dragging: bool,
 }
 
 impl Demo {
@@ -787,9 +855,86 @@ impl Demo {
                 return Err("ui_demo: a button could not be attached to the band");
             }
         }
-        // The row and the counter are each placed inside the band, which is what
-        // `Absolute` is for: the row at the band's own offset, the counter
-        // `COUNTER_DROP` below it.
+        // The slider, under the counter, and the readout that shows what it is
+        // at. The slider's colours come from the theme the same way the band's
+        // do, and it is snapped onto them before it is ever drawn for the reason
+        // `snap_to_state` exists.
+        let mut widget = Slider::new(&mut nodes, SLIDER_MIN, SLIDER_MAX);
+        widget.set_step(Some(SLIDER_STEP));
+        widget.set_orientation(Orientation::Horizontal);
+        widget.set_palette(SliderPalette::from_theme(&theme));
+        widget.snap_to_state();
+        // The size is the widget's own, rather than a number written out here: a
+        // slider has no content to measure, so this is the widget saying how big
+        // a slider should be until a caller says otherwise.
+        {
+            let size = widget.size();
+            nodes
+                .get_mut(widget.handle())
+                .ok_or("ui_demo: the slider node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+
+        // The readout is a bound label over two properties: the slider's value,
+        // so it follows a drag and a key and a programmatic write alike, and a
+        // count of the widget's own adjustments, so the line also says which of
+        // those it was. `on_change` is what increments the second — the widget
+        // fires it for a pointer and a key, and not for a value the demo wrote
+        // itself. The count needs no field of its own: the two closures below
+        // hold it, and the readout's text is how a reader sees it.
+        let changes = Property::new(0u32);
+        {
+            let counted = changes.clone();
+            widget.on_change = ValueCallback::from_fn(move |_value| {
+                counted.set(counted.get() + 1);
+            });
+        }
+        let readout_text = {
+            let value = widget.value.clone();
+            let counted = changes.clone();
+            Property::bind(move || {
+                let count = counted.get();
+                let noun = if count == 1 {
+                    "adjustment"
+                } else {
+                    "adjustments"
+                };
+                // One space between the words, because the label lays a run of
+                // them out as one word gap: a readout that lined its two halves up
+                // with padding would have it collapsed.
+                format!("{:.0} of {SLIDER_MAX:.0}, {count} {noun}", value.get())
+            })
+        };
+        let mut readout = Label::new(&mut nodes, String::new());
+        readout.text = readout_text;
+        readout.color = cycling_color(&color_token, &token_properties);
+        readout.font_size.set(BUTTON_FONT);
+        let slider_readout = DemoLabel {
+            label: readout,
+            options: LayoutOptions {
+                max_width: SLIDER_READOUT_WIDTH,
+                ..LayoutOptions::default()
+            },
+        };
+        {
+            let size = slider_readout.size(&metrics, BUTTON_FONT);
+            nodes
+                .get_mut(slider_readout.label.handle())
+                .ok_or("ui_demo: the slider readout is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+        let slider = DemoSlider {
+            widget,
+            written: false,
+            aimed: false,
+        };
+
+        // The row, the counter, the slider and its readout are each placed inside
+        // the band, which is what `Absolute` is for: the row at the band's own
+        // offset, the counter `COUNTER_DROP` below it, and the slider and its
+        // readout below that.
         nodes
             .get_mut(button_row.handle())
             .ok_or("ui_demo: the button row is missing")?
@@ -803,10 +948,23 @@ impl Demo {
                 BUTTON_ORIGIN.0,
                 BUTTON_ORIGIN.1 + COUNTER_DROP,
             )));
+        nodes
+            .get_mut(slider.widget.handle())
+            .ok_or("ui_demo: the slider is missing")?
+            .layout_mut()
+            .set_position(Some(Offset::new(SLIDER_ORIGIN.0, SLIDER_ORIGIN.1)));
+        nodes
+            .get_mut(slider_readout.label.handle())
+            .ok_or("ui_demo: the slider readout is missing")?
+            .layout_mut()
+            .set_position(Some(Offset::new(
+                SLIDER_ORIGIN.0,
+                SLIDER_ORIGIN.1 + SLIDER_READOUT_DROP,
+            )));
         // The band is the window, not a box of its own: it is a `Stack` child,
         // and a `Stack` sizes a child from its own constraints but places it at
         // the origin. Giving it the window's size makes the offsets inside it
-        // window coordinates, which is what the two positions above assume.
+        // window coordinates, which is what the positions above assume.
         let button_area = Container::new(&mut nodes, LayoutMode::Absolute);
         {
             let band = nodes
@@ -817,6 +975,8 @@ impl Demo {
         }
         if !button_area.add_child(&mut nodes, button_row.handle())
             || !button_area.add_child(&mut nodes, counter.label.handle())
+            || !button_area.add_child(&mut nodes, slider.widget.handle())
+            || !button_area.add_child(&mut nodes, slider_readout.label.handle())
         {
             return Err("ui_demo: the button band could not be assembled");
         }
@@ -934,6 +1094,49 @@ impl Demo {
             });
         }
 
+        // The same two links for the slider's readout, whose text is bound to the
+        // slider's value and to the count of its adjustments: a drag reaches it
+        // twice over, once through the value the widget wrote and once through
+        // the count its `on_change` bumped.
+        {
+            let text_nodes = Rc::clone(&nodes);
+            let node = slider_readout.label.handle();
+            slider_readout.label.text.on_change(move |_| {
+                mark_dirty(&mut text_nodes.borrow_mut(), node);
+            });
+            let color_nodes = Rc::clone(&nodes);
+            slider_readout.label.color.on_change(move |_| {
+                mark_dirty(&mut color_nodes.borrow_mut(), node);
+            });
+        }
+
+        // And for the slider's own properties. There are six of them, all painted
+        // and none of them a layout input — a slider draws inside whatever rect
+        // it is given — so this is the link between a transition writing and the
+        // next frame drawing it, and nothing else.
+        {
+            let node = slider.widget.handle();
+            // The four colours first, then the two numbers: one array cannot hold
+            // both, and the writes all mark the same node dirty anyway.
+            for property in [
+                &slider.widget.track,
+                &slider.widget.fill,
+                &slider.widget.thumb_fill,
+                &slider.widget.thumb_border,
+            ] {
+                let nodes = Rc::clone(&nodes);
+                property.on_change(move |_| {
+                    mark_dirty(&mut nodes.borrow_mut(), node);
+                });
+            }
+            for property in [&slider.widget.thumb, &slider.widget.thumb_scale] {
+                let nodes = Rc::clone(&nodes);
+                property.on_change(move |_| {
+                    mark_dirty(&mut nodes.borrow_mut(), node);
+                });
+            }
+        }
+
         // The tree never changes shape, so the order is computed once.
         let order = paint_order(&nodes.borrow(), root.handle());
         Ok(Demo {
@@ -959,6 +1162,9 @@ impl Demo {
             focused: None,
             pressed: None,
             containers: vec![row, text_column, text_panel, button_row, button_area, root],
+            slider,
+            slider_readout,
+            slider_dragging: false,
         })
     }
 
@@ -1024,6 +1230,10 @@ impl Demo {
     /// focus, because that is the control a user has navigated to, and falls
     /// back to the pads when nothing is focused — so the pads still work with
     /// `Tab` never pressed, which is how the demo starts.
+    ///
+    /// `0` and `1` put the slider at its two ends without a pointer, which is the
+    /// one thing a drag cannot show: the thumb travelling to a value it was not
+    /// given.
     fn handle_event(&mut self, event: Event) {
         let produced = self.recognizer.process(&event);
 
@@ -1044,6 +1254,8 @@ impl Demo {
                 }
                 Keycode::Minus => self.set_text_size(self.text_size - TEXT_SIZE_STEP),
                 Keycode::C => self.cycle_text_color(),
+                Keycode::_0 => self.set_slider_value(SLIDER_MIN),
+                Keycode::_1 => self.set_slider_value(SLIDER_MAX),
                 _ => {}
             },
             Event::KeyUp {
@@ -1069,6 +1281,8 @@ impl Demo {
                     self.press_pad(index);
                 } else if let Some(index) = self.button_at(x, y) {
                     self.pressed = Some(index);
+                } else if self.slider_at(x, y).is_some() {
+                    self.slider_dragging = true;
                 }
             }
             Event::MouseButtonUp {
@@ -1079,6 +1293,19 @@ impl Demo {
                     self.release_pad(index);
                 }
                 self.pressed = None;
+                self.slider_dragging = false;
+            }
+            // A finger is a pointer too, and a car has no mouse: the same press
+            // and release the left button gets, from the touch events SDL delivers
+            // for the same gesture. A canceled touch drops the slider as well as
+            // the pointer, because a canceled finger is one that is gone.
+            Event::FingerDown { x, y, .. } => {
+                if self.slider_at(x, y).is_some() {
+                    self.slider_dragging = true;
+                }
+            }
+            Event::FingerUp { .. } | Event::FingerCanceled { .. } => {
+                self.slider_dragging = false;
             }
             _ => {}
         }
@@ -1088,35 +1315,50 @@ impl Demo {
         }
     }
 
-    /// Delivers one event the recogniser produced to the button band.
+    /// Delivers one event the recogniser produced to the widget under it.
     ///
     /// A positional event is routed through [`input::route`] and offered to each
-    /// node in turn until a button consumes it, which is what lets a button stop
-    /// the events meant for it. A key has no position and is not routed by one,
-    /// so it goes to the button holding focus — except a navigation key, which
-    /// moves that focus instead.
+    /// node in turn until a widget consumes it, which is what lets a control stop
+    /// the events meant for it. A key has no position and is not routed by one, so
+    /// it goes to the control holding focus — and so does a positionless `Scroll`,
+    /// which is the steering wheel's axis and the only gamepad axis the input
+    /// module maps, so a focused slider is driven by it.
     ///
     /// The chain is resolved before any handler runs, rather than dispatched
-    /// through [`input::dispatch_event`], because a button's click writes a
+    /// through [`input::dispatch_event`], because a widget's handler writes a
     /// property and that write fires the `on_change` callback which marks a node
-    /// dirty: a handler reaching the arena while the dispatch still held a
-    /// borrow of it would be a `RefCell` double borrow, and would panic on the
-    /// first click rather than on anything a test could have caught by reading
-    /// the code.
+    /// dirty: a handler reaching the arena while the dispatch still held a borrow
+    /// of it would be a `RefCell` double borrow, and would panic on the first
+    /// click rather than on anything a test could have caught by reading the code.
     fn route_input_event(&mut self, event: &mut InputEvent) {
         if event.position().is_none() {
-            if let InputEventKind::KeyDown { .. } = event.kind() {
-                if self.focus_navigation(event) {
-                    event.consume();
+            // The focused control has the first claim on a positionless event, and
+            // focus navigation runs only for whatever it left alone. A button takes
+            // its activation keys and leaves Tab; a slider takes its arrows and
+            // the wheel's axis; neither takes the other's.
+            if self.offer_to_focused(event) {
+                return;
+            }
+            if matches!(event.kind(), InputEventKind::KeyDown { .. })
+                && self.focus_navigation(event)
+            {
+                event.consume();
+            }
+            return;
+        }
+
+        // A drag goes to the slider being dragged first, whether or not the
+        // pointer is still over it. The chain below finds the node under the
+        // pointer, and a finger that has travelled past the end of a slider is
+        // outside it — which is exactly when the slider most needs to hear about
+        // the drag, because the answer is its own end of the range.
+        if self.slider_dragging && matches!(event.kind(), InputEventKind::Drag { .. }) {
+            if let Some(rect) = self.slider_rect() {
+                self.slider.widget.on_event(event, rect);
+                if event.consumed() {
                     return;
                 }
             }
-            if let Some(handle) = self.focused {
-                if let Some(button) = self.buttons.iter().find(|button| button.node() == handle) {
-                    button.widget.on_event(event);
-                }
-            }
-            return;
         }
 
         let chain = {
@@ -1124,14 +1366,37 @@ impl Demo {
             input::route(&nodes, self.root, event)
         };
         for handle in chain {
-            let Some(button) = self.buttons.iter().find(|button| button.node() == handle) else {
-                continue;
-            };
-            button.widget.on_event(event);
+            self.offer_to(handle, event);
             if event.consumed() {
                 break;
             }
         }
+    }
+
+    /// Offers a positionless event to the control holding focus, and reports
+    /// whether it took it.
+    fn offer_to_focused(&self, event: &mut InputEvent) -> bool {
+        let Some(handle) = self.focused else {
+            return false;
+        };
+        self.offer_to(handle, event)
+    }
+
+    /// Offers `event` to the widget at `handle`, and reports whether it took it.
+    ///
+    /// A handle that belongs to neither the band nor the slider is nobody's, which
+    /// is what lets one loop serve both without asking what is there.
+    fn offer_to(&self, handle: Handle, event: &mut InputEvent) -> bool {
+        if handle == self.slider.node() {
+            return match self.slider_rect() {
+                Some(rect) => self.slider.widget.on_event(event, rect),
+                None => false,
+            };
+        }
+        self.buttons
+            .iter()
+            .find(|button| button.node() == handle)
+            .is_some_and(|button| button.widget.on_event(event))
     }
 
     /// Moves focus if `event` is a navigation key, and reports whether it was.
@@ -1141,9 +1406,9 @@ impl Demo {
     /// this through the same [`Focus`] tracker. A **mouse** wheel is not one of
     /// them: `GestureRecognizer` gives a wheel event the pointer's position, so
     /// it is routed as a positional event and lands on the node under the cursor
-    /// rather than here. The focusable set is rebuilt from the buttons each
-    /// time, which is what makes a disabled button fall out of the order rather
-    /// than sit in it.
+    /// rather than here. The focusable set is rebuilt from the buttons and the
+    /// slider each time, which is what makes a disabled button fall out of the
+    /// order rather than sit in it.
     fn focus_navigation(&mut self, event: &InputEvent) -> bool {
         if event.position().is_some() {
             return false;
@@ -1169,6 +1434,10 @@ impl Demo {
             for button in &self.buttons {
                 focus.set_focusable(button.node(), button.is_focusable());
             }
+            // The slider is the last stop in the tree's paint order, so `Tab`
+            // reaches it after the band. It has no disabled state of its own, so
+            // it is always in the order.
+            focus.set_focusable(self.slider.node(), true);
             // Re-entering the order where focus already is. `Focus` starts with
             // nothing focused, so without this a wheel turned twice in a row
             // would walk from the top both times, and Shift+Tab from the first
@@ -1187,7 +1456,7 @@ impl Demo {
         true
     }
 
-    /// Records which button holds focus, and writes the flag every button's
+    /// Records which control holds focus, and writes the flag each widget's
     /// `focused` property holds, so the rings move.
     fn set_focus(&mut self, next: Option<Handle>) {
         self.focused = next;
@@ -1198,6 +1467,10 @@ impl Demo {
                 button.widget.focused.set(wanted);
                 button.written.focused = wanted;
             }
+        }
+        let slider_wanted = Some(self.slider.node()) == focused;
+        if self.slider.widget.focused.get() != slider_wanted {
+            self.slider.widget.focused.set(slider_wanted);
         }
     }
 
@@ -1215,9 +1488,11 @@ impl Demo {
         let _ = self.theme.tick(delta);
         self.track_hover();
         self.sync_button_state();
+        self.sync_slider_state();
         for button in &self.buttons {
             let _ = button.widget.tick(delta);
         }
+        let _ = self.slider.widget.tick(delta);
 
         let mut nodes = self.nodes.borrow_mut();
         Layout::new(&mut nodes).layout(self.root, Constraints::tight(size));
@@ -1254,6 +1529,17 @@ impl Demo {
                         &|ch: char| self.metrics.advance(ch, BUTTON_FONT),
                         self.metrics.line_height(BUTTON_FONT),
                     ),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            if handle == self.slider.node() {
+                // The rect comes from the node the loop already holds, rather than
+                // from `slider_rect`: that borrows the arena, and the loop has it
+                // borrowed mutably already.
+                let commands = match node.layout().rect() {
+                    Some(rect) => self.slider.widget.paint(rect.into()),
                     None => Vec::new(),
                 };
                 *node.paint_mut() = PaintState::from_commands(commands);
@@ -1307,6 +1593,27 @@ impl Demo {
             options.line_height = self.metrics.line_height(BUTTON_FONT);
             let commands = self
                 .counter
+                .label
+                .paint(rect.into(), &options, &|ch: char| {
+                    self.metrics.advance(ch, BUTTON_FONT)
+                });
+            *node.paint_mut() = PaintState::from_commands(commands);
+        }
+
+        // And the slider's readout, which is reached through the band as well.
+        // It is painted last of all so the text is on top of the slider it is
+        // reporting.
+        {
+            let Some(node) = nodes.get_mut(self.slider_readout.label.handle()) else {
+                return;
+            };
+            let Some(rect) = node.layout().rect() else {
+                return;
+            };
+            let mut options = self.slider_readout.options;
+            options.line_height = self.metrics.line_height(BUTTON_FONT);
+            let commands = self
+                .slider_readout
                 .label
                 .paint(rect.into(), &options, &|ch: char| {
                     self.metrics.advance(ch, BUTTON_FONT)
@@ -1373,6 +1680,44 @@ impl Demo {
         }
     }
 
+    /// Writes the slider's `dragging` flag, and re-aims it when that has moved.
+    ///
+    /// The same two records as [`Demo::sync_button_state`] and the same reason:
+    /// aiming restarts the slider's transition, so aiming every frame would leave
+    /// the thumb creeping toward its target for ever. The slider's *value* is not
+    /// re-aimed here, because an interaction writes the thumb itself and a
+    /// programmatic write is aimed by whoever made it — see
+    /// [`Demo::set_slider_value`].
+    fn sync_slider_state(&mut self) {
+        let wanted = self.slider_dragging;
+        if self.slider.widget.dragging.get() != wanted {
+            self.slider.widget.dragging.set(wanted);
+            self.slider.written = wanted;
+        }
+        if self.slider.aimed != wanted {
+            self.slider.aimed = wanted;
+            self.slider
+                .widget
+                .animate_to_state(Motion::from_theme(&self.theme));
+        }
+    }
+
+    /// Puts the slider at `value` without a pointer having asked for it, and
+    /// carries the thumb there.
+    ///
+    /// This is the demo's "changes programmatically" case, which is what `0` and
+    /// `1` do: the value property is written directly, the way a caller binding a
+    /// slider to a model writes it, and the thumb is animated to it rather than
+    /// jumping — so the one thing a drag cannot show is on screen. It is also the
+    /// only way the demo changes the value without the widget doing it, which is
+    /// why the readout's count of adjustments does not move when this is called.
+    fn set_slider_value(&mut self, value: f32) {
+        self.slider.widget.value.set(value);
+        self.slider
+            .widget
+            .animate_to_state(Motion::from_theme(&self.theme));
+    }
+
     /// Returns the window's background colour: the theme's `Background` token,
     /// or black if the theme ever holds something else there.
     fn background_color(&self) -> Color {
@@ -1408,12 +1753,15 @@ impl Demo {
         // Read the new theme's palette and motion before it is handed to
         // `switch_to`, which takes it by value.
         let palette = Palette::from_theme(&new_theme);
+        let slider_palette = SliderPalette::from_theme(&new_theme);
         let motion = Motion::from_theme(&new_theme);
         self.theme.switch_to(new_theme, THEME_TRANSITION);
         for button in &mut self.buttons {
             button.widget.set_palette(palette);
             button.widget.animate_to_state(motion);
         }
+        self.slider.widget.set_palette(slider_palette);
+        self.slider.widget.animate_to_state(motion);
     }
 
     /// Presses every pad, cascading across them one `STAGGER_STEP` apart.
@@ -1514,6 +1862,36 @@ impl Demo {
         })
     }
 
+    /// Returns `Some(())` when the point is over the slider, and `None` when it
+    /// is not.
+    ///
+    /// The slider is the last thing asked about, so a point over the band or a
+    /// pad never reaches it: those are the controls that are drawn on top of
+    /// that part of the window.
+    fn slider_at(&self, x: f32, y: f32) -> Option<()> {
+        self.slider_rect()
+            .is_some_and(|rect| {
+                x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
+            })
+            .then_some(())
+    }
+
+    /// Returns the slider's rect in window coordinates, or `None` if it has not
+    /// been laid out.
+    ///
+    /// This is the rect the slider draws inside and the one a pointer event is
+    /// measured against, so it is the demo's own statement of where the slider is
+    /// rather than each caller working it out — and it is why the widget's
+    /// `on_event` takes a rect: a node cannot reach the arena that holds it.
+    fn slider_rect(&self) -> Option<ui_core::paint::Rect> {
+        let nodes = self.nodes.borrow();
+        nodes
+            .get(self.slider.node())?
+            .layout()
+            .rect()
+            .map(Into::into)
+    }
+
     /// Returns the centre of the button at `index` in window coordinates, or
     /// `None` if it has not been laid out.
     ///
@@ -1528,6 +1906,31 @@ impl Demo {
             rect.origin.x + rect.size.width / 2.0,
             rect.origin.y + rect.size.height / 2.0,
         ))
+    }
+
+    /// Returns where the slider's thumb is at `fraction` of its range, in window
+    /// coordinates, and leaves the slider where it was.
+    ///
+    /// The point is the widget's own answer rather than a number worked out here:
+    /// `Slider::thumb_center` is the geometry every pointer position is measured
+    /// against, so a test aiming at the thumb is aiming at the same thing the
+    /// demo routes its events to. The value is put back afterwards — along with
+    /// the thumb, which `snap_to_state` follows — so a test can aim without having
+    /// moved anything; nothing is animating while a test is only asking where a
+    /// point is.
+    #[cfg(test)]
+    fn slider_at_fraction(&self, fraction: f32) -> Option<(f32, f32)> {
+        let rect = self.slider_rect()?;
+        let before = self.slider.widget.value.get();
+        self.slider
+            .widget
+            .value
+            .set(SLIDER_MIN + (SLIDER_MAX - SLIDER_MIN) * fraction);
+        self.slider.widget.snap_to_state();
+        let center = self.slider.widget.thumb_center(rect);
+        self.slider.widget.value.set(before);
+        self.slider.widget.snap_to_state();
+        Some(center)
     }
 
     /// Returns the card the pads sit inside: the row of pads, which is the
@@ -1551,6 +1954,32 @@ impl Demo {
                 DrawCommand::Text { text, .. } => Some(text.clone()),
                 _ => None,
             })
+    }
+
+    /// Returns the text the slider's readout is showing, as the last frame
+    /// recorded it.
+    #[cfg(test)]
+    fn readout_text(&self) -> Option<String> {
+        let nodes = self.nodes.borrow();
+        nodes
+            .get(self.slider_readout.label.handle())?
+            .paint()
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+    }
+
+    /// Returns the draw commands the slider recorded on the last frame.
+    #[cfg(test)]
+    fn slider_commands(&self) -> Vec<DrawCommand> {
+        let nodes = self.nodes.borrow();
+        nodes
+            .get(self.slider.node())
+            .map(|node| node.paint().commands().to_vec())
+            .unwrap_or_default()
     }
 }
 
@@ -2538,6 +2967,11 @@ mod tests {
     fn tab_steps_over_the_disabled_button() {
         // A control that refuses interaction has nothing to be activated by a
         // key, so it is not in the order focus walks.
+        //
+        // The walk has four stops since task 14 added the slider: the two
+        // buttons that can be activated, the slider, and back round. The claim
+        // here is still that the disabled one is never visited, and it is stated
+        // over the whole walk rather than over the band's first three.
         let mut demo = laid_out();
         let enabled: Vec<Handle> = demo
             .buttons
@@ -2546,18 +2980,24 @@ mod tests {
             .filter(|(index, _)| *index != 1)
             .map(|(_, button)| button.node())
             .collect();
+        let slider = demo.slider.node();
 
         let mut visited = Vec::new();
-        for _ in 0..3 {
+        for _ in 0..4 {
             demo.handle_event(key(Keycode::Tab));
             visited.push(demo.focused);
         }
 
         assert_eq!(
             visited,
-            vec![Some(enabled[0]), Some(enabled[1]), Some(enabled[0])],
-            "the walk is press, reset, and wraps back to press — never the \
-             disabled one in the middle"
+            vec![
+                Some(enabled[0]),
+                Some(enabled[1]),
+                Some(slider),
+                Some(enabled[0])
+            ],
+            "the walk is press, reset, the slider, and wraps back to press — \
+             never the disabled one in the middle"
         );
     }
 
@@ -2903,5 +3343,478 @@ mod tests {
                 "a container with no background records no draw commands"
             );
         }
+    }
+
+    /// A finger down at `(x, y)`, a motion to `(to_x, to_y)`, and a release at
+    /// the same place.
+    ///
+    /// A car has no mouse, so the demo's slider is driven by touch and the tests
+    /// drive it the way the platform delivers it. The motion has to travel past
+    /// the recogniser's own threshold to be a drag at all — ten pixels, per
+    /// `TAP_MAX_MOVEMENT` — which is what a real finger does.
+    fn drag_on(x: f32, y: f32, to_x: f32, to_y: f32) -> [Event; 3] {
+        let finger = 1;
+        [
+            Event::FingerDown {
+                timestamp: 0,
+                touch_id: finger,
+                finger_id: finger,
+                x,
+                y,
+                dx: 0.0,
+                dy: 0.0,
+                pressure: 1.0,
+                window_id: 0,
+            },
+            Event::FingerMotion {
+                timestamp: 1_000_000,
+                touch_id: finger,
+                finger_id: finger,
+                x: to_x,
+                y: to_y,
+                dx: to_x - x,
+                dy: to_y - y,
+                pressure: 1.0,
+                window_id: 0,
+            },
+            Event::FingerUp {
+                timestamp: 200_000_000,
+                touch_id: finger,
+                finger_id: finger,
+                x: to_x,
+                y: to_y,
+                dx: 0.0,
+                dy: 0.0,
+                pressure: 1.0,
+                window_id: 0,
+            },
+        ]
+    }
+
+    /// A steering-wheel axis event, which is what a wheel turned one way arrives
+    /// as: a `Scroll` with no position, because an axis is not under a pointer.
+    ///
+    /// The axis is the module's own `STEERING_WHEEL_SCROLL_AXIS` rather than a
+    /// literal, because that constant is what decides whether the recogniser
+    /// produces a `Scroll` at all — the one axis it maps.
+    fn wheel(value: i16) -> Event {
+        Event::GamepadAxisMotion {
+            timestamp: 0,
+            which: sdl3::joystick::JoystickId::from(0),
+            axis: ui_core::input::STEERING_WHEEL_SCROLL_AXIS,
+            value,
+        }
+    }
+
+    /// The circles the slider recorded on the last frame, as their centre and
+    /// radius.
+    ///
+    /// The thumb is two of them — the border and the thumb's own — and the thumb's
+    /// own is the last, because it is painted over the border.
+    fn painted_thumb(demo: &Demo) -> ((f32, f32), f32) {
+        let circles: Vec<((f32, f32), f32)> = demo
+            .slider_commands()
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Circle { center, radius, .. } => Some((*center, *radius)),
+                _ => None,
+            })
+            .collect();
+        let (center, radius) = *circles
+            .last()
+            .unwrap_or_else(|| panic!("the slider painted no thumb: {circles:?}"));
+        (center, radius)
+    }
+
+    /// The x the slider's thumb was painted at.
+    fn painted_thumb_x(demo: &Demo) -> f32 {
+        painted_thumb(demo).0 .0
+    }
+
+    /// The radius the slider's thumb was painted at.
+    fn painted_thumb_radius(demo: &Demo) -> f32 {
+        painted_thumb(demo).1
+    }
+
+    #[test]
+    fn the_demo_has_a_slider_over_a_hundred() {
+        let demo = laid_out();
+        let slider = &demo.slider.widget;
+        assert_eq!(slider.min(), SLIDER_MIN);
+        assert_eq!(slider.max(), SLIDER_MAX);
+        assert_eq!(slider.step(), Some(SLIDER_STEP));
+        assert_eq!(slider.orientation(), Orientation::Horizontal);
+        assert_eq!(
+            slider.value.get(),
+            SLIDER_MIN,
+            "a slider starts at its minimum, and the demo has not touched it"
+        );
+        assert_eq!(
+            slider.track.get(),
+            SliderPalette::from_theme(&Theme::dark()).track,
+            "and is already on the theme's colours rather than the neutral ones"
+        );
+        assert!(
+            demo.nodes.borrow().get(demo.slider.node()).is_some(),
+            "with a node of its own in the tree"
+        );
+    }
+
+    #[test]
+    fn the_slider_paints_its_track_its_fill_and_its_thumb() {
+        // "Renders track, fill, and thumb" is three shapes on one node: two
+        // rounded rectangles and two circles, the thumb being a border with a
+        // circle on top of it.
+        let demo = laid_out();
+        let commands = demo.slider_commands();
+        let rects = commands
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::RoundedRect { .. }))
+            .count();
+        let circles = commands
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::Circle { .. }))
+            .count();
+        assert_eq!(rects, 2, "a track and a fill");
+        assert_eq!(circles, 2, "a thumb, which is a border and a circle");
+        assert_eq!(commands.len(), 4, "and nothing else on the node");
+    }
+
+    #[test]
+    fn a_drag_on_the_slider_moves_its_value_and_its_thumb() {
+        // The whole path a finger takes: down, motion, up, and a frame between
+        // each so the widget's properties reach the screen.
+        let mut demo = laid_out();
+        let (x, y) = demo.slider_at_fraction(0.5).expect("a laid-out slider");
+        for event in drag_on(x, y, x + 80.0, y) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+
+        let slider = &demo.slider.widget;
+        assert!(
+            slider.value.get() > 50.0,
+            "dragging right of the middle raised the value: {}",
+            slider.value.get()
+        );
+        assert_eq!(
+            slider.value.get() % SLIDER_STEP,
+            0.0,
+            "and it snapped to the step, so {} is on the grid",
+            slider.value.get()
+        );
+        let rect = demo.slider_rect().expect("a laid-out slider");
+        let wanted = slider.thumb_center(rect).0;
+        assert!(
+            (painted_thumb_x(&demo) - wanted).abs() < 0.01,
+            "and the thumb was painted at {} rather than {wanted}",
+            painted_thumb_x(&demo)
+        );
+    }
+
+    #[test]
+    fn a_drag_past_the_end_of_the_slider_clamps_at_its_maximum() {
+        // The finger has left the slider by the time it is past the end, which is
+        // why the demo offers the drag to the slider being dragged rather than
+        // only to whatever is under the pointer. Without that the value would
+        // stop at the edge of the node instead of at the end of the range.
+        let mut demo = laid_out();
+        let (x, y) = demo.slider_at_fraction(0.25).expect("a laid-out slider");
+        for event in drag_on(x, y, x + 900.0, y) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert_eq!(demo.slider.widget.value.get(), SLIDER_MAX);
+
+        let rect = demo.slider_rect().expect("a laid-out slider");
+        assert_eq!(
+            painted_thumb_x(&demo),
+            rect.x + rect.width - 12.0,
+            "and the thumb is a radius in from the far end of the track"
+        );
+    }
+
+    #[test]
+    fn a_tap_on_the_sliders_track_jumps_the_value_there() {
+        let mut demo = laid_out();
+        let (x, y) = demo.slider_at_fraction(0.75).expect("a laid-out slider");
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert_eq!(
+            demo.slider.widget.value.get(),
+            75.0,
+            "the tap landed three quarters along 0 to 100"
+        );
+    }
+
+    #[test]
+    fn the_sliders_readout_follows_the_value_and_counts_its_adjustments() {
+        let mut demo = laid_out();
+        assert_eq!(
+            demo.readout_text().as_deref(),
+            Some("0 of 100, 0 adjustments")
+        );
+
+        // A finger that goes down on the track a little right of the minimum and
+        // drags forty pixels further lands at 70: the point it started from is
+        // where the thumb would be at half, and the drag adds 40 of the 216 the
+        // thumb can travel.
+        let (x, y) = demo.slider_at_fraction(0.5).expect("a laid-out slider");
+        for event in drag_on(x, y, x + 40.0, y) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        let readout = demo.readout_text().expect("a readout");
+        assert!(
+            readout.starts_with("70 of 100"),
+            "the value followed the drag: {readout}"
+        );
+        assert!(
+            readout.ends_with(", 1 adjustment"),
+            "and the widget reported exactly one adjustment: {readout}"
+        );
+
+        // A second drag to the same place changes nothing, and so reports
+        // nothing: the widget fires its callback when the value moves.
+        for event in drag_on(x, y, x + 40.0, y) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert!(
+            demo.readout_text()
+                .expect("a readout")
+                .ends_with(", 1 adjustment"),
+            "a drag that lands where the thumb already was is not an adjustment"
+        );
+    }
+
+    #[test]
+    fn a_programmatic_change_moves_the_slider_without_counting_an_adjustment() {
+        // The `0` and `1` keys write the value directly, which is what a caller
+        // binding a slider to a model does. The readout follows because it is
+        // bound to the value; the count does not, because the widget did not
+        // adjust anything.
+        let mut demo = laid_out();
+        demo.handle_event(key(Keycode::_1));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(demo.slider.widget.value.get(), SLIDER_MAX);
+        let readout = demo.readout_text().expect("a readout");
+        assert!(readout.starts_with("100 of 100"), "{readout}");
+        assert!(readout.ends_with(", 0 adjustments"), "{readout}");
+    }
+
+    #[test]
+    fn a_programmatic_change_carries_the_thumb_to_the_value_rather_than_jumping() {
+        // The acceptance criterion "thumb position animates smoothly": the thumb
+        // starts where it was, is part way after one frame's worth of the
+        // transition, and arrives. A `set` instead of an animation would be at
+        // the value on the first frame and pass an end-only assertion.
+        let mut demo = laid_out();
+        assert_eq!(
+            painted_thumb_x(&demo),
+            demo.slider_at_fraction(0.0).unwrap().0
+        );
+
+        // Both ends are read before the key is pressed, and reading one puts the
+        // slider there and snaps it — which is the very thing under test, so it
+        // has to happen while nothing is animating.
+        let end = demo.slider_at_fraction(1.0).unwrap().0;
+        let start = demo.slider_at_fraction(0.0).unwrap().0;
+
+        demo.handle_event(key(Keycode::_1));
+        demo.frame(WINDOW, Duration::from_millis(10));
+        let midway = painted_thumb_x(&demo);
+        assert!(
+            midway > start && midway < end,
+            "ten milliseconds in, the thumb is part way to {end}: {midway}"
+        );
+
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(
+            painted_thumb_x(&demo),
+            end,
+            "and it arrives rather than creeping"
+        );
+        assert!(
+            !demo.slider.widget.is_animating(),
+            "a transition that has arrived has stopped"
+        );
+    }
+
+    #[test]
+    fn the_thumb_grows_while_a_pointer_is_holding_the_slider() {
+        let mut demo = laid_out();
+        let (x, y) = demo.slider_at_fraction(0.5).expect("a laid-out slider");
+        let resting = painted_thumb_radius(&demo);
+
+        let mut events = drag_on(x, y, x + 40.0, y).into_iter();
+        demo.handle_event(events.next().expect("a finger going down"));
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert!(demo.slider.widget.dragging.get(), "the press took hold");
+        let held = painted_thumb_radius(&demo);
+        assert!(held > resting, "and the thumb grew: {resting} then {held}");
+
+        demo.handle_event(events.last().expect("the same finger coming up"));
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert!(!demo.slider.widget.dragging.get(), "the release let go");
+        assert_eq!(painted_thumb_radius(&demo), resting, "and it shrank back");
+    }
+
+    #[test]
+    fn an_arrow_key_moves_the_slider_once_it_holds_focus() {
+        let mut demo = laid_out();
+        for _ in 0..3 {
+            demo.handle_event(key(Keycode::Tab));
+        }
+        assert_eq!(demo.focused, Some(demo.slider.node()));
+
+        demo.handle_event(key(Keycode::Right));
+        demo.handle_event(key(Keycode::Right));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.slider.widget.value.get(),
+            10.0,
+            "two presses of the right arrow, by the slider's own step"
+        );
+
+        demo.handle_event(key(Keycode::Left));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(demo.slider.widget.value.get(), 5.0);
+    }
+
+    #[test]
+    fn an_arrow_key_does_nothing_while_the_slider_is_not_focused() {
+        // A key is not routed by position, so an arrow would otherwise move every
+        // slider on screen. The widget's own test says this too; what the demo
+        // adds is that nothing focuses the slider by accident.
+        let mut demo = laid_out();
+        demo.handle_event(key(Keycode::Right));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(demo.slider.widget.value.get(), SLIDER_MIN);
+        assert!(demo.focused.is_none());
+    }
+
+    #[test]
+    fn a_steering_wheel_scroll_adjusts_the_focused_slider() {
+        // The one gamepad axis the input module maps is the wheel's scroll, and
+        // it arrives as a positionless `Scroll`. The focused control gets it
+        // first, and focus navigation only runs for what the control left alone —
+        // so a focused slider is driven by it and a focused button still walks.
+        let mut demo = laid_out();
+        for _ in 0..3 {
+            demo.handle_event(key(Keycode::Tab));
+        }
+        assert_eq!(demo.focused, Some(demo.slider.node()));
+        demo.handle_event(wheel(8000));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.slider.widget.value.get(),
+            SLIDER_STEP,
+            "one notch of the wheel is one step of the grid"
+        );
+    }
+
+    #[test]
+    fn the_slider_paints_a_focus_ring_once_it_is_focused() {
+        let mut demo = laid_out();
+        let rects = |demo: &Demo| {
+            demo.slider_commands()
+                .iter()
+                .filter(|command| matches!(command, DrawCommand::RoundedRect { .. }))
+                .count()
+        };
+        assert_eq!(rects(&demo), 2, "an unfocused slider is a track and a fill");
+
+        for _ in 0..3 {
+            demo.handle_event(key(Keycode::Tab));
+        }
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(rects(&demo), 3, "and a focused one has a ring as well");
+    }
+
+    #[test]
+    fn the_slider_follows_the_theme_switch() {
+        // The track is the theme's `Border` token and the fill its `Primary`, so
+        // a switch carries the new colours to the slider through the property
+        // graph: the widget is aimed at the new palette and its own transition
+        // runs alongside the theme's.
+        let mut demo = laid_out();
+        let dark = demo.slider.widget.track.get();
+        assert_eq!(
+            dark,
+            Theme::dark().get(ThemeToken::Border).as_color().unwrap()
+        );
+
+        demo.handle_event(toggle_theme_event());
+        for _ in 0..35 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(
+            demo.slider.widget.track.get(),
+            Theme::light().get(ThemeToken::Border).as_color().unwrap(),
+            "the slider arrived at the light theme's own Border token"
+        );
+    }
+
+    #[test]
+    fn the_slider_sits_clear_of_the_counter_the_buttons_and_the_text() {
+        // The collision tasks 12 and 13 each found only by looking: a control
+        // placed by hand lands on top of whatever is already there, and nothing
+        // in the suite would notice because each of them is laid out correctly on
+        // its own.
+        let demo = laid_out();
+        let rect = demo.slider_rect().expect("a laid-out slider");
+        let column_right = TEXT_PANEL_ORIGIN.0 + TEXT_COLUMN_WIDTH;
+        assert!(
+            rect.x > column_right,
+            "the slider starts at x = {}, right of the text column's edge at {}",
+            rect.x,
+            column_right
+        );
+        let counter_top = BUTTON_ORIGIN.1 + COUNTER_DROP;
+        assert!(
+            rect.y > counter_top + 24.0,
+            "and at y = {}, below the click counter's own line at {counter_top}",
+            rect.y
+        );
+        assert!(
+            rect.y + rect.height < WINDOW.height,
+            "with its readout still inside the window"
+        );
+        assert!(
+            rect.x + rect.width < WINDOW.width,
+            "and inside it horizontally, at {} wide",
+            rect.width
+        );
+    }
+
+    #[test]
+    fn the_slider_is_the_last_thing_painted_in_the_band() {
+        // The readout is drawn after the slider it reports, so a number that
+        // overlapped it would be the readable one rather than the covered one.
+        let demo = laid_out();
+        let slider_at = demo
+            .order
+            .iter()
+            .position(|&handle| handle == demo.slider.node())
+            .expect("the slider is in the tree");
+        let readout_at = demo
+            .order
+            .iter()
+            .position(|&handle| handle == demo.slider_readout.label.handle())
+            .expect("the readout is in the tree");
+        assert!(
+            readout_at > slider_at,
+            "the readout at {readout_at} is painted after the slider at {slider_at}"
+        );
     }
 }

@@ -12,13 +12,31 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 11 committed (`ffbb4d6`). Tasks 01–11 done. Task 12 implemented and
-reviewed; review findings fixed, awaiting re-review.**
+**Status: 13 committed (`2dc9193`). Task 14 implemented, awaiting review.** Tasks
+01–13 are done. Task 13 was reviewed *approve with minor findings* and its
+findings fixed before the commit. Task 12 was committed with its review findings
+fixed but without a dedicated re-review; what has and has not been looked at is
+set out below.
 
-**Last task: 12 — Widget: Button.** `widgets/button.rs` is new (2114 lines),
+**Last task: 14 — Widget: Slider.** `widgets/slider.rs` is new (54 tests), the
+action `Callback` moved out of `widgets::button` and became
+`widgets::Callback<T>`, and `ui_demo` gained a slider with a value readout under
+the button band. 380 `ui_core` unit tests + 65 demo tests + 57 doctests.
+
+**Next task: 15 — Widget: Toggle.** It is the third caller of the shared
+`Callback`, and the second of `widgets::Callback<f32>`'s `from_fn`.
+
+**Task 13 — Widget: Container.** `widgets/container.rs` is new (18 tests),
+`layout.rs` gained `Padding` and the pass now honours it, and `ui_demo`'s
+private `container()` helper is **gone**: the demo's tree is built out of
+`Container` widgets, and the row of pads is drawn on a card — a container with
+the theme's `Surface` behind them and a padding of 12. 326 `ui_core` unit tests
++ 49 demo tests + 49 doctests.
+
+**Task 12 — Widget: Button.** `widgets/button.rs` is new (2168 lines),
 `input.rs` gained `Focus::focus` and `route` plus a **unit fix that is not part
 of the button** (below), `ui_demo` gained a band of three buttons over a click
-counter. 300 `ui_core` unit tests + 44 demo tests + 44 doctests.
+counter. 301 `ui_core` unit tests + 44 demo tests + 44 doctests.
 
 **The blocker the review found: the gesture recogniser compared nanoseconds
 against millisecond thresholds, so no `Tap` was ever produced.** SDL stamps every
@@ -37,7 +55,253 @@ written: `held <= TAP_MAX_DURATION` does not compile across units where
 `held <= 300` compiles happily and is wrong by a factor of a million. Two tests
 now fail on the old behaviour, one of them a realistic 100 ms click.
 
-**Next task: 13 — Widget: Container.**
+**Task 12: what was reviewed, and what was not — stated precisely, because the
+first version of this note was too strong.** A *dedicated* re-review of task
+12's fixes never happened, so the workflow's *No unreviewed advance* gate was
+formally skipped: the operator committed `9973185` with the blocker and the
+three majors fixed, each fix mutation-verified only by the session that wrote
+it. But "unverified" overstates it, and the task 13 review corrected that:
+
+- **The blocker has been independently confirmed twice.** The task 13 reviewer
+  read the source and found the unit fix genuinely in place — the thresholds are
+  `Duration`s at `input.rs:93`/`:97`, the tap comparison at `:879` is on a
+  `Duration`, and the tests convert at the boundary at `:1053` — and then drove
+  a **real click** on the live demo and took the counter from `0 clicks` to
+  `1 clicks`, so the tap recogniser works end to end on real input. That is the
+  part that mattered, and it is no longer one agent's word.
+- **What is still one agent's word:** the three majors' fixes — the `shapes()`
+  ordering tests and the reordering mutation that now fails, the removal of the
+  vacuous `shadow.a <= round(PRESS_SHADOW_ALPHA * 255)` assertion, and the
+  retitled demo test — and the minors: the two stale counts, the
+  `THEME_SPACING_*`/`THEME_RADIUS_MD` constants with their token-reading test,
+  and the `focus_navigation` doc correction.
+
+A reviewer dispatched against `9973185` needs no working tree, so closing this is
+cheap whenever it is wanted. The order that would be least wasteful is to let
+task 14 land first and review the two together, since the unexamined fixes are
+test and comment changes with no behavioural surface.
+
+## Task 14 — what it decided, and what it found
+
+Decisions the task file left open or contradicted, and where each one is recorded
+in the code. None of them belong to the operator.
+
+- **`Callback` is `widgets::Callback<T>`, and `widgets/mod.rs` owns it.** The
+  button's own doc said it would move when a second widget needed one, and task 14
+  is that second widget: a slider's `on_change` carries the value it moved to, and
+  a type that cannot carry a payload could not be it. `button::Callback` is a
+  **type alias** for `Callback<()>`, so `button::Callback` still names what it
+  named and `Callback::new(move || …)` still reads as it did.
+- **The two constructors are named apart, which is what made the alias possible.**
+  A closure of no arguments does not implement `Fn(())` and no bound can make it,
+  so one `new` cannot serve both shapes. `Callback::new` is the payload-free one
+  and `Callback::from_fn` is the general one. Had they been one function, every
+  button's click handler in the repository would have become `move |_|`.
+- **`call` takes the payload, so the button calls `call(())`.** The only
+  source-level consequence, and it is inside `button.rs`; `Button::activate` is
+  what a caller uses.
+- **`Slider::on_event` takes the slider's `rect` as an argument.** A node cannot
+  reach the arena that holds it — the same reason `Container::add_child` takes
+  `&mut Arena` — and a slider has to know where along its own track a pointer is.
+  `Button::on_event` does not need one: a tap anywhere on a button is a click.
+- **`dragging` is a property the caller writes from a press and a release**, and
+  `on_event` does not touch it. This is `Button::pressed`'s arrangement, for the
+  same reason: the gesture recogniser reports a tap on the *release*, so the
+  pressed appearance has to be on screen while the pointer is down, which is
+  before any tap exists — and a short drag produces no event at all on release, so
+  a flag maintained from the event stream would stay set.
+- **`on_change` fires when the value *moved*, and only for an interaction.** A
+  finger resting past the end of the track moves nothing and reports nothing; a
+  caller writing `value` itself is itself and reads the property.
+- **`min`, `max`, `step`, `orientation` and the three sizes are plain fields
+  behind `&mut self` setters**, not properties. They are the *mapping* rather than
+  the appearance, nothing animates a slider's minimum, and a caller writing them
+  would need the setters anyway to re-clamp the value against them. The colours
+  and the two animated numbers — the thumb's value and its scale — are
+  properties, and they are what `snap_to_state`, `animate_to_state` and `paint`
+  read.
+- **`set_range` and `set_step` move the thumb at once rather than animating it.** A
+  range or a grid that has just changed has no transition to run, and a thumb
+  animating into a track that has not been drawn yet is a frame of nonsense.
+- **The vertical case is in the geometry and the keyboard, not in the demo.** The
+  task file lists `orientation` as a property and puts "Vertical slider" under
+  *Out of Scope* with the note "(add orientation support)", which is read as: the
+  vertical slider as a shipped feature is out of scope, and the support for it is
+  what this task adds. `Orientation` therefore exists, is honoured by
+  `thumb_center`, `value_at`, `track_rect`, the fill's side and the key and scroll
+  mapping, and the demo shows **one** horizontal slider — the window's room below
+  the counter is 360 by 144 and a second control there is a collision waiting to
+  happen, which tasks 12 and 13 each found by eye. `a_vertical_slider_is_larger_at
+  _the_top_than_at_the_bottom` and `a_vertical_slider_takes_up_and_down_and
+  _ignores_left_and_right` are what make the enum non-decorative.
+- **The sizing is named constants, not theme tokens**, for the reason
+  `MIN_TOUCH_TARGET` and `THEME_SPACING_SM` in `button.rs` give: the theme has no
+  token for a slider's parts, and adding one would change `ThemeToken::all`, both
+  theme tables, the token count and the animation every token takes part in during
+  a switch, for values a switch does not change. Each constant says what would
+  reverse it.
+- **The focus ring is not in the task file and is drawn anyway.** The keyboard
+  criterion needs an on-screen indication of where arrows will land, and
+  `Button`'s ring is the precedent; without it, focus on a slider is invisible. It
+  is drawn **around the track**, not around the node — see the defects below.
+- **The gamepad half of requirement 3 is half met, and the half that is not is
+  recorded rather than faked.** Gamepad *buttons* are already mapped into `Key`,
+  so the d-pad adjusts the value with no change to `input.rs` and is tested. The
+  **left stick is not implemented**: `input.rs` maps exactly one gamepad axis,
+  `STEERING_WHEEL_SCROLL_AXIS = Axis::RightX`, and nothing maps `Axis::LeftX` or
+  `LeftY` to any event. What the widget does do is handle
+  `Scroll { delta }` — the event an axis *would* produce — using the component
+  along its own axis and the direction alone, and `ui_demo` gives the focused
+  control first refusal on a positionless `Scroll` so the steering wheel's axis
+  already reaches a focused slider. Adding `LeftX → Scroll` is a change to a
+  module task 10 shipped, and it is not made here; it is one `match` arm in
+  `GestureRecognizer::process` whenever a stick is wanted.
+- **`Motion` is still `button::Motion`,** imported by `slider.rs`. It is the
+  theme's fast duration and standard curve and a slider's press follows the same
+  motion as a button's, but it is one line of import rather than a second move
+  that would touch the button's doctests, its tests and the demo's import. It
+  moves when a module of its own is warranted.
+- **The demo's slider is a fourth child of the band**, not a new panel, so
+  `every_parent_in_the_demo_is_a_container_widget` still counts six containers and
+  still fails if a bare parent reappears. It sits at `(664, 496)` — the band's own
+  column, below the click counter — with its readout `SLIDER_READOUT_DROP` below
+  it, and a test asserts it is clear of the counter, the text column and both
+  edges of the window.
+- **`0` and `1` put the slider at its two ends**, which is the demo's
+  *changes programmatically* case: the value property is written directly and the
+  thumb is carried there, so the one thing a drag cannot show is on screen. The
+  readout's count of adjustments deliberately does **not** move when they are
+  pressed, which is the visible difference between the two paths.
+- **One existing demo test grew a step.**
+  `tab_steps_over_the_disabled_button` walked three `Tab` presses and expected to
+  wrap; the slider is a fourth stop, so it now walks four and still asserts that
+  the disabled button is never visited.
+- **A value whose step does not divide its range cannot reach its top.** "Snaps to
+  the nearest step" says nothing about the ends being on the grid: a slider from 0
+  to 1 with a step of 0.3 snaps to 0.9 at the top, and that is what the word
+  means. The demo's step is 5 of 100, which does divide it.
+
+### Defects found while implementing, and fixed
+
+1. **The focus ring was a white card, not an outline.** `Slider::paint` drew the
+   ring as a rounded rectangle grown around the slider's whole rect, which is what
+   the button's ring is — and the button works only because it draws its background
+   over the ring's middle. A slider has no background to draw with, so a focused
+   slider rendered as a 240×44 white panel with a track lying on it. **Found by
+   looking at the pixels**, after a unit test had been written and passed that
+   asserted the ring's rect: a filled rounded rectangle of the right size, colour
+   and place satisfies every draw-command assertion there is. Fixed by drawing the
+   ring around the **track** and letting the track cover it, which is the same
+   trick the button uses; the test now asserts both the grown rect and the fact
+   that the track is recorded after it, and a mutation that puts the ring back
+   around the node fails it. Recorded in `.ai/NEVERAGAIN.md`.
+2. **Every slider drawn away from the origin was broken.** `Slider::travel`
+   computed the thumb's run as `extent - origin - radius * 2`, where `extent` was
+   already a length. All 53 unit tests laid their slider out at `(0, 0)`, where
+   subtracting the origin subtracts nothing, and every one passed; the run came
+   out negative for any real position, both ends pinned to the slider's centre,
+   and every pointer position read as the minimum. **Found by the demo**, whose
+   slider is at `(664, 496)`, within an hour of the widget landing. Fixed, and
+   `a_slider_away_from_the_origin_maps_positions_to_the_same_values` was added
+   with a fixture that is not at the origin — the fixture the suite was missing is
+   recorded in `.ai/NEVERAGAIN.md`.
+
+## Task 13 — what it decided, and what it found
+
+Decisions the task file left open, and where each one is recorded in the code.
+The three that belong to the operator are in *Ratified by the operator* and are
+not restated here.
+
+- **`Container` holds no `layout_mode` field and no `padding` field.** The task
+  file lists both as properties, and both live on the node's `LayoutState`
+  instead, which is what the layout pass reads. A second copy on the widget would
+  be a value nothing reads, and a padding only the container held would leave
+  every other node's children laid out at the unpadded origin. The widget's
+  `set_mode`, `set_padding` and `set_flex_config` are the doors to them; the
+  size of a container is set the way every other node is sized, through
+  `layout_mut()`.
+- **`background` and `border_radius` are plain `Property`s, not
+  `Option<Property<…>>`.** The task file's optionality is read as a transparent
+  default: `Color::new(0, 0, 0, 0)` is how this repository says "not drawn", and
+  it is the only shape a *themed* background can take, because a colour that
+  follows the theme is a `Property::bind` and a bind cannot produce an `Option`.
+  Requirement 4 — "background color animates with theme changes" — is
+  unsatisfiable with an `Option` under the property graph as it stands.
+  `Container::paint` records **no command at all** while the background is
+  transparent, so a container with no background costs nothing.
+- **The background is behind the children by tree order, not by drawing it.**
+  A node's commands are recorded parent first, and the demo's `order` is a
+  pre-order walk, so a container's rect is recorded before its children's. Two
+  tests pin the order, because task 12's review found that moving the label above
+  the press overlay passed every assertion in that module.
+- **The task file's requirement 2 is stale about `LayoutMode`.** What exists is
+  `Flex { direction, wrap, flex_config }`, `Grid { columns }`, `Stack` and
+  `Absolute`, with `LayoutMode::row()` and `::column()` as constructors. `wrap`
+  is accepted and **not honoured** — documented at `layout.rs` and arriving with
+  the list widget — and `Grid` lays out no children and reports no rects. Neither
+  is implemented here: neither is a container, and both are already recorded
+  where they were shipped.
+- **`layout_constraints` did not gain a `padding` parameter.** It is a
+  measurement helper with no caller outside `layout.rs`'s own tests, and its
+  signature is task 07's public API. Its doc now says what to pass instead: the
+  padded box is `padding.inset(constraints)`, which is why `Padding::inset` is
+  public.
+- **The two bare parent nodes in the demo became `Container`s too.** The text
+  panel and the button band were `node::create` with a mode and children — the
+  same thing the retired helper did, written out. Leaving them would have kept
+  two ways to build a parent in one repository, and
+  `every_parent_in_the_demo_is_a_container_widget` fails if one reappears.
+- **The card is the row of pads, and it bleeds off two edges of the window.**
+  The demo's window is full: the text panel's rect is 900×380 at the origin, so a
+  card there would cover the pads, and the button band is the window, so a card
+  there would cover everything. The pads' row is the one container whose rect
+  covers nothing but its own children. Its left and top edges are the window's
+  own corner, because a `Stack` places every child at the origin and the pads
+  are already flush there, so the padding shows on the right and bottom only.
+  Measured on screen: the card is 788×164 with the pads inset by exactly 12, and
+  `CARD_PADDING` is 12 rather than 16 because 16 would have put the card's bottom
+  edge two pixels into the first label's line box.
+- **`ui_demo`'s click counter has a 0×0 rect, and that is pre-existing.** It is
+  an `Absolute` child with no declared constraints, so the pass measures its
+  content — and a leaf's content is nothing. The text still draws, because
+  `Label::paint` lays out from its own options rather than from the rect's size.
+  Not touched: it is task 12's code and no criterion here depends on it.
+- **The `BUTTON_ORIGIN` comment says the pads are centred, and they are not.**
+  It claims they "reach from x = 130 to x = 894"; they are laid out at 0, 272 and
+  544, because the row is a `Stack` child and a `Stack` sizes a child from its
+  own constraints, which measures it to its content — 764 wide. The comment's
+  conclusion still holds on the other axis: the band is below the pads at
+  y = 396, which is what `the_band_does_not_overlap_a_pad` checks. Left as found
+  rather than corrected in passing.
+
+### The benchmark, before and after
+
+`layout_walk_cost` is a best-of-N on a shared host. **These figures are the
+reviewer's, not the developer's** — the first version of this table reported +6 %
+and +10 % and overstated the regression by roughly 5–10×, because one baseline
+sample of 164 ms sat far below its own run and the comparison was not
+interleaved. Three interleaved rounds of three, median of each:
+
+| shape | before (`9973185`) | after | delta |
+|---|---|---|---|
+| flat-2041 clean pass | 9 739 ns (9079–11100) | 8 667 ns (8653–8765) | **−11 %** |
+| depth-1000 declaring, one dirty leaf | 4.26 ms (4.04–4.40) | 4.34 ms (4.33–4.49) | +1.7 % |
+| depth-1000 bare, cold pass | 187 ms (186.2–192.5) | 189 ms (188.5–188.9) | +1.2 % |
+
+**The conclusion the developer reached is right and the numbers were not:** the
+move is inside the noise rather than outside it. The clean pass is very slightly
+*faster* and the two deep-chain shapes are up about 1 %, and the O(n·d) argument
+in *Deviations* is about ratios, which do not move: 22.9× before and 23.0× after
+on the declaring chain, 1.0× on the bare one. The developer's 14 % baseline
+spread does not reproduce either; it measures 9 %.
+
+The likeliest real cost is the 16 bytes `Padding` adds to `LayoutState`, which
+`visit` reads once per node. A guard skipping the inset for the zero case was
+tried, measured, and reverted rather than kept as speculative complexity.
+
+**Read this table as "about 1 %", not as "+10 %".** A single unreplicated sample
+on a shared host is not a measurement, and quoting one as a headline is the
+2026-09-30 `NEVERAGAIN` entry about derived numbers arriving unverified.
 
 ## Task 12 — what it decided, and what it found
 
@@ -133,8 +397,35 @@ origin: the root here is 1920×2280 and the window sits at +480+1468.
 pointer events were injected through a throwaway C program linked against
 `libXtst` (`XTestFakeKeyEvent` and friends; the headers *are* installed, under
 `/usr/include/X11/extensions/XTest.h`). It lives in `/tmp`, not in the
-repository. Keyboard injection works, and it is how the focus ring and the
-activation key were seen on screen.
+repository.
+
+**Injected input is unreliable on this host, and a failure to inject is not
+evidence of a product defect.** What is actually known, measured 2026-09-30
+across several attempts by two agents:
+
+- On runs where injection **worked**, a synthetic **click** was required first.
+  Before any click, injecting `T` changed **0** pixels and moving the pointer
+  changed 0; `XSetInputFocus` returning `Success`, confirmed by
+  `XGetInputFocus`, changed 0. After a click on a button, one `T` changed
+  **614,400** pixels — the whole 1024×600 window — with the background going
+  (18,18,18) → (255,255,255) and a themed card's fill (30,30,30) →
+  (245,245,245); a second `T` returned to a pixel-identical image (`AE` = 0).
+  Clicks on empty window space do not grant it.
+- On other runs it delivers **nothing at all** — not clicks, not keys — including
+  a fresh launch with a six-second settle. The counter stayed at `0 clicks` and
+  `T` changed 0 pixels. That is not explained by focus, the extension or the key
+  mapping, and the reviewer independently found `XTestFakeMotionEvent` having no
+  effect in their session too.
+
+So the click-first rule is a **necessary condition on the runs that worked, not
+a sufficient one**, and it is recorded as such rather than as a recipe. When
+checking whether a change works, **verify the injection reached the app before
+concluding anything about the change**: compare captures with
+`magick compare -metric AE a.png b.png null:` and read the on-screen counter, and
+treat "0 pixels changed" as ambiguous between "the change is broken" and "the
+input never arrived". The task 12 blocker was found by an agent that took the
+second reading for granted in the *other* direction — a misread timestamp, a
+waiver, and a defect that was real all the same.
 
 **A pointer tap, and the waiver that was wrongly raised against it.** The first
 attempt at this section recorded a waiver on task 12's "responds to tap/click",
@@ -148,9 +439,117 @@ misreading turned a product defect into a tooling excuse: the recogniser's
 thresholds were in the wrong unit, so a real click failed exactly as the injected
 one did. The waiver is withdrawn and the defect is fixed; see *Current position*.
 
-Keyboard injection through `libXtst` does work and is how the focus ring and the
-activation key were seen on screen. Pointer injection is unreliable on this
-host and is no longer relied on for anything.
+Keyboard injection through `libXtst` does work — once the window has been
+clicked — and is how the focus ring and the activation key were seen on screen.
+Pointer injection is unreliable on this host and is no longer relied on for
+anything.
+
+**2026-09-30, task 13: keyboard injection did not work this time, and the
+statement above no longer holds for this X session.** The demo window was mapped
+(`map_state=2`), it was already `_NET_ACTIVE_WINDOW`, `XSetInputFocus` returned
+`Success` and `XGetInputFocus` confirmed it, `XTestQueryExtension` reported
+XTEST 2.2, and the keyboard mapping does carry `T` on keycode 28. XTEST key
+events were then injected at the window with `KeyPressMask` selected and **no
+`KeyPress` was delivered at all** — a probe that selected the mask and waited
+half a second saw zero events, and two captures taken after injecting `T` were
+pixel-identical (`compare -metric AE` = 0) to the capture before it. Whatever
+changed, the cause is not the injector, the focus, the extension or the mapping.
+Task 13's theme-switch criterion is therefore covered by a unit test
+(`the_card_follows_a_theme_switch` runs `toggle_theme` and four 100 ms frames and
+asserts the card's recorded colour) and **not** by a capture. Re-probe before
+trusting keyboard injection again; the pointer caveat above still holds.
+
+**Superseded 2026-09-30 by the task 13 review — kept, not deleted, per the
+sidecar rule in `AGENTS.md`.** The conclusion is wrong and the diagnosis in the
+paragraph above is the opposite of the cause. Nothing was broken: the window
+simply had not been **clicked**. Measured, after a synthetic click on the
+"Press me" button, one `T` changes **614,400 pixels** — the whole 1024×600
+window — with the background going (18,18,18) → (255,255,255) and the card's
+fill (30,30,30) → (245,245,245); a second `T` returns to a pixel-identical image
+(`AE` = 0). The clicks that fail to grant focus are the ones on empty window
+space, which is what the original attempt was doing. The waiver this paragraph
+justifies is withdrawn, and **the task 13 theme-switch criterion is verified on
+screen on the reviewer's measurement** — the card's fill changing with the theme
+— as well as by `the_card_follows_a_theme_switch`. Read the injection section
+above before relying on it: click-first is necessary, not sufficient.
+
+**2026-09-30, task 14: neither keyboard nor pointer injection reached the app in
+this session, and the positive control says so.** The injector is the same shape
+as before — `XTestFakeMotionEvent`, `XTestFakeButtonEvent`,
+`XTestFakeKeyEvent` through `libXtst`, built in `/tmp` — and
+`XTestQueryExtension` reports XTEST 2.2. What was measured:
+
+- A drag along the slider's track from 50% to 90% of it: `compare -metric AE`
+  = **0** against the capture before it.
+- **Two presses on "Press me"**, the button task 12 verified on screen twice:
+  `AE` = **0**, the counter still reads `0 clicks`, and the button still paints
+  its resting fill rather than its hover tint. This is the control that makes the
+  reading safe: the failure is not slider-specific, it is the whole input path.
+- A `1` key press, which the demo answers by putting the slider at its maximum
+  with the thumb travelling there: `AE` = **0**.
+- `XQueryPointer` after a fake motion reports the pointer inside window
+  **`0x0`** — not inside the demo window — while `xwininfo` reports the window
+  `IsViewable` at `+480+1468`, 1024×600. So the pointer is not where the window
+  is, whatever the injection does to the X server's idea of it.
+
+So the "0 pixels changed" above is the ambiguous reading the earlier paragraphs
+warn about, and it is resolved here by the *control*: task 12's button, known to
+work, is equally dead, so nothing here is evidence about the slider. **Five of the
+task file's eight acceptance criteria are therefore covered by tests and not by a
+capture, and that is recorded as a waiver** rather than as a defect. They are
+criteria **2 (dragging the thumb), 3 (tapping the track), 4 (keyboard and gamepad),
+7 (the thumb animating) and 8 (the demo responding to a drag)** — every one of
+them needs a pointer or a key to happen at all. Criteria **1** (track, fill and
+thumb render) was capture-verified, and **5** (step snapping) and **6** (clamping)
+are properties of the widget's arithmetic with no input and no GPU in the way, so
+a test is the whole of their verification and no capture is owed them. Re-probe
+with a button click as the control before trusting injection again, and treat a
+button that does not count a click as the same failure rather than as the widget
+under test.
+
+**The capture method for task 14, since the paragraph above ends the input route
+and something still has to say how the pixels were got.** Three captures were
+taken and only the first is reachable from the demo as it stands:
+
+1. **The resting slider, value 0, unfocused** — no input at all. `cargo build`,
+   then `setsid ./target/debug/ui_demo > /tmp/demo.log 2>&1 &`, the window id
+   from `xwininfo -root -tree | rg '"roados ui_demo"'`, and
+   `magick import -window <id> shot.png`, cropped and scaled with
+   `magick shot.png -crop … +repage -scale 400%`. This is the stock method above
+   and needs nothing but a built binary.
+2. **Values 25 and 70, and the focused state** — a **rebuilt binary with a
+   temporary seed in `Demo::new`**, since no key and no click reached the app and
+   the demo has no other route to either a value or a focus. The seed was six
+   lines, read from the environment, and has been reverted:
+
+   ```rust
+   // SLIDER_PREVIEW: temporary capture aid, reverted immediately after.
+   {
+       let preview: f32 = std::env::var("SLIDER_PREVIEW")
+           .ok()
+           .and_then(|v| v.parse().ok())
+           .unwrap_or(0.0);
+       widget.value.set(preview);
+       widget.focused
+           .set(std::env::var("SLIDER_FOCUS").is_ok());
+       widget.snap_to_state();
+   }
+   ```
+
+   It ran as `SLIDER_PREVIEW=70 SLIDER_FOCUS=1 setsid ./target/debug/ui_demo` and
+   `SLIDER_PREVIEW=25 setsid ./target/debug/ui_demo`, on builds that had it.
+   `rg -c SLIDER_PREVIEW ui/src/ui_demo/src/main.rs` is **0** now, and the file's
+   `md5sum` matches the snapshot taken before the seed was added.
+
+   **What this means for the record, stated plainly:** the focus ring was seen in
+   a capture produced this way — the widget's `focused` property was written at
+   construction, not by `Demo::set_focus` — and the reader may re-apply the seed
+   above to reproduce it. It is *not* evidence that `Tab` focuses a slider on
+   screen, because no `Tab` ever arrived. The first version of this file said "seen
+   on screen at 0, 25 and 70 with its fill, thumb, readout and focus ring" without
+   saying that two of the three came from a seeded build, which read as though the
+   demo's own keys had produced them; they cannot have, because `0` and `1` write
+   0 and 100 and not 25 and 70.
 
 
 ## Ratified by the operator (2026-09-28, 2026-09-29, 2026-09-30)
@@ -188,6 +587,29 @@ host and is no longer relied on for anything.
   it needs a windowing driver; the head unit must carry no desktop stack. The
   split is enforced asymmetrically because no single mechanism can serve both —
   see *The native/target X11 split*.
+- **Task 13's `Container` API takes `&mut Arena` on every method that needs it**,
+  decided 2026-09-30. The task file's `Container::add_child(&self, child:
+  Handle)` is not implementable: a node cannot reach the arena that holds it,
+  because the arena owns the node, and `node::attach` already needs
+  `&mut Arena<WidgetNode>`. This is the shape task 12's `Button` settled on and
+  it is precedent, not a new decision — the task file's `-> Handle` is read as
+  `Container::handle()`.
+- **`ui_demo`'s private `container()` helper is replaced by the widget**, decided
+  2026-09-30. The demo has had a helper doing this task's exact job since task
+  06, in four call sites; building `ui_core::widgets::container` without retiring
+  it would leave two implementations of a composition primitive in one
+  repository, and the widget's acceptance criteria would be proven against a
+  demo that does not use it.
+- **`Padding` lives on `LayoutState` and the layout pass honours it**, decided
+  2026-09-30. `layout.rs` had no padding at all, so this is a change to a module
+  that task 07 shipped and that this sequence has since built four widgets on top
+  of. It is chosen over keeping padding on the `Container` widget because a
+  field only the container reads makes padding impossible on every other node,
+  and a stacked child would still be placed by the pass at the unpadded origin.
+  **Consequence to carry:** the layout suite and the committed
+  `layout_walk_cost` benchmark both have to be re-run, because the pass itself
+  changes and the benchmark is what the O(n·d) walk argument in *Deviations*
+  rests on.
 - **aarch64 target libraries are deferred until the target image is decided.**
   The operator's decision, 2026-09-28. Native builds proceed and stay verified;
   aarch64 remains a documented waiver. No sysroot strategy is committed to yet.
@@ -255,11 +677,15 @@ sysroot mandatory.
   shipped `dispatch_event` without a caller that could hit this; the button is
   the first. `dispatch_event` itself is unchanged and remains correct for
   handlers that cannot re-enter.
-- **Task 12's `on_click: Callback` is a new public newtype in `widgets/button`.**
-  The task file names a `Callback` that does not exist as a public type:
-  `property.rs`'s is private and is `Fn(&T)`, the notification a property fires,
-  not an action a widget performs. Tasks 15 and 19 name the same type and will
-  need it moved somewhere both can reach.
+- **Task 12's `on_click: Callback` is a type alias for `widgets::Callback<()>`, and
+  the type itself moved to `widgets/mod.rs` in task 14.** The task file names a
+  `Callback` that does not exist as a public type: `property.rs`'s is private and
+  is `Fn(&T)`, the notification a property fires, not an action a widget performs.
+  Task 14 needed the payload a `property.rs` callback already had — an `on_change`
+  that reports the value it moved to — and the button's own doc said it would move
+  when a second widget needed one. So it moved, and what moved is
+  `widgets::Callback<T>`; tasks 15 and 19 now reach the same type. `button::Callback`
+  is an alias, so no button's spelling changed.
 - **SDL3 ships with all twelve subsystems enabled.** The architecture doc asks
   for audio, render, camera and filesystem off. Accepted temporarily because
   `sdl3` 0.20.0 re-exports no subsystem features, so honouring the doc needs
@@ -309,6 +735,13 @@ sysroot mandatory.
   cargo test -p ui_core --release --all-features --lib \
       layout_walk_cost -- --ignored --nocapture
   ```
+
+  **Re-measured 2026-09-30, after task 13 added `Padding` to the pass:** the flat
+  clean pass is unchanged (9 975 ns → 9 750 ns, medians of three) and the two
+  1000-deep figures are 4–10 % higher, which is at the edge of this benchmark's
+  own run-to-run spread. The ratios are the same — 4.5×, 27.0×, 1.0× — and the
+  argument here is about ratios. Full numbers and the noise, in *Task 13 — what it
+  decided, and what it found*.
 
   | fixture | one dirty leaf under a clean root | cold pass | ratio |
   | --- | --- | --- | --- |
@@ -407,9 +840,9 @@ verified. A blank cell is unknown, not "none".
 | 09 | Animation System | done | `6726e21` | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
 | 10 | Input Handling | done | `4e51b09` | 2 review passes, 1 fix round | 1 (`cargo audit` not installed) |
 | 11 | Widget — Label | done | `ffbb4d6` | **none — committed without review** | 0 |
-| 12 | Widget — Button | implemented | | 1 pass, findings fixed — **awaiting re-review** | — |
-| 13 | Widget — Container | pending | | | |
-| 14 | Widget — Slider | pending | | | |
+| 12 | Widget — Button | done | `9973185` | 1 pass, *fix first* — findings fixed, **not re-reviewed** | 0 |
+| 13 | Widget — Container | done | `2dc9193` | 1 pass, *approve with minor findings* — findings fixed | 1 (`cargo audit` not installed) |
+| 14 | Widget — Slider | implemented | | awaiting review | **ACs 2, 3, 4, 7, 8** — each needs a pointer or a key, and XTEST injection delivered no event to the app in either session (see *Verifying a change that draws*). AC 1 was capture-verified; ACs 5 and 6 are the widget's own arithmetic and a test is their whole verification. *Tool gate, not an AC:* `cargo audit` is not installed |
 | 15 | Widget — Toggle | pending | | | |
 | 16 | Widget — Image | pending | | | |
 | 17 | Widget — Progress | pending | | | |
@@ -1003,3 +1436,196 @@ operator's rule, none of these is treated as satisfied.
   "Press me" took the counter to "3 clicks" with the hover tint and the focus
   ring both visible. Re-verified: fmt, clippy `-D warnings`, 301 `ui_core` + 44
   demo + 44 doctests, `cargo doc` clean, and the aarch64 cross-build.
+- 2026-09-30 — **task 12 committed by the operator, `9973185`, with the review
+  step completed but not repeated.** The verdict was *fix first*; the blocker and
+  the three majors were fixed and each fix mutation-verified, but **no reviewer
+  has looked at the fixes**, so the *No unreviewed advance* gate was skipped. The
+  task table records that rather than a pass. The commit is a sound target: the
+  tree was clean at `9973185` except for `doc/ui/DEMO_APPLICATION.md`, which is
+  untracked, so a reviewer can work against the commit with no revert point at
+  risk. What is unverified is the fixes themselves — chiefly the `Duration`
+  conversion in `input.rs`, the `shapes()` ordering tests, and the retitled demo
+  test.
+- 2026-09-30 — **`doc/ui/DEMO_APPLICATION.md` arrived untracked during task 12
+  and is not committed.** It is the operator's: a Tesla-like infotainment demo
+  in a new `TASK_UI_DEMO_n` category, superseding task 24. It is referenced from
+  the task table so a session resuming here does not start task 24, and is
+  otherwise untouched. Whether it belongs in the repository is the operator's
+  call, not this file's.
+- 2026-09-30 — **task 13 implemented: the Container widget, `Padding` in the
+  layout pass, and `ui_demo`'s `container()` helper retired.** Five files, two
+  independent components by the scope check's count (the widget, the layout
+  change it consumes) plus the demo migration, which touches none of the
+  library's behaviour. `widgets/container.rs` is new; `layout.rs` gained the
+  `Padding` type, the `LayoutState` field and the three places the pass applies
+  it; the demo's tree is built out of `Container`s and the pads sit on a card.
+  325 `ui_core` + 49 demo + 49 doctests, fmt clean, clippy `-D warnings` clean,
+  `cargo doc` clean, aarch64 cross-build clean (`AArch64`, the same four
+  dynamic dependencies), and the card seen on screen at 788×164 with the pads
+  inset by 12. Six deliberate breaks were run and each failed for the right
+  reason, and two of them found a gap first: removing the `inset` from `arrange`
+  was caught by nothing until `a_padded_container_measures_its_children_in_the_padded_box`
+  was written, which is now the test that says a padded container gives its
+  children a smaller box and not only a smaller offset. **Waived, with the
+  reason recorded in *Verifying a change that draws*: the theme switch of the
+  card could not be seen on screen, because XTEST key injection delivered no
+  event to the window in this X session.** `cargo audit` was not run; it is not
+  installed on this host and no dependency changed.
+- 2026-09-30 — **the operator decided to proceed to task 13 without the task 12
+  re-review**, having been told what was unverified and that the
+  *No unreviewed advance* gate was being skipped. The gate is skipped, not
+  satisfied: nothing about the fixes has had a second pair of eyes. Task 13
+  therefore builds on a task whose review findings are fixed but unchecked, and
+  if task 13's review turns up something in `input.rs` or `button.rs` that
+  belongs to task 12, it belongs to task 12's history and not to task 13's.
+- 2026-09-30 — **task 13 implemented, reviewed *approve with minor findings*, all
+  findings fixed; awaiting the operator's commit.** `widgets/container.rs` is
+  new (18 tests) and the demo's private `container()` helper is gone, with all
+  six of the demo's parents being `Container` widgets and a test that fails if a
+  bare parent reappears. `layout.rs` gained `Padding`, applied to the box
+  (`layout.rs:1189`), the placements (`:1200`) and the measurement (`:1527`) —
+  applied, not merely stored, which is the failure this repository has already
+  recorded once for the clip rect.
+  **The review's five findings, all fixed.** (i) A comment credited
+  `Padding::inset`'s four `.max(0.0)` floors with behaviour `clamp_axis` actually
+  provides; the reviewer removed the floors and got byte-identical output on
+  eleven arrangements. The floors are gone and both comments now name the clamp.
+  (ii) The demo's `on_change → mark_dirty` link for the card did nothing and its
+  comment said otherwise — the demo rebuilds every paint state each frame, and
+  `mark_dirty` dirties *layout* for a paint-only change. Deleted, with a comment
+  saying why the card is the one node that needs no link. (iii) A test was added
+  for `set_padding` *after* a settled pass, which every other padding test
+  missed; it is caught by removing `set_padding`'s `mark_dirty`. (iv) The
+  benchmark table overstated the regression by 5–10× on one unreplicated
+  baseline sample; replaced with the reviewer's interleaved figures, which put
+  the clean pass 11 % *faster* and the two deep shapes up about 1 %. (v) A
+  `"1 clicks"` string, from task 12, that the reviewer's own capture showed on
+  screen; now pluralised.
+  **A fifth finding was the reviewer's, and it corrected a claim of mine**: the
+  developer had waived *the card's theme switch, not seen on screen*, on the
+  evidence that XTEST delivered no `KeyPress`. That was wrong, and I had already
+  written the opposite claim into this file. On the runs where injection works, a
+  synthetic click is required first; after one, `T` changes 614,400 pixels and the
+  card's fill goes (30,30,30) → (245,245,245). The waiver is withdrawn, the
+  developer's note is marked superseded rather than deleted, and *Verifying a
+  change that draws* now records the whole of it — including that injection
+  delivers **nothing at all** on other runs, which is why "0 pixels changed" is
+  ambiguous and has to be checked against the on-screen counter before it is read
+  as a defect. **I over-claimed in the other direction while fixing it** and the
+  file says so.
+  **Requirement 2 is partially unmet and recorded as such:** `wrap: bool` is
+  accepted by `LayoutMode` and never read by the pass, which is task 07's
+  pre-existing state, documented at `layout.rs:495` as arriving with the list
+  widget. Container supplies the mode; it does not supply wrapping.
+  Re-verified after the fixes: fmt, clippy `-D warnings`, 326 `ui_core` + 49
+  demo + 49 doctests, `cargo doc` clean, aarch64 cross-build. `cargo audit` is
+  still not installed and remains the only waiver.
+- 2026-09-30 — **task 13 committed by the operator, `2dc9193`**, reviewed
+  *approve with minor findings* with all five fixed before the commit. The
+  operator's `5722fb1` separately committed `doc/ui/DEMO_APPLICATION.md`, so the
+  demo-application direction is now tracked rather than untracked.
+- 2026-09-30 — **task 14 implemented: the Slider widget, the action `Callback`
+  moved somewhere two widgets can reach it, and a slider in the demo.** Five
+  files: `widgets/slider.rs` is new (54 tests), `widgets/mod.rs` gains the
+  parameterised `Callback<T>` that task 12's own doc promised would move,
+  `widgets/button.rs` keeps its `Callback` name as a type alias for it, and
+  `ui_demo` gains a slider and a value readout under the button band. The widget
+  holds the value, the drawn thumb, the track, the fill, the thumb and its border
+  as properties, `min`/`max`/`step`/`orientation`/the three sizes as setters, and
+  a `Palette` read from the theme the way `Button`'s is.
+  **Two defects, and only one of them is the kind the suite can catch.** The
+  focus ring was drawn as a filled rounded rectangle around the whole slider,
+  which on screen is a white card with a track on it — a `RoundedRect` fills its
+  rect, and a slider has no background to draw over the ring's middle the way a
+  button does. Every draw-command assertion in the module called it correct, and
+  the capture is what found it; both are recorded in `.ai/NEVERAGAIN.md` with the
+  rules they replace. Separately, `Slider::travel` subtracted a rect's *origin*
+  from its *extent*, which every unit test missed because every one of them lays
+  its slider out at `(0, 0)`; the demo found it within the hour because the
+  demo's slider is at `(664, 496)`. Both are fixed, and a fixture away from the
+  origin now exists.
+  **Eleven deliberate breaks, each seen to fail for the right reason and each
+  restored from a snapshot taken immediately before it**: dropping the step snap
+  (3 tests), dropping the interaction's write of the drawn thumb (2), firing
+  `on_change` on an interaction that moved nothing (3), letting the keyboard act
+  on an unfocused slider (1), putting the focus ring back around the whole node
+  (1), removing the too-small-for-its-thumb guard (1), drawing the thumb's border
+  over the thumb (2), and four in the demo — not offering a drag to the slider
+  being dragged (1), and reordering the positionless-event precedence (3).
+  A twelfth mutation, dropping the clamp inside `fraction`, was **not** caught by
+  `cargo test --lib` at all: it was caught by the doctest on `fraction`, and the
+  clamp is now asserted in the unit suite as well, because every path the widget
+  takes clamps first and so nothing else in the module could see it missing.
+  Verified: fmt, clippy `-D warnings`, 380 `ui_core` + 65 demo + 57 doctests,
+  `cargo doc` clean, aarch64 cross-build (`AArch64`, statically linked, the same
+  shape as every previous task), and the slider **seen on screen three times**: at
+  its resting 0 with nothing but a built binary, and at 25 unfocused and 70 focused
+  on builds carrying a temporary seed in `Demo::new` that has since been reverted —
+  the whole method, and why two of the three came from a seeded build rather than
+  from the demo's own keys, is in *Verifying a change that draws*.
+  **Five acceptance criteria are waived: 2, 3, 4, 7 and 8** — the drag, the tap, the
+  keyboard and gamepad, the visible animation and the demo's response to a drag,
+  every one of which needs a pointer or a key. XTEST injection delivered nothing to
+  the app in both the developer's session and the reviewer's, and task 12's button
+  is the control that says so. `cargo audit` is a **tool gate, not a criterion**:
+  it is not installed and remains the standing waiver from tasks 07, 09, 10 and 13.
+- 2026-09-30 — **task 14 reviewed: *approve with required changes* — the widget
+  itself stands, and every finding is about the record or a doc comment.** The
+  reviewer re-ran the whole suite and reproduced all four of the developer's input
+  measurements exactly, tried three mutations against the widget and could not
+  break it, and upheld both `NEVERAGAIN` entries, the control comparison behind
+  the XTEST waiver, all six flagged scope risks, the left-stick reading,
+  `Orientation`'s being load-bearing, the `Button` alias removing no public path,
+  the no-collision claim (reproduced on the reviewer's own capture) and
+  `DEMO_APPLICATION.md` not being the developer's. Two majors and four minors, all
+  fixed here and none of them touching the widget's behaviour.
+  **Major 1 — a capture claim with no route in the code.** The file said the
+  slider was seen on screen "at 0, 25 and 70 … and focus ring", while the same
+  file recorded that no key and no click reached the app, and the demo's only
+  route to a focus is `set_focus`, which only a `Tab` or a positionless `Scroll`
+  reaches. The reviewer did the arithmetic the developer had not: **the demo's
+  `0` and `1` keys write 0 and 100, not 25 and 70**, so those two captures cannot
+  have come from them. They did not. They came from **a rebuilt binary with a
+  temporary six-line seed in `Demo::new` reading `SLIDER_PREVIEW` and
+  `SLIDER_FOCUS` from the environment**, taken because nothing else could put a
+  value or a focus on the screen, and reverted afterwards
+  (`rg -c SLIDER_PREVIEW ui/src/ui_demo/src/main.rs` is 0, and the file's md5
+  matches the pre-seed snapshot). The seed is now quoted verbatim in *Verifying a
+  change that draws*, with an explicit statement of what the focused capture is
+  and is not evidence for, and the `NEVERAGAIN` entry that rests on it carries the
+  same note. The claim was true; it was undocumented, which is the finding.
+  **Major 2 — three different counts for one waiver.** The table cell said `2`, the
+  History said "one acceptance criterion", and the *Verifying* section said "the
+  drag and key criteria", all against a ratified operator rule that requires a
+  criterion which cannot be verified here to be *named* so it is never later
+  mistaken for a verified one. All three now read the same: **ACs 2, 3, 4, 7 and
+  8**, with AC 1 recorded as capture-verified and ACs 5 and 6 explained as the
+  widget's own arithmetic, where a test *is* the whole of the verification.
+  `cargo audit` is now labelled a **tool gate, not a criterion**, in the cell and
+  in History, because the column header says criteria.
+  **Minor 3** — two doc comments (`FOCUS_RING` and `Palette::ring`) still described
+  the ring as drawn around the slider's whole rect, which is the pre-fix
+  description of the defect this change fixed. **Minor 4** —
+  `a_slider_paints_its_thumb_over_its_fill_and_its_border_under_itself` asserted
+  only the shape sequence, and `shapes` maps two `Circle`s to one word, so
+  swapping the thumb's circle and its border left it green; it now asserts the two
+  radii, `shapes`'s doc says what it cannot see, and the reviewer's swap was
+  re-run and took that test red with "12 against 14" before the restore. **Minor
+  5** — `.ai/NEVERAGAIN.md.context.md` still said five entries and "Last touched:
+  2026-09-27" against a file with 17; the sidecar is corrected and its own history
+  extended. **Minor 6** — the task 13 record said `container.rs` was "new (17
+  tests)" and it has 18, a count that went stale inside task 13's own fix round;
+  corrected here because this file was already being edited, and
+  `container.rs` itself is unchanged.
+  Re-verified after the fixes: fmt, clippy `-D warnings`, 380 `ui_core` + 65 demo
+  + 57 doctests, `cargo doc` clean. `cargo audit` is still not installed and
+  remains a tool gate.
+- 2026-09-30 — **the "task 12 is unverified" claim narrowed, because the operator
+  asked what it rested on and the answer was partly weaker than stated.** A
+  dedicated re-review of task 12's fixes never happened, so the gate was skipped
+  — that part stands. But the note said "nobody has checked the fixes", and that
+  was too strong: the task 13 review independently confirmed the **blocker**
+  twice, once by reading the unit fix in the source and once by driving a real
+  click that took the live counter from 0 to 1. What remains unexamined is the
+  three majors' fixes and the minors, which are test and comment changes with no
+  behavioural surface. The note above now says that instead.

@@ -197,3 +197,26 @@ the failing one immediately.
 when a GL call is added, read `gl.get_error()` after it once to find out which
 call is unhappy. A rendering change is not verified until the pixels have been
 looked at.
+
+## 2026-09-30 — A strength clamped to 0..=1, used directly as an effect's size
+
+`Button::paint` derived a press overlay's alpha from the button's scale —
+`((1.0 - scale) / (1.0 - PRESSED_SCALE)).clamp(0.0, 1.0)` — and passed it
+straight to a colour interpolator. A full press therefore meant a **fully
+opaque black** rectangle inset 2 px into the background: a pressed button was a
+black box, and its label was drawn on top in the theme's `OnPrimary`, which is
+black in the dark theme, so the label vanished too. The task asked for a
+"slight inner shadow".
+
+46 unit tests passed throughout, and they could not have caught it. Every one of
+them asserts on the *recorded draw commands*, and a rounded rect of near-black at
+alpha 71 and the same rect at alpha 255 are the same shape and the same colour;
+"is it black and is it inset" is the whole of what a draw-command assertion can
+ask. The number that distinguishes them is the one thing not asserted on.
+
+**Rule:** a quantity clamped to `0.0..=1.0` is a *position in a range*, not a
+magnitude. "How pressed" and "how opaque" are different quantities, and scaling
+one by the other needs a ceiling written down as a named constant with a reason.
+When an effect has a word like *slight* or *subtle* in its spec, assert the
+number that word fixes — here `shadow.a < 128` — because a shape assertion will
+not.

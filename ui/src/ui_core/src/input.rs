@@ -67,6 +67,8 @@
 //! );
 //! ```
 
+use std::time::Duration;
+
 use crate::arena::{Arena, Handle};
 use crate::layout::Offset;
 use crate::node::WidgetNode;
@@ -76,11 +78,23 @@ use sdl3::keyboard::{Keycode, Mod};
 use sdl3::mouse::MouseButton;
 
 /// The longest a press may last and still be a tap.
-const TAP_MAX_DURATION_MS: u64 = 300;
+///
+/// These two are [`Duration`]s rather than bare counts on purpose. SDL stamps
+/// every event with `SDL_GetTicksNS()` — nanoseconds, per `SDL_events.h` — and
+/// these thresholds used to be `u64` milliseconds compared against that value
+/// directly, which made the tap window 300 *nanoseconds* and fired a long press
+/// at 500 of them. Every press was therefore a long press, and
+/// `release_pointer` returns as soon as one has fired, so **no `Tap` was ever
+/// produced and no widget that acts on a tap could fire at all**.
+///
+/// A `Duration` makes that mistake unrepresentable: `held <= TAP_MAX_DURATION`
+/// does not compile if the two sides are in different units, where
+/// `held_ms <= 300` compiles happily and is wrong by a factor of a million.
+const TAP_MAX_DURATION: Duration = Duration::from_millis(300);
 /// How far a pointer may travel from its press point and still be a tap.
 const TAP_MAX_MOVEMENT: f32 = 10.0;
 /// How long a press must be held to become a long press.
-const LONG_PRESS_MIN_DURATION_MS: u64 = 500;
+const LONG_PRESS_MIN_DURATION: Duration = Duration::from_millis(500);
 /// How far a pointer must travel for the gesture to be a swipe.
 const SWIPE_MIN_DISTANCE: f32 = 50.0;
 
@@ -346,17 +360,68 @@ pub fn dispatch_event(
     event: &mut InputEvent,
     handler: &mut dyn FnMut(Handle, &mut InputEvent),
 ) {
+    for handle in route(nodes, root, event) {
+        handler(handle, event);
+        if event.consumed() {
+            break;
+        }
+    }
+}
+
+/// Returns the nodes `event` would be offered to by [`dispatch_event`], in the
+/// order it offers them: the deepest node under the event's position, then each
+/// ancestor, ending at `root`.
+///
+/// This is the same routing as [`dispatch_event`] with the borrow released
+/// before the caller acts on it, and it exists because a handler that reaches
+/// the arena re-enters it. The demo's widgets are reached through property
+/// callbacks — an `on_change` that marks a node dirty — and a property write
+/// from inside a handler while `dispatch_event` still holds a `Ref` on the arena
+/// is a `RefCell` double borrow, which panics rather than misbehaves. A caller
+/// whose handlers cannot reach the arena should use `dispatch_event`; one whose
+/// handlers can should route, drop the borrow, and then handle.
+///
+/// An event whose position is over no node yields an empty chain: there is no
+/// hit node, and so nothing to bubble along. An event with no position is not
+/// routed by one and yields `root`.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::arena::Arena;
+/// use ui_core::input::{route, InputEvent, InputEventKind};
+/// use ui_core::layout::{Constraints, Layout, LayoutState, Offset, Size};
+/// use ui_core::node::{self, WidgetNode};
+///
+/// let mut nodes = Arena::new();
+/// let root = node::create(
+///     &mut nodes,
+///     LayoutState::new().with_constraints(Constraints::tight(Size::new(100.0, 100.0))),
+/// );
+/// let child = node::create(
+///     &mut nodes,
+///     LayoutState::new().with_constraints(Constraints::tight(Size::new(20.0, 20.0))),
+/// );
+/// assert!(node::attach(&mut nodes, root, child));
+/// Layout::new(&mut nodes).layout(root, Constraints::tight(Size::new(100.0, 100.0)));
+///
+/// let event = InputEvent::new(InputEventKind::Tap, Some(Offset::new(5.0, 5.0)));
+/// let chain = route(&nodes, root, &event);
+///
+/// assert_eq!(chain, vec![child, root], "the child, then the parent");
+/// ```
+#[must_use]
+pub fn route(nodes: &Arena<WidgetNode>, root: Handle, event: &InputEvent) -> Vec<Handle> {
+    let mut chain = Vec::new();
     let mut current = match event.position() {
         Some(position) => hit_test(nodes, root, position),
         None => Some(root),
     };
     while let Some(handle) = current {
-        handler(handle, event);
-        if event.consumed() {
-            break;
-        }
+        chain.push(handle);
         current = nodes.get(handle).and_then(WidgetNode::parent);
     }
+    chain
 }
 
 /// Tracks the focused node in a tree and moves it on navigation input.
@@ -410,6 +475,46 @@ impl<'a> Focus<'a> {
     #[must_use]
     pub fn current(&self) -> Option<Handle> {
         self.current
+    }
+
+    /// Moves focus to `handle`, and reports whether it did.
+    ///
+    /// Only a node the caller has marked focusable with
+    /// [`Focus::set_focusable`] can be focused, so this cannot leave focus on
+    /// something the caller never offered; it returns `false` and leaves focus
+    /// where it was for anything else. That is the one way focus reaches a node
+    /// without a navigation key, and it exists for a caller that owns focus
+    /// itself — a gamepad and keyboard scheme, a pointer, or a tracker that does
+    /// not outlive the borrow it is built from and is rebuilt around the node it
+    /// last had.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ui_core::arena::Arena;
+    /// use ui_core::input::Focus;
+    /// use ui_core::layout::LayoutState;
+    /// use ui_core::node::{self, WidgetNode};
+    ///
+    /// let mut nodes = Arena::new();
+    /// let button = node::create(&mut nodes, LayoutState::new());
+    /// let panel = node::create(&mut nodes, LayoutState::new());
+    /// assert!(node::attach(&mut nodes, panel, button));
+    ///
+    /// let mut focus = Focus::new(&nodes, panel);
+    /// assert!(!focus.focus(button), "a node nobody offered cannot be focused");
+    ///
+    /// focus.set_focusable(button, true);
+    /// assert!(focus.focus(button));
+    /// assert_eq!(focus.current(), Some(button));
+    /// ```
+    #[must_use]
+    pub fn focus(&mut self, handle: Handle) -> bool {
+        if !self.focusable.contains(&handle) {
+            return false;
+        }
+        self.current = Some(handle);
+        true
     }
 
     /// Moves focus to the next focusable node, wrapping from the last to the
@@ -762,6 +867,7 @@ impl GestureRecognizer {
         if was_pinch || pointer.long_press_fired {
             return;
         }
+        let held = held_for(pointer.down_at, now);
         let travel = distance(pointer.start, position);
         if travel >= SWIPE_MIN_DISTANCE {
             out.push(InputEvent::new(
@@ -770,9 +876,7 @@ impl GestureRecognizer {
                 },
                 Some(position),
             ));
-        } else if travel <= TAP_MAX_MOVEMENT
-            && now.saturating_sub(pointer.down_at) <= TAP_MAX_DURATION_MS
-        {
+        } else if travel <= TAP_MAX_MOVEMENT && held <= TAP_MAX_DURATION {
             out.push(InputEvent::new(InputEventKind::Tap, Some(position)));
         }
     }
@@ -788,7 +892,7 @@ impl GestureRecognizer {
         for pointer in &mut self.pointers {
             if !pointer.long_press_fired
                 && !pointer.moved
-                && now.saturating_sub(pointer.down_at) >= LONG_PRESS_MIN_DURATION_MS
+                && held_for(pointer.down_at, now) >= LONG_PRESS_MIN_DURATION
             {
                 pointer.long_press_fired = true;
                 out.push(InputEvent::new(
@@ -863,6 +967,17 @@ fn swipe_direction(start: Offset, end: Offset) -> SwipeDirection {
 /// pointer events is rare, and the long press fires by the release at the
 /// latest. A `0` timestamp is therefore a safe stand-in — it is older than
 /// any real press, so it fires nothing.
+/// Returns how long a pointer pressed at `down_at` has been held at `now`.
+///
+/// `down_at` and `now` are SDL's own nanosecond stamps, so the difference is
+/// nanoseconds and this converts it to a [`Duration`] once, at the boundary.
+/// `saturating_sub` is kept so a clock that steps backwards — which a
+/// synthesised event can produce — reads as no time held rather than as a
+/// wrapped enormous one.
+fn held_for(down_at: u64, now: u64) -> Duration {
+    Duration::from_nanos(now.saturating_sub(down_at))
+}
+
 fn handled_timestamp(event: &Event) -> u64 {
     match event {
         Event::FingerDown { timestamp, .. }
@@ -923,6 +1038,20 @@ mod tests {
             pressure: 1.0,
             window_id: 0,
         }
+    }
+
+    /// A nanosecond timestamp `duration` after the zero the event helpers stamp
+    /// their events with.
+    ///
+    /// SDL timestamps events with `SDL_GetTicksNS()`, so a test that wants a
+    /// press to last 200 milliseconds has to say 200 *million* nanoseconds. The
+    /// first version of this suite said `200`, and every test in it passed
+    /// against a recogniser that read milliseconds where SDL writes nanoseconds:
+    /// a 200-nanosecond press is under a 300-nanosecond window, and a
+    /// 300-nanosecond one is over it, so the bug was invisible here and fatal in
+    /// the product.
+    fn after(duration: Duration) -> u64 {
+        u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
     }
 
     /// Returns a finger-motion event for `finger_id` at `(x, y)`.
@@ -1181,7 +1310,7 @@ mod tests {
         assert!(recognizer.process(&finger_down(1, 100.0, 100.0)).is_empty());
 
         let up = Event::FingerUp {
-            timestamp: 200,
+            timestamp: after(Duration::from_millis(200)),
             touch_id: 1,
             finger_id: 1,
             x: 105.0,
@@ -1204,7 +1333,7 @@ mod tests {
         assert!(recognizer.process(&finger_down(1, 100.0, 100.0)).is_empty());
 
         let up = Event::FingerUp {
-            timestamp: TAP_MAX_DURATION_MS + 1,
+            timestamp: after(TAP_MAX_DURATION + Duration::from_nanos(1)),
             touch_id: 1,
             finger_id: 1,
             x: 100.0,
@@ -1220,6 +1349,60 @@ mod tests {
             events.is_empty(),
             "a press past the tap window is not a tap"
         );
+    }
+
+    #[test]
+    fn a_press_of_a_realistic_length_is_a_tap_and_a_held_one_is_a_long_press() {
+        // The test that pins the unit SDL timestamps events in. A press held for
+        // a tenth of a second is a tap and nothing else, and one held for six
+        // tenths is a long press — read as milliseconds against a nanosecond
+        // stamp, *both* were over the 300 threshold and both fired a long press,
+        // so the recogniser produced no `Tap` at all and no widget acting on one
+        // could ever fire. A test that used 200 for "quick" could not see that,
+        // because 200 nanoseconds is under a 300-nanosecond window.
+        let mut recognizer = GestureRecognizer::new();
+        assert!(recognizer.process(&finger_down(1, 100.0, 100.0)).is_empty());
+
+        let quick = Event::FingerUp {
+            timestamp: after(Duration::from_millis(100)),
+            touch_id: 1,
+            finger_id: 1,
+            x: 100.0,
+            y: 100.0,
+            dx: 0.0,
+            dy: 0.0,
+            pressure: 1.0,
+            window_id: 0,
+        };
+        let events = recognizer.process(&quick);
+        assert_eq!(events.len(), 1, "a tenth of a second is an ordinary click");
+        assert_eq!(events[0].kind(), InputEventKind::Tap);
+
+        // And the same press held past the long-press threshold, which is the
+        // case the tap window has to stay clear of.
+        let mut recognizer = GestureRecognizer::new();
+        assert!(recognizer.process(&finger_down(1, 100.0, 100.0)).is_empty());
+        let mut held = Event::FingerMotion {
+            timestamp: after(Duration::from_millis(100)),
+            touch_id: 1,
+            finger_id: 1,
+            x: 100.0,
+            y: 100.0,
+            dx: 0.0,
+            dy: 0.0,
+            pressure: 1.0,
+            window_id: 0,
+        };
+        assert!(recognizer.process(&held).is_empty());
+        still_timestamp(&mut held, after(Duration::from_millis(600)));
+        let events = recognizer.process(&held);
+
+        assert_eq!(
+            events.len(),
+            1,
+            "six tenths of a second has passed the long-press threshold"
+        );
+        assert_eq!(events[0].kind(), InputEventKind::LongPress);
     }
 
     #[test]
@@ -1254,7 +1437,10 @@ mod tests {
         // A motion at the same position carries a later timestamp, which is
         // what the recogniser reads the threshold against.
         let mut still = finger_motion(1, 100.0, 100.0);
-        still_timestamp(&mut still, LONG_PRESS_MIN_DURATION_MS + 100);
+        still_timestamp(
+            &mut still,
+            after(LONG_PRESS_MIN_DURATION + Duration::from_millis(100)),
+        );
         let events = recognizer.process(&still);
 
         assert_eq!(events.len(), 1);
@@ -1263,7 +1449,10 @@ mod tests {
 
         // The release after a long press finalises nothing.
         let mut up = finger_up(1, 100.0, 100.0);
-        still_timestamp(&mut up, LONG_PRESS_MIN_DURATION_MS + 200);
+        still_timestamp(
+            &mut up,
+            after(LONG_PRESS_MIN_DURATION + Duration::from_millis(200)),
+        );
         let events = recognizer.process(&up);
         assert!(
             events.is_empty(),
@@ -1290,7 +1479,10 @@ mod tests {
 
         // Well past the threshold, still no long press — the pointer moved.
         let mut later = finger_motion(1, 160.0, 100.0);
-        still_timestamp(&mut later, LONG_PRESS_MIN_DURATION_MS + 100);
+        still_timestamp(
+            &mut later,
+            after(LONG_PRESS_MIN_DURATION + Duration::from_millis(100)),
+        );
         let events = recognizer.process(&later);
         assert!(
             events
@@ -1420,7 +1612,10 @@ mod tests {
         // A still motion well past the threshold: with two fingers down the
         // hold is a pinch, not a long press.
         let mut still = finger_motion(1, 100.0, 100.0);
-        still_timestamp(&mut still, LONG_PRESS_MIN_DURATION_MS + 100);
+        still_timestamp(
+            &mut still,
+            after(LONG_PRESS_MIN_DURATION + Duration::from_millis(100)),
+        );
         let events = recognizer.process(&still);
         assert!(
             events
@@ -1442,7 +1637,10 @@ mod tests {
         // finger id: a pointer the cancel left behind would fire a spurious
         // long press here.
         let mut still = finger_motion(1, 100.0, 100.0);
-        still_timestamp(&mut still, LONG_PRESS_MIN_DURATION_MS + 100);
+        still_timestamp(
+            &mut still,
+            after(LONG_PRESS_MIN_DURATION + Duration::from_millis(100)),
+        );
         let events = recognizer.process(&still);
         assert!(
             events
@@ -1830,6 +2028,36 @@ mod tests {
 
         focus.set_focusable(first, false);
         assert_eq!(focus.current(), None);
+    }
+
+    #[test]
+    fn focusing_a_node_moves_focus_to_it_without_a_navigation_key() {
+        let (nodes, root, [first, second, third], _) = three_stacked();
+        let mut focus = Focus::new(&nodes, root);
+        for handle in [first, second, third] {
+            focus.set_focusable(handle, true);
+        }
+
+        assert!(focus.focus(third));
+        assert_eq!(focus.current(), Some(third));
+        assert!(focus.focus(first), "and straight on to another");
+        assert_eq!(focus.current(), Some(first));
+        // Navigation carries on from wherever focus was put.
+        focus.focus_next();
+        assert_eq!(focus.current(), Some(second));
+    }
+
+    #[test]
+    fn focusing_a_node_nobody_offered_leaves_focus_alone() {
+        let (nodes, root, [first, second, ..], _) = three_stacked();
+        let mut focus = Focus::new(&nodes, root);
+        focus.set_focusable(first, true);
+        focus.set_focusable(second, true);
+        focus.focus_next();
+        assert_eq!(focus.current(), Some(first));
+
+        assert!(!focus.focus(root), "the panel is not focusable");
+        assert_eq!(focus.current(), Some(first), "so focus did not move");
     }
 
     #[test]

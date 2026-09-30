@@ -17,6 +17,15 @@
 //! them back to rest. Every colour property carries an `on_change` callback
 //! that marks its node dirty — the link from an animation or a theme switch to
 //! the node arena, which the animation and theme modules know nothing about.
+//!
+//! A band of buttons sits to the right of the text panel: click one and the
+//! click counter under the row goes up, or reset it with the third. The middle
+//! button is disabled — it swallows a tap, fires nothing, and focus steps over
+//! it. The row is driven by the input module rather than by raw events: the
+//! gesture recogniser turns an SDL event into the tap or key press it completed,
+//! and dispatch routes it to the node under it, which is what makes a button
+//! consume the events meant for it. `Tab` and `Shift+Tab` move focus and `Enter`
+//! activates the button holding it.
 
 use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::Keycode;
@@ -29,16 +38,20 @@ use std::time::{Duration, Instant};
 use ui_core::animation::{AnimationClock, AnyAnimation, Easing, Interpolate, Stagger};
 use ui_core::arena::{Arena, Handle};
 use ui_core::font::Font;
+use ui_core::input::{self, Focus, GestureRecognizer, InputEvent, InputEventKind, Key};
 use ui_core::layout::{
     mark_dirty, Constraints, CrossAxisAlignment, FlexConfig, Layout, LayoutMode, LayoutState,
     MainAxisAlignment, Offset, Size,
 };
 use ui_core::node::{self, WidgetNode};
+#[cfg(test)]
+use ui_core::paint::DrawCommand;
 use ui_core::paint::{Color, PaintState, Painter};
 use ui_core::property::Property;
 use ui_core::render::context::Context;
 use ui_core::render::Renderer;
 use ui_core::theme::{PropertyValue, Theme, ThemeToken};
+use ui_core::widgets::button::{Button, Callback, Motion, Palette};
 use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapMode};
 
 /// The window, and the box the root is laid out in.
@@ -91,6 +104,20 @@ const TEXT_PANEL: Size = Size {
 /// leaves at the top-left corner.
 const TEXT_PANEL_ORIGIN: (f32, f32) = (60.0, 170.0);
 
+/// The width the text column's labels are laid out in.
+///
+/// This is what keeps the column clear of the button band, and it is the reason
+/// it is not the panel's own width. The panel is [`TEXT_PANEL`] wide, so a
+/// right-aligned label laid out across it ends at 60 + 900 = 960 and runs
+/// underneath the band, which starts at [`BUTTON_ORIGIN`]'s 664 — the kind of
+/// collision no unit test sees, because both labels and both buttons lay out
+/// correctly on their own. Laying the column out at 594 puts its right edge at
+/// 654, and the ten pixels between are the clearance.
+///
+/// The paragraph wraps at this width and the three alignment rows share it, so
+/// the comparison those three exist for is still like for like.
+const TEXT_COLUMN_WIDTH: f32 = 594.0;
+
 /// The gap between the text column's labels.
 const LABEL_SPACING: f32 = 12.0;
 
@@ -127,6 +154,65 @@ const RELEASE_SPRING: Easing = Easing::Spring {
     damping: 9.0,
     stiffness: 140.0,
 };
+
+/// Where the button band sits in the window.
+///
+/// This is the row's position inside the band's `Absolute` box, and a
+/// `Stack` places every one of its children at the origin regardless of the
+/// position they declare — so the offset belongs here, on the row, and not on
+/// the band itself, which a `Stack` would ignore. Putting it on the band is a
+/// mistake that looks right: the band lands on top of the pads, which are
+/// centred and reach from x = 130 to x = 894.
+///
+/// The text panel's labels stay left of 660 — the panel is 900 wide from an
+/// origin of 60, but its widest line wraps at 594 — and the pads end at y = 140,
+/// so the band goes right of the text and below the pads rather than under the
+/// text column, which already reaches the bottom of the window.
+const BUTTON_ORIGIN: (f32, f32) = (664.0, 396.0);
+
+/// The gap between the buttons in the row.
+const BUTTON_SPACING: f32 = 16.0;
+
+/// The font size the buttons and their click counter are drawn at.
+///
+/// The panel's labels are at [`TEXT_SIZE_START`]; the band's own text is a row
+/// of short labels rather than a column of prose, and `+` and `-` move the
+/// panel alone.
+const BUTTON_FONT: f32 = 20.0;
+
+/// How far below the row the click counter sits.
+///
+/// A row of buttons is 44 tall, so this clears it with room for the counter's
+/// own line, and the counter is placed rather than stacked: an `Absolute` box
+/// gives each of its children the position it declares, and the row's is
+/// already taken by the buttons.
+const COUNTER_DROP: f32 = 60.0;
+
+/// The width the click counter is given, which is wide enough for the text it
+/// ever shows: it counts up, and a label laid out narrower than its text would
+/// wrap it onto a second line.
+const COUNTER_WIDTH: f32 = 320.0;
+
+/// What a button in the demo's band does when it is clicked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ButtonAction {
+    /// Add one to the click counter.
+    Count,
+    /// Put the click counter back to zero.
+    Reset,
+}
+
+/// The buttons in the demo's band: their label, whether they are disabled, and
+/// what they do.
+///
+/// The middle one is disabled on purpose — a control that refuses interaction is
+/// half of what the widget is, and it is what shows a disabled button refusing a
+/// tap and being stepped over by focus.
+const BUTTONS: [(&str, bool, ButtonAction); 3] = [
+    ("Press me", false, ButtonAction::Count),
+    ("Disabled", true, ButtonAction::Count),
+    ("Reset", false, ButtonAction::Reset),
+];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut renderer = Renderer::new(Context::new(
@@ -296,6 +382,98 @@ impl DemoLabel {
     }
 }
 
+/// The four state properties a button is written in, kept together so the demo
+/// can tell whether anything about a button has changed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ButtonFlags {
+    /// A pointer is over the button.
+    hovered: bool,
+    /// The button is held down.
+    pressed: bool,
+    /// The button refuses interaction.
+    disabled: bool,
+    /// The button holds focus.
+    focused: bool,
+}
+
+/// A button in the demo's band: the widget, and the state the demo last wrote to
+/// it and last aimed it at.
+///
+/// The two records are what stop a frame from doing work: a property write
+/// notifies the node's `on_change` callback and marks the node dirty, and
+/// aiming a button restarts its transition, so both are done only when the state
+/// or the palette has actually moved.
+struct DemoButton {
+    /// The button widget, with its node in the arena.
+    widget: Button,
+    /// The state the demo last wrote to the widget's properties.
+    written: ButtonFlags,
+    /// The state the widget was last aimed at.
+    aimed: ButtonFlags,
+}
+
+impl DemoButton {
+    /// Returns the button's node in the arena.
+    fn node(&self) -> Handle {
+        self.widget.handle()
+    }
+
+    /// Returns the state the widget is in.
+    fn state(&self) -> ButtonFlags {
+        ButtonFlags {
+            hovered: self.widget.hovered.get(),
+            pressed: self.widget.pressed.get(),
+            disabled: self.widget.disabled.get(),
+            focused: self.widget.focused.get(),
+        }
+    }
+
+    /// Returns whether the button can hold focus.
+    ///
+    /// A disabled button cannot: focus belongs to what the user can act on, and
+    /// a control that swallows a tap and fires nothing has nothing to be
+    /// activated by a key.
+    fn is_focusable(&self) -> bool {
+        !self.widget.disabled.get()
+    }
+}
+
+/// Returns a colour property that follows whichever of `tokens` the
+/// `color_token` property names.
+///
+/// Every piece of text in the demo is bound through this, so `C` moves the text
+/// panel and the click counter together.
+fn cycling_color(
+    color_token: &Property<ThemeToken>,
+    tokens: &[(ThemeToken, Property<PropertyValue>)],
+) -> Property<Color> {
+    let token = color_token.clone();
+    let candidates = tokens.to_vec();
+    Property::bind(move || {
+        let wanted = token.get();
+        candidates
+            .iter()
+            .find(|(candidate, _)| *candidate == wanted)
+            .and_then(|(_, property)| property.get().as_color())
+            .unwrap_or(Color::new(255, 255, 255, 255))
+    })
+}
+
+/// Returns the click handler for a button in the demo's band, writing to
+/// `clicks`.
+///
+/// The handler holds a clone of the property rather than the demo: a property is
+/// a handle to shared state, so the closure reaches the counter the demo shows
+/// without the demo being captured, and the button outliving the demo cannot
+/// leave a dangling borrow behind it.
+fn button_callback(clicks: &Property<u32>, action: ButtonAction) -> Callback {
+    let clicks = clicks.clone();
+    Callback::new(move || match action {
+        ButtonAction::Count => clicks.set(clicks.get() + 1),
+        ButtonAction::Reset => clicks.set(0),
+    })
+}
+
 /// The demo's widget tree, the pads that press, the labels that show what text
 /// rendering does, the theme every colour comes from, and the clock that drives
 /// the pads.
@@ -327,6 +505,16 @@ struct Demo {
     /// Whether the theme is currently the dark one.
     dark: bool,
     mouse_pressed: Option<usize>,
+    /// The buttons in the band, with the state the demo last wrote to each.
+    buttons: Vec<DemoButton>,
+    /// The label showing the click counter, under the row of buttons.
+    counter: DemoLabel,
+    /// The gesture recogniser the button row's events are built from.
+    recognizer: GestureRecognizer,
+    /// The button holding focus, or `None` when nothing does.
+    focused: Option<Handle>,
+    /// The index of the button a pointer is holding down, if any.
+    pressed: Option<usize>,
 }
 
 impl Demo {
@@ -401,18 +589,7 @@ impl Demo {
         let mut labels = Vec::new();
         for (text, options) in demo_labels() {
             let mut label = Label::new(&mut nodes, text);
-            label.color = {
-                let token = color_token.clone();
-                let candidates = token_properties.clone();
-                Property::bind(move || {
-                    let wanted = token.get();
-                    candidates
-                        .iter()
-                        .find(|(candidate, _)| *candidate == wanted)
-                        .and_then(|(_, property)| property.get().as_color())
-                        .unwrap_or(Color::new(255, 255, 255, 255))
-                })
-            };
+            label.color = cycling_color(&color_token, &token_properties);
             label.font_size.set(TEXT_SIZE_START);
             labels.push(DemoLabel { label, options });
         }
@@ -455,13 +632,114 @@ impl Demo {
             return Err("ui_demo: the text column could not be attached");
         }
 
-        // A stack: the background fills the window behind the row of pads and
-        // the text panel, and both are painted over it.
+        // The button band, to the right of the text panel: a row of three
+        // buttons over a click counter. The band is `Absolute` so the row and
+        // the counter each sit at their own position inside it.
+        let clicks = Property::new(0u32);
+        let counter_text = {
+            let clicks = clicks.clone();
+            Property::bind(move || format!("{} clicks", clicks.get()))
+        };
+        let mut counter = Label::new(&mut nodes, String::new());
+        counter.text = counter_text;
+        counter.color = cycling_color(&color_token, &token_properties);
+        counter.font_size.set(BUTTON_FONT);
+        let counter = DemoLabel {
+            label: counter,
+            options: LayoutOptions {
+                max_width: COUNTER_WIDTH,
+                ..LayoutOptions::default()
+            },
+        };
+
+        let button_line_height = metrics.line_height(BUTTON_FONT);
+        let mut buttons = Vec::new();
+        for &(text, disabled, action) in &BUTTONS {
+            let mut widget = Button::new(&mut nodes, text);
+            widget.font_size.set(BUTTON_FONT);
+            widget.disabled.set(disabled);
+            widget.set_palette(Palette::from_theme(&theme));
+            // The palette names the colours the states are derived from, and
+            // the properties still hold the neutral defaults `Button::new` wrote,
+            // so the button is snapped onto its theme before it is ever drawn.
+            widget.snap_to_state();
+            widget.on_click = button_callback(&clicks, action);
+            // Every button is given the rect its own label and padding need,
+            // floored at the minimum touch target, so the band lays out from the
+            // widgets' sizes rather than from a size written out here.
+            let size = widget.size(
+                &|ch: char| metrics.advance(ch, BUTTON_FONT),
+                button_line_height,
+            );
+            nodes
+                .get_mut(widget.handle())
+                .ok_or("ui_demo: a button node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+            buttons.push(DemoButton {
+                widget,
+                written: ButtonFlags {
+                    hovered: false,
+                    pressed: false,
+                    disabled,
+                    focused: false,
+                },
+                aimed: ButtonFlags {
+                    hovered: false,
+                    pressed: false,
+                    disabled,
+                    focused: false,
+                },
+            });
+        }
+        let button_nodes: Vec<Handle> = buttons.iter().map(DemoButton::node).collect();
+        let button_row = container(
+            &mut nodes,
+            LayoutMode::row(),
+            FlexConfig::new()
+                .with_spacing(BUTTON_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+            &button_nodes,
+        )?;
+        // The row and the counter are each placed inside the band, which is what
+        // `Absolute` is for: the row at the band's own offset, the counter
+        // `COUNTER_DROP` below it.
+        nodes
+            .get_mut(button_row)
+            .ok_or("ui_demo: the button row is missing")?
+            .layout_mut()
+            .set_position(Some(Offset::new(BUTTON_ORIGIN.0, BUTTON_ORIGIN.1)));
+        nodes
+            .get_mut(counter.label.handle())
+            .ok_or("ui_demo: the click counter is missing")?
+            .layout_mut()
+            .set_position(Some(Offset::new(
+                BUTTON_ORIGIN.0,
+                BUTTON_ORIGIN.1 + COUNTER_DROP,
+            )));
+        // The band is the window, not a box of its own: it is a `Stack` child,
+        // and a `Stack` sizes a child from its own constraints but places it at
+        // the origin. Giving it the window's size makes the offsets inside it
+        // window coordinates, which is what the two positions above assume.
+        let button_area = node::create(
+            &mut nodes,
+            LayoutState::new()
+                .with_mode(LayoutMode::Absolute)
+                .with_constraints(Constraints::tight(WINDOW)),
+        );
+        if !node::attach(&mut nodes, button_area, button_row)
+            || !node::attach(&mut nodes, button_area, counter.label.handle())
+        {
+            return Err("ui_demo: the button band could not be assembled");
+        }
+
+        // A stack: the background fills the window behind the row of pads, the
+        // text panel and the button band, and all three are painted over it.
         let root = container(
             &mut nodes,
             LayoutMode::Stack,
             FlexConfig::new(),
-            &[background, row, text_panel],
+            &[background, row, text_panel, button_area],
         )?;
 
         // The link from an animation or a theme switch to a node: every write
@@ -509,6 +787,47 @@ impl Demo {
             });
         }
 
+        // The same link for the buttons: every property a button's transition
+        // writes — its background, label colour, scale and opacity — marks its
+        // own node dirty, so the next pass repaints it. The button is a widget
+        // that owns a clock rather than a property the demo animates, so this is
+        // the only thing standing between a button's transition and the screen.
+        for button in &buttons {
+            let node = button.widget.handle();
+            // The two colours first, then the two numbers: one array cannot hold
+            // both, and the writes all mark the same node dirty anyway.
+            let background = &button.widget.background;
+            let foreground = &button.widget.foreground;
+            for property in [background, foreground] {
+                let nodes = Rc::clone(&nodes);
+                property.on_change(move |_| {
+                    mark_dirty(&mut nodes.borrow_mut(), node);
+                });
+            }
+            let scale = &button.widget.scale;
+            let opacity = &button.widget.opacity;
+            for property in [scale, opacity] {
+                let nodes = Rc::clone(&nodes);
+                property.on_change(move |_| {
+                    mark_dirty(&mut nodes.borrow_mut(), node);
+                });
+            }
+        }
+
+        // And for the click counter: the count is a property, the label's text
+        // is bound to it, and a write to either marks the counter's node dirty.
+        {
+            let text_nodes = Rc::clone(&nodes);
+            let node = counter.label.handle();
+            counter.label.text.on_change(move |_| {
+                mark_dirty(&mut text_nodes.borrow_mut(), node);
+            });
+            let color_nodes = Rc::clone(&nodes);
+            counter.label.color.on_change(move |_| {
+                mark_dirty(&mut color_nodes.borrow_mut(), node);
+            });
+        }
+
         // The tree never changes shape, so the order is computed once.
         let order = paint_order(&nodes.borrow(), root);
         Ok(Demo {
@@ -528,6 +847,11 @@ impl Demo {
             theme,
             dark: true,
             mouse_pressed: None,
+            buttons,
+            counter,
+            recognizer: GestureRecognizer::new(),
+            focused: None,
+            pressed: None,
         })
     }
 
@@ -581,7 +905,21 @@ impl Demo {
     /// releases them on the spring, `+` and `-` move the text size, `C` moves
     /// the token the text takes its colour from, and the left mouse button
     /// presses and releases the pad under the cursor.
+    ///
+    /// The button band is driven the other way round, through the input module:
+    /// the event goes to the [`GestureRecognizer`]
+    /// first, and whatever gesture or key it completed is dispatched to the node
+    /// under it, which is what lets a button consume the events meant for it
+    /// rather than letting them reach whatever is behind. `Tab` and `Shift+Tab`
+    /// move focus, and Enter activates the button holding it.
+    ///
+    /// Space is the one key both halves want. It belongs to the button holding
+    /// focus, because that is the control a user has navigated to, and falls
+    /// back to the pads when nothing is focused — so the pads still work with
+    /// `Tab` never pressed, which is how the demo starts.
     fn handle_event(&mut self, event: Event) {
+        let produced = self.recognizer.process(&event);
+
         match event {
             Event::KeyDown {
                 keycode: Some(Keycode::T),
@@ -593,7 +931,7 @@ impl Demo {
                 repeat: false,
                 ..
             } => match keycode {
-                Keycode::Space => self.press_all(),
+                Keycode::Space if self.focused.is_none() => self.press_all(),
                 Keycode::Equals | Keycode::Plus => {
                     self.set_text_size(self.text_size + TEXT_SIZE_STEP);
                 }
@@ -604,16 +942,26 @@ impl Demo {
             Event::KeyUp {
                 keycode: Some(Keycode::Space),
                 ..
-            } => self.release_all(),
+            } => {
+                if self.focused.is_none() {
+                    self.release_all();
+                }
+            }
             Event::MouseButtonDown {
                 mouse_btn: MouseButton::Left,
                 x,
                 y,
                 ..
             } => {
+                // A press is tracked here rather than taken from the recogniser,
+                // because a recogniser reports a tap on the *release*: the
+                // pressed appearance has to be on screen for the whole time the
+                // pointer is down, which is before any tap exists.
                 if let Some(index) = self.pad_at(x, y) {
                     self.mouse_pressed = Some(index);
                     self.press_pad(index);
+                } else if let Some(index) = self.button_at(x, y) {
+                    self.pressed = Some(index);
                 }
             }
             Event::MouseButtonUp {
@@ -623,8 +971,126 @@ impl Demo {
                 if let Some(index) = self.mouse_pressed.take() {
                     self.release_pad(index);
                 }
+                self.pressed = None;
             }
             _ => {}
+        }
+
+        for mut input_event in produced {
+            self.route_input_event(&mut input_event);
+        }
+    }
+
+    /// Delivers one event the recogniser produced to the button band.
+    ///
+    /// A positional event is routed through [`input::route`] and offered to each
+    /// node in turn until a button consumes it, which is what lets a button stop
+    /// the events meant for it. A key has no position and is not routed by one,
+    /// so it goes to the button holding focus — except a navigation key, which
+    /// moves that focus instead.
+    ///
+    /// The chain is resolved before any handler runs, rather than dispatched
+    /// through [`input::dispatch_event`], because a button's click writes a
+    /// property and that write fires the `on_change` callback which marks a node
+    /// dirty: a handler reaching the arena while the dispatch still held a
+    /// borrow of it would be a `RefCell` double borrow, and would panic on the
+    /// first click rather than on anything a test could have caught by reading
+    /// the code.
+    fn route_input_event(&mut self, event: &mut InputEvent) {
+        if event.position().is_none() {
+            if let InputEventKind::KeyDown { .. } = event.kind() {
+                if self.focus_navigation(event) {
+                    event.consume();
+                    return;
+                }
+            }
+            if let Some(handle) = self.focused {
+                if let Some(button) = self.buttons.iter().find(|button| button.node() == handle) {
+                    button.widget.on_event(event);
+                }
+            }
+            return;
+        }
+
+        let chain = {
+            let nodes = self.nodes.borrow();
+            input::route(&nodes, self.root, event)
+        };
+        for handle in chain {
+            let Some(button) = self.buttons.iter().find(|button| button.node() == handle) else {
+                continue;
+            };
+            button.widget.on_event(event);
+            if event.consumed() {
+                break;
+            }
+        }
+    }
+
+    /// Moves focus if `event` is a navigation key, and reports whether it was.
+    ///
+    /// `Tab` and `Shift+Tab` are the keyboard's navigation, and a gamepad
+    /// steering-wheel axis arrives as a `Scroll` with no position, so both reach
+    /// this through the same [`Focus`] tracker. A **mouse** wheel is not one of
+    /// them: `GestureRecognizer` gives a wheel event the pointer's position, so
+    /// it is routed as a positional event and lands on the node under the cursor
+    /// rather than here. The focusable set is rebuilt from the buttons each
+    /// time, which is what makes a disabled button fall out of the order rather
+    /// than sit in it.
+    fn focus_navigation(&mut self, event: &InputEvent) -> bool {
+        if event.position().is_some() {
+            return false;
+        }
+        let scroll = match event.kind() {
+            InputEventKind::Scroll { delta } => Some(delta.y),
+            _ => None,
+        };
+        let is_tab = matches!(
+            event.kind(),
+            InputEventKind::KeyDown {
+                key: Key::Keyboard(Keycode::Tab),
+                ..
+            }
+        );
+        if !is_tab && scroll.is_none() {
+            return false;
+        }
+
+        let next = {
+            let nodes = self.nodes.borrow();
+            let mut focus = Focus::new(&nodes, self.root);
+            for button in &self.buttons {
+                focus.set_focusable(button.node(), button.is_focusable());
+            }
+            // Re-entering the order where focus already is. `Focus` starts with
+            // nothing focused, so without this a wheel turned twice in a row
+            // would walk from the top both times, and Shift+Tab from the first
+            // button would go forward instead of back.
+            if let Some(current) = self.focused {
+                let _ = focus.focus(current);
+            }
+            if let Some(delta) = scroll {
+                focus.handle_scroll(delta);
+            } else {
+                let _ = focus.handle_key(event);
+            }
+            focus.current()
+        };
+        self.set_focus(next);
+        true
+    }
+
+    /// Records which button holds focus, and writes the flag every button's
+    /// `focused` property holds, so the rings move.
+    fn set_focus(&mut self, next: Option<Handle>) {
+        self.focused = next;
+        let focused = self.focused;
+        for button in &mut self.buttons {
+            let wanted = Some(button.node()) == focused;
+            if button.widget.focused.get() != wanted {
+                button.widget.focused.set(wanted);
+                button.written.focused = wanted;
+            }
         }
     }
 
@@ -635,10 +1101,16 @@ impl Demo {
     /// written its last value — and marked its node dirty through the
     /// property's callback — before the pass below reads the tree. The theme's
     /// clock is ticked alongside the pads': a theme switch is an animation
-    /// like any other, and its frames have to land before the pass too.
+    /// like any other, and its frames have to land before the pass too. Each
+    /// button ticks its own clock, which is the same order for the same reason.
     fn frame(&mut self, size: Size, delta: Duration) {
         let _ = self.clock.tick(delta);
         let _ = self.theme.tick(delta);
+        self.track_hover();
+        self.sync_button_state();
+        for button in &self.buttons {
+            let _ = button.widget.tick(delta);
+        }
 
         let mut nodes = self.nodes.borrow_mut();
         Layout::new(&mut nodes).layout(self.root, Constraints::tight(size));
@@ -655,6 +1127,18 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(painter.finish());
                 continue;
             }
+            if let Some(button) = self.buttons.iter().find(|button| button.node() == handle) {
+                let commands = match node.layout().rect() {
+                    Some(rect) => button.widget.paint(
+                        rect.into(),
+                        &|ch: char| self.metrics.advance(ch, BUTTON_FONT),
+                        self.metrics.line_height(BUTTON_FONT),
+                    ),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
             let Some(pad) = self.pads.iter().find(|pad| pad.node == handle) else {
                 continue;
             };
@@ -668,12 +1152,12 @@ impl Demo {
             *node.paint_mut() = PaintState::from_commands(painter.finish());
         }
 
-        // The labels last, so the text is on top of the pads: each is painted
-        // with the layout it was given, measuring its characters through the
-        // demo's font, so what is drawn is the laid-out text and not one raw
-        // run. They are painted here rather than in the loop above because the
-        // loop walks the tree's own order, and the labels are reached through
-        // the panel, not as its siblings.
+        // The labels last, so the text is on top of the pads and the buttons:
+        // each is painted with the layout it was given, measuring its
+        // characters through the demo's font, so what is drawn is the laid-out
+        // text and not one raw run. They are painted here rather than in the
+        // loop above because the loop walks the tree's own order, and the
+        // labels are reached through the panel, not as its siblings.
         let text_size = self.text_size;
         for (demo_label, &handle) in self.labels.iter().zip(self.label_nodes.iter()) {
             let Some(node) = nodes.get_mut(handle) else {
@@ -688,6 +1172,84 @@ impl Demo {
                 self.metrics.advance(ch, text_size)
             });
             *node.paint_mut() = PaintState::from_commands(commands);
+        }
+
+        // The click counter is reached through the band, so it is painted the
+        // same way the panel's labels are.
+        {
+            let Some(node) = nodes.get_mut(self.counter.label.handle()) else {
+                return;
+            };
+            let Some(rect) = node.layout().rect() else {
+                return;
+            };
+            let mut options = self.counter.options;
+            options.line_height = self.metrics.line_height(BUTTON_FONT);
+            let commands = self
+                .counter
+                .label
+                .paint(rect.into(), &options, &|ch: char| {
+                    self.metrics.advance(ch, BUTTON_FONT)
+                });
+            *node.paint_mut() = PaintState::from_commands(commands);
+        }
+    }
+
+    /// Writes each button's `hovered` flag from where the pointer is.
+    ///
+    /// Hover is the one state that is not an event: it is a fact about where
+    /// the pointer is, so it is read from the recogniser's last known position
+    /// rather than carried from a motion event, and a touch — which has no
+    /// position to hover with once it is gone — leaves every button unhovered.
+    fn track_hover(&mut self) {
+        let pointer = self.recognizer.mouse_position();
+        let hovered = match pointer {
+            Some(position) => {
+                let nodes = self.nodes.borrow();
+                self.buttons.iter().position(|button| {
+                    nodes
+                        .get(button.node())
+                        .and_then(|node| node.layout().rect())
+                        .is_some_and(|rect| {
+                            position.x >= rect.origin.x
+                                && position.x <= rect.origin.x + rect.size.width
+                                && position.y >= rect.origin.y
+                                && position.y <= rect.origin.y + rect.size.height
+                        })
+                })
+            }
+            None => None,
+        };
+        for (index, button) in self.buttons.iter_mut().enumerate() {
+            let wanted = Some(index) == hovered;
+            if button.widget.hovered.get() != wanted {
+                button.widget.hovered.set(wanted);
+                button.written.hovered = wanted;
+            }
+        }
+    }
+
+    /// Writes each button's `pressed` flag, and re-aims the buttons whose state
+    /// has moved.
+    ///
+    /// Aiming restarts a button's transition, so it happens only when the state
+    /// the demo has written has actually changed. Aiming every frame would
+    /// restart the transition on every frame, and the button would creep toward
+    /// its target for ever instead of arriving at it.
+    fn sync_button_state(&mut self) {
+        let pressed = self.pressed;
+        let motion = Motion::from_theme(&self.theme);
+        for (index, button) in self.buttons.iter_mut().enumerate() {
+            let wanted = Some(index) == pressed;
+            if button.widget.pressed.get() != wanted {
+                button.widget.pressed.set(wanted);
+                button.written.pressed = wanted;
+            }
+            let state = button.state();
+            if button.aimed != state {
+                button.aimed = state;
+                button.widget.animate_to_state(motion);
+            }
         }
     }
 
@@ -710,6 +1272,12 @@ impl Demo {
 
     /// Switches between the dark and light themes, animated over
     /// `THEME_TRANSITION` milliseconds.
+    ///
+    /// The buttons are aimed at the *new* theme's palette rather than the one
+    /// the theme is passing through, so each button's transition and the theme's
+    /// own arrive together at the end of the same window. Aiming at the
+    /// theme's current value would instead leave every button chasing a target
+    /// that moves for as long as the switch does.
     fn toggle_theme(&mut self) {
         self.dark = !self.dark;
         let new_theme = if self.dark {
@@ -717,7 +1285,15 @@ impl Demo {
         } else {
             Theme::light()
         };
+        // Read the new theme's palette and motion before it is handed to
+        // `switch_to`, which takes it by value.
+        let palette = Palette::from_theme(&new_theme);
+        let motion = Motion::from_theme(&new_theme);
         self.theme.switch_to(new_theme, THEME_TRANSITION);
+        for button in &mut self.buttons {
+            button.widget.set_palette(palette);
+            button.widget.animate_to_state(motion);
+        }
     }
 
     /// Presses every pad, cascading across them one `STAGGER_STEP` apart.
@@ -797,6 +1373,58 @@ impl Demo {
                 })
         })
     }
+
+    /// Returns the index of the button whose laid-out rect contains `(x, y)`.
+    ///
+    /// A disabled button is still under the point: it is what the tap is aimed
+    /// at, and it is the button that swallows it. Deciding that here would mean
+    /// the tap reached whatever is behind instead.
+    fn button_at(&self, x: f32, y: f32) -> Option<usize> {
+        let nodes = self.nodes.borrow();
+        self.buttons.iter().position(|button| {
+            nodes
+                .get(button.node())
+                .and_then(|node| node.layout().rect())
+                .is_some_and(|rect| {
+                    x >= rect.origin.x
+                        && x <= rect.origin.x + rect.size.width
+                        && y >= rect.origin.y
+                        && y <= rect.origin.y + rect.size.height
+                })
+        })
+    }
+
+    /// Returns the centre of the button at `index` in window coordinates, or
+    /// `None` if it has not been laid out.
+    ///
+    /// This is what a test aims a synthetic event at, so it is the demo's
+    /// statement of where a button is rather than each test working it out.
+    #[cfg(test)]
+    fn button_center(&self, index: usize) -> Option<(f32, f32)> {
+        let button = self.buttons.get(index)?;
+        let nodes = self.nodes.borrow();
+        let rect = nodes.get(button.node())?.layout().rect()?;
+        Some((
+            rect.origin.x + rect.size.width / 2.0,
+            rect.origin.y + rect.size.height / 2.0,
+        ))
+    }
+
+    /// Returns the text the click counter is showing, as the last frame recorded
+    /// it.
+    #[cfg(test)]
+    fn counter_text(&self) -> Option<String> {
+        let nodes = self.nodes.borrow();
+        nodes
+            .get(self.counter.label.handle())?
+            .paint()
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+    }
 }
 
 /// Returns the labels in the demo's text panel, in the order they are shown,
@@ -810,7 +1438,7 @@ impl Demo {
 /// because of what is on this list.
 fn demo_labels() -> Vec<(&'static str, LayoutOptions)> {
     let alignment = |align| LayoutOptions {
-        max_width: TEXT_PANEL.width,
+        max_width: TEXT_COLUMN_WIDTH,
         align,
         ..LayoutOptions::default()
     };
@@ -818,7 +1446,7 @@ fn demo_labels() -> Vec<(&'static str, LayoutOptions)> {
         (
             "Hello, World!",
             LayoutOptions {
-                max_width: TEXT_PANEL.width,
+                max_width: TEXT_COLUMN_WIDTH,
                 ..LayoutOptions::default()
             },
         ),
@@ -826,7 +1454,7 @@ fn demo_labels() -> Vec<(&'static str, LayoutOptions)> {
             "This paragraph wraps at the panel's width, one word at a time, and \
              every line after the first is laid out from the same options.",
             LayoutOptions {
-                max_width: TEXT_PANEL.width * 0.66,
+                max_width: TEXT_COLUMN_WIDTH,
                 ..LayoutOptions::default()
             },
         ),
@@ -836,7 +1464,7 @@ fn demo_labels() -> Vec<(&'static str, LayoutOptions)> {
         (
             "letter spacing widens every gap",
             LayoutOptions {
-                max_width: TEXT_PANEL.width,
+                max_width: TEXT_COLUMN_WIDTH,
                 letter_spacing: 3.0,
                 ..LayoutOptions::default()
             },
@@ -845,7 +1473,7 @@ fn demo_labels() -> Vec<(&'static str, LayoutOptions)> {
             "A line far too long for the panel it is given is cut at the panel's \
              edge and closed with an ellipsis.",
             LayoutOptions {
-                max_width: TEXT_PANEL.width * 0.5,
+                max_width: TEXT_COLUMN_WIDTH * 0.5,
                 wrap: WrapMode::None,
                 truncation: Truncation::Ellipsis,
                 ..LayoutOptions::default()
@@ -896,7 +1524,6 @@ fn container(
 mod tests {
     use super::*;
     use std::time::Duration;
-    use ui_core::paint::DrawCommand;
 
     /// Monospace stand-in measurements: every character half its size wide, and
     /// every line 1.2 times its size tall, so both grow with the font size the
@@ -1381,5 +2008,611 @@ mod tests {
             Theme::light().get(ThemeToken::Text).as_color().unwrap(),
             "and arrived at the light theme's Text token"
         );
+    }
+
+    /// The mouse press at `(x, y)`, and its release.
+    ///
+    /// The gap between the two timestamps is a hundred **nanoseconds**, because
+    /// that is the unit SDL stamps events with (`SDL_GetTicksNS`, per
+    /// `SDL_events.h`) and the recogniser reads them unchanged. A hundred
+    /// milliseconds — a hundred million of them — is just as much a tap, and
+    /// saying so here rather than in prose is what keeps the two apart.
+    fn click_at(x: f32, y: f32) -> (Event, Event) {
+        (
+            Event::MouseButtonDown {
+                timestamp: 0,
+                window_id: 0,
+                which: 0,
+                mouse_btn: MouseButton::Left,
+                clicks: 1,
+                x,
+                y,
+            },
+            Event::MouseButtonUp {
+                timestamp: 100_000_000,
+                window_id: 0,
+                which: 0,
+                mouse_btn: MouseButton::Left,
+                clicks: 1,
+                x,
+                y,
+            },
+        )
+    }
+
+    /// Clicks the button at `index` and lays the demo out, which is the whole
+    /// path a click takes: two SDL events, the recogniser's tap, and the
+    /// dispatch that routes it to the button under the pointer.
+    fn click_button(demo: &mut Demo, index: usize) {
+        let (x, y) = demo.button_center(index).expect("a laid-out button");
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+    }
+
+    /// The background the button at `index` was painted with on the last frame.
+    fn button_background(demo: &Demo, index: usize) -> Color {
+        let button = &demo.buttons[index];
+        let nodes = demo.nodes.borrow();
+        nodes
+            .get(button.node())
+            .expect("a button node")
+            .paint()
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::RoundedRect { color, .. } => Some(*color),
+                _ => None,
+            })
+            .expect("a button paints a background")
+    }
+
+    /// The text the button at `index` painted on the last frame.
+    fn button_text(demo: &Demo, index: usize) -> Option<String> {
+        let button = &demo.buttons[index];
+        let nodes = demo.nodes.borrow();
+        nodes
+            .get(button.node())
+            .expect("a button node")
+            .paint()
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+    }
+
+    /// The rect the button at `index` was laid out to, as `(x, y, width, height)`.
+    fn button_rect(demo: &Demo, index: usize) -> (f32, f32, f32, f32) {
+        let button = &demo.buttons[index];
+        let nodes = demo.nodes.borrow();
+        let rect = nodes
+            .get(button.node())
+            .expect("a button node")
+            .layout()
+            .rect()
+            .expect("a laid-out button");
+        (
+            rect.origin.x,
+            rect.origin.y,
+            rect.size.width,
+            rect.size.height,
+        )
+    }
+
+    #[test]
+    fn the_demo_has_a_band_of_three_buttons() {
+        let demo = laid_out();
+        assert_eq!(demo.buttons.len(), 3);
+        let labels: Vec<String> = demo
+            .buttons
+            .iter()
+            .map(|button| button.widget.label.get())
+            .collect();
+        assert_eq!(labels, vec!["Press me", "Disabled", "Reset"]);
+    }
+
+    #[test]
+    fn a_button_paints_its_label_centred_inside_its_own_background() {
+        // "Renders with label centred" is two things: there is a background and
+        // there is a label, and the label sits in the middle of the background
+        // rather than at its corner. Both are checked against the numbers the
+        // widget derives them from: a 44-tall button with 4 of vertical padding
+        // leaves 36 for a 24-tall line, so the line's top is 6 below the
+        // padding's, at 10.
+        let demo = laid_out();
+        let button = &demo.buttons[0];
+        let nodes = demo.nodes.borrow();
+        let node = nodes.get(button.node()).expect("a button node");
+        let commands = node.paint().commands();
+
+        let background = commands
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::RoundedRect { rect, .. } => Some(*rect),
+                _ => None,
+            })
+            .expect("the button paints a background");
+        let (text_x, text_y) = commands
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::Text { x, y, .. } => Some((*x, *y)),
+                _ => None,
+            })
+            .expect("the button paints its label");
+        assert_eq!(button_text(&demo, 0).as_deref(), Some("Press me"));
+        assert_eq!(
+            text_y,
+            background.y + 10.0,
+            "the label's line box is centred vertically: 4 of padding plus half \
+             of the 12 the line does not fill"
+        );
+        assert!(
+            text_x > background.x && text_x < background.x + background.width,
+            "the label starts inside the background: {} against {}",
+            text_x,
+            background.x
+        );
+    }
+
+    #[test]
+    fn every_button_is_at_least_the_minimum_touch_target() {
+        // 44 by 44 is the floor the widget applies, and the band proves it on
+        // real labels: "Ok" is narrower than 44, so without the floor it would
+        // be a target a finger cannot hit.
+        let demo = laid_out();
+        for (index, _) in demo.buttons.iter().enumerate() {
+            let (_, _, width, height) = button_rect(&demo, index);
+            assert!(
+                width >= 44.0 && height >= 44.0,
+                "button {index} is {width} by {height}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_label_is_still_floored_at_the_minimum_touch_target() {
+        // The narrowest button in the band is "Reset", five characters, and it
+        // is still floored. The label is 20 pixels at half-width per character,
+        // so 50 plus 16 of padding would pass the floor on width alone; the
+        // height is the one under it, being one line of 24 plus 8 of padding.
+        let demo = laid_out();
+        let (_, _, width, height) = button_rect(&demo, 2);
+        assert_eq!(button_text(&demo, 2).as_deref(), Some("Reset"));
+        assert_eq!(height, 44.0, "a one-line button is floored in height");
+        assert!(width > 44.0, "and is wider than the floor on its own");
+    }
+
+    #[test]
+    fn clicking_a_button_counts_a_click() {
+        let mut demo = laid_out();
+        assert_eq!(demo.counter_text().as_deref(), Some("0 clicks"));
+
+        click_button(&mut demo, 0);
+
+        assert_eq!(
+            demo.counter_text().as_deref(),
+            Some("1 clicks"),
+            "the button's callback wrote to the counter, and the label followed"
+        );
+    }
+
+    #[test]
+    fn the_reset_button_empties_the_counter() {
+        let mut demo = laid_out();
+        click_button(&mut demo, 0);
+        click_button(&mut demo, 0);
+        assert_eq!(demo.counter_text().as_deref(), Some("2 clicks"));
+
+        click_button(&mut demo, 2);
+
+        assert_eq!(demo.counter_text().as_deref(), Some("0 clicks"));
+    }
+
+    #[test]
+    fn a_disabled_button_swallows_a_tap_and_fires_nothing() {
+        let mut demo = laid_out();
+        let (x, y) = demo.button_center(1).expect("a laid-out button");
+        let (down, up) = click_at(x, y);
+
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert_eq!(
+            demo.counter_text().as_deref(),
+            Some("0 clicks"),
+            "a disabled button does nothing"
+        );
+    }
+
+    #[test]
+    fn one_click_on_a_button_counts_once() {
+        // This is what the demo can actually establish: one click, one count.
+        //
+        // It is **not** a test that a consumed tap stops travelling, and it was
+        // previously named and commented as if it were — the claim was that the
+        // counter would go up by two if the tap fell through to the panel
+        // behind, and nothing behind the band handles a `Tap` at all, so the
+        // counter could not have gone up by two whatever the routing did. The
+        // `break` on `event.consumed()` here is defensive, mirroring
+        // `dispatch_event`.
+        //
+        // The consumption contract is tested where it can fail, against a real
+        // node behind the button:
+        // `ui_core::widgets::button::tests::a_tap_fires_the_click_and_is_consumed`
+        // fails when `event.consume()` is removed, and
+        // `ui_core::input::tests::an_event_bubbles_to_the_parent_until_it_is_consumed`
+        // covers the bubbling.
+        let mut demo = laid_out();
+        click_button(&mut demo, 0);
+        assert_eq!(demo.counter_text().as_deref(), Some("1 clicks"));
+
+        // And a second click is a second count, so the two are not being folded
+        // into one by the routing.
+        click_button(&mut demo, 0);
+        assert_eq!(demo.counter_text().as_deref(), Some("2 clicks"));
+    }
+
+    #[test]
+    fn a_pressed_button_moves_through_its_transition_and_arrives() {
+        // "State transitions are animated" has two halves that can be broken
+        // separately: the state change has to start a transition rather than
+        // jumping, and that transition has to finish rather than creeping.
+        let mut demo = laid_out();
+        let (x, y) = demo.button_center(0).expect("a laid-out button");
+        demo.handle_event(Event::MouseButtonDown {
+            timestamp: 0,
+            window_id: 0,
+            which: 0,
+            mouse_btn: MouseButton::Left,
+            clicks: 1,
+            x,
+            y,
+        });
+        demo.frame(WINDOW, Duration::from_millis(10));
+        assert!(demo.buttons[0].widget.pressed.get());
+        let midway = demo.buttons[0].widget.scale.get();
+        assert!(
+            midway < 1.0 && midway > 0.95,
+            "ten milliseconds in, the button is part way to 0.95, not there: {midway}"
+        );
+
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(
+            demo.buttons[0].widget.scale.get(),
+            0.95,
+            "and it arrives rather than creeping"
+        );
+        assert!(
+            !demo.buttons[0].widget.is_animating(),
+            "a transition that has arrived has stopped"
+        );
+    }
+
+    #[test]
+    fn releasing_a_button_brings_its_scale_back() {
+        let mut demo = laid_out();
+        let (x, y) = demo.button_center(0).expect("a laid-out button");
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(demo.buttons[0].widget.scale.get(), 0.95);
+
+        demo.handle_event(up);
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(
+            demo.buttons[0].widget.scale.get(),
+            1.0,
+            "the release brings it back to its resting size"
+        );
+    }
+
+    #[test]
+    fn a_button_under_the_pointer_is_hovered() {
+        let mut demo = laid_out();
+        let (x, y) = demo.button_center(2).expect("a laid-out button");
+        assert!(
+            demo.buttons
+                .iter()
+                .all(|button| !button.widget.hovered.get()),
+            "nothing is hovered before the pointer has been anywhere"
+        );
+
+        demo.handle_event(Event::MouseMotion {
+            timestamp: 0,
+            window_id: 0,
+            which: 0,
+            mousestate: sdl3::mouse::MouseState::from_sdl_state(0),
+            x,
+            y,
+            xrel: 0.0,
+            yrel: 0.0,
+        });
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert!(
+            demo.buttons[2].widget.hovered.get(),
+            "it is the one under it"
+        );
+        assert!(
+            demo.buttons[0..2]
+                .iter()
+                .all(|button| !button.widget.hovered.get()),
+            "and not the others"
+        );
+    }
+
+    #[test]
+    fn a_hovered_button_paints_a_lighter_background_than_a_resting_one() {
+        let mut demo = laid_out();
+        let resting = button_background(&demo, 0);
+        let (x, y) = demo.button_center(0).expect("a laid-out button");
+        demo.handle_event(Event::MouseMotion {
+            timestamp: 0,
+            window_id: 0,
+            which: 0,
+            mousestate: sdl3::mouse::MouseState::from_sdl_state(0),
+            x,
+            y,
+            xrel: 0.0,
+            yrel: 0.0,
+        });
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+
+        let hovered = button_background(&demo, 0);
+        assert_ne!(hovered, resting, "the hover has arrived");
+        assert!(
+            hovered.r > resting.r || hovered.g > resting.g || hovered.b > resting.b,
+            "and it is lighter: {resting:?} then {hovered:?}"
+        );
+    }
+
+    #[test]
+    fn a_focused_button_paints_a_ring_the_rest_do_not() {
+        // The focus indicator is a drawing, not a flag: the ring is the extra
+        // rounded rect `Button::paint` puts outside the background.
+        let mut demo = laid_out();
+        let rings = |demo: &Demo, index: usize| {
+            let button = &demo.buttons[index];
+            let nodes = demo.nodes.borrow();
+            nodes
+                .get(button.node())
+                .expect("a button node")
+                .paint()
+                .commands()
+                .iter()
+                .filter(|command| matches!(command, DrawCommand::RoundedRect { .. }))
+                .count()
+        };
+        assert_eq!(rings(&demo, 0), 1, "a resting button is one background");
+
+        demo.handle_event(key(Keycode::Tab));
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert_eq!(rings(&demo, 0), 2, "a focused one has a ring as well");
+        assert_eq!(rings(&demo, 1), 1, "and its neighbours do not");
+    }
+
+    #[test]
+    fn tab_moves_focus_to_the_first_button_and_enter_activates_it() {
+        let mut demo = laid_out();
+        assert!(demo.focused.is_none(), "nothing holds focus to begin with");
+
+        demo.handle_event(key(Keycode::Tab));
+        assert_eq!(
+            demo.focused,
+            Some(demo.buttons[0].node()),
+            "Tab lands on the first focusable button"
+        );
+        assert!(demo.buttons[0].widget.focused.get());
+
+        demo.handle_event(key(Keycode::Return));
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert_eq!(
+            demo.counter_text().as_deref(),
+            Some("1 clicks"),
+            "and Enter activates the button holding focus"
+        );
+    }
+
+    #[test]
+    fn tab_steps_over_the_disabled_button() {
+        // A control that refuses interaction has nothing to be activated by a
+        // key, so it is not in the order focus walks.
+        let mut demo = laid_out();
+        let enabled: Vec<Handle> = demo
+            .buttons
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != 1)
+            .map(|(_, button)| button.node())
+            .collect();
+
+        let mut visited = Vec::new();
+        for _ in 0..3 {
+            demo.handle_event(key(Keycode::Tab));
+            visited.push(demo.focused);
+        }
+
+        assert_eq!(
+            visited,
+            vec![Some(enabled[0]), Some(enabled[1]), Some(enabled[0])],
+            "the walk is press, reset, and wraps back to press — never the \
+             disabled one in the middle"
+        );
+    }
+
+    #[test]
+    fn enter_does_nothing_while_no_button_holds_focus() {
+        let mut demo = laid_out();
+        demo.handle_event(key(Keycode::Return));
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert_eq!(
+            demo.counter_text().as_deref(),
+            Some("0 clicks"),
+            "an activation key with nothing focused belongs to nobody"
+        );
+    }
+
+    #[test]
+    fn a_focused_button_can_be_activated_by_the_space_bar() {
+        let mut demo = laid_out();
+        demo.handle_event(key(Keycode::Tab));
+        demo.handle_event(key(Keycode::Space));
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert_eq!(demo.counter_text().as_deref(), Some("1 clicks"));
+    }
+
+    #[test]
+    fn the_buttons_follow_the_theme_switch() {
+        // The band is themed from the Primary and OnPrimary tokens, so a
+        // switch carries the new colours to it: the button is aimed at the new
+        // theme's palette, and its own transition runs alongside the theme's.
+        let mut demo = laid_out();
+        let dark = button_background(&demo, 0);
+        assert_eq!(
+            dark.r,
+            Theme::dark().get(ThemeToken::Primary).as_color().unwrap().r,
+            "a resting button paints the dark theme's Primary token"
+        );
+
+        demo.handle_event(key(Keycode::T));
+        for _ in 0..35 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+
+        let light = button_background(&demo, 0);
+        assert_ne!(light, dark, "the button's colour moved with the theme");
+        assert_eq!(
+            light.r,
+            Theme::light()
+                .get(ThemeToken::Primary)
+                .as_color()
+                .unwrap()
+                .r,
+            "and arrived at the light theme's Primary token"
+        );
+    }
+
+    #[test]
+    fn a_button_in_the_band_does_not_move_the_pads() {
+        // The pads and the buttons are separate controls: a click on the band
+        // must not reach the row above it.
+        let mut demo = laid_out();
+        click_button(&mut demo, 0);
+
+        for pad in &demo.pads {
+            assert_eq!(pad.press.get(), 0.0, "no pad was pressed");
+        }
+    }
+
+    #[test]
+    fn the_band_sits_clear_of_the_text_panel_and_the_pads() {
+        // The band is placed by hand, so its position is a claim about the
+        // window that has to be checked: a `Stack` places all of its children at
+        // the origin, so an offset on the band itself rather than on the row
+        // inside it would be ignored, and the band would land on the pads.
+        let demo = laid_out();
+        let (band_x, band_y, _, band_height) = button_rect(&demo, 0);
+        let column_right = TEXT_PANEL_ORIGIN.0 + TEXT_COLUMN_WIDTH;
+        assert!(
+            band_x > column_right,
+            "the band starts at x = {band_x}, right of the text column's edge \
+             at {column_right}"
+        );
+        assert!(
+            band_y > PAD_SIZE.height,
+            "the band starts at y = {band_y}, below the pads"
+        );
+        assert!(
+            band_y + band_height + COUNTER_DROP < WINDOW.height,
+            "and the counter under it is still inside the window"
+        );
+
+        // The concrete claim: no pad shares a point with the band. The pads are
+        // centred in the window, so this is the check that a band at the origin
+        // would fail.
+        let nodes = demo.nodes.borrow();
+        for pad in &demo.pads {
+            let rect = nodes
+                .get(pad.node)
+                .and_then(|node| node.layout().rect())
+                .expect("a laid-out pad");
+            let overlaps = band_x < rect.origin.x + rect.size.width
+                && rect.origin.x < band_x + 400.0
+                && band_y < rect.origin.y + rect.size.height
+                && rect.origin.y < band_y + band_height;
+            assert!(!overlaps, "the band overlaps a pad at {:?}", rect);
+        }
+    }
+
+    #[test]
+    fn no_text_label_reaches_under_the_band() {
+        // The collision a screenshot showed: the alignment rows are laid out
+        // across `TEXT_COLUMN_WIDTH`, so a right-aligned one ends at the column's
+        // right edge. If that edge ever moves right of the band, the text runs
+        // under the buttons — and nothing else in the suite would notice, since
+        // both the label and the button are laid out correctly on their own.
+        let demo = laid_out();
+        let (band_x, _, _, _) = button_rect(&demo, 0);
+        let nodes = demo.nodes.borrow();
+        for &handle in &demo.label_nodes {
+            let node = nodes.get(handle).expect("a label node");
+            let right = node
+                .paint()
+                .commands()
+                .iter()
+                .filter_map(|command| match command {
+                    DrawCommand::Text { x, text, .. } => {
+                        let width = demo
+                            .metrics
+                            .advance(text.chars().next().unwrap_or(' '), TEXT_SIZE_START);
+                        Some(*x + width * text.chars().count() as f32)
+                    }
+                    _ => None,
+                })
+                .fold(f32::MIN, f32::max);
+            if right == f32::MIN {
+                continue;
+            }
+            assert!(
+                right <= band_x,
+                "a label ends at {right}, which is under the band at {band_x}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_row_of_buttons_does_not_overlap_the_next() {
+        let demo = laid_out();
+        let rects: Vec<(f32, f32, f32)> = (0..demo.buttons.len())
+            .map(|index| {
+                let (x, _, width, _) = button_rect(&demo, index);
+                (x, x + width, width)
+            })
+            .collect();
+        for pair in rects.windows(2) {
+            assert!(
+                pair[0].1 <= pair[1].0,
+                "button {} ends at {} and the next starts at {}",
+                pair[0].2,
+                pair[0].1,
+                pair[1].0
+            );
+        }
     }
 }

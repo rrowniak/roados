@@ -8,26 +8,152 @@ and this file gets corrected.
 **Spec:** `doc/ui/PRIMITIVES.md`, `doc/ui/PRIMITIVES_ARCHITECTURE.md`, and
 `doc/ui/TASK_UI_PRIM_01..24.md`.
 
-**Last updated:** 2026-09-29
+**Last updated:** 2026-09-30
 
 ## Current position
 
-**Status: 10 committed (`4e51b09`). Tasks 01–10 done.**
+**Status: 11 committed (`ffbb4d6`). Tasks 01–11 done. Task 12 implemented and
+reviewed; review findings fixed, awaiting re-review.**
 
-**Last task: 10 — Input Handling.** 207 unit tests + 30 doctests, up from 163
-unit + 27 doctests before the task. `input.rs` is new (+1987); `layout.rs`
-gained a `visible` flag on `LayoutState`. Three gesture defects found and fixed:
-two-finger hold firing long presses, canceled touch leaving a stuck pointer,
-pinch with coincident start never arming.
+**Last task: 12 — Widget: Button.** `widgets/button.rs` is new (2114 lines),
+`input.rs` gained `Focus::focus` and `route` plus a **unit fix that is not part
+of the button** (below), `ui_demo` gained a band of three buttons over a click
+counter. 300 `ui_core` unit tests + 44 demo tests + 44 doctests.
 
-**Task 09 ran before task 08 by the operator's decision, 2026-09-29.** Task 08
-requires `Property::animate` and `Easing`, which task 09 owns. The dependency
-inversion is real: 08's spec names an API that only 09 creates. Recorded in
-*Ratified by the operator* below.
+**The blocker the review found: the gesture recogniser compared nanoseconds
+against millisecond thresholds, so no `Tap` was ever produced.** SDL stamps every
+event with `SDL_GetTicksNS()` — `SDL_events.h:300`, *"In nanoseconds, populated
+using SDL_GetTicksNS()"*, in the vendored 3.4.16 this project builds against.
+`input.rs` read those stamps unchanged and compared them against
+`TAP_MAX_DURATION_MS = 300`, which made the tap window 300 **nanoseconds** and
+fired a long press at 500 of them. `check_long_press` runs before the release is
+evaluated and `release_pointer` returns as soon as one has fired, so **every
+press was a long press**: a button's `on_click` could not fire from any pointer,
+and task 12's acceptance criteria 2 and 7 were genuinely unmet. This is task 10's
+code, and the unit tests did not catch it because every one of them used small
+timestamps — `200` for "quick" — which is under a 300-nanosecond window. Fixed
+by making the two thresholds [`std::time::Duration`], so the mistake cannot be
+written: `held <= TAP_MAX_DURATION` does not compile across units where
+`held <= 300` compiles happily and is wrong by a factor of a million. Two tests
+now fail on the old behaviour, one of them a realistic 100 ms click.
 
-**Current task: 11 — Widget: Label.**
+**Next task: 13 — Widget: Container.**
 
-## Ratified by the operator (2026-09-28, 2026-09-29)
+## Task 12 — what it decided, and what it found
+
+Decisions the task file left open, and where each one is recorded in the code.
+The two that belong to the operator are flagged.
+
+- **`on_click: Callback` is a new public newtype in `widgets::button`**, not
+  `property.rs`'s `Callback<T>`, which is a private `Rc<dyn Fn(&T)>` and is the
+  notification a property fires rather than an action a widget performs. The
+  task file names a `Callback` that does not exist as a public type; this is the
+  smallest thing that satisfies it. Its own doc says it moves somewhere shared
+  when a second widget needs one — task 15's Toggle and task 19's TextInput both
+  will.
+- **The minimum touch target is a constant, not a theme token.** The theme has no
+  token for it, and adding one would change `ThemeToken::all`, both theme
+  tables, the token count, and the animation every token joins during a switch —
+  for a value a switch does not change. `MIN_TOUCH_TARGET` documents the
+  trade-off and says what would reverse it.
+- **The states are four boolean properties, not one enum, plus a `ButtonState`
+  enum that resolves them.** The states overlap: a button can be focused *and*
+  hovered, and an enum holds one. `Button::style` is the pure resolution and is
+  what is drawn; `Button::state` is the primary state for a caller that wants
+  one name.
+- **A button owns its transition clock.** `AnimationClock::clear` is whole-clock,
+  so a shared clock would strand other widgets' transitions when one button is
+  re-aimed. The button owning one is what makes a state change *replace* a
+  transition rather than fight it. This is the same reasoning as `Theme`'s own
+  clock, and it is the fix for the per-pad `clear` limitation the demo's
+  `press_pad` documents at length.
+- **Focus activation lives in the button, not in `input`.** `Focus` knows the
+  focus *order*; `Button::on_event` knows what Enter means. `input.rs` gained
+  only `Focus::focus` (focus a known node) and `route` (below). The alternative
+  was teaching `Focus` the activation keys, which would put a widget's meaning
+  in the input module.
+- **`input::route` exists because `dispatch_event` cannot be used for this.**
+  `dispatch_event` holds `&Arena` for its whole bubbling walk, and this
+  repository reaches widgets through property callbacks — an `on_change` that
+  marks a node dirty. A button's click writes a property, so the callback fires
+  while the dispatch still holds a `Ref` on the arena, which is a `RefCell`
+  double borrow and panics. Five demo tests fail on that revert. `dispatch_event`
+  is unchanged and is still right for callers whose handlers cannot re-enter;
+  `route` resolves the chain, the borrow drops, and the caller then handles.
+
+**Defects found while implementing, and fixed:**
+
+1. **A themed button started out grey.** `Button::new` seeds its colour
+   properties from the *default* palette, and `set_palette` deliberately leaves
+   the appearance alone so a theme switch can be animated — so a button that was
+   given a palette and never aimed painted the neutral grey. Fixed by adding
+   `Button::snap_to_state`, which applies the current state's appearance at once
+   and clears any running transition first. Three tests, one of which mutates
+   the `clear` away.
+2. **The pressed overlay was opaque black, and the label vanished on it.** Found
+   by screenshotting, not by any test — see the 2026-09-30 entry in
+   `.ai/NEVERAGAIN.md`. The press amount was clamped to `0.0..=1.0` and used
+   directly as the overlay's alpha, so a full press meant alpha 255. Now capped
+   at `PRESS_SHADOW_ALPHA = 0.28`, which is what "a slight inner shadow" means.
+   Measured on screen: the button's mean luminance goes 0.515 hovered → 0.316
+   pressed → 0.515 released, where it was 0.094 pressed before the fix. The
+   reviewer then found the *other* half: no test pinned the **order** the
+   commands are recorded in, and moving the label above the overlay — the change
+   that made the label invisible in the first place — left all 340 tests green,
+   because every helper in the module filters and so cannot see order. `shapes()`
+   now returns the recorded sequence and three tests assert on it.
+3. **The button band landed on top of the pads.** `arrange_stack` places every
+   child at the origin and ignores the position it declares, so an offset put on
+   the band was ignored while the band still covered the centred pads. The offset
+   belongs on the row inside it. **Four** tests catch the revert, not two.
+4. **"right aligned" ran under the buttons.** Also only visible on screen. The
+   text panel is 900 wide from an origin of 60, so a right-aligned label ended at
+   960 while the band starts at 664. The column is now laid out at
+   `TEXT_COLUMN_WIDTH = 594`, which puts its right edge at 654.
+
+## Verifying a change that draws — the capture method
+
+Task 11 recorded that the demo "was captured and inspected" without saying how,
+and rediscovering it cost several steps. It is:
+
+```sh
+# The window id, not the root: ffmpeg's x11grab and ImageMagick's root capture
+# both return black for a GL window, because the compositor does not put the
+# window in the root pixmap. Capturing the window by id works.
+DISPLAY=:0 xwininfo -root -tree | rg '"roados ui_demo"' | rg -o '0x[0-9a-f]+' | head -1
+DISPLAY=:0 magick import -window <that id> /tmp/shot.png
+```
+
+`import` on this machine reports `missing an image filename` for a filename it
+was given, and `ffmpeg -f x11grab -i :0+X,Y` returns black, so neither is the
+tool. `magick import -window <id>` is. The window's position is also not the
+origin: the root here is 1920×2280 and the window sits at +480+1468.
+
+**Injecting input.** There is no `xdotool` or `xte` on this machine, so keys and
+pointer events were injected through a throwaway C program linked against
+`libXtst` (`XTestFakeKeyEvent` and friends; the headers *are* installed, under
+`/usr/include/X11/extensions/XTest.h`). It lives in `/tmp`, not in the
+repository. Keyboard injection works, and it is how the focus ring and the
+activation key were seen on screen.
+
+**A pointer tap, and the waiver that was wrongly raised against it.** The first
+attempt at this section recorded a waiver on task 12's "responds to tap/click",
+on the reasoning that SDL3 on X11 does not take its event timestamp from the X
+event, so an XTEST-injected press and release were stamped 14 hours apart and
+every injected click read as a long press. **The reasoning was wrong in a way
+that mattered.** The stamps were 4,552,618,936 and 4,604,053,201, and the
+difference is 51,434,265 — read as milliseconds that is 14.3 hours, and read as
+the **nanoseconds** they actually are it is 51.4 ms, an ordinary click. The
+misreading turned a product defect into a tooling excuse: the recogniser's
+thresholds were in the wrong unit, so a real click failed exactly as the injected
+one did. The waiver is withdrawn and the defect is fixed; see *Current position*.
+
+Keyboard injection through `libXtst` does work and is how the focus ring and the
+activation key were seen on screen. Pointer injection is unreliable on this
+host and is no longer relied on for anything.
+
+
+## Ratified by the operator (2026-09-28, 2026-09-29, 2026-09-30)
 
 - **Task 09 lands before task 08**, decided 2026-09-29. Task 08's
   `Theme::switch_to` requires `Property::animate` per token and lists
@@ -120,6 +246,20 @@ sysroot mandatory.
 
 ## Deviations from the spec, and why
 
+- **`input::dispatch_event` is unusable for any handler that reaches the arena,
+  and `input::route` was added beside it.** `dispatch_event` holds `&Arena` for
+  its whole bubbling walk. This repository reaches widgets through property
+  callbacks — an `on_change` that marks a node dirty — so a handler that writes
+  a property re-enters the arena while the dispatch still holds a `Ref` on it,
+  which is a `RefCell` double borrow and panics rather than misbehaves. Task 10
+  shipped `dispatch_event` without a caller that could hit this; the button is
+  the first. `dispatch_event` itself is unchanged and remains correct for
+  handlers that cannot re-enter.
+- **Task 12's `on_click: Callback` is a new public newtype in `widgets/button`.**
+  The task file names a `Callback` that does not exist as a public type:
+  `property.rs`'s is private and is `Fn(&T)`, the notification a property fires,
+  not an action a widget performs. Tasks 15 and 19 name the same type and will
+  need it moved somewhere both can reach.
 - **SDL3 ships with all twelve subsystems enabled.** The architecture doc asks
   for audio, render, camera and filesystem off. Accepted temporarily because
   `sdl3` 0.20.0 re-exports no subsystem features, so honouring the doc needs
@@ -267,7 +407,7 @@ verified. A blank cell is unknown, not "none".
 | 09 | Animation System | done | `6726e21` | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
 | 10 | Input Handling | done | `4e51b09` | 2 review passes, 1 fix round | 1 (`cargo audit` not installed) |
 | 11 | Widget — Label | done | `ffbb4d6` | **none — committed without review** | 0 |
-| 12 | Widget — Button | pending | | | |
+| 12 | Widget — Button | implemented | | 1 pass, findings fixed — **awaiting re-review** | — |
 | 13 | Widget — Container | pending | | | |
 | 14 | Widget — Slider | pending | | | |
 | 15 | Widget — Toggle | pending | | | |
@@ -279,7 +419,16 @@ verified. A blank cell is unknown, not "none".
 | 21 | Widget — Chart | pending | | | |
 | 22 | Widget — Dialog | pending | | | |
 | 23 | Widget — Toast | pending | | | |
-| 24 | Demo Application | pending | | | |
+| 24 | Demo Application | **superseded** | | | |
+| — | Tesla-like demo application | pending | | | see `doc/ui/DEMO_APPLICATION.md` |
+
+**Task 24 is superseded and will not be started in its current form.** The
+operator's decision of 2026-09-30 replaces the widget-gallery demo with a
+Tesla-like infotainment application, in a new `TASK_UI_DEMO_n` task category
+begun after task 23. That document owns the decision, the scope and the open
+questions; nothing about it is restated here. The line is in this table so a
+fresh session resuming from this file does not start task 24, and so the last
+task of the `PRIM` sequence is 23 rather than 24.
 
 Status values: `pending` · `in progress` · `implemented` (developer done,
 awaiting review) · `in review` (reviewer running) · `changes requested` ·
@@ -790,3 +939,67 @@ operator's rule, none of these is treated as satisfied.
   without a revert point being at risk. What is lost until that happens is the
   second pair of eyes on ~3200 lines, and the recorded fact that nobody has
   looked for the findings a reviewer would look for.
+- 2026-09-30 — **task 12 implemented; awaiting review.** The developer subagent
+  wrote `widgets/button.rs` and half of `ui_demo`'s wiring, then died on a
+  provider rate limit with no handoff, so the demo half was finished directly and
+  the result verified from scratch rather than reported. `button.rs` is +1988
+  lines: the four state properties, the four animated ones, a `Palette` and a
+  `Motion` resolved from the theme, a `Callback` newtype, a per-button
+  `AnimationClock`, and a pure `style()` that both `animate_to_state` and
+  `paint` read. `input.rs` gained `Focus::focus` and `route`. `ui_demo` routes
+  the band through `GestureRecognizer` and `input::route` rather than raw events,
+  so a button consumes what is aimed at it.
+  **Four defects, two of them only findable by looking at pixels:** the press
+  overlay was opaque black and swallowed the label (recorded in
+  `.ai/NEVERAGAIN.md`); the band's offset was on the node a `Stack` ignores, so
+  it landed on the pads; "right aligned" ran under the buttons; and a themed
+  button started grey, which needed `Button::snap_to_state` to exist at all.
+  **Five mutation checks, each seen to fail for the right reason** before being
+  restored: reverting `route` to `dispatch_event` (5 tests, the `RefCell`
+  double borrow), moving the band offset back onto the band (3), dropping the
+  `clear` from `snap_to_state` (1), removing the 44 px floor (6), and letting a
+  disabled button into the focus order (1). Verified: fmt, clippy `-D warnings`,
+  296 `ui_core` + 44 demo + 44 doctests, `cargo doc` clean, and the aarch64
+  cross-build (AArch64, no sysroot, the same four dynamic dependencies, so
+  FreeType and SDL are still statically linked).
+  **`cargo audit` is not installed here and was not run** — the standing waiver,
+  as on tasks 07, 09 and 10. **One acceptance criterion is waived:** the pointer
+  tap, for the timestamp reason recorded under *Verifying a change that draws*.
+  The other six were seen on screen: all five visual states, the press animation
+  measured at 0.515 → 0.316 → 0.515, the focus ring on `Tab`, and the click
+  counter incrementing on `Enter`.
+- 2026-09-30 — **task 12 reviewed; one blocker and three majors found, all
+  fixed.** The verdict was *fix first*. The blocker is the important one and it
+  is not a button defect: the reviewer's finding was that
+  `GestureRecognizer` compared SDL's **nanosecond** event stamps against
+  **millisecond** thresholds, so every press fired a long press, `release_pointer`
+  returned before it could emit a `Tap`, and **no widget acting on a tap could
+  ever fire**. Task 12's acceptance criteria 2 and 7 were unmet because of task
+  10's code. The unit tests missed it because every one of them used small
+  timestamps — `200` for "quick" — which is under a 300-nanosecond window.
+  **The developer had already written a waiver for the criterion, on a
+  misreading**: the two stamps were 4,552,618,936 and 4,604,053,201, which read
+  as milliseconds is 14.3 hours and read as the nanoseconds they are is 51.4 ms.
+  The misreading turned a product defect into a tooling excuse, and it was only
+  the review that separated them. The waiver is withdrawn. Fixed by making both
+  thresholds `Duration`, so `held <= TAP_MAX_DURATION` cannot compile across
+  units; two tests fail on the old behaviour, one a realistic 100 ms click.
+  **Three majors, all "the test cannot fail" shape.** (i) The new alpha
+  assertion was `shadow.a <= round(PRESS_SHADOW_ALPHA * 255)` — computed *from*
+  the constant it was checking, so it survived setting that constant to 1.0. The
+  number is now written out. (ii) The reviewer moved the label above the press
+  overlay — the exact change that had made the label invisible — and all 340
+  tests stayed green, because every helper in the module filters and cannot see
+  order; `shapes()` and three tests now pin the recorded sequence. (iii) A demo
+  test named `a_tap_on_a_button_does_not_reach_the_node_behind_it` claimed the
+  counter would go up by two if the tap fell through, and nothing behind the
+  band handles a `Tap`, so it could not have; retitled to what it establishes,
+  with a pointer to where the consumption contract really is tested. Also fixed:
+  two stale counts in this file, the padding and radius constants that asserted
+  themselves rather than reading the theme tokens, and a doc comment that
+  overstated which scrolls reach focus navigation.
+  **All seven acceptance criteria are now met and all seven were seen on
+  screen**, the last of them after the fix: three real pointer clicks on
+  "Press me" took the counter to "3 clicks" with the hover tint and the focus
+  ring both visible. Re-verified: fmt, clippy `-D warnings`, 301 `ui_core` + 44
+  demo + 44 doctests, `cargo doc` clean, and the aarch64 cross-build.

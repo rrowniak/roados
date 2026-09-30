@@ -37,6 +37,105 @@ There is no `scout`. Reading a dependency's actual implementation is
   "What licence governs Slint's embedded Linux backend" is a fact. Convert
   judgements into their factual components first.
 
+## Implementation fan-out
+
+Research fan-out is read-only and answers questions. Implementation fan-out
+writes code. The rules are different.
+
+### When to use it
+
+The developer agent estimates scope per `.ai/agents/developer.md` § *Scope
+check*. When a task exceeds the threshold, the developer splits it into
+isolated sub-tasks and dispatches one `general` subagent per sub-task.
+
+**The developer is the orchestrator, not a peer.** It splits the work, briefs
+each subagent, collects the handoffs, and integrates. Subagents do not see
+each other's work and do not coordinate directly.
+
+### Splitting
+
+A valid split has three properties:
+
+1. **File isolation.** Each subagent works on a disjoint set of files. Two
+   subagents editing the same file is a failed split — the second write wins
+   and the first subagent's work is silently lost.
+2. **Testable independently.** Each sub-task has an acceptance test that
+   passes without the other sub-tasks landing. A sub-task that cannot be
+   verified alone is not a sub-task; it is a phase of a monolithic change.
+3. **No hidden dependencies.** If sub-task B requires a type or function from
+   sub-task A, they are not independent. Either merge them or make A a
+   prerequisite that lands first.
+
+**Split along module boundaries, not arbitrary chunks.** A file is the unit of
+isolation. If a task requires two changes to the same file, it is one sub-task,
+not two.
+
+### Parallel or sequential
+
+The developer decides the execution order:
+
+- **Parallel** when sub-tasks touch disjoint files and have no data
+  dependencies. All dispatches go in one message, per the research fan-out
+  rules.
+- **Sequential** when sub-task B reads a type or function sub-task A creates.
+  A lands, is verified, and B is briefed against the now-existing code.
+- **Mixed** when some sub-tasks are independent and others depend on them.
+  Dispatch the independent ones in parallel, then the dependent ones in
+   sequence.
+
+**Do not dispatch a subagent whose brief depends on code that does not exist
+yet.** A subagent told to "use the Foo type from the other subagent" will
+invent it. Brief against the codebase as it stands, or wait for the prerequisite
+to land.
+
+### Briefing contract
+
+Each implementation subagent gets a self-contained brief containing:
+
+- **The sub-task**, in one or two sentences: what to build, and why it matters
+- **The files it owns** — the disjoint set it may create or modify
+- **The acceptance test** — how the subagent knows it is done
+- **The constraints** — the project's conventions, the error-handling rules,
+  the dependency policy, the coding standards from `developer.md`
+- **What it must not touch** — files owned by other subagents, and the
+  boundaries of its sub-task
+- **The return format** — a handoff, not a research answer
+- **Read-write access** — unlike research, implementation subagents write to
+  the repository. State this explicitly.
+
+### Return format
+
+Implementation subagents return a handoff, not a research answer:
+
+```
+SUB-TASK: <the sub-task, restated>
+DONE: <what was built, in one paragraph>
+FILES: <the files created or modified>
+VERIFIED: <the commands run, with real output — build, test, lint>
+LEFT OUT: <what was not done, and why>
+RISKS: <decisions made that the spec left open, or places where you guessed>
+```
+
+A subagent that returns prose instead of this is a **failed dispatch**.
+Re-send the brief. Do not retrofit its prose into the format yourself: the
+verification and the risks are the subagent's to report, and they have to be
+the subagent's, or the apparatus is decoration.
+
+### Coordination rules
+
+- **No nesting.** Implementation subagents do not fan out further. If a
+  sub-task is too large for one subagent, the developer split it wrong.
+- **No shared state.** Subagents do not communicate through files, git
+  branches, or any mechanism other than the developer's integration.
+- **The developer integrates.** After all subagents return, the developer
+  merges their work, resolves conflicts, and runs the full verification suite
+  before handing off to review.
+- **A failed subagent is re-dispatched, not patched.** If a subagent returns
+  incomplete work, the developer re-dispatches it with a corrected brief. The
+  developer does not finish a subagent's work itself — that would make the
+  developer the author of code it did not design, and the review would lose
+  its meaning.
+
 ## Briefing contract
 
 Subagents start with no context: anything you leave out, they will invent.

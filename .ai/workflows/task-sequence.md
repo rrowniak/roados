@@ -18,10 +18,22 @@ One task at a time, in numeric order. Not overlapping, not batched.
    (`.ai/protocols/subagents.md` allows only `explore` and `general`; `developer`
    and `reviewer` are instruction files, not subagent types). It implements the
    task and returns a handoff: what it did, what it verified, what it left out.
+
+   If the task exceeds the scope threshold in `.ai/agents/developer.md` §
+   *Scope check*, the developer splits it into isolated sub-tasks per
+   `.ai/protocols/subagents.md` § *Implementation fan-out*. Each sub-task is
+   dispatched as a separate `general` subagent. The developer integrates their
+   work and returns a single handoff for the whole task.
+
 2. **Review.** Dispatch `.ai/agents/reviewer.md` as `general`, in a **different
    session from the developer.** A reviewer in the author's session inherits the
    author's reasoning and reviews its own conclusions. Do not reuse the
    developer's session.
+
+   If the task fanned out, the review covers the integrated result, not each
+   sub-task separately. A sub-task that was reviewed in isolation and then
+   integrated is reviewed again as part of the whole — integration can break
+   what the parts proved.
 3. **Fix, or waive.** Findings go back to the developer until each is fixed. A
    finding the operator declines to fix is **waived with a recorded reason** — a
    waiver is a decision, not a skipped step, and an unrecorded one is a bug.

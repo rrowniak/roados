@@ -68,6 +68,22 @@ writing code. Concretely:
 - What is explicitly *not* in this change?
 - What does the operator see when it works?
 
+### Scope check
+
+Before committing to the shape, estimate the diff:
+
+- **Files touched.** Count the files the change will create or modify.
+- **Independent components.** Count the distinct modules, structs, or subsystems
+  that can be built and tested separately.
+
+If the change touches **more than 5 files** or has **more than 3 independent
+components**, it is too large for one agent. Split it per
+`.ai/protocols/subagents.md` § *Implementation fan-out* before writing code.
+
+A task that cannot be split along file or module boundaries is not a splitting
+problem — it is a design problem. Stop and report that the task is monolithic
+and needs redesign, not fan-out.
+
 **The first implementation in a repository has no conventions to match.** When
 the codebase is empty or near-empty, do not hunt for a style to imitate and do
 not improvise one per file. Establish the conventions deliberately — layout,

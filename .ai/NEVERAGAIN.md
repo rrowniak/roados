@@ -288,3 +288,34 @@ in the record that cites it, and check the method's own arithmetic against the
 numbers claimed *before* writing either down — the same class of error as task
 12's withdrawn tap waiver, where two timestamps read in the wrong unit turned a
 real defect into a tooling excuse.
+
+## 2026-09-30 — A still screenshot of a 4 fps application looks exactly like a 60 fps one
+
+Task 11 added `font.rs`, and `Font::advance` called FreeType's `load_char` once
+per character, per label, per frame — about 61 µs each. The demo re-lays its
+labels every frame, so a frame cost ~200 ms and the whole application ran at
+about 4 frames per second at 91% of a core. It survived **three reviews and four
+captures** because every capture method in `IMPLEMENTATION_STATE.md` is a single
+still, and a still of a 4 fps application is pixel-identical to a still of a
+60 fps one. No test could see it either: `AGENTS.md` forbids wall-clock tests, so
+there was nothing to fail.
+
+The tell that was available the whole time and was read as a tooling problem
+three times: the window existed, the pixels were right, and *nothing responded*.
+Reviewers concluded "XTEST injection delivered no event" and recorded a waiver.
+The app was not ignoring input — it was too slow to answer it. Two of the three
+reviewers had a working control in front of them (task 12's button, verified on
+screen twice) that was *equally* dead, which is what a machine-level problem
+looks like, and it was read as evidence about the injector.
+
+**Rule:** a still proves what is drawn, never how fast it is drawn. When a
+change touches a per-frame cost, measure the rate (`/proc/<pid>/stat` utime
+over a fixed interval, or frames counted in the loop) and state it, because
+"it looks right" and "it responds" are different claims and only the second one
+is what a user notices. And bisect before theorising: `git worktree` at the last
+known-good commit and compare the same measurement across the three commits
+around the suspect change — here task 10 read 5/300 jiffies and task 11 read
+272/300, which named the commit in one step. When a report says "input did not
+arrive", check `XTestFakeMotionEvent` actually moves the pointer before
+believing it; on this host it does not, and a click sent to a pointer that never
+moved lands outside the window and proves nothing.

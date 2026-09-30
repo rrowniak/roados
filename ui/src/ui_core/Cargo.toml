@@ -30,6 +30,19 @@
 # operator accepted default subsystems for now; the deviation is recorded in
 # `doc/ui/IMPLEMENTATION_STATE.md`.
 #
+# `freetype-rs` carries the text rendering pipeline: it rasterises glyphs from
+# a font file. It is used with the `bundled` feature, which compiles the
+# vendored C source via the `cc` crate and statically links it — the same
+# from-source, no-system-library model SDL3 uses, so the aarch64 cross-build
+# needs no sysroot for it either. The operator approved it 2026-09-30; the
+# decision is recorded in `doc/ui/IMPLEMENTATION_STATE.md`.
+#
+# Text *shaping* (ligatures, complex scripts, bidirectional text) would need
+# HarfBuzz, whose safe Rust binding exposes no shaping API — only `unsafe` C
+# calls. The operator declined `unsafe` for now and dropped the dependency
+# 2026-09-30; FreeType alone renders Latin text. Revisit when a complex-script
+# or bidi requirement lands.
+#
 # Sources: `doc/ui/CROSSBUILD.md` §5.1 and §5.4.
 [package]
 name = "ui_core"
@@ -47,3 +60,4 @@ sdl3 = { version = "0.20", features = [
     "build-from-source-unix-console",
 ] }
 glow = "0.18"
+freetype-rs = { version = "0.38", features = ["bundled"] }

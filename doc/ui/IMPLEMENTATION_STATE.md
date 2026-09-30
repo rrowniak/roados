@@ -12,10 +12,7 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 10 approved, awaiting the operator's commit.** Two review rounds:
-*Approve with required changes* (3 minor gesture defects), then *Approve* with
-nothing outstanding after the fixes. Nothing waived except `cargo audit`, which
-is not installed on this host.
+**Status: 10 committed (`4e51b09`). Tasks 01–10 done.**
 
 **Last task: 10 — Input Handling.** 207 unit tests + 30 doctests, up from 163
 unit + 27 doctests before the task. `input.rs` is new (+1987); `layout.rs`
@@ -28,8 +25,7 @@ requires `Property::animate` and `Easing`, which task 09 owns. The dependency
 inversion is real: 08's spec names an API that only 09 creates. Recorded in
 *Ratified by the operator* below.
 
-**Current task: 10 — awaiting commit. Task 11 starts after the operator
-reports the SHA.**
+**Current task: 11 — Widget: Label.**
 
 ## Ratified by the operator (2026-09-28, 2026-09-29)
 
@@ -39,11 +35,14 @@ reports the SHA.**
   task 09's. The task files place 09's API inside 08, an inversion. 09 does not
   depend on 08, so 09 runs first. The numeric order is broken at this one point;
   every other cross-reference in the task files is honoured.
-- The 24 task files are the **confirmed spec**. The
+- The 24 task files, `01`–`24`, are the **confirmed spec**. The
   `.ai/workflows/idea-to-code.md` stage 1 gate is satisfied by the operator for
   the whole sequence — no `idea-evaluator` pass per task. Work enters at
   stage 3, and the reviewer checks the change against the task file, not
-  against whether the task was the right idea.
+  against whether the task was the right idea. Tasks `25`–`29` and `30`–`32`
+  were added afterwards, each in its own section below with its own status;
+  they are **not** covered by that stage 1 waiver and each needs the operator's
+  ratification before work starts on it.
 - **An acceptance criterion that cannot be verified on this machine is waived
   with a recorded reason**, not silently dropped and not treated as a blocker.
   It goes in the `AC waived` column and its reason goes in *History*, so a
@@ -266,8 +265,8 @@ verified. A blank cell is unknown, not "none".
 | 07 | Layout System | done | `58957d8` | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
 | 08 | Theme System | done | `d9041f9` | 0 review passes, 0 fix rounds | — |
 | 09 | Animation System | done | `6726e21` | 4 review passes, 3 fix rounds | 1 (`cargo audit` not installed) |
-| 10 | Input Handling | approved | | 2 review passes, 1 fix round | 1 (`cargo audit` not installed) |
-| 11 | Widget — Label | pending | | | |
+| 10 | Input Handling | done | `4e51b09` | 2 review passes, 1 fix round | 1 (`cargo audit` not installed) |
+| 11 | Widget — Label | implemented, rendered | | visual proof captured 2026-09-30 | |
 | 12 | Widget — Button | pending | | | |
 | 13 | Widget — Container | pending | | | |
 | 14 | Widget — Slider | pending | | | |
@@ -335,6 +334,27 @@ question, not a build one.
    superseded by item 2 and by §6.4.2: a real aarch64 compile happened, twice —
    once as a direct CMake configure and once through Cargo. What a sysroot would
    still add is the *runtime* side, which is item 1.
+
+## Tasks 30–32, the text gaps task 11 left
+
+Created 2026-09-30, **pending the operator's ratification**. Task 11 is
+implemented and renders, but three of its own requirements are not met. They are
+named here so that "implemented" is not read as "the whole spec landed", and
+each has a task file so the work is not carried in prose.
+
+| # | Task | Unmet requirement in task 11 | Symptom today |
+|---|---|---|---|
+| 30 | Font fallback chain | §2 *Font fallback chain* | `Label::font_family` is a property nothing reads; the demo hardcodes one `FONT_PATH`. A character the font lacks is **silently dropped** — `get_or_insert` returns `None`, `draw_text_batch` `continue`s, and the word has a hole in it. `GlyphKey` is `{ ch, size }`, so a second font would collide with the first. |
+| 31 | Dynamic atlas growth | §3 *Dynamic atlas growth* | The atlas is a fixed `ATLAS_SIZE = 2048`. `allocate` evicts LRU rows and returns `None` when it cannot, and `None` is a **silent** dropped glyph. Live glyphs' UVs and row bookkeeping must survive a re-pack. |
+| 32 | Fade and clip truncation, drawn | §4 *Text truncation: ellipsis, clip, fade* | `truncate_line` treats `Clip` and `Fade` identically and `Label::paint` never reads `truncation`, so there is **no fade ramp at all** and `Clip` is a layout cut, not a visual clip. Only the ellipsis third works. |
+
+Task 11's §2 also lists HarfBuzz shaping and bidi. Those are **waived, not
+deferred**: the operator dropped HarfBuzz on 2026-09-30 because its safe binding
+exposes no shaping API and `unsafe` was declined. They have no task file, and
+that is deliberate — the trigger for revisiting is a complex-script or bidi
+requirement landing, recorded in `AGENTS.md` § Rust and
+`PRIMITIVES_ARCHITECTURE.md` § *Dependencies*. A task file would imply work
+nobody has asked for.
 
 ## Resolved since task 01 was reviewed
 
@@ -701,3 +721,59 @@ operator's rule, none of these is treated as satisfied.
   leaving a stuck pointer, pinch with coincident start never arming. The
   reviewer mutation-tested each fix. `layout.rs` gained a `visible` flag on
   `LayoutState` for hit testing.
+- 2026-09-30 — **task 10 committed by the operator**, `4e51b09`, and task 11
+  started.
+- 2026-09-30 — **task 11 implemented; awaiting review.** The developer
+  subagent returned empty three times, so the task was implemented directly,
+  as task 05 was. `widgets/label.rs` is new (+683): the `Label` widget node
+  with its four properties, and a pure text-layout engine (word/character
+  wrap, left/center/right/justify alignment, line height, letter spacing,
+  ellipsis/clip/fade truncation, vertical truncation) measured through an
+  advance-width callback. 228 unit + 13 integration + 32 doctests pass; fmt,
+  clippy and doc clean. Two mutations (wrap off-by-one, ellipsis budget) were
+  each caught by the test named for them and restored clean.
+- 2026-09-30 — **the operator approved the font dependency, then narrowed it
+  to FreeType alone.** `freetype-rs 0.38` (`bundled`) is added to `ui_core`;
+  it compiles its vendored C from source via `cc` and statically links — the
+  same from-source, no-system-library model SDL3 uses, so the aarch64
+  cross-build needs no sysroot for it. Recorded in
+  `PRIMITIVES_ARCHITECTURE.md` § *Dependencies* and `AGENTS.md`.
+  **HarfBuzz was approved then dropped the same day.** Its safe Rust binding
+  (`harfbuzz` 0.8) exposes no shaping API — only `unsafe` C calls — and the
+  operator declined `unsafe`. FreeType alone renders Latin text; ligatures,
+  complex scripts and bidirectional text wait for a future `unsafe` decision.
+  **Build verified, both targets, 2026-09-30.** Native: `libfreetype2.a` and
+  `libpng.a` are produced from the vendored source; the binary's only dynamic
+  dependencies are `libm`, `libgcc_s`, `libc` and the loader. aarch64
+  cross-build: exit 0 in 57 s with **no sysroot**, the artifact is
+  `ELF 64-bit … ARM aarch64`, and FreeType and zlib are statically linked
+  (same four dynamic dependencies).
+- 2026-09-30 — **the text pipeline renders; the demo shows it.** The text
+  renderer is no longer the remaining work: the glyph atlas (shelf packing,
+  LRU eviction with span reuse, atlas-owned dirty tracking), the SDF
+  generator, the text shader and the `u_text_resolution` uniform are all in,
+  and `Label::paint` feeds the laid-out lines to the renderer as one command
+  per line, justified lines word by word. `ui_demo` paints a seven-label panel
+  — greeting, a wrapping paragraph, the three alignments, letter spacing and a
+  line cut with an ellipsis — with `+`/`-` for size, `C` for colour and `T` for
+  the theme.
+  **A real bug the unit tests could not see:** both vertex buffers were sized
+  for one vertex per quad, so `glBufferSubData` failed with `GL_INVALID_VALUE`
+  past 64 quads and the text was silently dropped. It is fixed in
+  `vertex_buffer_size`, which is now unit-tested, and the demo was captured and
+  inspected to confirm it.
+  **Known gaps, deliberately left:** no font fallback chain (`font_family` does
+  not resolve fonts) and no dynamic atlas growth; both wait on a decision. Fade
+  truncation lays out but does not draw a fade. Shaping, ligatures, complex
+  scripts and bidi remain waived with HarfBuzz. Each of the first three is now a
+  task file — **30**, **31**, **32** — see § *Tasks 30–32*; the HarfBuzz items
+  stay waived with no task.
+  **Verified 2026-09-30:** fmt, clippy, 246 unit + 22 demo + 33 doctests, doc,
+  aarch64 cross-build, and FreeType still statically linked with no dynamic
+  freetype dependency on either target.
+  **One verification limit, stated rather than glossed:** the `+`/`-` size keys
+  are covered by a unit test, not by a captured screenshot — this machine has no
+  `xdotool` or `xte` to inject a key event. Size-dependent *layout* was
+  confirmed visually by capturing the demo built at a 40px default instead, which
+  re-wraps the panel. Injecting synthetic input into a running demo is a tooling
+  gap, not a task; SDL's own event path is already covered by task 10.

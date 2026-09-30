@@ -28,9 +28,10 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 use ui_core::animation::{AnimationClock, AnyAnimation, Easing, Interpolate, Stagger};
 use ui_core::arena::{Arena, Handle};
+use ui_core::font::Font;
 use ui_core::layout::{
     mark_dirty, Constraints, CrossAxisAlignment, FlexConfig, Layout, LayoutMode, LayoutState,
-    MainAxisAlignment, Size,
+    MainAxisAlignment, Offset, Size,
 };
 use ui_core::node::{self, WidgetNode};
 use ui_core::paint::{Color, PaintState, Painter};
@@ -38,6 +39,7 @@ use ui_core::property::Property;
 use ui_core::render::context::Context;
 use ui_core::render::Renderer;
 use ui_core::theme::{PropertyValue, Theme, ThemeToken};
+use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapMode};
 
 /// The window, and the box the root is laid out in.
 const WINDOW: Size = Size {
@@ -71,6 +73,45 @@ const HELD_LIGHTEN: f32 = 0.4;
 /// blue pad, from the theme's error, success and primary colours.
 const PAD_TOKENS: [ThemeToken; 3] = [ThemeToken::Error, ThemeToken::Success, ThemeToken::Primary];
 
+/// The font file the demo's labels are drawn with.
+const FONT_PATH: &str = "/usr/share/fonts/truetype/lato/Lato-Medium.ttf";
+
+/// The panel the text is laid out in: the width its wrapping label wraps at,
+/// and the height the text column is given.
+///
+/// The height is the column's height at [`TEXT_SIZE_START`]; the column is
+/// not clipped to it, so a larger `+` size overflows the window bottom by
+/// design.
+const TEXT_PANEL: Size = Size {
+    width: 900.0,
+    height: 380.0,
+};
+
+/// Where the text column sits in the window: below the pads, which a `Stack`
+/// leaves at the top-left corner.
+const TEXT_PANEL_ORIGIN: (f32, f32) = (60.0, 170.0);
+
+/// The gap between the text column's labels.
+const LABEL_SPACING: f32 = 12.0;
+
+/// The font size the labels start at, and the bounds `+` and `-` move within.
+const TEXT_SIZE_START: f32 = 24.0;
+const TEXT_SIZE_MIN: f32 = 10.0;
+const TEXT_SIZE_MAX: f32 = 64.0;
+const TEXT_SIZE_STEP: f32 = 2.0;
+
+/// The theme tokens the labels' colour cycles through on `C`, in that order.
+///
+/// The labels take their colour from the theme, like every other colour in the
+/// demo, so `T` carries a theme switch to the text too — and `C` moves which
+/// token they read, which is the same link one step earlier in the chain.
+const TEXT_COLOR_TOKENS: [ThemeToken; 4] = [
+    ThemeToken::Text,
+    ThemeToken::Primary,
+    ThemeToken::Success,
+    ThemeToken::Warning,
+];
+
 /// How long a pad takes to press down.
 const PRESS_DURATION: Duration = Duration::from_millis(150);
 
@@ -93,9 +134,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         f32_to_u32(WINDOW.width),
         f32_to_u32(WINDOW.height),
     )?)?;
+    let font = Font::from_path(FONT_PATH)?;
+    renderer.set_font(font.clone());
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
-    let mut demo = Demo::new()?;
+    let mut demo = Demo::new(TextMetrics::new(font))?;
 
     let mut last = Instant::now();
     'running: loop {
@@ -183,8 +226,79 @@ impl Pad {
     }
 }
 
-/// The demo's widget tree, the pads that press, the theme every colour comes
-/// from, and the clock that drives the pads.
+/// The font measurements the demo's text panel needs: a character's advance and
+/// the height of one line, both at a font size.
+///
+/// The demo takes these two rather than a [`Font`] because a font can only be
+/// loaded from a file, and the demo's tests must not need a filesystem. `main`
+/// builds them from the same face it hands the renderer; the tests build them
+/// from a monospace stand-in.
+#[derive(Clone)]
+struct TextMetrics {
+    /// A character's advance width at a size, in pixels.
+    advance: Rc<dyn Fn(char, f32) -> f32>,
+    /// The height of one line at a size, in pixels.
+    line_height: Rc<dyn Fn(f32) -> f32>,
+}
+
+impl TextMetrics {
+    /// Returns the measurements of `font`.
+    fn new(font: Font) -> Self {
+        let face = Rc::new(font);
+        let lines = Rc::clone(&face);
+        TextMetrics {
+            advance: Rc::new(move |ch: char, size: f32| face.advance(ch, size)),
+            line_height: Rc::new(move |size: f32| lines.line_height(size)),
+        }
+    }
+
+    /// Returns the advance width of `ch` at `font_size`, in pixels.
+    fn advance(&self, ch: char, font_size: f32) -> f32 {
+        (self.advance)(ch, font_size)
+    }
+
+    /// Returns the height of one line at `font_size`, in pixels.
+    fn line_height(&self, font_size: f32) -> f32 {
+        (self.line_height)(font_size)
+    }
+}
+
+/// A label in the demo's text panel: the widget, and the layout options it is
+/// painted with.
+///
+/// The options are the demo's, not the label's: the label lays out whatever it
+/// is given, and the demo decides that this one wraps, that one is centred and
+/// that this one is truncated. Keeping them together here is what lets the
+/// panel re-lay out every label when the font size changes.
+struct DemoLabel {
+    /// The label widget, with its node in the arena.
+    label: Label,
+    /// The layout the label is drawn with.
+    options: LayoutOptions,
+}
+
+impl DemoLabel {
+    /// Returns the size this label's text needs in its layout at `font_size`.
+    fn size(&self, metrics: &TextMetrics, font_size: f32) -> Size {
+        let mut options = self.options;
+        options.line_height = metrics.line_height(font_size);
+        let layout = self
+            .label
+            .layout(&options, &|ch| metrics.advance(ch, font_size));
+        let width = options.max_width.max(
+            layout
+                .lines
+                .iter()
+                .map(|line| line.width)
+                .fold(0.0, f32::max),
+        );
+        Size::new(width, layout.total_height)
+    }
+}
+
+/// The demo's widget tree, the pads that press, the labels that show what text
+/// rendering does, the theme every colour comes from, and the clock that drives
+/// the pads.
 struct Demo {
     nodes: Rc<RefCell<Arena<WidgetNode>>>,
     root: Handle,
@@ -194,6 +308,19 @@ struct Demo {
     background: Handle,
     /// The window's background colour, bound to the theme's `Background` token.
     background_color: Property<PropertyValue>,
+    /// The labels, in the order the text column places them.
+    labels: Vec<DemoLabel>,
+    /// The handles of the label nodes, parallel to `labels`.
+    label_nodes: Vec<Handle>,
+    /// The node the text column is placed in, so a label change can mark the
+    /// whole panel dirty rather than every label.
+    text_panel: Handle,
+    /// The font measurements every label is laid out and drawn with.
+    metrics: TextMetrics,
+    /// The font size the labels are at, moved by `+` and `-`.
+    text_size: f32,
+    /// Which theme token the labels take their colour from, moved by `C`.
+    color_token: Property<ThemeToken>,
     clock: AnimationClock,
     /// The theme the demo's colours come from.
     theme: Theme,
@@ -205,12 +332,20 @@ struct Demo {
 impl Demo {
     /// Builds the demo: a themed background behind a centred row of three
     /// pads, each with a press property and a colour bound to it and to the
-    /// theme.
+    /// theme, and a text panel above them that exercises the Label.
+    ///
+    /// The text panel is the visual proof for the label work, so it shows what
+    /// the pipeline does rather than one string: the greeting itself, a
+    /// paragraph wrapped at the panel's width, the three alignments side by
+    /// side, and a line truncated to fit. `+` and `-` move the font size, `C`
+    /// moves which theme token the text takes its colour from, and `T` switches
+    /// the theme, which reaches the text through the same property graph the
+    /// pads use.
     ///
     /// The error is a message rather than a type of its own: the tree is
     /// written out here, so a node that cannot be attached is a bug in this
     /// file and not a runtime condition a caller could act on.
-    fn new() -> Result<Self, &'static str> {
+    fn new(metrics: TextMetrics) -> Result<Self, &'static str> {
         let theme = Theme::new();
         let mut nodes = Arena::new();
         let mut pads = Vec::new();
@@ -255,13 +390,78 @@ impl Demo {
             &[pads[0].node, pads[1].node, pads[2].node],
         )?;
 
-        // A stack: the background fills the window behind the centred row of
-        // pads, and the row is painted over it.
+        // The text panel, and the labels in it. Their colours come from the
+        // theme like the pads', bound through the token `C` moves, so both a
+        // theme switch and a `C` reach the text through the property graph.
+        let color_token = Property::new(ThemeToken::Text);
+        let token_properties: Vec<(ThemeToken, Property<PropertyValue>)> = TEXT_COLOR_TOKENS
+            .iter()
+            .map(|&token| (token, theme.property(token)))
+            .collect();
+        let mut labels = Vec::new();
+        for (text, options) in demo_labels() {
+            let mut label = Label::new(&mut nodes, text);
+            label.color = {
+                let token = color_token.clone();
+                let candidates = token_properties.clone();
+                Property::bind(move || {
+                    let wanted = token.get();
+                    candidates
+                        .iter()
+                        .find(|(candidate, _)| *candidate == wanted)
+                        .and_then(|(_, property)| property.get().as_color())
+                        .unwrap_or(Color::new(255, 255, 255, 255))
+                })
+            };
+            label.font_size.set(TEXT_SIZE_START);
+            labels.push(DemoLabel { label, options });
+        }
+        // Each label is given a rect the size its own laid-out text needs, so
+        // the panel's wrapping is the wrapping on screen.
+        for demo_label in &labels {
+            let handle = demo_label.label.handle();
+            let size = demo_label.size(&metrics, TEXT_SIZE_START);
+            nodes
+                .get_mut(handle)
+                .ok_or("ui_demo: a label node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+        let label_nodes: Vec<Handle> = labels.iter().map(|demo| demo.label.handle()).collect();
+        let text_column = container(
+            &mut nodes,
+            LayoutMode::column(),
+            FlexConfig::new()
+                .with_spacing(LABEL_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Start),
+            &label_nodes,
+        )?;
+        // The panel is `Absolute` so the column inside it can sit at the panel's
+        // margin: a `Stack` places every child at its own origin, so the margin
+        // has to come from the column's declared position rather than from the
+        // panel's rect.
+        nodes
+            .get_mut(text_column)
+            .ok_or("ui_demo: the text column is missing")?
+            .layout_mut()
+            .set_position(Some(Offset::new(TEXT_PANEL_ORIGIN.0, TEXT_PANEL_ORIGIN.1)));
+        let text_panel = node::create(
+            &mut nodes,
+            LayoutState::new()
+                .with_mode(LayoutMode::Absolute)
+                .with_constraints(Constraints::tight(TEXT_PANEL)),
+        );
+        if !node::attach(&mut nodes, text_panel, text_column) {
+            return Err("ui_demo: the text column could not be attached");
+        }
+
+        // A stack: the background fills the window behind the row of pads and
+        // the text panel, and both are painted over it.
         let root = container(
             &mut nodes,
             LayoutMode::Stack,
             FlexConfig::new(),
-            &[background, row],
+            &[background, row, text_panel],
         )?;
 
         // The link from an animation or a theme switch to a node: every write
@@ -288,6 +488,27 @@ impl Demo {
             });
         }
 
+        // The same link for the labels: a change to a label's text, font size
+        // or colour marks the panel dirty, so the next pass repaints the text
+        // with it. The panel is one node, so a change to any label dirties the
+        // whole panel rather than a label that does not exist. Each closure gets
+        // its own clone of the arena handle, so the original is never moved.
+        for demo_label in &labels {
+            let text_nodes = Rc::clone(&nodes);
+            let node = demo_label.label.handle();
+            demo_label.label.text.on_change(move |_| {
+                mark_dirty(&mut text_nodes.borrow_mut(), node);
+            });
+            let size_nodes = Rc::clone(&nodes);
+            demo_label.label.font_size.on_change(move |_| {
+                mark_dirty(&mut size_nodes.borrow_mut(), node);
+            });
+            let color_nodes = Rc::clone(&nodes);
+            demo_label.label.color.on_change(move |_| {
+                mark_dirty(&mut color_nodes.borrow_mut(), node);
+            });
+        }
+
         // The tree never changes shape, so the order is computed once.
         let order = paint_order(&nodes.borrow(), root);
         Ok(Demo {
@@ -297,6 +518,12 @@ impl Demo {
             pads,
             background,
             background_color,
+            labels,
+            label_nodes,
+            text_panel,
+            metrics,
+            text_size: TEXT_SIZE_START,
+            color_token,
             clock: AnimationClock::new(),
             theme,
             dark: true,
@@ -304,10 +531,56 @@ impl Demo {
         })
     }
 
+    /// Sets the font size every label is drawn at, and re-gives each label the
+    /// rect its text now needs.
+    ///
+    /// The size is a plain field, not a property, because it changes the labels'
+    /// *rects* as well as their glyphs: a bigger font wraps onto more lines, and
+    /// the panel lays the labels out by the rects it is given. A property write
+    /// could only mark a node dirty, and the size a node was laid out at would
+    /// still be the old one.
+    fn set_text_size(&mut self, size: f32) {
+        let size = size.clamp(TEXT_SIZE_MIN, TEXT_SIZE_MAX);
+        if (self.text_size - size).abs() < f32::EPSILON {
+            return;
+        }
+        self.text_size = size;
+        // The property writes come first: each one marks its own label's node
+        // dirty through that label's callback, and the callbacks borrow the
+        // arena, so the borrow below cannot be held across them.
+        for demo_label in &self.labels {
+            demo_label.label.font_size.set(size);
+        }
+        let mut nodes = self.nodes.borrow_mut();
+        for (&node, demo_label) in self.label_nodes.iter().zip(self.labels.iter()) {
+            let laid_out = demo_label.size(&self.metrics, size);
+            let Some(widget) = nodes.get_mut(node) else {
+                continue;
+            };
+            widget
+                .layout_mut()
+                .set_constraints(Constraints::tight(laid_out));
+        }
+        mark_dirty(&mut nodes, self.text_panel);
+    }
+
+    /// Moves which theme token the labels take their colour from, to the next
+    /// one in [`TEXT_COLOR_TOKENS`].
+    fn cycle_text_color(&mut self) {
+        let current = self.color_token.get();
+        let index = TEXT_COLOR_TOKENS
+            .iter()
+            .position(|token| *token == current)
+            .unwrap_or(0);
+        let next = (index + 1) % TEXT_COLOR_TOKENS.len();
+        self.color_token.set(TEXT_COLOR_TOKENS[next]);
+    }
+
     /// Handles one input event: `T` switches between the dark and light
     /// themes, the space bar presses all three pads with a stagger and
-    /// releases them on the spring, and the left mouse button presses and
-    /// releases the pad under the cursor.
+    /// releases them on the spring, `+` and `-` move the text size, `C` moves
+    /// the token the text takes its colour from, and the left mouse button
+    /// presses and releases the pad under the cursor.
     fn handle_event(&mut self, event: Event) {
         match event {
             Event::KeyDown {
@@ -316,10 +589,18 @@ impl Demo {
                 ..
             } => self.toggle_theme(),
             Event::KeyDown {
-                keycode: Some(Keycode::Space),
+                keycode: Some(keycode),
                 repeat: false,
                 ..
-            } => self.press_all(),
+            } => match keycode {
+                Keycode::Space => self.press_all(),
+                Keycode::Equals | Keycode::Plus => {
+                    self.set_text_size(self.text_size + TEXT_SIZE_STEP);
+                }
+                Keycode::Minus => self.set_text_size(self.text_size - TEXT_SIZE_STEP),
+                Keycode::C => self.cycle_text_color(),
+                _ => {}
+            },
             Event::KeyUp {
                 keycode: Some(Keycode::Space),
                 ..
@@ -385,6 +666,28 @@ impl Demo {
                 painter.rounded_rect(rect.into(), PAD_RADIUS, pad.color());
             }
             *node.paint_mut() = PaintState::from_commands(painter.finish());
+        }
+
+        // The labels last, so the text is on top of the pads: each is painted
+        // with the layout it was given, measuring its characters through the
+        // demo's font, so what is drawn is the laid-out text and not one raw
+        // run. They are painted here rather than in the loop above because the
+        // loop walks the tree's own order, and the labels are reached through
+        // the panel, not as its siblings.
+        let text_size = self.text_size;
+        for (demo_label, &handle) in self.labels.iter().zip(self.label_nodes.iter()) {
+            let Some(node) = nodes.get_mut(handle) else {
+                continue;
+            };
+            let Some(rect) = node.layout().rect() else {
+                continue;
+            };
+            let mut options = demo_label.options;
+            options.line_height = self.metrics.line_height(text_size);
+            let commands = demo_label.label.paint(rect.into(), &options, &|ch: char| {
+                self.metrics.advance(ch, text_size)
+            });
+            *node.paint_mut() = PaintState::from_commands(commands);
         }
     }
 
@@ -496,6 +799,61 @@ impl Demo {
     }
 }
 
+/// Returns the labels in the demo's text panel, in the order they are shown,
+/// each with the layout it is drawn with.
+///
+/// This is the visual proof for the label work, so it shows what the pipeline
+/// does rather than one string: the greeting, a paragraph that wraps at the
+/// panel's width, the three alignments across the same width, a letter-spaced
+/// line, and a line too long for the panel, truncated with an ellipsis. A
+/// change to a font size, a colour or a layout is visible in the running demo
+/// because of what is on this list.
+fn demo_labels() -> Vec<(&'static str, LayoutOptions)> {
+    let alignment = |align| LayoutOptions {
+        max_width: TEXT_PANEL.width,
+        align,
+        ..LayoutOptions::default()
+    };
+    vec![
+        (
+            "Hello, World!",
+            LayoutOptions {
+                max_width: TEXT_PANEL.width,
+                ..LayoutOptions::default()
+            },
+        ),
+        (
+            "This paragraph wraps at the panel's width, one word at a time, and \
+             every line after the first is laid out from the same options.",
+            LayoutOptions {
+                max_width: TEXT_PANEL.width * 0.66,
+                ..LayoutOptions::default()
+            },
+        ),
+        ("left aligned", alignment(TextAlign::Left)),
+        ("centred", alignment(TextAlign::Center)),
+        ("right aligned", alignment(TextAlign::Right)),
+        (
+            "letter spacing widens every gap",
+            LayoutOptions {
+                max_width: TEXT_PANEL.width,
+                letter_spacing: 3.0,
+                ..LayoutOptions::default()
+            },
+        ),
+        (
+            "A line far too long for the panel it is given is cut at the panel's \
+             edge and closed with an ellipsis.",
+            LayoutOptions {
+                max_width: TEXT_PANEL.width * 0.5,
+                wrap: WrapMode::None,
+                truncation: Truncation::Ellipsis,
+                ..LayoutOptions::default()
+            },
+        ),
+    ]
+}
+
 /// Returns the handles of the tree below `root` in paint order: a parent, then
 /// its children in the order its layout mode places them. A `Stack` places them
 /// all at the same rect, and the later one covers the earlier, so the order
@@ -538,11 +896,28 @@ fn container(
 mod tests {
     use super::*;
     use std::time::Duration;
+    use ui_core::paint::DrawCommand;
+
+    /// Monospace stand-in measurements: every character half its size wide, and
+    /// every line 1.2 times its size tall, so both grow with the font size the
+    /// way a real face's do. A real font needs a file, and a test may not need a
+    /// filesystem.
+    fn mono_metrics() -> TextMetrics {
+        TextMetrics {
+            advance: Rc::new(|_, size| size * 0.5),
+            line_height: Rc::new(|size| size * 1.2),
+        }
+    }
+
+    /// Returns a demo with the stand-in measurements.
+    fn demo() -> Demo {
+        Demo::new(mono_metrics()).unwrap()
+    }
 
     /// Lays the demo out once, the way the first frame does, so a test can ask
     /// where the pads are.
     fn laid_out() -> Demo {
-        let mut demo = Demo::new().unwrap();
+        let mut demo = demo();
         demo.frame(WINDOW, Duration::from_millis(16));
         demo
     }
@@ -563,7 +938,7 @@ mod tests {
 
     #[test]
     fn a_new_pad_is_at_rest_and_paints_its_rest_colour() {
-        let demo = Demo::new().unwrap();
+        let demo = demo();
         let pad = &demo.pads[0];
         assert_eq!(pad.press.get(), 0.0);
         assert!(!pad.press.is_bound());
@@ -577,7 +952,7 @@ mod tests {
 
     #[test]
     fn a_fully_pressed_pad_paints_its_held_colour() {
-        let demo = Demo::new().unwrap();
+        let demo = demo();
         let pad = &demo.pads[0];
         pad.press.set(1.0);
         let rest = demo.theme.get(ThemeToken::Error).as_color().unwrap();
@@ -593,7 +968,7 @@ mod tests {
         // The colour is derived from the single press property at paint time
         // rather than animated: halfway pressed, the pad paints exactly halfway
         // between its rest and held colours.
-        let demo = Demo::new().unwrap();
+        let demo = demo();
         let pad = &demo.pads[0];
         pad.press.set(0.5);
         let rest = demo.theme.get(ThemeToken::Error).as_color().unwrap();
@@ -606,7 +981,7 @@ mod tests {
 
     #[test]
     fn the_demo_starts_with_three_pads_at_rest() {
-        let demo = Demo::new().unwrap();
+        let demo = demo();
         assert_eq!(demo.pads.len(), 3);
         for pad in &demo.pads {
             assert_eq!(pad.press.get(), 0.0);
@@ -615,7 +990,7 @@ mod tests {
 
     #[test]
     fn the_demo_starts_with_the_dark_theme() {
-        let demo = Demo::new().unwrap();
+        let demo = demo();
         assert!(demo.dark);
         assert_eq!(
             demo.theme.get(ThemeToken::Background),
@@ -707,7 +1082,7 @@ mod tests {
         // Holding the space bar presses all three pads, one STAGGER_STEP
         // apart: after one step's worth of time the first is pressing and the
         // last has not started.
-        let mut demo = Demo::new().unwrap();
+        let mut demo = demo();
         demo.press_all();
         let _ = demo.clock.tick(STAGGER_STEP);
         assert!(demo.pads[0].press.get() > 0.0, "the first pad is pressing");
@@ -720,7 +1095,7 @@ mod tests {
 
     #[test]
     fn a_pressed_pad_arrives_at_held() {
-        let mut demo = Demo::new().unwrap();
+        let mut demo = demo();
         demo.press_all();
         for _ in 0..10 {
             let _ = demo.clock.tick(Duration::from_millis(50));
@@ -733,7 +1108,7 @@ mod tests {
 
     #[test]
     fn releasing_a_pad_springs_it_back_to_rest() {
-        let mut demo = Demo::new().unwrap();
+        let mut demo = demo();
         demo.press_all();
         for _ in 0..10 {
             let _ = demo.clock.tick(Duration::from_millis(50));
@@ -793,5 +1168,218 @@ mod tests {
         );
         assert_eq!(demo.pads[0].press.get(), 0.0, "and the others are not");
         assert_eq!(demo.pads[2].press.get(), 0.0);
+    }
+
+    /// Returns the `keycode` key-down event the demo reacts to.
+    fn key(keycode: Keycode) -> Event {
+        Event::KeyDown {
+            timestamp: 0,
+            window_id: 0,
+            keycode: Some(keycode),
+            scancode: None,
+            keymod: Mod::empty(),
+            repeat: false,
+            which: 0,
+            raw: 0,
+        }
+    }
+
+    /// The colour the demo's first label paints with.
+    fn first_label_color(demo: &Demo) -> Color {
+        demo.labels[0].label.color.get()
+    }
+
+    /// The text runs the first label recorded on the last frame.
+    fn first_label_runs(demo: &Demo) -> Vec<(f32, f32, String)> {
+        let nodes = demo.nodes.borrow();
+        let Some(node) = nodes.get(demo.label_nodes[0]) else {
+            return Vec::new();
+        };
+        node.paint()
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Text { x, y, text, .. } => Some((*x, *y, text.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The text runs a label recorded on the last frame.
+    fn label_runs(demo: &Demo, index: usize) -> Vec<String> {
+        let nodes = demo.nodes.borrow();
+        let Some(node) = demo
+            .label_nodes
+            .get(index)
+            .and_then(|&handle| nodes.get(handle))
+        else {
+            return Vec::new();
+        };
+        node.paint()
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_last_panel_label_is_cut_with_an_ellipsis() {
+        let demo = laid_out();
+        let runs = label_runs(&demo, 6);
+        assert_eq!(runs.len(), 1, "the long label is one line, not wrapped");
+        assert!(
+            runs[0].ends_with('\u{2026}'),
+            "the long line is closed with an ellipsis, got {:?}",
+            runs[0]
+        );
+        assert!(
+            !runs[0].contains("ellipsis."),
+            "the text is cut before its end, got {:?}",
+            runs[0]
+        );
+    }
+
+    #[test]
+    fn the_text_panel_shows_the_greeting() {
+        let demo = laid_out();
+        assert_eq!(
+            first_label_runs(&demo)[0].2,
+            "Hello, World!",
+            "the first thing the panel says is the greeting"
+        );
+    }
+
+    #[test]
+    fn the_panel_lays_out_its_labels_in_the_column() {
+        let mut demo = demo();
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let nodes = demo.nodes.borrow();
+        let rects: Vec<_> = demo
+            .label_nodes
+            .iter()
+            .map(|&handle| nodes.get(handle).unwrap().layout().rect().unwrap())
+            .collect();
+        for pair in rects.windows(2) {
+            assert!(
+                pair[1].origin.y > pair[0].origin.y,
+                "each label is below the one before it"
+            );
+        }
+        assert!(
+            rects[0].origin.x > 0.0 && rects[0].origin.y > 0.0,
+            "and the panel is inset from the window's edge"
+        );
+    }
+
+    #[test]
+    fn a_wrapped_label_records_more_than_one_line() {
+        let mut demo = demo();
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let nodes = demo.nodes.borrow();
+        let runs = nodes
+            .get(demo.label_nodes[1])
+            .unwrap()
+            .paint()
+            .commands()
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::Text { .. }))
+            .count();
+        assert!(
+            runs > 1,
+            "the paragraph label wraps onto more than one line, at {runs} runs"
+        );
+    }
+
+    #[test]
+    fn the_plus_and_minus_keys_move_the_text_size() {
+        let mut demo = laid_out();
+        let start = demo.labels[0].label.font_size.get();
+        demo.handle_event(key(Keycode::Equals));
+        assert_eq!(
+            demo.labels[0].label.font_size.get(),
+            start + TEXT_SIZE_STEP,
+            "every label takes the new size"
+        );
+        demo.handle_event(key(Keycode::Minus));
+        assert_eq!(demo.labels[0].label.font_size.get(), start);
+    }
+
+    #[test]
+    fn the_text_size_stays_inside_its_bounds() {
+        let mut demo = laid_out();
+        for _ in 0..100 {
+            demo.handle_event(key(Keycode::Minus));
+        }
+        assert_eq!(demo.text_size, TEXT_SIZE_MIN, "and stops at the floor");
+        for _ in 0..200 {
+            demo.handle_event(key(Keycode::Plus));
+        }
+        assert_eq!(demo.text_size, TEXT_SIZE_MAX, "and stops at the ceiling");
+    }
+
+    #[test]
+    fn a_bigger_font_gives_the_labels_taller_rects() {
+        // The size is a plain field rather than a property because it changes
+        // the labels' rects, not only their glyphs: the panel lays them out by
+        // the rects it is given.
+        let mut demo = laid_out();
+        let first = demo.label_nodes[0];
+        let before = {
+            let nodes = demo.nodes.borrow();
+            nodes.get(first).unwrap().layout().rect().unwrap()
+        };
+        demo.handle_event(key(Keycode::Equals));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let after = {
+            let nodes = demo.nodes.borrow();
+            nodes.get(first).unwrap().layout().rect().unwrap()
+        };
+        assert!(
+            after.size.height > before.size.height,
+            "a bigger font needs a taller line box: {} then {}",
+            before.size.height,
+            after.size.height
+        );
+    }
+
+    #[test]
+    fn the_c_key_moves_the_token_the_text_takes_its_colour_from() {
+        let mut demo = laid_out();
+        let first = first_label_color(&demo);
+        assert_eq!(
+            first,
+            demo.theme.get(ThemeToken::Text).as_color().unwrap(),
+            "the text starts on the theme's Text token"
+        );
+        demo.handle_event(key(Keycode::C));
+        assert_ne!(first_label_color(&demo), first, "and C moved it");
+        assert_eq!(
+            first_label_color(&demo),
+            demo.theme.get(ThemeToken::Primary).as_color().unwrap(),
+            "onto the next token in the cycle"
+        );
+    }
+
+    #[test]
+    fn the_text_follows_the_theme_switch() {
+        let dark = first_label_color(&laid_out());
+        let mut demo = laid_out();
+        demo.handle_event(key(Keycode::T));
+        for _ in 0..35 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_ne!(
+            first_label_color(&demo),
+            dark,
+            "the text moved with the theme"
+        );
+        assert_eq!(
+            first_label_color(&demo),
+            Theme::light().get(ThemeToken::Text).as_color().unwrap(),
+            "and arrived at the light theme's Text token"
+        );
     }
 }

@@ -224,6 +224,8 @@ mod tests {
             y: 0.0,
             text: "a".to_string(),
             color: transparent(),
+            font_size: 16.0,
+            extra_advance: 0.0,
         });
         batcher.add(rect(opaque()));
 
@@ -244,6 +246,8 @@ mod tests {
             y: 0.0,
             text: "a".to_string(),
             color: opaque(),
+            font_size: 16.0,
+            extra_advance: 0.0,
         });
 
         let batched = batcher.finish();

@@ -75,18 +75,26 @@ pub enum DrawCommand {
     },
     /// A text run.
     ///
-    /// Rendering needs the font atlas, which arrives with the Label widget
-    /// (task 11); the command is recorded and batched but not yet submitted to
-    /// the GPU.
+    /// The run is drawn with the text shader, from the glyph atlas the
+    /// renderer keeps. It is one *line*: a multi-line run is recorded as one
+    /// command per line, each positioned on its own line box.
     Text {
-        /// X offset of the text origin.
+        /// X offset of the line's left edge.
         x: f32,
-        /// Y offset of the text origin.
+        /// Y offset of the *top* of the line's box, not the baseline. The font
+        /// decides where the baseline falls inside it, so a caller that has
+        /// measured a line does not have to know the ascent.
         y: f32,
         /// The text to draw.
         text: String,
         /// Fill color, premultiplied alpha.
         color: Color,
+        /// The font size in pixels, used to rasterize the glyphs.
+        font_size: f32,
+        /// Pixels added after every glyph, including the last: the layout's
+        /// letter spacing. A run that is justified is recorded word by word
+        /// instead, so its extra gap is carried by the word positions.
+        extra_advance: f32,
     },
     /// A textured rectangle.
     ///
@@ -227,13 +235,24 @@ impl Painter {
         });
     }
 
-    /// Records a text run.
-    pub fn text(&mut self, x: f32, y: f32, text: &str, color: Color) {
+    /// Records a text run at `font_size` pixels, on a line whose top edge is at
+    /// `y`, with `extra_advance` pixels of tracking after each glyph.
+    pub fn text(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: &str,
+        color: Color,
+        font_size: f32,
+        extra_advance: f32,
+    ) {
         self.commands.push(DrawCommand::Text {
             x,
             y,
             text: text.to_string(),
             color,
+            font_size,
+            extra_advance,
         });
     }
 
@@ -291,7 +310,7 @@ mod tests {
             4.0,
             Color::new(0, 255, 0, 255),
         );
-        painter.text(2.0, 3.0, "hi", Color::new(0, 0, 255, 255));
+        painter.text(2.0, 3.0, "hi", Color::new(0, 0, 255, 255), 16.0, 0.0);
         painter.image(Rect::new(4.0, 4.0, 8.0, 8.0), TextureId::new(7));
         painter.line((0.0, 0.0), (10.0, 10.0), 2.0, Color::new(1, 2, 3, 255));
         painter.circle((5.0, 5.0), 3.0, Color::new(4, 5, 6, 255));

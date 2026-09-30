@@ -23,10 +23,13 @@ Research date: 2026-09-27
 [dependencies]
 sdl3 = { version = "0.20", features = ["build-from-source"] }
 glow = "0.18"
+freetype-rs = { version = "0.38", features = ["bundled"] }
 ```
 
 - `sdl3` with `build-from-source` builds SDL3 from vendored source via `sdl3-sys` (cmake crate). No system SDL3 package needed.
 - `glow` loads GLES 3.1 function pointers via `SDL_GL_GetProcAddress` — compatible with SDL3-created contexts.
+- `freetype-rs` with `bundled` builds FreeType 2.13.2 from vendored C source (via `freetype-sys` + `cc`) and statically links it — glyph rasterisation, no system FreeType needed.
+- Text *shaping* (ligatures, complex scripts, bidirectional text) would need HarfBuzz. Its safe Rust binding exposes no shaping API — only `unsafe` C calls — so the operator declined `unsafe` and dropped the dependency 2026-09-30; FreeType alone renders Latin text. Revisit when a complex-script or bidi requirement lands.
 - SDL3 subsystems disabled at build time: audio, render, camera, filesystem — only video, events, input, joystick/gamepad needed.
 
 ## Widget Tree

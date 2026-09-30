@@ -14,6 +14,7 @@
 pub mod animation;
 pub mod arena;
 pub mod batch;
+pub mod font;
 pub mod input;
 pub mod layout;
 pub mod node;

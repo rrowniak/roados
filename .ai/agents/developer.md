@@ -184,6 +184,12 @@ Verification is not a step you report on; it is a step you perform.
   - `cargo audit` — no known vulnerabilities in dependencies
 - **Never assert green from a change that was not run.** "Should compile" is not
   a result, and a passing claim nobody checked is worse than an admitted failure.
+- **A change that alters what is on screen is not verified until it has been
+  seen.** A GL pipeline passes every unit test and still draws nothing: buffer
+  sizing, uniforms, atlas uploads and blend state are all invisible to the test
+  harness. Build the demo, run it, capture the window, and look at the pixels
+  before reporting a rendering change as done. State the capture method in the
+  report so the operator can reproduce it.
 - **A test that has never failed is not a test.** Break it deliberately, watch
   it fail for the right reason, then fix it back. A test asserted only against
   working code proves nothing.
@@ -200,7 +206,9 @@ Verification is not a step you report on; it is a step you perform.
   for verification, always redirect stdout/stderr to a file
   (`>/tmp/app.log 2>&1`) and run `cargo build` first so compilation time does
   not race with `sleep`. Without redirection the bash tool hangs forever
-  waiting on inherited file descriptors.
+  waiting on inherited file descriptors. Kill a demo by exact process name
+  (`pkill -x ui_demo`); `pkill -f ui_demo` matches the invoking shell and kills
+  the tool call with it.
 - If there is no test infrastructure yet, the first change creates it. That is
   part of the change, not a follow-up.
 

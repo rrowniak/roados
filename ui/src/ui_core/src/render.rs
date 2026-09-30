@@ -7,6 +7,7 @@ pub mod context;
 
 use crate::arena::{Arena, Handle};
 use crate::batch::{Batch, Batcher, ShaderKind};
+use crate::font::{Font, GlyphAtlas};
 use crate::node::WidgetNode;
 use crate::paint::{DrawCommand, Rect};
 use crate::property::Color;
@@ -41,6 +42,20 @@ const GL_ONE: u32 = 1;
 const GL_ONE_MINUS_SRC_ALPHA: u32 = 0x0303;
 /// GL_COLOR_BUFFER_BIT constant (0x4000).
 const GL_COLOR_BUFFER_BIT: u32 = 0x4000;
+/// GL_TEXTURE_2D constant (0x0DE1).
+const GL_TEXTURE_2D: u32 = 0x0DE1;
+/// GL_R8 constant (0x8229): a single-channel texture.
+const GL_R8: u32 = 0x8229;
+/// GL_RED constant (0x1903): the red channel of a single-channel texture.
+const GL_RED: u32 = 0x1903;
+/// GL_UNSIGNED_BYTE constant (0x1401).
+const GL_UNSIGNED_BYTE: u32 = 0x1401;
+/// GL_TEXTURE0 constant (0x84C0).
+const GL_TEXTURE0: u32 = 0x84C0;
+/// GL_LINEAR constant (0x2601): linear texture filtering.
+const GL_LINEAR: u32 = 0x2601;
+/// GL_CLAMP_TO_EDGE constant (0x812F).
+const GL_CLAMP_TO_EDGE: u32 = 0x812F;
 
 /// Stride of one [`Vertex`] in bytes: 11 `f32` fields, no padding.
 const VERTEX_STRIDE: i32 = 44;
@@ -56,6 +71,19 @@ const SIZE_OFFSET: i32 = 36;
 /// Quads the vertex and index buffers are allocated for before the first
 /// frame; both grow geometrically past this.
 const INITIAL_CAPACITY: usize = 256;
+
+/// Vertices per quad: two triangles.
+const VERTS_PER_QUAD: usize = 4;
+
+/// Stride of one [`TextVertex`] in bytes: 8 `f32` fields, no padding.
+const TEXT_VERTEX_STRIDE: i32 = 32;
+/// Byte offset of `TextVertex::uv` within the vertex.
+const TEXT_UV_OFFSET: i32 = 8;
+/// Byte offset of `TextVertex::color` within the vertex.
+const TEXT_COLOR_OFFSET: i32 = 16;
+
+/// The glyph atlas texture size in pixels, square.
+const ATLAS_SIZE: u32 = 2048;
 
 /// The solid-color shader: window-space positions, per-vertex color, and an
 /// SDF that cuts rounded corners in the fragment shader.
@@ -104,6 +132,46 @@ void main() {
 }
 "#;
 
+/// The text vertex shader: window-space positions, atlas UVs, and a
+/// premultiplied color per vertex.
+const TEXT_VERTEX_SHADER_SRC: &str = r#"#version 300 es
+layout(location = 0) in vec2 a_pos;
+layout(location = 1) in vec2 a_uv;
+layout(location = 2) in vec4 a_color;
+uniform vec2 u_resolution;
+out vec2 v_uv;
+out vec4 v_color;
+void main() {
+    vec2 normalized = a_pos / u_resolution;
+    vec2 clip = normalized * 2.0 - 1.0;
+    gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+    v_uv = a_uv;
+    v_color = a_color;
+}
+"#;
+
+/// The text fragment shader. Samples the glyph's signed distance field and
+/// turns it into a coverage, which is what makes the text crisp at any size:
+/// the SDF is resolution-independent, so scaling the quad scales the distance
+/// smoothly instead of re-rasterizing the glyph. The transition width comes
+/// from `fwidth`, the field's rate of change per screen pixel, so the edge is
+/// always about one pixel wide — a fixed band would be blurry when the quad is
+/// magnified and aliased when it is shrunk. The color is premultiplied by the
+/// coverage because the text pass blends with `ONE, ONE_MINUS_SRC_ALPHA`.
+const TEXT_FRAGMENT_SHADER_SRC: &str = r#"#version 300 es
+precision mediump float;
+in vec2 v_uv;
+in vec4 v_color;
+uniform sampler2D u_atlas;
+out vec4 frag_color;
+void main() {
+    float dist = texture(u_atlas, v_uv).r;
+    float width = max(fwidth(dist), 0.0005);
+    float coverage = smoothstep(0.5 - width, 0.5 + width, dist);
+    frag_color = vec4(v_color.rgb * coverage, v_color.a * coverage);
+}
+"#;
+
 /// An error that can occur while creating a [`Renderer`] or submitting a
 /// frame.
 #[derive(Debug)]
@@ -148,6 +216,14 @@ fn u32_to_f32(value: u32) -> f32 {
     value as f32
 }
 
+/// Converts a pixel offset to `f32` for vertex positions.
+///
+/// Like [`u32_to_f32`], there is no `From<i32> for f32` in std, so this is an
+/// `as` cast; the value is a small pixel offset that `f32` represents exactly.
+fn i32_to_f32(value: i32) -> f32 {
+    value as f32
+}
+
 /// One vertex of a quad: window position, position within the quad, color,
 /// corner radius and quad size — everything the solid shader needs, so a
 /// batch draws with no per-command uniforms.
@@ -180,6 +256,58 @@ struct Quad {
     radius: f32,
     /// Quad size in pixels.
     size: [f32; 2],
+}
+
+/// One vertex of a text glyph quad: window position, atlas UV, and a
+/// premultiplied color.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+struct TextVertex {
+    /// Position in window coordinates, origin at the top left.
+    pos: [f32; 2],
+    /// Position within the glyph atlas.
+    uv: [f32; 2],
+    /// Premultiplied color.
+    color: [f32; 4],
+}
+
+/// Builds the four vertices of one glyph quad.
+///
+/// `(x, y)` is the quad's top-left corner in window coordinates, `(w, h)` its
+/// size, `(u0, v0)`–`(u1, v1)` its rect in the atlas, and `color` the
+/// premultiplied fill.
+fn text_quad(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    uv: (f32, f32, f32, f32),
+    color: Color,
+) -> [TextVertex; 4] {
+    let (u0, v0, u1, v1) = uv;
+    let c = quad_color(color);
+    [
+        TextVertex {
+            pos: [x, y],
+            uv: [u0, v0],
+            color: c,
+        },
+        TextVertex {
+            pos: [x + w, y],
+            uv: [u1, v0],
+            color: c,
+        },
+        TextVertex {
+            pos: [x + w, y + h],
+            uv: [u1, v1],
+            color: c,
+        },
+        TextVertex {
+            pos: [x, y + h],
+            uv: [u0, v1],
+            color: c,
+        },
+    ]
 }
 
 /// Converts a color to normalized premultiplied components.
@@ -300,6 +428,22 @@ fn command_quads(command: &DrawCommand) -> Vec<Quad> {
     }
 }
 
+/// Byte size of a vertex buffer that holds `capacity` quads.
+///
+/// A quad is four vertices, so a buffer sized for one vertex per quad is a
+/// quarter of the size [`Renderer::ensure_vertex_capacity`] and
+/// [`Renderer::ensure_text_vertex_capacity`] promise to their callers. The
+/// subsequent `glBufferSubData` then fails with `GL_INVALID_VALUE` and the
+/// batch is silently dropped.
+fn vertex_buffer_size(capacity: usize, bytes_per_vertex: usize) -> Result<i32, RenderError> {
+    let bytes = capacity
+        .checked_mul(VERTS_PER_QUAD)
+        .and_then(|vertices| vertices.checked_mul(bytes_per_vertex))
+        .ok_or_else(|| RenderError::Gl("vertex buffer size exceeds the i32 range".to_string()))?;
+    i32::try_from(bytes)
+        .map_err(|_| RenderError::Gl("vertex buffer size exceeds the i32 range".to_string()))
+}
+
 /// Expands every command in a batch into vertices, four per quad.
 fn batch_vertices(batch: &Batch) -> Vec<Vertex> {
     let mut vertices = Vec::new();
@@ -375,6 +519,35 @@ fn create_program(gl: &glow::Context) -> Result<glow::Program, RenderError> {
     Ok(program)
 }
 
+/// Links the text program.
+///
+/// # Errors
+///
+/// Returns [`RenderError::ShaderCompile`] or [`RenderError::ProgramLink`]
+/// with the info log on failure.
+fn create_text_program(gl: &glow::Context) -> Result<glow::Program, RenderError> {
+    let vertex_shader = compile_shader(gl, GL_VERTEX_SHADER, TEXT_VERTEX_SHADER_SRC)?;
+    let fragment_shader = compile_shader(gl, GL_FRAGMENT_SHADER, TEXT_FRAGMENT_SHADER_SRC)?;
+    // SAFETY: The GL context is current on this thread.
+    let program = unsafe { gl.create_program() }.map_err(RenderError::Gl)?;
+    // SAFETY: `program` and both shaders are valid objects.
+    unsafe {
+        gl.attach_shader(program, vertex_shader);
+        gl.attach_shader(program, fragment_shader);
+        gl.link_program(program);
+        gl.detach_shader(program, vertex_shader);
+        gl.detach_shader(program, fragment_shader);
+        gl.delete_shader(vertex_shader);
+        gl.delete_shader(fragment_shader);
+        if !gl.get_program_link_status(program) {
+            let log = gl.get_program_info_log(program);
+            gl.delete_program(program);
+            return Err(RenderError::ProgramLink(log));
+        }
+    }
+    Ok(program)
+}
+
 /// Submits batched draw commands to the GPU through OpenGL ES.
 ///
 /// The renderer owns the window and GL context, the shader program, and the
@@ -392,6 +565,17 @@ pub struct Renderer {
     viewport: (u32, u32),
     vertex_capacity: usize,
     index_capacity: usize,
+    text_program: glow::Program,
+    text_vao: glow::VertexArray,
+    text_vbo: glow::Buffer,
+    text_ibo: glow::Buffer,
+    u_atlas: Option<glow::UniformLocation>,
+    u_text_resolution: Option<glow::UniformLocation>,
+    atlas_texture: glow::Texture,
+    font: Option<Font>,
+    atlas: GlyphAtlas,
+    text_vertex_capacity: usize,
+    text_index_capacity: usize,
 }
 
 impl Renderer {
@@ -406,8 +590,18 @@ impl Renderer {
     /// link, or a GL object cannot be created.
     pub fn new(context: Context) -> Result<Self, RenderError> {
         let program = create_program(context.gl())?;
+        let text_program = create_text_program(context.gl())?;
         // SAFETY: The GL context is current on this thread.
         let (vao, vbo, ibo) = unsafe {
+            let gl = context.gl();
+            (
+                gl.create_vertex_array().map_err(RenderError::Gl)?,
+                gl.create_buffer().map_err(RenderError::Gl)?,
+                gl.create_buffer().map_err(RenderError::Gl)?,
+            )
+        };
+        // SAFETY: The GL context is current on this thread.
+        let (text_vao, text_vbo, text_ibo) = unsafe {
             let gl = context.gl();
             (
                 gl.create_vertex_array().map_err(RenderError::Gl)?,
@@ -418,6 +612,21 @@ impl Renderer {
         // SAFETY: The GL context is current on this thread and `program` is
         // the linked program.
         let u_resolution = unsafe { context.gl().get_uniform_location(program, "u_resolution") };
+        // SAFETY: The GL context is current on this thread and `text_program`
+        // is the linked program.
+        let u_atlas = unsafe { context.gl().get_uniform_location(text_program, "u_atlas") };
+        // A uniform location belongs to the program it was queried from, so the
+        // text program needs its own `u_resolution`; the solid program's
+        // location would leave the text shader's at (0, 0).
+        // SAFETY: The GL context is current on this thread and `text_program`
+        // is the linked program.
+        let u_text_resolution = unsafe {
+            context
+                .gl()
+                .get_uniform_location(text_program, "u_resolution")
+        };
+        // SAFETY: The GL context is current on this thread.
+        let atlas_texture = unsafe { context.gl().create_texture().map_err(RenderError::Gl)? };
         let mut renderer = Renderer {
             context,
             program,
@@ -429,6 +638,17 @@ impl Renderer {
             viewport: (0, 0),
             vertex_capacity: 0,
             index_capacity: 0,
+            text_program,
+            text_vao,
+            text_vbo,
+            text_ibo,
+            u_atlas,
+            u_text_resolution,
+            atlas_texture,
+            font: None,
+            atlas: GlyphAtlas::new(ATLAS_SIZE),
+            text_vertex_capacity: 0,
+            text_index_capacity: 0,
         };
         // SAFETY: The GL context is current on this thread; `vao`, `vbo` and
         // `ibo` are valid objects created above. The attribute pointers and
@@ -450,9 +670,41 @@ impl Renderer {
             gl.vertex_attrib_pointer_f32(4, 2, GL_FLOAT, false, VERTEX_STRIDE, SIZE_OFFSET);
             gl.bind_vertex_array(None);
         }
+        // SAFETY: The GL context is current on this thread; the text VAO, VBO
+        // and IBO are valid objects created above.
+        unsafe {
+            let gl = renderer.context.gl();
+            gl.bind_vertex_array(Some(renderer.text_vao));
+            gl.bind_buffer(GL_ARRAY_BUFFER, Some(renderer.text_vbo));
+            gl.bind_buffer(GL_ELEMENT_ARRAY_BUFFER, Some(renderer.text_ibo));
+            gl.enable_vertex_attrib_array(0);
+            gl.vertex_attrib_pointer_f32(0, 2, GL_FLOAT, false, TEXT_VERTEX_STRIDE, 0);
+            gl.enable_vertex_attrib_array(1);
+            gl.vertex_attrib_pointer_f32(1, 2, GL_FLOAT, false, TEXT_VERTEX_STRIDE, TEXT_UV_OFFSET);
+            gl.enable_vertex_attrib_array(2);
+            gl.vertex_attrib_pointer_f32(
+                2,
+                4,
+                GL_FLOAT,
+                false,
+                TEXT_VERTEX_STRIDE,
+                TEXT_COLOR_OFFSET,
+            );
+            gl.bind_vertex_array(None);
+        }
         renderer.ensure_index_capacity(INITIAL_CAPACITY)?;
         renderer.ensure_vertex_capacity(INITIAL_CAPACITY)?;
+        renderer.ensure_text_index_capacity(INITIAL_CAPACITY)?;
+        renderer.ensure_text_vertex_capacity(INITIAL_CAPACITY)?;
         Ok(renderer)
+    }
+
+    /// Sets the font the renderer draws text with.
+    ///
+    /// The font is loaded from `path`; the renderer owns it and the glyph
+    /// atlas, and rasterizes glyphs into the atlas as text is drawn.
+    pub fn set_font(&mut self, font: Font) {
+        self.font = Some(font);
     }
 
     /// Returns a reference to the SDL3 context, for obtaining the event pump.
@@ -570,6 +822,15 @@ impl Renderer {
         for batch in &batched.transparent {
             self.draw_solid_batch(batch)?;
         }
+        // Text is drawn last, with blending on: the SDF coverage is a
+        // per-fragment alpha, so even fully-opaque text composites its
+        // anti-aliased edges.
+        for batch in &batched.opaque {
+            self.draw_text_batch(batch)?;
+        }
+        for batch in &batched.transparent {
+            self.draw_text_batch(batch)?;
+        }
         self.context.swap();
         Ok(())
     }
@@ -612,6 +873,193 @@ impl Renderer {
             gl.draw_elements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
             gl.bind_vertex_array(None);
         }
+        Ok(())
+    }
+
+    /// Uploads the glyph atlas to the GPU, but only when it changed.
+    ///
+    /// The atlas is populated lazily while a batch is being expanded, so this
+    /// has to run *after* the quads are built and *before* they are drawn: an
+    /// upload taken before rasterization would sample an empty texture.
+    fn upload_atlas(&mut self) -> Result<(), RenderError> {
+        let size = self.atlas.size();
+        let Some(pixels) = self.atlas.take_dirty_pixels() else {
+            return Ok(());
+        };
+        // SAFETY: The GL context is current on this thread; `self.atlas_texture`
+        // is a valid texture and `pixels` is a `size`×`size` array that outlives
+        // the upload.
+        unsafe {
+            let gl = self.context.gl();
+            gl.active_texture(GL_TEXTURE0);
+            gl.bind_texture(GL_TEXTURE_2D, Some(self.atlas_texture));
+            gl.tex_parameter_i32(GL_TEXTURE_2D, glow::TEXTURE_MIN_FILTER, GL_LINEAR as i32);
+            gl.tex_parameter_i32(GL_TEXTURE_2D, glow::TEXTURE_MAG_FILTER, GL_LINEAR as i32);
+            gl.tex_parameter_i32(GL_TEXTURE_2D, glow::TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE as i32);
+            gl.tex_parameter_i32(GL_TEXTURE_2D, glow::TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE as i32);
+            gl.tex_image_2d(
+                GL_TEXTURE_2D,
+                0,
+                GL_R8 as i32,
+                i32::try_from(size).unwrap_or(0),
+                i32::try_from(size).unwrap_or(0),
+                0,
+                GL_RED,
+                GL_UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(Some(pixels)),
+            );
+        }
+        Ok(())
+    }
+
+    /// Draws one text batch with the SDF text shader.
+    ///
+    /// Each text command is expanded into one quad per glyph, positioned by the
+    /// glyph's bearing and advance, and sampling its signed distance field from
+    /// the atlas. Batches that are not text, or drawn with no font set, are
+    /// skipped.
+    fn draw_text_batch(&mut self, batch: &Batch) -> Result<(), RenderError> {
+        if batch.key.shader != ShaderKind::Text {
+            return Ok(());
+        }
+        let Some(font) = self.font.as_ref() else {
+            return Ok(());
+        };
+        let mut vertices: Vec<TextVertex> = Vec::new();
+        for command in &batch.commands {
+            let DrawCommand::Text {
+                x,
+                y,
+                text,
+                color,
+                font_size,
+                extra_advance,
+            } = command
+            else {
+                continue;
+            };
+            // The command gives the top of the line box; the font places the
+            // baseline inside it. Placing the baseline at `y` itself would put
+            // the ascenders above the command's own rect, off the top of the
+            // window for a label laid out at the origin.
+            let baseline = *y + font.ascent(*font_size);
+            let mut pen_x = *x;
+            for ch in text.chars() {
+                let Some(placement) = self.atlas.get_or_insert(ch, *font_size, font) else {
+                    continue;
+                };
+                let gx = pen_x + i32_to_f32(placement.bearing_x);
+                let gy = baseline - i32_to_f32(placement.bearing_y);
+                let w = u32_to_f32(placement.width);
+                let h = u32_to_f32(placement.height);
+                let uv = (placement.u0, placement.v0, placement.u1, placement.v1);
+                vertices.extend_from_slice(&text_quad(gx, gy, w, h, uv, *color));
+                pen_x += placement.advance + *extra_advance;
+            }
+        }
+        if vertices.is_empty() {
+            return Ok(());
+        }
+        // The glyphs were just rasterized into the atlas, so it has to be
+        // uploaded before the quads sample it.
+        self.upload_atlas()?;
+        let quads = vertices.len() / 4;
+        self.ensure_text_index_capacity(quads)?;
+        self.ensure_text_vertex_capacity(quads)?;
+        // SAFETY: `TextVertex` is `repr(C)` with 8 `f32` fields and no padding,
+        // so the slice is a valid `TEXT_VERTEX_STRIDE`-strided vertex array.
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                vertices.as_ptr().cast::<u8>(),
+                vertices.len() * std::mem::size_of::<TextVertex>(),
+            )
+        };
+        let count = i32::try_from(quads * 6)
+            .map_err(|_| RenderError::Gl("index count exceeds the i32 range".to_string()))?;
+        // SAFETY: The GL context is current on this thread; `self.text_program`
+        // is the linked program, `self.text_vao` carries the attribute
+        // pointers, and `self.text_vbo` is bound for the upload.
+        unsafe {
+            let gl = self.context.gl();
+            gl.use_program(Some(self.text_program));
+            gl.uniform_2_f32(
+                self.u_text_resolution.as_ref(),
+                u32_to_f32(self.viewport.0),
+                u32_to_f32(self.viewport.1),
+            );
+            gl.active_texture(GL_TEXTURE0);
+            gl.bind_texture(GL_TEXTURE_2D, Some(self.atlas_texture));
+            gl.uniform_1_i32(self.u_atlas.as_ref(), 0);
+            gl.bind_vertex_array(Some(self.text_vao));
+            gl.bind_buffer(GL_ARRAY_BUFFER, Some(self.text_vbo));
+            gl.buffer_sub_data_u8_slice(GL_ARRAY_BUFFER, 0, bytes);
+            gl.draw_elements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0);
+            gl.bind_vertex_array(None);
+        }
+        Ok(())
+    }
+
+    /// Grows the text index buffer to hold `quads` quads' worth of indices.
+    fn ensure_text_index_capacity(&mut self, quads: usize) -> Result<(), RenderError> {
+        if quads <= self.text_index_capacity {
+            return Ok(());
+        }
+        let mut capacity = self.text_index_capacity.max(INITIAL_CAPACITY);
+        while capacity < quads {
+            capacity = capacity.saturating_mul(2);
+        }
+        let mut indices = Vec::with_capacity(capacity * 6);
+        for quad in 0..capacity {
+            let base = u32::try_from(quad)
+                .map_err(|_| RenderError::Gl("quad count exceeds the u32 index range".to_string()))?
+                .checked_mul(4)
+                .ok_or_else(|| {
+                    RenderError::Gl("quad count exceeds the u32 index range".to_string())
+                })?;
+            indices.push(base);
+            indices.push(base + 1);
+            indices.push(base + 2);
+            indices.push(base);
+            indices.push(base + 2);
+            indices.push(base + 3);
+        }
+        // SAFETY: `indices` is a `Vec<u32>`, so the slice is a valid index
+        // array. It outlives the upload.
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                indices.as_ptr().cast::<u8>(),
+                indices.len() * std::mem::size_of::<u32>(),
+            )
+        };
+        let gl = self.context.gl();
+        // SAFETY: The GL context is current on this thread and `self.text_ibo`
+        // is a valid buffer.
+        unsafe {
+            gl.bind_buffer(GL_ELEMENT_ARRAY_BUFFER, Some(self.text_ibo));
+            gl.buffer_data_u8_slice(GL_ELEMENT_ARRAY_BUFFER, bytes, GL_STATIC_DRAW);
+        }
+        self.text_index_capacity = capacity;
+        Ok(())
+    }
+
+    /// Grows the text vertex buffer to hold `quads` quads' worth of vertices.
+    fn ensure_text_vertex_capacity(&mut self, quads: usize) -> Result<(), RenderError> {
+        if quads <= self.text_vertex_capacity {
+            return Ok(());
+        }
+        let mut capacity = self.text_vertex_capacity.max(INITIAL_CAPACITY);
+        while capacity < quads {
+            capacity = capacity.saturating_mul(2);
+        }
+        let size = vertex_buffer_size(capacity, std::mem::size_of::<TextVertex>())?;
+        let gl = self.context.gl();
+        // SAFETY: The GL context is current on this thread and `self.text_vbo`
+        // is a valid buffer.
+        unsafe {
+            gl.bind_buffer(GL_ARRAY_BUFFER, Some(self.text_vbo));
+            gl.buffer_data_size(GL_ARRAY_BUFFER, size, GL_DYNAMIC_DRAW);
+        }
+        self.text_vertex_capacity = capacity;
         Ok(())
     }
 
@@ -667,8 +1115,7 @@ impl Renderer {
         while capacity < quads {
             capacity = capacity.saturating_mul(2);
         }
-        let size = i32::try_from(capacity * std::mem::size_of::<Vertex>())
-            .map_err(|_| RenderError::Gl("vertex buffer size exceeds the i32 range".to_string()))?;
+        let size = vertex_buffer_size(capacity, std::mem::size_of::<Vertex>())?;
         let gl = self.context.gl();
         // SAFETY: The GL context is current on this thread and `self.vbo` is
         // a valid buffer.
@@ -689,6 +1136,25 @@ mod tests {
     #[test]
     fn vertex_layout_matches_offsets() {
         assert_eq!(std::mem::size_of::<Vertex>(), VERTEX_STRIDE as usize);
+    }
+
+    #[test]
+    fn vertex_buffer_size_holds_four_vertices_per_quad() {
+        let per_quad = VERTS_PER_QUAD * std::mem::size_of::<Vertex>();
+        assert_eq!(
+            vertex_buffer_size(INITIAL_CAPACITY, std::mem::size_of::<Vertex>()).unwrap(),
+            i32::try_from(INITIAL_CAPACITY * per_quad).unwrap()
+        );
+        assert_eq!(
+            vertex_buffer_size(INITIAL_CAPACITY, std::mem::size_of::<TextVertex>()).unwrap(),
+            i32::try_from(INITIAL_CAPACITY * VERTS_PER_QUAD * 32).unwrap()
+        );
+    }
+
+    #[test]
+    fn vertex_buffer_size_rejects_an_unrepresentable_size() {
+        assert!(vertex_buffer_size(usize::MAX, 4).is_err());
+        assert!(vertex_buffer_size(1 << 30, 64).is_err());
     }
 
     #[test]
@@ -789,6 +1255,8 @@ mod tests {
             y: 0.0,
             text: "a".to_string(),
             color: Color::new(0, 0, 0, 255),
+            font_size: 16.0,
+            extra_advance: 0.0,
         });
         assert!(text.is_empty());
 

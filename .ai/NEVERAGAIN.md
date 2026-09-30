@@ -176,3 +176,24 @@ wrap, and was only noticed when the mutation check was run.
 **Rule:** an assertion that cannot fail for reasons of type cannot test
 anything. The only way to know is to run the mutation it was written to catch.
 
+
+## 2026-09-30 — A buffer sized for one vertex per quad
+
+Both `ensure_vertex_capacity` and `ensure_text_vertex_capacity` allocated
+`capacity * size_of::<Vertex>()` bytes for a capacity counted in *quads*. A
+quad is four vertices, so every buffer was a quarter of the size it promised.
+`glBufferSubData` then failed with `GL_INVALID_VALUE` and the batch was
+silently dropped: the text pipeline drew nothing at all, while the solid
+pipeline kept drawing because the demo had fewer quads than the slack allowed.
+
+Nothing in the test suite could see it, because the size arithmetic is GL-side
+and there is no GL context in a test. The only reason it was found is that the
+window was screenshotted and looked empty. The first guess — that the crop was
+wrong, then that the labels were not painted, then that the ellipsis glyph was
+missing from the font — was each wrong; `gl.get_error()` after each call named
+the failing one immediately.
+
+**Rule:** count a buffer's contents in the unit its capacity is counted in, and
+when a GL call is added, read `gl.get_error()` after it once to find out which
+call is unhappy. A rendering change is not verified until the pixels have been
+looked at.

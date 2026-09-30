@@ -366,6 +366,20 @@ impl Default for Transform {
     }
 }
 
+impl Default for Color {
+    /// Returns transparent black — the value a colour property holds before
+    /// anything writes it.
+    ///
+    /// `Property::bind` evaluates its closure immediately and needs a starting
+    /// value to put there, so a bound colour needs a `Default`. Transparent
+    /// black is the one colour that paints nothing, which is the right
+    /// placeholder for a colour nothing has chosen yet: the same reasoning
+    /// `PropertyValue::default` gives.
+    fn default() -> Self {
+        Color::new(0, 0, 0, 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

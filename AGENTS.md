@@ -37,8 +37,14 @@ exception it names the rule it excepts.
 
 - **Edition 2021, `rust-version = "1.85"`** — the floor `sdl3-sys` declares.
 - **No new dependency** without the operator, per `.ai/agents/developer.md`.
-  The approved **direct** dependencies are `sdl3 0.20` and `glow 0.18`; the
-  resolved graph is larger and is not gated.
+  The approved **direct** dependencies are `sdl3 0.20`, `glow 0.18` and
+  `freetype-rs 0.38` (`bundled`); the resolved graph is larger and is not
+  gated. The font crate was approved by the operator 2026-09-30 for the
+  task 11 text rendering pipeline; it builds its vendored C from source and
+  statically links, like SDL3. HarfBuzz was approved then dropped the same
+  day: its safe binding exposes no shaping API (only `unsafe` C calls), and
+  the operator declined `unsafe`. Revisit when a complex-script or bidi
+  requirement lands.
 - **Error handling deviates from `developer.md` on purpose.** It prescribes
   `thiserror` and `anyhow`; neither is an approved dependency, so a binary
   returns `Result<(), Box<dyn std::error::Error>>` and a library returns the

@@ -545,13 +545,132 @@ impl LayoutMode {
     }
 }
 
+/// The gap a node leaves between its own bounds and the box its children are
+/// laid out in.
+///
+/// Padding is taken *off* the node's box rather than added to it: a node with
+/// [`Padding::all`] 16 arranges its children in a box 32 pixels narrower and 32
+/// pixels shorter than itself, and the children sit at `(left, top)` inside it.
+/// A node whose size is not fixed is measured to fit that inner box, so its own
+/// size is its content plus the padding around it — which is what makes a card
+/// with padding on it bigger than the row inside it.
+///
+/// It is an input on [`LayoutState`] rather than a field on the
+/// [`Container`](crate::widgets::container::Container) widget, because the pass
+/// is what applies it: a field only the container read would leave every other
+/// node — every panel, every row, a stacked child — placing its children at the
+/// unpadded origin.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::layout::{Constraints, Padding, Size};
+///
+/// let card = Padding::all(16.0);
+/// assert_eq!(card.horizontal(), 32.0);
+/// assert_eq!(card.vertical(), 32.0);
+///
+/// // The box left for the children, and where it starts inside the node.
+/// let inner = card.inset(Constraints::tight(Size::new(100.0, 60.0)));
+/// assert_eq!(inner.biggest(), Size::new(68.0, 28.0));
+/// assert_eq!((card.left, card.top), (16.0, 16.0));
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Padding {
+    /// The gap at the left edge.
+    pub left: f32,
+    /// The gap at the right edge.
+    pub right: f32,
+    /// The gap at the top edge.
+    pub top: f32,
+    /// The gap at the bottom edge.
+    pub bottom: f32,
+}
+
+impl Padding {
+    /// No gap on any side: the children are laid out in the node's own box.
+    pub const ZERO: Padding = Padding {
+        left: 0.0,
+        right: 0.0,
+        top: 0.0,
+        bottom: 0.0,
+    };
+
+    /// Returns the same gap on all four sides.
+    #[must_use]
+    pub fn all(sides: f32) -> Self {
+        Padding {
+            left: sides,
+            right: sides,
+            top: sides,
+            bottom: sides,
+        }
+    }
+
+    /// Returns the gap taken off the left and right edges together.
+    #[must_use]
+    pub fn horizontal(self) -> f32 {
+        self.left + self.right
+    }
+
+    /// Returns the gap taken off the top and bottom edges together.
+    #[must_use]
+    pub fn vertical(self) -> f32 {
+        self.top + self.bottom
+    }
+
+    /// Returns the box left for children inside `constraints`.
+    ///
+    /// Both bounds move in by the gap on that axis, so a minimum and a maximum
+    /// that met stay meeting: a child that filled its parent's box exactly fills
+    /// the padded one.
+    ///
+    /// A box smaller than the padding it holds does **not** invert here, and the
+    /// arithmetic below deliberately does not floor it: a `-140` maximum is
+    /// resolved by the module's `clamp_axis`, which returns the minimum whenever
+    /// `min > max` because the minimum is the bound a caller can still act on.
+    /// So the child is given zero, which is the right answer, and it comes from
+    /// that clamp rather than from four `.max(0.0)` calls here. Those floors
+    /// were in this function and were measured to make no difference on eleven
+    /// arrangements; a comment claimed they were what stopped a child being
+    /// sized in the negative direction, and that was false.
+    ///
+    /// An unbounded side stays unbounded, which is what a row of a parent's
+    /// content in a stack needs.
+    #[must_use]
+    pub fn inset(&self, constraints: Constraints) -> Constraints {
+        Constraints {
+            min_width: constraints.min_width - self.horizontal(),
+            max_width: constraints.max_width - self.horizontal(),
+            min_height: constraints.min_height - self.vertical(),
+            max_height: constraints.max_height - self.vertical(),
+        }
+    }
+
+    /// Returns this padding with every side floored at zero.
+    ///
+    /// Applied when the padding is stored on a [`LayoutState`] rather than
+    /// here, so that what [`LayoutState::padding`] reads back is what the pass
+    /// applied — the same reason [`LayoutState::with_flex`] clamps its factor.
+    /// A negative side would otherwise pull a child out of its parent's box,
+    /// and there is no arrangement that means it.
+    fn clamped(&self) -> Padding {
+        Padding {
+            left: self.left.max(0.0),
+            right: self.right.max(0.0),
+            top: self.top.max(0.0),
+            bottom: self.bottom.max(0.0),
+        }
+    }
+}
+
 /// One node's layout inputs, and the rect the last pass computed for it.
 ///
 /// The inputs are the node's declared [`Constraints`], its flex factor, its
-/// position for an [`LayoutMode::Absolute`] parent, and its own [`LayoutMode`]
-/// with the [`FlexConfig`] to arrange its children by. The cache is the rect
-/// the pass computed, the clip rectangle it sits inside, and whether it is
-/// still up to date.
+/// position for an [`LayoutMode::Absolute`] parent, its [`Padding`], and its own
+/// [`LayoutMode`] with the [`FlexConfig`] to arrange its children by. The cache
+/// is the rect the pass computed, the clip rectangle it sits inside, and whether
+/// it is still up to date.
 ///
 /// A fresh state is dirty and has no rect: the pass lays out every node it
 /// reaches for the first time. Changing an input through a `set_` method marks
@@ -564,6 +683,7 @@ pub struct LayoutState {
     constraints: Constraints,
     flex: f32,
     position: Option<Offset>,
+    padding: Padding,
     rect: Option<Rect>,
     clip: Option<Rect>,
     dirty: bool,
@@ -579,6 +699,7 @@ impl Default for LayoutState {
             constraints: Constraints::default(),
             flex: 0.0,
             position: None,
+            padding: Padding::ZERO,
             rect: None,
             clip: None,
             dirty: true,
@@ -638,6 +759,14 @@ impl LayoutState {
         self
     }
 
+    /// Sets the gap between this node's bounds and the box its children are
+    /// laid out in, with every side floored at zero.
+    #[must_use]
+    pub fn with_padding(mut self, padding: Padding) -> Self {
+        self.padding = padding.clamped();
+        self
+    }
+
     /// Sets how this node places its children and marks it dirty.
     pub fn set_mode(&mut self, mode: LayoutMode) {
         self.mode = mode;
@@ -665,6 +794,17 @@ impl LayoutState {
     /// Sets the position an `Absolute` parent uses and marks this node dirty.
     pub fn set_position(&mut self, position: Option<Offset>) {
         self.position = position;
+        self.mark_dirty();
+    }
+
+    /// Sets the gap between this node's bounds and its children, with every side
+    /// floored at zero, and marks this node dirty.
+    ///
+    /// The dirty flag is what makes the change visible: the children were
+    /// placed in the unpadded box, and only a pass over this node moves them
+    /// into the padded one.
+    pub fn set_padding(&mut self, padding: Padding) {
+        self.padding = padding.clamped();
         self.mark_dirty();
     }
 
@@ -697,6 +837,16 @@ impl LayoutState {
     #[must_use]
     pub fn position(&self) -> Option<Offset> {
         self.position
+    }
+
+    /// Returns the gap between this node's bounds and the box its children are
+    /// laid out in.
+    ///
+    /// A fresh state has [`Padding::ZERO`], so every node laid out before this
+    /// field existed arranges its children in its own box, unchanged.
+    #[must_use]
+    pub fn padding(&self) -> Padding {
+        self.padding
     }
 
     /// Returns the rect the last pass computed, or `None` before the first one.
@@ -872,10 +1022,18 @@ impl<'a> Layout<'a> {
         let children = node.children().to_vec();
         let mode = node.layout().mode();
         let config = *node.layout().flex_config();
+        let padding = node.layout().padding();
         // The box this node fills, and the one its children are placed in.
         let box_constraints = resolve_box(self.nodes, node, incoming);
         let rect = Rect::new(origin, box_constraints.biggest());
-        let placements = arrange(self.nodes, &children, box_constraints, mode, &config);
+        let placements = arrange(
+            self.nodes,
+            &children,
+            box_constraints,
+            mode,
+            &config,
+            padding,
+        );
         // Children are clipped to their ancestors' boxes; the intersection is
         // the same for all of them, so it is computed once.
         let children_clip = intersect(clip, Some(rect));
@@ -969,6 +1127,11 @@ pub fn mark_dirty(nodes: &mut Arena<WidgetNode>, handle: Handle) {
 /// the arena rather than a node, so this call cannot look them up itself. The
 /// rects are local to the constrained box: the parent adds its own origin.
 ///
+/// The children are arranged with no padding. A caller asking where a padded
+/// node's children go passes `padding.inset(constraints)` and the mode, config
+/// and padding the node itself holds — the inset box and the offset back out
+/// are exactly what the pass applies.
+///
 /// A handle that no longer resolves gets a zero-size rect at the origin, so the
 /// result stays index-aligned with `children`.
 ///
@@ -1000,7 +1163,7 @@ pub fn layout_constraints(
     mode: LayoutMode,
     config: &FlexConfig,
 ) -> Vec<Rect> {
-    arrange(nodes, children, constraints, mode, config)
+    arrange(nodes, children, constraints, mode, config, Padding::ZERO)
         .into_iter()
         .map(|placement| placement.rect)
         .collect()
@@ -1019,21 +1182,40 @@ struct Placement {
 }
 
 /// Lays `children` out inside `constraints` and returns a placement per child.
+///
+/// The children are arranged in the box `padding` leaves, and their rects are
+/// then moved out to where that box starts, so a caller reading the placements
+/// measures them from the parent's own origin — the same origin every other
+/// placement is measured from, whether the node has padding or not.
 fn arrange(
     nodes: &Arena<WidgetNode>,
     children: &[Handle],
     constraints: Constraints,
     mode: LayoutMode,
     config: &FlexConfig,
+    padding: Padding,
 ) -> Vec<Placement> {
-    match mode {
+    let inner = padding.inset(constraints);
+    let mut placements = match mode {
         LayoutMode::Flex { direction, .. } => {
-            arrange_flex(nodes, children, constraints, direction, config)
+            arrange_flex(nodes, children, inner, direction, config)
         }
-        LayoutMode::Stack => arrange_stack(nodes, children, constraints),
-        LayoutMode::Absolute => arrange_absolute(nodes, children, constraints),
+        LayoutMode::Stack => arrange_stack(nodes, children, inner),
+        LayoutMode::Absolute => arrange_absolute(nodes, children, inner),
         LayoutMode::Grid { .. } => Vec::new(),
+    };
+    // An unpadded node skips the walk: it is the common case — every node laid
+    // out before `Padding` existed is one — and this loop is the only part of
+    // arranging that grows with the number of children, so the figure the
+    // `layout_walk_cost` benchmark reports for a row of thousands is measured
+    // against exactly this branch.
+    if padding != Padding::ZERO {
+        for placement in &mut placements {
+            placement.rect.origin.x += padding.left;
+            placement.rect.origin.y += padding.top;
+        }
     }
+    placements
 }
 
 /// A flex child, in main/cross terms.
@@ -1343,14 +1525,27 @@ fn bounding_box(placements: &[Placement]) -> Size {
 /// box must not make its parent wider. An unbounded main axis also means a
 /// flexible child has no intrinsic size there, which is the answer the rest of
 /// the pass gives an unbounded main axis.
+///
+/// The padding is added around the result, and only on the *far* side: the
+/// placements handed back by `arrange` are already offset by the leading gap, so
+/// the extent measured from the node's own origin already carries it. Adding the
+/// near side again would count it twice, and adding both gaps from a
+/// zero-padded measure would miss a child that hangs off the leading edge — a
+/// centred row wider than its box — which this is the one place that sees.
 fn content_size(nodes: &Arena<WidgetNode>, node: &WidgetNode) -> Size {
-    bounding_box(&arrange(
+    let padding = node.layout().padding();
+    let content = bounding_box(&arrange(
         nodes,
         node.children(),
         Constraints::UNBOUNDED,
         node.layout().mode(),
         node.layout().flex_config(),
-    ))
+        padding,
+    ));
+    Size::new(
+        content.width + padding.right,
+        content.height + padding.bottom,
+    )
 }
 
 /// The box a node lays its children out in: the tightest box its own declared
@@ -1783,6 +1978,221 @@ mod tests {
             nodes.get(unplaced).unwrap().layout().rect().unwrap().origin,
             Offset::ZERO
         );
+    }
+
+    /// A container in `mode` with `padding` on all four sides, holding
+    /// `children`.
+    ///
+    /// The `container` helper above builds the same node without padding, which
+    /// is the other half of every test here: the two have to differ in the
+    /// children's origins and in nothing else.
+    fn padded(
+        nodes: &mut Arena<WidgetNode>,
+        mode: LayoutMode,
+        padding: Padding,
+        children: &[Handle],
+    ) -> Handle {
+        let handle = node::create(
+            nodes,
+            LayoutState::new()
+                .with_mode(mode)
+                .with_flex_config(FlexConfig::new())
+                .with_padding(padding),
+        );
+        for &child in children {
+            assert!(node::attach(nodes, handle, child));
+        }
+        handle
+    }
+
+    #[test]
+    fn a_padded_row_offsets_its_children_by_the_leading_edges() {
+        let mut nodes = Arena::new();
+        let first = leaf(&mut nodes, 30.0, 10.0);
+        let second = leaf(&mut nodes, 30.0, 10.0);
+        let row = padded(
+            &mut nodes,
+            LayoutMode::row(),
+            Padding::all(20.0),
+            &[first, second],
+        );
+
+        layout_in(&mut nodes, row, Size::new(200.0, 100.0));
+
+        // 20 in from the left and 20 down from the top, and the second child
+        // after the first: 20 + 30.
+        assert_eq!(
+            nodes.get(first).unwrap().layout().rect().unwrap(),
+            Rect::from_parts(20.0, 20.0, 30.0, 10.0)
+        );
+        assert_eq!(
+            nodes.get(second).unwrap().layout().rect().unwrap(),
+            Rect::from_parts(50.0, 20.0, 30.0, 10.0)
+        );
+    }
+
+    #[test]
+    fn a_padded_column_offsets_its_children_by_the_leading_edges() {
+        let mut nodes = Arena::new();
+        let first = leaf(&mut nodes, 10.0, 30.0);
+        let second = leaf(&mut nodes, 10.0, 30.0);
+        let column = padded(
+            &mut nodes,
+            LayoutMode::column(),
+            Padding::all(20.0),
+            &[first, second],
+        );
+
+        layout_in(&mut nodes, column, Size::new(100.0, 200.0));
+
+        assert_eq!(
+            nodes.get(first).unwrap().layout().rect().unwrap(),
+            Rect::from_parts(20.0, 20.0, 10.0, 30.0)
+        );
+        assert_eq!(
+            nodes.get(second).unwrap().layout().rect().unwrap(),
+            Rect::from_parts(20.0, 50.0, 10.0, 30.0)
+        );
+    }
+
+    #[test]
+    fn a_padded_stack_offsets_its_children_by_the_leading_edges() {
+        let mut nodes = Arena::new();
+        let only = leaf(&mut nodes, 30.0, 10.0);
+        let stack = padded(&mut nodes, LayoutMode::Stack, Padding::all(20.0), &[only]);
+
+        layout_in(&mut nodes, stack, Size::new(200.0, 100.0));
+
+        // A stack places every child at the same origin, and that origin is the
+        // one the padding leaves rather than the node's own.
+        assert_eq!(
+            nodes.get(only).unwrap().layout().rect().unwrap(),
+            Rect::from_parts(20.0, 20.0, 30.0, 10.0)
+        );
+    }
+
+    #[test]
+    fn a_padded_absolute_child_is_placed_from_the_content_origin() {
+        let mut nodes = Arena::new();
+        let placed = node::create(
+            &mut nodes,
+            LayoutState::new()
+                .with_constraints(Constraints::tight(Size::new(20.0, 20.0)))
+                .with_position(Offset::new(5.0, 7.0)),
+        );
+        let absolute = padded(
+            &mut nodes,
+            LayoutMode::Absolute,
+            Padding::all(20.0),
+            &[placed],
+        );
+
+        layout_in(&mut nodes, absolute, Size::new(100.0, 100.0));
+
+        // A declared position is relative to the box the children are laid out
+        // in, which is the padded one: 5 + 20 and 7 + 20. Padding is the margin
+        // a child's own offsets are measured from, and this is the one place
+        // that says so.
+        assert_eq!(
+            nodes.get(placed).unwrap().layout().rect().unwrap(),
+            Rect::from_parts(25.0, 27.0, 20.0, 20.0)
+        );
+    }
+
+    #[test]
+    fn a_padded_node_is_measured_as_its_content_plus_the_padding() {
+        let mut nodes = Arena::new();
+        let only = leaf(&mut nodes, 30.0, 10.0);
+        let row = padded(&mut nodes, LayoutMode::row(), Padding::all(20.0), &[only]);
+
+        // A loose box, which is what a stack hands a child: the node's size is
+        // then its own to decide, and it is measured from its content.
+        Layout::new(&mut nodes).layout(row, Constraints::loose(Size::new(200.0, 100.0)));
+
+        assert_eq!(
+            nodes.get(row).unwrap().layout().rect().unwrap(),
+            Rect::from_parts(0.0, 0.0, 70.0, 50.0),
+            "30 wide plus 20 on each side, and 10 tall plus 20 on each side"
+        );
+        assert_eq!(
+            nodes.get(only).unwrap().layout().rect().unwrap().origin,
+            Offset::new(20.0, 20.0),
+            "and the child still sits inside the padding"
+        );
+    }
+
+    #[test]
+    fn padding_larger_than_the_box_leaves_no_room_rather_than_a_negative_one() {
+        let mut nodes = Arena::new();
+        let empty = node::create(&mut nodes, LayoutState::new());
+        let sized = leaf(&mut nodes, 30.0, 10.0);
+        let row = padded(
+            &mut nodes,
+            LayoutMode::row(),
+            Padding::all(100.0),
+            &[empty, sized],
+        );
+
+        layout_in(&mut nodes, row, Size::new(60.0, 40.0));
+
+        // A child that asks for nothing gets a box with no size in it, and it
+        // is still where the padding put it. The box does not invert: the padded
+        // bounds are min 0 and max -140, and `clamp_axis` gives the minimum
+        // whenever the minimum is above the maximum, so the child is handed zero
+        // rather than a width of -140. That is the clamp doing it, not a floor
+        // in `Padding::inset` — an earlier version of this comment credited a
+        // floor that was measured to make no difference.
+        let rect = nodes.get(empty).unwrap().layout().rect().unwrap();
+        assert_eq!(
+            rect.size,
+            Size::ZERO,
+            "a box smaller than its padding is empty"
+        );
+        assert_eq!(
+            rect.origin,
+            Offset::new(100.0, 100.0),
+            "and the child is still where the padding put it"
+        );
+        // A child that declared a size keeps it, because a minimum above its
+        // maximum wins in this pass — the same answer a parent smaller than its
+        // child gets, and the reason the floor above is a floor on the box
+        // rather than a cap on the child.
+        assert_eq!(
+            nodes.get(sized).unwrap().layout().rect().unwrap().size,
+            Size::new(30.0, 10.0)
+        );
+    }
+
+    #[test]
+    fn a_negative_padding_is_clamped_to_zero_when_it_is_stored() {
+        let negative = Padding {
+            left: -5.0,
+            right: -5.0,
+            top: -5.0,
+            bottom: -5.0,
+        };
+        assert_eq!(
+            LayoutState::new().with_padding(negative).padding(),
+            Padding::ZERO,
+            "the builder stores what it was given, clamped"
+        );
+        assert_eq!(
+            LayoutState::new().padding(),
+            Padding::ZERO,
+            "and a fresh state has no padding at all"
+        );
+
+        let mut state = LayoutState::new();
+        // Settled first, so the dirty flag below is the one `set_padding` set
+        // rather than the one every fresh state starts with.
+        state.place(Rect::ZERO, None, Constraints::UNBOUNDED);
+        state.set_padding(negative);
+        assert_eq!(
+            state.padding(),
+            Padding::ZERO,
+            "a negative gap has no meaning"
+        );
+        assert!(state.is_dirty(), "and a padding change is a layout change");
     }
 
     #[test]

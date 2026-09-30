@@ -6,6 +6,13 @@
 //! and held colours from that value at paint time: the animation writes a
 //! single number, and the pad's whole appearance follows.
 //!
+//! The three pads sit inside a card: the [`Container`] widget, with a background
+//! bound to the theme's `Surface` and a padding of [`CARD_PADDING`]. It is the
+//! one place the demo draws a container — the other five in the tree, the text
+//! column, the text panel, the button row, the button band and the root, group
+//! children and have no background, which is what a container with no background
+//! looks like.
+//!
 //! Every colour in the demo comes from the theme: the background from
 //! `Background`, each pad's rest colour from `Error`, `Success` or `Primary`.
 //! Pressing `T` switches between the dark and light themes over 300 ms, and
@@ -41,7 +48,7 @@ use ui_core::font::Font;
 use ui_core::input::{self, Focus, GestureRecognizer, InputEvent, InputEventKind, Key};
 use ui_core::layout::{
     mark_dirty, Constraints, CrossAxisAlignment, FlexConfig, Layout, LayoutMode, LayoutState,
-    MainAxisAlignment, Offset, Size,
+    MainAxisAlignment, Offset, Padding, Size,
 };
 use ui_core::node::{self, WidgetNode};
 #[cfg(test)]
@@ -52,6 +59,7 @@ use ui_core::render::context::Context;
 use ui_core::render::Renderer;
 use ui_core::theme::{PropertyValue, Theme, ThemeToken};
 use ui_core::widgets::button::{Button, Callback, Motion, Palette};
+use ui_core::widgets::container::Container;
 use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapMode};
 
 /// The window, and the box the root is laid out in.
@@ -72,6 +80,20 @@ const PAD_SIZE: Size = Size {
 
 /// The gap between the pads.
 const PAD_SPACING: f32 = 52.0;
+
+/// The padding the row of pads is given, and so the margin between the card it
+/// is drawn on and the pads inside it.
+///
+/// The card is the pads' 140 pixels of height plus this twice, and it has to
+/// clear the text panel below it: the first label's line box starts at
+/// [`TEXT_PANEL_ORIGIN`]'s 170, so twelve leaves six pixels between them and
+/// sixteen would have eaten two of the line box's own top.
+const CARD_PADDING: f32 = 12.0;
+
+/// The corner radius a card falls back to if the theme ever holds something
+/// other than a number in its `BorderRadiusLg` token. It is the value both
+/// themes hold today.
+const CARD_RADIUS_FALLBACK: f32 = 16.0;
 
 /// The corner radius a pad is painted with.
 const PAD_RADIUS: f32 = 28.0;
@@ -161,8 +183,11 @@ const RELEASE_SPRING: Easing = Easing::Spring {
 /// `Stack` places every one of its children at the origin regardless of the
 /// position they declare — so the offset belongs here, on the row, and not on
 /// the band itself, which a `Stack` would ignore. Putting it on the band is a
-/// mistake that looks right: the band lands on top of the pads, which are
-/// centred and reach from x = 130 to x = 894.
+/// mistake that looks right: the band lands on top of the pads, which are a
+/// `Stack` child too and so are laid out from the origin, not centred. (An
+/// earlier version of this comment claimed they were centred and ran from
+/// x = 130 to x = 894; they are not, and the claim came from reading the row's
+/// `MainAxisAlignment::Center` as though it had anything to centre inside.)
 ///
 /// The text panel's labels stay left of 660 — the panel is 900 wide from an
 /// origin of 60, but its widest line wraps at 594 — and the pads end at y = 140,
@@ -459,6 +484,18 @@ fn cycling_color(
     })
 }
 
+/// Returns a colour property bound to a single `token`, falling back to
+/// `fallback` if the theme ever holds something else there.
+///
+/// The one-colour case of [`cycling_color`], which needs a list because it
+/// follows a token the caller moves. The card the pads sit on is bound here
+/// rather than copied, so `T` carries a theme switch to it through the same
+/// property graph every other colour in the demo uses.
+fn themed_color(token: &Property<PropertyValue>, fallback: Color) -> Property<Color> {
+    let token = token.clone();
+    Property::bind(move || token.get().as_color().unwrap_or(fallback))
+}
+
 /// Returns the click handler for a button in the demo's band, writing to
 /// `clicks`.
 ///
@@ -515,6 +552,14 @@ struct Demo {
     focused: Option<Handle>,
     /// The index of the button a pointer is holding down, if any.
     pressed: Option<usize>,
+    /// Every node in the demo that has children, as the widget that owns it.
+    ///
+    /// The tree is built out of [`Container`]s rather than out of nodes the demo
+    /// assembles itself, so a parent is the widget and the demo's frame loop
+    /// paints it through [`Container::paint`]. Only the row of pads is given a
+    /// background: it is the card that shows what a container with a background
+    /// and padding looks like, and the other five draw nothing.
+    containers: Vec<Container>,
 }
 
 impl Demo {
@@ -568,15 +613,36 @@ impl Demo {
             pads.push(Pad::new(press, color, node));
         }
 
-        let row = container(
+        // The row of pads, which is also the demo's card: a container with the
+        // theme's surface behind the pads and the pads inset by its padding.
+        let mut row = Container::new(&mut nodes, LayoutMode::row());
+        row.set_flex_config(
             &mut nodes,
-            LayoutMode::row(),
             FlexConfig::new()
                 .with_spacing(PAD_SPACING)
                 .with_main_axis_alignment(MainAxisAlignment::Center)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center),
-            &[pads[0].node, pads[1].node, pads[2].node],
-        )?;
+        );
+        row.set_padding(&mut nodes, Padding::all(CARD_PADDING));
+        row.background = themed_color(
+            &theme.property(ThemeToken::Surface),
+            Color::new(0, 0, 0, 255),
+        );
+        // The radius is read once rather than bound, because the theme animates
+        // a token's colour but nothing here moves a corner: the two themes hold
+        // the same radius today, and a theme that changed it would be a change
+        // to the shape of the card rather than to what is on it.
+        row.border_radius.set(
+            theme
+                .get(ThemeToken::BorderRadiusLg)
+                .as_number()
+                .unwrap_or(CARD_RADIUS_FALLBACK),
+        );
+        for &child in &[pads[0].node, pads[1].node, pads[2].node] {
+            if !row.add_child(&mut nodes, child) {
+                return Err("ui_demo: a pad could not be attached to the row");
+            }
+        }
 
         // The text panel, and the labels in it. Their colours come from the
         // theme like the pads', bound through the token `C` moves, so both a
@@ -605,30 +671,37 @@ impl Demo {
                 .set_constraints(Constraints::tight(size));
         }
         let label_nodes: Vec<Handle> = labels.iter().map(|demo| demo.label.handle()).collect();
-        let text_column = container(
+        let text_column = Container::new(&mut nodes, LayoutMode::column());
+        text_column.set_flex_config(
             &mut nodes,
-            LayoutMode::column(),
             FlexConfig::new()
                 .with_spacing(LABEL_SPACING)
                 .with_cross_axis_alignment(CrossAxisAlignment::Start),
-            &label_nodes,
-        )?;
+        );
+        for &child in &label_nodes {
+            if !text_column.add_child(&mut nodes, child) {
+                return Err("ui_demo: a label could not be attached to the text column");
+            }
+        }
         // The panel is `Absolute` so the column inside it can sit at the panel's
         // margin: a `Stack` places every child at its own origin, so the margin
         // has to come from the column's declared position rather than from the
         // panel's rect.
         nodes
-            .get_mut(text_column)
+            .get_mut(text_column.handle())
             .ok_or("ui_demo: the text column is missing")?
             .layout_mut()
             .set_position(Some(Offset::new(TEXT_PANEL_ORIGIN.0, TEXT_PANEL_ORIGIN.1)));
-        let text_panel = node::create(
-            &mut nodes,
-            LayoutState::new()
-                .with_mode(LayoutMode::Absolute)
-                .with_constraints(Constraints::tight(TEXT_PANEL)),
-        );
-        if !node::attach(&mut nodes, text_panel, text_column) {
+        let text_panel = Container::new(&mut nodes, LayoutMode::Absolute);
+        {
+            let panel = nodes
+                .get_mut(text_panel.handle())
+                .ok_or("ui_demo: the text panel is missing")?;
+            panel
+                .layout_mut()
+                .set_constraints(Constraints::tight(TEXT_PANEL));
+        }
+        if !text_panel.add_child(&mut nodes, text_column.handle()) {
             return Err("ui_demo: the text column could not be attached");
         }
 
@@ -638,7 +711,16 @@ impl Demo {
         let clicks = Property::new(0u32);
         let counter_text = {
             let clicks = clicks.clone();
-            Property::bind(move || format!("{} clicks", clicks.get()))
+            Property::bind(move || {
+                // "1 click" rather than "1 clicks": this string is on screen in
+                // the demo, and the first count is the one everyone sees.
+                let count = clicks.get();
+                if count == 1 {
+                    "1 click".to_string()
+                } else {
+                    format!("{count} clicks")
+                }
+            })
         };
         let mut counter = Label::new(&mut nodes, String::new());
         counter.text = counter_text;
@@ -693,19 +775,23 @@ impl Demo {
             });
         }
         let button_nodes: Vec<Handle> = buttons.iter().map(DemoButton::node).collect();
-        let button_row = container(
+        let button_row = Container::new(&mut nodes, LayoutMode::row());
+        button_row.set_flex_config(
             &mut nodes,
-            LayoutMode::row(),
             FlexConfig::new()
                 .with_spacing(BUTTON_SPACING)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center),
-            &button_nodes,
-        )?;
+        );
+        for &child in &button_nodes {
+            if !button_row.add_child(&mut nodes, child) {
+                return Err("ui_demo: a button could not be attached to the band");
+            }
+        }
         // The row and the counter are each placed inside the band, which is what
         // `Absolute` is for: the row at the band's own offset, the counter
         // `COUNTER_DROP` below it.
         nodes
-            .get_mut(button_row)
+            .get_mut(button_row.handle())
             .ok_or("ui_demo: the button row is missing")?
             .layout_mut()
             .set_position(Some(Offset::new(BUTTON_ORIGIN.0, BUTTON_ORIGIN.1)));
@@ -721,26 +807,33 @@ impl Demo {
         // and a `Stack` sizes a child from its own constraints but places it at
         // the origin. Giving it the window's size makes the offsets inside it
         // window coordinates, which is what the two positions above assume.
-        let button_area = node::create(
-            &mut nodes,
-            LayoutState::new()
-                .with_mode(LayoutMode::Absolute)
-                .with_constraints(Constraints::tight(WINDOW)),
-        );
-        if !node::attach(&mut nodes, button_area, button_row)
-            || !node::attach(&mut nodes, button_area, counter.label.handle())
+        let button_area = Container::new(&mut nodes, LayoutMode::Absolute);
+        {
+            let band = nodes
+                .get_mut(button_area.handle())
+                .ok_or("ui_demo: the button band is missing")?;
+            band.layout_mut()
+                .set_constraints(Constraints::tight(WINDOW));
+        }
+        if !button_area.add_child(&mut nodes, button_row.handle())
+            || !button_area.add_child(&mut nodes, counter.label.handle())
         {
             return Err("ui_demo: the button band could not be assembled");
         }
 
         // A stack: the background fills the window behind the row of pads, the
         // text panel and the button band, and all three are painted over it.
-        let root = container(
-            &mut nodes,
-            LayoutMode::Stack,
-            FlexConfig::new(),
-            &[background, row, text_panel, button_area],
-        )?;
+        let root = Container::new(&mut nodes, LayoutMode::Stack);
+        for &child in &[
+            background,
+            row.handle(),
+            text_panel.handle(),
+            button_area.handle(),
+        ] {
+            if !root.add_child(&mut nodes, child) {
+                return Err("ui_demo: a panel could not be attached to the root");
+            }
+        }
 
         // The link from an animation or a theme switch to a node: every write
         // a pad's colour property receives — from a clock tick, from
@@ -765,6 +858,19 @@ impl Demo {
                 mark_dirty(&mut nodes.borrow_mut(), background);
             });
         }
+
+        // The card behind the pads gets **no** `on_change` link, and that is
+        // deliberate. The links above exist because the pad and label *layout*
+        // inputs change with their properties — a label's text changes the rect
+        // it is given — and the layout pass only re-measures a dirty node. The
+        // card's background is a paint-only property: `Demo::frame` rebuilds
+        // every node's paint state on every frame, so a write to it needs
+        // nothing to reach the node, and `mark_dirty` here would be *layout*
+        // dirt on a node whose layout did not change.
+        //
+        // The link a caller outside the demo needs is in
+        // `ui_core::widgets::container`: `Container` documents that a themed
+        // background is wired with `paint_mut().mark_dirty()`.
 
         // The same link for the labels: a change to a label's text, font size
         // or colour marks the panel dirty, so the next pass repaints the text
@@ -829,17 +935,17 @@ impl Demo {
         }
 
         // The tree never changes shape, so the order is computed once.
-        let order = paint_order(&nodes.borrow(), root);
+        let order = paint_order(&nodes.borrow(), root.handle());
         Ok(Demo {
             nodes,
-            root,
+            root: root.handle(),
             order,
             pads,
             background,
             background_color,
             labels,
             label_nodes,
-            text_panel,
+            text_panel: text_panel.handle(),
             metrics,
             text_size: TEXT_SIZE_START,
             color_token,
@@ -852,6 +958,7 @@ impl Demo {
             recognizer: GestureRecognizer::new(),
             focused: None,
             pressed: None,
+            containers: vec![row, text_column, text_panel, button_row, button_area, root],
         })
     }
 
@@ -1125,6 +1232,19 @@ impl Demo {
                     painter.rect(rect.into(), self.background_color());
                 }
                 *node.paint_mut() = PaintState::from_commands(painter.finish());
+                continue;
+            }
+            // A container paints its own background, and paints nothing at all
+            // when it has none: five of the demo's six draw no commands, and
+            // the row of pads draws the card the pads sit inside. The walk is
+            // parent first, so the card is recorded before the pads and so is
+            // drawn behind them.
+            if let Some(container) = self.containers.iter().find(|it| it.handle() == handle) {
+                let commands = match node.layout().rect() {
+                    Some(rect) => container.paint(rect.into()),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
             if let Some(button) = self.buttons.iter().find(|button| button.node() == handle) {
@@ -1410,6 +1530,13 @@ impl Demo {
         ))
     }
 
+    /// Returns the card the pads sit inside: the row of pads, which is the
+    /// first container the demo builds and the only one it gives a background.
+    #[cfg(test)]
+    fn card(&self) -> &Container {
+        &self.containers[0]
+    }
+
     /// Returns the text the click counter is showing, as the last frame recorded
     /// it.
     #[cfg(test)]
@@ -1498,26 +1625,6 @@ fn paint_order(nodes: &Arena<WidgetNode>, root: Handle) -> Vec<Handle> {
     let mut order = Vec::new();
     walk(nodes, root, &mut order);
     order
-}
-
-/// Adds a container in `mode` that places `children` with `config`, and returns
-/// its handle.
-fn container(
-    nodes: &mut Arena<WidgetNode>,
-    mode: LayoutMode,
-    config: FlexConfig,
-    children: &[Handle],
-) -> Result<Handle, &'static str> {
-    let handle = node::create(
-        nodes,
-        LayoutState::new().with_mode(mode).with_flex_config(config),
-    );
-    for &child in children {
-        if !node::attach(nodes, handle, child) {
-            return Err("ui_demo: a demo node could not be attached");
-        }
-    }
-    Ok(handle)
 }
 
 #[cfg(test)]
@@ -2194,7 +2301,7 @@ mod tests {
 
         assert_eq!(
             demo.counter_text().as_deref(),
-            Some("1 clicks"),
+            Some("1 click"),
             "the button's callback wrote to the counter, and the label followed"
         );
     }
@@ -2248,7 +2355,7 @@ mod tests {
         // covers the bubbling.
         let mut demo = laid_out();
         click_button(&mut demo, 0);
-        assert_eq!(demo.counter_text().as_deref(), Some("1 clicks"));
+        assert_eq!(demo.counter_text().as_deref(), Some("1 click"));
 
         // And a second click is a second count, so the two are not being folded
         // into one by the routing.
@@ -2422,7 +2529,7 @@ mod tests {
 
         assert_eq!(
             demo.counter_text().as_deref(),
-            Some("1 clicks"),
+            Some("1 click"),
             "and Enter activates the button holding focus"
         );
     }
@@ -2474,7 +2581,7 @@ mod tests {
         demo.handle_event(key(Keycode::Space));
         demo.frame(WINDOW, Duration::from_millis(16));
 
-        assert_eq!(demo.counter_text().as_deref(), Some("1 clicks"));
+        assert_eq!(demo.counter_text().as_deref(), Some("1 click"));
     }
 
     #[test]
@@ -2612,6 +2719,188 @@ mod tests {
                 pair[0].2,
                 pair[0].1,
                 pair[1].0
+            );
+        }
+    }
+
+    /// The rounded rectangles the card recorded, with their radii and colours.
+    ///
+    /// The card is the one container in the demo with a background, so this is
+    /// how a test asks what was drawn behind the pads.
+    fn card_rects(demo: &Demo) -> Vec<(f32, Color)> {
+        let nodes = demo.nodes.borrow();
+        nodes
+            .get(demo.card().handle())
+            .expect("the card's node")
+            .paint()
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::RoundedRect { radius, color, .. } => Some((*radius, *color)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_parent_in_the_demo_is_a_container_widget() {
+        // The demo used to assemble its own parent nodes, which meant two
+        // implementations of the same composition primitive in one repository:
+        // the demo's private helper and the widget. Nothing in the suite would
+        // have noticed a new one appearing, so this is the check that a node
+        // with children is a `Container` and not a node the demo wired up.
+        let demo = demo();
+        let nodes = demo.nodes.borrow();
+        let containers: Vec<Handle> = demo.containers.iter().map(Container::handle).collect();
+        let mut parents = 0;
+        for &handle in &demo.order {
+            let node = nodes.get(handle).expect("a node in the demo's tree");
+            if node.children().is_empty() {
+                continue;
+            }
+            parents += 1;
+            assert!(
+                containers.contains(&handle),
+                "node {handle:?} has children but is not a Container"
+            );
+        }
+        assert_eq!(parents, containers.len(), "and every one of them is");
+        assert_eq!(
+            containers.len(),
+            6,
+            "the demo has six: the card, the text \
+             column and its panel, the button row and its band, and the root"
+        );
+    }
+
+    #[test]
+    fn the_pads_sit_inside_the_card_their_row_draws() {
+        let demo = laid_out();
+        let nodes = demo.nodes.borrow();
+        let card = nodes
+            .get(demo.card().handle())
+            .expect("the card's node")
+            .layout()
+            .rect()
+            .expect("a laid-out card");
+        let rect = |node| {
+            nodes
+                .get(node)
+                .expect("a laid-out pad")
+                .layout()
+                .rect()
+                .expect("a laid-out pad")
+        };
+        let first = rect(demo.pads[0].node);
+        let last = rect(demo.pads[2].node);
+
+        // The card's own rect is the row's plus the padding, and the pads are
+        // CARD_PADDING in from its far edges. A padding that was stored and never
+        // applied would leave the card exactly the row's size, and these two
+        // differences would be zero.
+        assert_eq!(
+            card.size.width - (last.origin.x + last.size.width),
+            CARD_PADDING,
+            "the card is CARD_PADDING wider than the pads reach"
+        );
+        assert_eq!(
+            card.size.height - (first.origin.y + PAD_SIZE.height),
+            CARD_PADDING,
+            "and CARD_PADDING taller"
+        );
+        assert_eq!(
+            first.origin.x, CARD_PADDING,
+            "with the first pad inset by it as well"
+        );
+    }
+
+    #[test]
+    fn the_card_paints_the_themes_surface_behind_the_pads() {
+        let demo = laid_out();
+        let surface = demo
+            .theme
+            .get(ThemeToken::Surface)
+            .as_color()
+            .expect("a colour in the Surface token");
+        let radius = demo
+            .theme
+            .get(ThemeToken::BorderRadiusLg)
+            .as_number()
+            .expect("a number in the BorderRadiusLg token");
+
+        assert_eq!(
+            card_rects(&demo),
+            vec![(radius, surface)],
+            "the card is one rounded rectangle, in the theme's surface colour \
+             and at the theme's loosest corner radius"
+        );
+
+        // Behind the pads, because the walk is parent first: the card is
+        // recorded before every pad, so it is drawn before every pad.
+        let card_at = demo
+            .order
+            .iter()
+            .position(|&handle| handle == demo.card().handle())
+            .expect("the card is in the tree");
+        for pad in &demo.pads {
+            let pad_at = demo
+                .order
+                .iter()
+                .position(|&handle| handle == pad.node)
+                .expect("a pad is in the tree");
+            assert!(
+                card_at < pad_at,
+                "pad at {pad_at} is painted after the card at {card_at}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_card_follows_a_theme_switch() {
+        let mut demo = laid_out();
+        let before = card_rects(&demo).first().map(|(_, color)| *color);
+
+        demo.handle_event(toggle_theme_event());
+        // The switch is 300 ms, so four 100 ms frames run it out.
+        for _ in 0..4 {
+            demo.frame(WINDOW, Duration::from_millis(100));
+        }
+
+        let after = demo
+            .theme
+            .get(ThemeToken::Surface)
+            .as_color()
+            .expect("a colour in the Surface token");
+        assert_eq!(
+            card_rects(&demo).first().map(|(_, color)| *color),
+            Some(after),
+            "the card arrived at the light theme's own surface"
+        );
+        assert_ne!(
+            before,
+            Some(after),
+            "and the two themes really do hold different surfaces"
+        );
+    }
+
+    #[test]
+    fn the_other_containers_draw_nothing() {
+        // A container with no background is invisible: the demo has five of them
+        // and the card is the sixth, so a background leaking onto any of the
+        // others would be visible as a box where the demo has always had the
+        // window's own background.
+        let demo = laid_out();
+        let card = demo.card().handle();
+        for container in &demo.containers {
+            if container.handle() == card {
+                continue;
+            }
+            let nodes = demo.nodes.borrow();
+            let node = nodes.get(container.handle()).expect("a container's node");
+            assert_eq!(
+                node.paint().commands().len(),
+                0,
+                "a container with no background records no draw commands"
             );
         }
     }

@@ -4,4 +4,5 @@
 //! `doc/ui/PRIMITIVES_ARCHITECTURE.md` § *Module Layout*.
 
 pub mod button;
+pub mod container;
 pub mod label;

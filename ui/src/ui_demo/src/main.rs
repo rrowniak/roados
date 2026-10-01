@@ -53,7 +53,19 @@
 //! background node's tight constraint read [`WINDOW`] — so nothing that was
 //! already there moves. `no_two_placed_rects_overlap` and
 //! `every_placed_rect_is_inside_the_window` are what hold that claim up.
+//!
+//! In the bottom left of the window a readout names how fast the loop is running:
+//! the current rate, the run's average and its worst single frame. The number is
+//! measured from the frame deltas the loop already computes — see [`fps`] — and
+//! the same run is printed to stdout as one `roados-fps …` line when the demo
+//! stops, which is what `.ai/tools/fps-check.sh` reads and what a comparison
+//! between two builds is made of. `ROADOS_RUN_SECONDS` bounds the run, because
+//! the demo otherwise only stops when its window is closed and a measurement
+//! nobody can end is not a measurement.
 
+mod fps;
+
+use crate::fps::FrameRate;
 use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::Keycode;
 #[cfg(test)]
@@ -516,6 +528,44 @@ const ROW_PADDING: f32 = 8.0;
 /// whose edges are the only thing in it that would show it.
 const IMAGE_CORNER_RADIUS: f32 = 10.0;
 
+/// Where the frame-rate readout sits: the bottom left of the window, below the
+/// text column and left of the control column.
+///
+/// Measured rather than guessed, and the two numbers below are what the measuring
+/// found. The text column's last label ends at y 501, the button band's column
+/// starts at x 664 and the list's readout is at x 1000, so the strip from
+/// (0, 505) to (664, 720) is the one region of the window nothing is in. 684 is
+/// the list's readout's own y, so the two lines of numbers at the bottom of the
+/// window are on one baseline.
+const FPS_READOUT_ORIGIN: (f32, f32) = (60.0, 684.0);
+
+/// The width the frame-rate readout is given.
+///
+/// **Written out rather than measured from its first string**, which is what
+/// every other readout in the band does, because this is the one whose text
+/// changes on every frame that moves it: a rect measured from `fps 0, avg 0.0,
+/// worst 0 ms` is a rect measured from a number that was true for one frame, and
+/// [`read_only_label`]'s ellipsis would then cut the line at the width of the
+/// shortest string it ever shows.
+///
+/// 400 fits the longest line the readout can print — `fps 10000, avg 10000.0,
+/// worst 9999 ms` is 37 characters, and a frame cannot be a hundredth of a
+/// millisecond long, which is what would give the rates six digits — and it ends
+/// at x 460, two hundred pixels clear of the button column at
+/// [`BUTTON_ORIGIN`]'s 664. A box wider than the line in it costs nothing: the
+/// text is drawn from the box's own left edge.
+const FPS_READOUT_WIDTH: f32 = 400.0;
+
+/// The environment variable that bounds how long the demo runs, in seconds.
+///
+/// The demo is a window: it runs until the window is closed or SDL turns a
+/// `SIGTERM` into a quit event, so without this an agent that launched it has no
+/// way to *end* a measurement and therefore no way to read one — a number only
+/// exists once something prints it. Ten seconds is the default the check script
+/// asks for and about a hundred of frames is enough for the average to be worth
+/// comparing.
+const RUN_SECONDS_VAR: &str = "ROADOS_RUN_SECONDS";
+
 /// The image the demo shows: a texture and the window of it the fit needs.
 ///
 /// The two together, because [`ImageSource::of`] is what turns a handle into
@@ -606,8 +656,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
     let mut demo = Demo::new(TextMetrics::new(font), picture)?;
+    let run_for = run_seconds();
 
     let mut last = Instant::now();
+    let started = last;
     'running: loop {
         let event = events.wait_event_timeout(EVENT_WAIT);
         if matches!(
@@ -634,9 +686,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         demo.frame(WINDOW, delta);
         demo.draw(&mut renderer);
         renderer.end_frame()?;
+
+        // Checked after the frame rather than before the wait, so a bounded run
+        // ends on a frame that was drawn: the last frame is counted and the last
+        // one is on the screen when the window goes.
+        if run_for.is_some_and(|limit| now.duration_since(started) >= limit) {
+            break 'running;
+        }
     }
 
+    // On every way out, and printed rather than logged because a test runner
+    // reads it: `fps-check.sh` greps for the prefix and compares the numbers. A
+    // measurement nobody can get at is the failure this whole mechanism exists to
+    // avoid.
+    println!("{}", demo.fps_report());
+
     Ok(())
+}
+
+/// Returns how long the demo should run for, read from [`RUN_SECONDS_VAR`], or
+/// `None` to run until the window is closed.
+fn run_seconds() -> Option<Duration> {
+    run_seconds_from(std::env::var(RUN_SECONDS_VAR).ok())
+}
+
+/// Returns how long a run of `raw` bounds itself to, or `None`.
+///
+/// The parsing is a free function over its argument rather than a pair of
+/// statements inside `main`, for the reason `asset_candidates_from` is: the
+/// process's environment is one value for the whole test process and a test that
+/// wrote it would be writing it for every other test running beside it. Given the
+/// value, the rule is a function and can be tested one.
+///
+/// **A value that is not a positive number of seconds says so on stderr and is
+/// ignored**, because a run that quietly lasts for ever is exactly the case the
+/// variable exists to remove, and a typo that produced one would look like a hang
+/// rather than like a typo. Zero is refused rather than honoured for the same
+/// reason: a run of no length measures nothing, and it is a much more likely
+/// thing to type than a negative one.
+fn run_seconds_from(raw: Option<String>) -> Option<Duration> {
+    let raw = raw?;
+    // `try_from_secs_f64` and not `from_secs_f64`, which **panics** on a value too
+    // large to be a duration: this is text off the environment, and a panic is
+    // not what an unparsable variable earns.
+    let limit = raw
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok())
+        .filter(|limit| !limit.is_zero());
+    if limit.is_none() {
+        eprintln!(
+            "ui_demo: {RUN_SECONDS_VAR}={raw:?} is not a positive number of seconds; \
+             running until the window is closed"
+        );
+    }
+    limit
 }
 
 /// Loads the demo's image and returns it, or `None` after saying why.
@@ -1293,6 +1398,23 @@ struct Demo {
     /// finger that has travelled past the end of a list wants the end of the
     /// list. This is `slider_dragging`'s fix applied to the other widget.
     list_dragging: bool,
+    /// How fast the demo is running, counted from the loop's own frame deltas.
+    ///
+    /// The demo's and not `main`'s, because the demo is what draws the frames it
+    /// measures and the readout is a widget like any other; `main` only asks for
+    /// the report when the loop ends.
+    fps: FrameRate,
+    /// The text the frame-rate readout shows, written by the frame.
+    ///
+    /// A plain property rather than a bound one, for the reason
+    /// [`Demo::progress_indeterminate`] is: the meter is a plain field, and a
+    /// binding can only recompute from properties. The write is guarded by the
+    /// text it would write — see [`Demo::tick_fps`] — because a readout whose text
+    /// changes on every frame would otherwise re-lay out a string sixty times a
+    /// second to say the same thing.
+    fps_text: Property<String>,
+    /// The label showing the frame rate, in the bottom left of the window.
+    fps_readout: DemoLabel,
 }
 
 impl Demo {
@@ -1835,6 +1957,33 @@ impl Demo {
             &token_properties,
         )?;
 
+        // The frame-rate readout, at the foot of the window. It is the one
+        // readout whose text the demo *writes* rather than binds, because what it
+        // shows is the loop's own measurement and not a property of a widget —
+        // and the one whose rect is written out rather than measured, because its
+        // text is different on almost every frame. See [`FPS_READOUT_WIDTH`].
+        let fps_text = Property::new(FrameRate::new().summary());
+        let fps_readout = read_only_label(
+            &mut nodes,
+            &metrics,
+            BUTTON_FONT,
+            FPS_READOUT_WIDTH,
+            fps_text.clone(),
+            &color_token,
+            &token_properties,
+        )?;
+        {
+            let size = Size {
+                width: FPS_READOUT_WIDTH,
+                height: metrics.line_height(BUTTON_FONT),
+            };
+            nodes
+                .get_mut(fps_readout.label.handle())
+                .ok_or("ui_demo: the frame-rate readout is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+
         // The row, the counter, the slider, its readout and the four newer
         // widgets are each placed inside the band, which is what `Absolute` is
         // for: each at its own offset from the band's origin, which is the
@@ -1874,6 +2023,7 @@ impl Demo {
             (progress_readout.label.handle(), PROGRESS_READOUT_ORIGIN),
             (list.handle(), LIST_ORIGIN),
             (list_readout.label.handle(), LIST_READOUT_ORIGIN),
+            (fps_readout.label.handle(), FPS_READOUT_ORIGIN),
         ] {
             nodes
                 .get_mut(node)
@@ -1913,6 +2063,7 @@ impl Demo {
             || !button_area.add_child(&mut nodes, progress_readout.label.handle())
             || !button_area.add_child(&mut nodes, list.handle())
             || !button_area.add_child(&mut nodes, list_readout.label.handle())
+            || !button_area.add_child(&mut nodes, fps_readout.label.handle())
         {
             return Err("ui_demo: the button band could not be assembled");
         }
@@ -2173,6 +2324,9 @@ impl Demo {
             free_count,
             list_readout,
             list_dragging: false,
+            fps: FrameRate::new(),
+            fps_text,
+            fps_readout,
         })
     }
 
@@ -2656,6 +2810,10 @@ impl Demo {
         self.live_count.set(self.list.visible_items().len());
         self.free_count.set(self.list.free_len());
 
+        // Where it is in the order above that the frame rate goes: after the
+        // clocks and the list's numbers, and **before** the arena is borrowed.
+        self.tick_fps(delta);
+
         let mut nodes = self.nodes.borrow_mut();
 
         for handle in self.order.iter().copied() {
@@ -2777,6 +2935,7 @@ impl Demo {
             (&self.image_fit_readout, BUTTON_FONT),
             (&self.progress_readout, BUTTON_FONT),
             (&self.list_readout, LIST_FONT),
+            (&self.fps_readout, BUTTON_FONT),
         ] {
             let handle = readout.label.handle();
             let rect = nodes
@@ -2978,6 +3137,37 @@ impl Demo {
             .get()
             .as_color()
             .unwrap_or(Color::new(0, 0, 0, 255))
+    }
+
+    /// Counts the frame that has just been drawn and writes the readout if what
+    /// it says has changed.
+    ///
+    /// **The write is guarded by the text it would write.** `Property::set` writes
+    /// and fires its callbacks on every call, and the rate changes on most frames
+    /// at the boundary of a window and on none of them in between, so an
+    /// unguarded write would re-shape the string on every frame of the run to
+    /// show a picture that is the same one most of the time. It also costs the
+    /// label its paint link: this readout's text carries **no** `on_change` mark
+    /// of its node dirty, for the reason `Demo::new` gives for the toggle, the
+    /// progress bar, the image and the list — the text is not an input to the
+    /// rect the node was laid out at, and the label draws from its own options
+    /// rather than from the rect's size, so the frame's own paint pass is what
+    /// puts the new text on the screen.
+    fn tick_fps(&mut self, delta: Duration) {
+        self.fps.tick(delta);
+        let text = self.fps.summary();
+        if self.fps_text.get() != text {
+            self.fps_text.set(text);
+        }
+    }
+
+    /// Returns the report line a test runner reads, for the run so far.
+    ///
+    /// One line, on stdout, with a fixed prefix and `key=value` fields — see
+    /// [`FrameRate::report`], which owns the format and says why it is that shape.
+    #[must_use]
+    fn fps_report(&self) -> String {
+        self.fps.report()
     }
 
     /// Hands the recorded commands to the renderer, in paint order.
@@ -3372,6 +3562,7 @@ impl Demo {
             ("progress readout", self.progress_readout.label.handle()),
             ("list", self.list.handle()),
             ("list readout", self.list_readout.label.handle()),
+            ("fps readout", self.fps_readout.label.handle()),
         ] {
             if let Some(found) = rect(what, handle) {
                 rects.push(found);
@@ -7026,5 +7217,168 @@ mod tests {
             "it starts one above the executable, which is not a directory to walk out of"
         );
         assert_eq!(plain.len(), 5, "and it walks every ancestor it has");
+    }
+
+    /// Returns the text the frame-rate readout is showing, as the last frame
+    /// recorded it.
+    fn fps_readout_text(demo: &Demo) -> Option<String> {
+        demo.readout_text_of(&demo.fps_readout)
+    }
+
+    /// Runs `count` frames of `delta` each through `demo`.
+    ///
+    /// The loop's own two lines with the deltas a test chose instead of the ones
+    /// a clock produced, which is what lets a test say what the demo does with a
+    /// known sequence of frame costs.
+    fn frames(demo: &mut Demo, count: usize, delta: Duration) {
+        for _ in 0..count {
+            demo.frame(WINDOW, delta);
+        }
+    }
+
+    #[test]
+    fn the_readout_reports_the_frames_the_loop_actually_drew() {
+        // The wiring, and the only thing here that is not the meter's own
+        // arithmetic: thirty frames of 20 ms is 600 ms and 50 frames per second,
+        // so the readout saying 50 means the frames `Demo::frame` drew are the
+        // frames it measured. A frame that did not tick the meter would leave the
+        // readout on its constructed string forever.
+        let mut demo = demo();
+        frames(&mut demo, 30, Duration::from_millis(20));
+        assert_eq!(
+            fps_readout_text(&demo).as_deref(),
+            Some("fps 50, avg 50.0, worst 20 ms")
+        );
+    }
+
+    #[test]
+    fn the_report_line_names_the_runs_own_numbers() {
+        // **This is the line a test runner parses**, so its shape is the contract:
+        // the prefix `fps-check.sh` greps for, and every field spelled the way that
+        // script spells it. A renamed field is a runner that quietly finds
+        // nothing, which is why the whole line is asserted rather than the parts.
+        let mut demo = demo();
+        frames(&mut demo, 30, Duration::from_millis(20));
+        assert_eq!(
+            demo.fps_report(),
+            "roados-fps frames=30 duration_s=0.600 average_fps=50.0 \
+             worst_frame_ms=20.0 long_frames=0"
+        );
+    }
+
+    #[test]
+    fn a_stall_reaches_both_the_readout_and_the_report() {
+        // The defect `.ai/NEVERAGAIN.md` records — a demo that renders correctly
+        // at four frames a second — is invisible in a capture and obvious in these
+        // two numbers. Forty uniform frames and one slow one: the average still
+        // reads like a working application, and the rate and the worst frame say
+        // what happened.
+        let mut demo = demo();
+        frames(&mut demo, 40, Duration::from_millis(20));
+        demo.frame(WINDOW, Duration::from_millis(200));
+        let said = fps_readout_text(&demo).expect("the frame-rate readout");
+        assert_eq!(said, "fps 32, avg 41.0, worst 200 ms");
+        assert!(
+            !said.contains('…'),
+            "and it is not cut short: {said:?} is inside the box it was given"
+        );
+        let report = demo.fps_report();
+        assert!(report.contains("worst_frame_ms=200.0"), "{report}");
+        assert!(report.contains("long_frames=1"), "{report}");
+    }
+
+    #[test]
+    fn the_readouts_box_is_written_out_rather_than_measured_from_its_first_text() {
+        // `read_only_label` gives a readout the box of the string it starts with,
+        // which is the right rule for every other readout in the band and the wrong
+        // one here: this text is different on almost every frame, so a box measured
+        // from `fps 0, avg 0.0, worst 0 ms` would ellipsise the line the moment the
+        // rate moved. The width is [`FPS_READOUT_WIDTH`], whatever the text says.
+        let demo = laid_out();
+        let width = demo
+            .node_rect(demo.fps_readout.label.handle())
+            .expect("a laid-out readout")
+            .width;
+        assert_eq!(
+            width, FPS_READOUT_WIDTH,
+            "the box is the constant, not the width of whatever the text measured"
+        );
+        // And the longest line the readout can print fits inside it, measured
+        // through the same metrics `record_label` draws with. Five digits each,
+        // because a frame cannot be a hundredth of a millisecond long: a rate of
+        // six digits needs a 16 µs frame, and this loop's own wait is 16 ms.
+        let metrics = mono_metrics();
+        let widest = "fps 10000, avg 10000.0, worst 9999 ms";
+        let drawn: f32 = widest
+            .chars()
+            .map(|ch| metrics.advance(ch, BUTTON_FONT))
+            .sum();
+        assert!(
+            drawn <= FPS_READOUT_WIDTH,
+            "the widest line it can show is {drawn} px and the box is \
+             {FPS_READOUT_WIDTH} px"
+        );
+    }
+
+    #[test]
+    fn the_readout_sits_below_the_text_column_and_left_of_the_controls() {
+        // The bottom left of the window is the one region nothing else is in: the
+        // text column's last label ends at y 501, the button band's column starts
+        // at x 664 and the list's readout is at x 1000. `no_two_placed_rects_overlap`
+        // says no two boxes touch; this says which boxes this one is clear of, so a
+        // failure names the neighbour.
+        let demo = laid_out();
+        let at = |handle: Handle| demo.node_rect(handle).expect("a laid-out node");
+        let fps = at(demo.fps_readout.label.handle());
+
+        let column = TEXT_PANEL_ORIGIN.0 + TEXT_COLUMN_WIDTH;
+        let band = BUTTON_ORIGIN.0;
+        assert!(
+            fps.x + fps.width <= band,
+            "the readout at {fps:?} reaches into the button column at x {band}"
+        );
+        assert!(
+            fps.x < column,
+            "and it is in the left region, which ends at x {column}"
+        );
+        for handle in demo.label_nodes.iter().copied() {
+            let label = at(handle);
+            assert!(
+                label.y + label.height <= fps.y,
+                "the readout at {fps:?} is below a text panel label at {label:?}"
+            );
+        }
+        let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
+        assert!(inside(window, fps), "and it is inside the {WINDOW:?}");
+    }
+
+    #[test]
+    fn run_seconds_bounds_a_run_and_refuses_anything_that_is_not_a_positive_number() {
+        // The demo is a window: it runs until the window is closed, so this is what
+        // lets a measurement *end*, and therefore what lets one be read. The values
+        // are the whole of the rule, and they are checked through the function that
+        // holds it rather than through the process's environment — which is one
+        // value for the whole test process, and a test that wrote it would be
+        // writing it for every other test beside it.
+        assert_eq!(run_seconds_from(None), None, "unset is not a bound");
+        assert_eq!(
+            run_seconds_from(Some("10".to_string())),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(
+            run_seconds_from(Some(" 2.5 ".to_string())),
+            Some(Duration::from_millis(2500)),
+            "and a fraction of a second, which is what a fast check wants"
+        );
+        for refused in ["0", "-3", "ten", "", "1e300"] {
+            assert_eq!(
+                run_seconds_from(Some(refused.to_string())),
+                None,
+                "{refused:?} bounds nothing: zero measures no time, a negative \
+                 runs backwards, text is not a number and a number too large for \
+                 a Duration panics `Duration::from_secs_f64` rather than bounding \
+                 anything"
+            );
+        }
     }
 }

@@ -160,6 +160,12 @@ input is unexamined.
 - **`Box<dyn Trait>`.** Where an enum or generic would work.
 - **Missing `let-else`.** Where it would clarify control flow.
 - **Manual loops.** Where iterators would be clearer.
+- **A per-frame cost change with no measurement.** A change that touches what a
+  frame does needs a rate, not a still: `.ai/tools/fps-check.sh`, per
+  `.ai/agents/developer.md` § Phase 3, whose numbers and baseline are in
+  `doc/ui/IMPLEMENTATION_STATE.md` § *The frame rate, measured*. Treat a handoff
+  that says "it looked the same" as a finding: nothing in the suite can see a
+  frame-cost regression, and a capture cannot either.
 
 ### Dependencies
 

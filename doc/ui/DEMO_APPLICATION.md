@@ -117,3 +117,17 @@ tasks when a gap blocks a demo screen.
 2. How to handle the Tesla logo and branding? (avoid trademark issues)
 3. What vehicle model to display in the status screen? (Passat B5.5 or a generic
    car?)
+
+## Screens
+
+## Layout
+
+Top bar: gear/transmission PRND | Battery icon + percentage | lock icon (car open/locked) | user icon + user name| Time | Weather icon + temperature|
+Bottom bar: Car icon | 72 (not sure what's that, maybe tem in F) | Calendar icon | Other icons for apps like spofity, youtube ,etc | Sound icon
+
+### Welcome screen
+
+Left panel: Fasten Seatbelt info + icon/image | automatic lighs on icon | seatbealt not fasten red icon
+Main screen: Rendered car with info/buttons about open frunk, open trunk, etc.
+Right pane: Map - barely visible
+

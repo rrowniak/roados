@@ -198,6 +198,15 @@ Verification is not a step you report on; it is a step you perform.
   - `cargo test --all-features` — all tests must pass
   - `cargo doc --no-deps` — documentation must build without warnings
   - `cargo audit` — no known vulnerabilities in dependencies
+- **After every run of the demo, measure its frame rate**:
+  `.ai/tools/fps-check.sh [seconds] [minimum-fps]`. Every run of `ui_demo` an
+  agent launches is a run that can be compared against the baseline in
+  `doc/ui/IMPLEMENTATION_STATE.md` § *The frame rate, measured*, and a change
+  that costs frames is invisible to every other check here — `cargo test` cannot
+  see it, and a capture cannot either, because a still of a 4 fps application is
+  pixel-identical to a still of a 60 fps one. Report the numbers in the handoff
+  whether they are good or bad, and paste the line the script printed rather
+  than the rate you expected.
 - **Never assert green from a change that was not run.** "Should compile" is not
   a result, and a passing claim nobody checked is worse than an admitted failure.
 - **A change that alters what is on screen is not verified until it has been

@@ -4,3 +4,7 @@
 # Cargo build output. Anchored so it matches the workspace's own target
 # directory and nothing else.
 /ui/target/
+
+# Temp data
+
+/tmp/

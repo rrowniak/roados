@@ -63,3 +63,53 @@ unescapes entities, and collapses whitespace. Prints a separator and the text.
   case better and should be tried first. This tool exists for what it cannot
   keep: full, deterministic, unsummarised output from a page you already have on
   disk.
+
+## `fps-check.sh` — measure the demo's frame rate, and judge it against a floor
+
+```sh
+.ai/tools/fps-check.sh                # measure a 10 s release run
+.ai/tools/fps-check.sh 5 55           # measure 5 s and require 55 fps
+FPS_MIN_FPS=55 .ai/tools/fps-check.sh # the same floor, from the environment
+```
+
+Builds `ui_demo` in release, runs it with `ROADOS_RUN_SECONDS`, and reads the one
+`roados-fps key=value …` line the demo prints on stdout. Exit status is 1 when a
+floor was given and missed, or when the run produced no report at all.
+
+### Use it for
+
+- **Answering "did this change cost anything?"** The average over a fixed run, the
+  worst single frame, and how many frames took longer than two of the loop's own
+  16 ms slots. `doc/ui/IMPLEMENTATION_STATE.md` § *The frame rate, measured*
+  carries the baseline this repository compares against.
+- **Any performance claim at all.** A claim with a number behind it can be
+  checked; the same claim with "it looked the same" behind it cannot, and a still
+  of a 4 fps application is pixel-identical to a still of a 60 fps one.
+
+### Do not use it for
+
+- **Proving the demo is correct.** It measures a rate and nothing else. A run at
+  60 fps of a window drawing the wrong thing passes it.
+- **Claiming a regression on a shared or loaded machine from one run.** One run is
+  one sample of a machine that may be running something else. Compare three runs
+  before and three after, as the benchmark tables in
+  `doc/ui/IMPLEMENTATION_STATE.md` do, and say which you did.
+- **Comparing a debug build with a release one.** This script builds release,
+  because a debug build's rate is a fact about unoptimised Rust rather than about
+  the interface. The two differ by about 15 fps on this repository's demo, which
+  is a number worth knowing and not one to regress against.
+- **Judging a run that never happened.** A missing `roados-fps` line is a run that
+  failed, and the script exits 1 on it for that reason.
+
+### Known limits
+
+- **The rate it reports is the loop's, not the display's.** There is no vsync and
+  no frame pacing: the loop waits 16 ms for an event and then draws, so the two
+  costs are serialised and a ceiling of about 62 fps is built into the shape of
+  the loop. A number near that ceiling is a loop that nothing in the interface is
+  holding back.
+- **It needs a display.** A headless run measures nothing, and the script says so
+  rather than reporting zero.
+- **The floor is an argument, not a constant in this file.** A number about a
+  machine belongs to whoever measured it, and there is one copy of the baseline
+  rather than two.

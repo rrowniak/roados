@@ -8,30 +8,37 @@ and this file gets corrected.
 **Spec:** `doc/ui/PRIMITIVES.md`, `doc/ui/PRIMITIVES_ARCHITECTURE.md`, and
 `doc/ui/TASK_UI_PRIM_01..24.md`.
 
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-01
 
 ## Current position
 
-**Status: 14 committed (`11f4134`). Tasks 15–18 implemented together, awaiting
-the operator's review.** Tasks 01–14 are done and committed. Tasks 15 (Toggle),
-16 (Image), 17 (Progress) and 18 (List/Scroll) were implemented in one pass on
-the operator's decision of 2026-09-30, and are **not yet reviewed by anybody**.
-They are one uncommitted changeset, not four tasks.
+**Status: 18 committed (`d7240c8`). Task 19 (TextInput) is next.** Tasks 15
+(Toggle), 16 (Image), 17 (Progress) and 18 (List/Scroll) were implemented in one
+pass on the operator's decision of 2026-09-30, reviewed by nobody, and **committed
+together as `d7240c8` on 2026-10-01**. The `Review` cells in the task table still
+read `none`, and that is a fact rather than a shrug — see *Gates skipped*.
 
-**Last task: 18 — Widgets: List and Scroll**, with 15, 16 and 17 in the same
-changeset. Six new files (`texture.rs`, `widgets/toggle.rs`, `image.rs`,
+**Since that commit: the demo measures and reports its own frame rate.** A
+readout in the bottom left of the window, a `roados-fps …` line on stdout when
+the demo stops, `ROADOS_RUN_SECONDS` to end a run at all, and
+`.ai/tools/fps-check.sh` to run the whole thing and judge it. It is also how the
+demo's rate became a **number**: **49.7 fps**, measured. See *The frame rate,
+measured*.
+
+**Last task: the frame-rate readout** — not a `TASK_UI_PRIM_n` task, an operator
+request of 2026-10-01 to make performance measurable after every run an agent
+launches. `ui/src/ui_demo/src/fps.rs` is new; `ui_demo` gained three constants,
+the readout and the bounded run. **838 `ui_core` unit tests (1 ignored) + 122
+demo tests + 129 doctests**, all green.
+
+**Last widget task: 18 — Widgets: List and Scroll**, with 15, 16 and 17 in the
+same changeset. Six new files (`texture.rs`, `widgets/toggle.rs`, `image.rs`,
 `progress.rs`, `scroll.rs`, `list.rs`), `paint.rs` and `batch.rs` extended,
 `render.rs` given a third pass, `ui_demo` enlarged to 1280×720 and given all four
-widgets, and one new dependency: `sdl3`'s `image` feature.
-
-**Since that changeset was written, the operator reported two scrollbar defects
-against the list** — a 6-pixel bar too narrow to aim at, and a drag that lagged
-the cursor by about ten to one — and both are fixed in the same uncommitted
-changeset. See *The fourth operator report*. The count below is current:
-**838 `ui_core` unit tests + 106 demo tests + 129 doctests**.
-
-**Next task: review of tasks 15–18**, which the operator is doing. Task 19
-(TextInput) is next after that.
+widgets, and one new dependency: `sdl3`'s `image` feature. The two scrollbar
+defects the operator reported against the list — a 6-pixel bar too narrow to aim
+at, and a drag that lagged the cursor by about ten to one — are fixed inside that
+same commit; see *The fourth operator report*.
 
 **Task 13 — Widget: Container.** `widgets/container.rs` is new (18 tests),
 `layout.rs` gained `Padding` and the pass now honours it, and `ui_demo`'s
@@ -88,6 +95,88 @@ cheap whenever it is wanted. The order that would be least wasteful is to let
 task 14 land first and review the two together, since the unexamined fixes are
 test and comment changes with no behavioural surface.
 
+## The frame rate, measured
+
+**This section is what `.ai/agents/developer.md` § Phase 3, `.ai/workflows/task-sequence.md`
+§ Gates and `.ai/tools/README.md` point at when they ask for a rate.** The
+numbers and the mechanism are here; the rule that it must be produced after every
+run lives with the agent that has to run it.
+
+### What exists
+
+| | |
+|---|---|
+| the meter | `ui/src/ui_demo/src/fps.rs` — `FrameRate`, ticked once per frame with the delta the loop already computes for the animation clocks. **It holds no clock**, which is what lets its ten tests run without a wall clock |
+| the readout | a `Label` at `(60, 684)`, 400 px wide, at the foot of the window and clear of the text column and the button column. `fps 61, avg 60.8, worst 34 ms` — the current 500 ms window, the run's average, and the longest single frame |
+| the report | one line on **stdout** when the demo stops: `roados-fps frames=498 duration_s=10.020 average_fps=49.7 worst_frame_ms=48.5 long_frames=1` |
+| ending a run | `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo`, or `kill -TERM` — SDL installs SIGINT and SIGTERM handlers by default (`SDL/src/events/SDL_quit.c:117` and `:118`) and turns either into the quit event the loop already breaks on. **Both paths were measured**: a bounded run printed its report, and a `kill -TERM` of an 89-second run printed `frames=4409 duration_s=88.799 average_fps=49.7` |
+| one command | `.ai/tools/fps-check.sh [seconds] [minimum-fps]` — builds release, runs, parses, and exits 1 on a missed floor **or on a run that produced no report at all** |
+
+### The baseline, and it is below the 60 fps target
+
+`doc/ui/DEMO_APPLICATION.md` lists **60 FPS target** in scope and *"Smooth
+animations and transitions — 60 FPS"* as a design principle. The demo does not
+reach it, and before this change nobody could tell:
+
+| build | run | average | worst frame | frames over 33 ms |
+|---|---|---|---|---|
+| **release** | `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo` | **49.7 fps** | 48.5 ms | 1 |
+| release | the same binary, stopped with `kill -TERM` after 137 s | 50.0 fps | 46.8 ms | 1 |
+| **debug** | `ROADOS_RUN_SECONDS=10 ./target/debug/ui_demo` | **34.2 fps** | 78.4 ms | 10 |
+
+**Six release runs on this host, taken while writing this section, read 49.7,
+50.0, 51.0, 52.5, 53.7 and 54.1 fps** — a spread of 4.4 fps on a machine that is
+also running a browser and a compositor, and the reason the floor a check should
+use is around **40** rather than the best number above. A floor at 49.7 would
+fail on a build that has not changed.
+
+**The ceiling is in the shape of the loop, not in the interface.** The loop calls
+`wait_event_timeout(EVENT_WAIT)` with `EVENT_WAIT = 16 ms` and *then* draws, so
+the wait and the frame's own cost are **serialised**: at 49.7 fps a frame is
+20.1 ms, of which about 16 is the wait and about 4 is the work. Even an
+infinitely fast frame would give 62.5 fps. Two things follow, and both are the
+operator's call rather than an agent's:
+
+- **The gate is a floor, not the target.** Comparing later runs against
+  *this* table is what detects a regression; 60 is a ceiling the loop cannot
+  reach at all in its present shape.
+- **Reaching 60 means changing the loop**, not the interface: wait only for what
+  is left of a 16.67 ms frame after the work, and the frame budget rather than
+  the event timeout becomes the pace. The operator decided on 2026-10-01 **not**
+  to do that in this round — measure first — and the numbers above are what the
+  decision was waiting for.
+
+The 15 fps between the two builds is why `fps-check.sh` builds **release**: a
+debug build's rate is a fact about unoptimised Rust, not about the interface, and
+a regression measured against the wrong build is a regression against nothing.
+
+### What is NOT claimed
+
+- **Not vsync, and not a display rate.** There is no frame pacing and no
+  `SDL_GL_SetSwapInterval`; the number is the loop's.
+- **Not one sample.** Every number above is one run on a shared machine, and the
+  six release runs span 4.4 fps. That is enough for a floor at 40 and not enough
+  to quote 49.7 to a decimal as a property of the interface. Repeating a run
+  three times before and three after is what the review's benchmark tables do, and
+  what a regression claim should do.
+- **Not a rendering verification.** A fast wrong picture passes it; a correct
+  slow one fails it. Both halves are checked by the things in
+  *Verifying a change that draws*.
+
+### Two capture traps this feature walked into
+
+**A pair of captures can be byte-identical while the demo is animating.** Two
+`magick import` captures of the window two seconds apart came back `AE = 0`, which
+reads as "the readout is not updating" — and the readout *was* updating. Six
+captures half a second apart read `fps 50, avg 52.8`, `51, 52.5`, `50, 52.1`,
+`51, 52.0`, `51, 52.0`, `50, 51.6`: two consecutive samples are the same string
+when the average lands on the same tenth twice. **A live readout needs several
+samples compared as a set, not a pair.** Recorded in `NEVERAGAIN`.
+
+**The window's position is not the root's, and the id has to be re-read.** The
+window id here was `0x120002f`; the standing capture method in *Verifying a
+change that draws* is unchanged and was used as written.
+
 ## Tasks 15–18 — what was decided, and what the operator should look at
 
 One changeset, four tasks. Everything below is the integrator's record; nothing
@@ -109,6 +198,12 @@ afterwards. The gates that goes around, recorded so they are decisions:
 - What *did* hold: the whole verification suite was run after integration, and
   the four sub-tasks were file-isolated and independently tested, per
   `.ai/protocols/subagents.md` § *Implementation fan-out*.
+
+**And then, on 2026-10-01, the operator committed the batch as `d7240c8`** — still
+without the review step 2 asks for, which was the decision and remains one. What
+that changes for the next reader is only *where* a review would start: a reviewer
+dispatched against `d7240c8` needs no working tree, and the four tasks are still
+one changeset with no per-task revert point.
 
 **The cheapest way to review this is by file, not by task.** `texture.rs` and
 `render.rs` are task 16's, `widgets/toggle.rs` is task 15's, and so on; each is
@@ -1068,7 +1163,6 @@ taken and only the first is reachable from the demo as it stands:
    demo's own keys had produced them; they cannot have, because `0` and `1` write
    0 and 100 and not 25 and 70.
 
-
 **2026-09-30, tasks 15–18: the capture method is the one above, and two things
 about it are new.** The window id is still read with `xwininfo` and captured with
 `magick import -window <id>`, and the pointer is still at the window rather than
@@ -1392,11 +1486,12 @@ verified. A blank cell is unknown, not "none".
 | 12 | Widget — Button | done | `9973185` | 1 pass, *fix first* — findings fixed, **not re-reviewed** | 0 |
 | 13 | Widget — Container | done | `2dc9193` | 1 pass, *approve with minor findings* — findings fixed | 1 (`cargo audit` not installed) |
 | 14 | Widget — Slider | done | `11f4134` | 1 pass, *approve with required changes* — 2 majors, 4 minors, all fixed before the commit | **ACs 2, 3, 4, 7, 8** — each needs a pointer or a key, and XTEST injection delivered no event to the app in either session (see *Verifying a change that draws*). AC 1 was capture-verified; ACs 5 and 6 are the widget's own arithmetic and a test is their whole verification. *Tool gate, not an AC:* `cargo audit` is not installed |
-| 15 | Widget — Toggle | implemented, **batched** | | **none** — see *Gates skipped* | **ACs 2, 3, 4, 5, 6** — every one needs a pointer or a key to happen at all, and no injected event reached the app. AC 1 (track and thumb render) was **capture-verified** |
-| 16 | Widget — Image | implemented, **batched** | | **none** — see *Gates skipped* | **ACs 2, 3, 4, 5, for the picture only.** The *geometry* of all four fits and the opacity are asserted as recorded draw commands, and AC 6's corner clip and AC 7's image on screen were **capture-verified**; only `Contain` has been *seen*, because reaching the other three needs a key |
-| 17 | Widget — Progress | implemented, **batched** | | **none** — see *Gates skipped* | **ACs 3, 4** — a value animating and the indeterminate slide both need frames with something moving, and moving them needs a key. ACs 1, 2 and 5 were **capture-verified**, the bar on screen at 50% |
-| 18 | Widget — List/Scroll | implemented, **batched**, then **fixed on screen** | | **none** — see *Gates skipped* | **ACs 2, 3**, and the "scrollable" half of **AC 7** — all three need a pointer or a wheel on this host. **AC 2 is not a defect**: dragging *up* scrolls, through the demo's real event path, and dragging *down* at offset 0 cannot move a list past its own start. ACs 1, 4, 5, 6 and AC 7's *100 rows on screen* are **capture-verified and unit-tested**, and the clipping defect the operator reported is fixed — see *A defect the operator found* |
-| 19 | Widget — TextInput | pending | | | |
+| 15 | Widget — Toggle | done, **batched** | `d7240c8` | **none** — see *Gates skipped* | **ACs 2, 3, 4, 5, 6** — every one needs a pointer or a key to happen at all, and no injected event reached the app. AC 1 (track and thumb render) was **capture-verified** |
+| 16 | Widget — Image | done, **batched** | `d7240c8` | **none** — see *Gates skipped* | **ACs 2, 3, 4, 5, for the picture only.** The *geometry* of all four fits and the opacity are asserted as recorded draw commands, and AC 6's corner clip and AC 7's image on screen were **capture-verified**; only `Contain` has been *seen*, because reaching the other three needs a key |
+| 17 | Widget — Progress | done, **batched** | `d7240c8` | **none** — see *Gates skipped* | **ACs 3, 4** — a value animating and the indeterminate slide both need frames with something moving, and moving them needs a key. ACs 1, 2 and 5 were **capture-verified**, the bar on screen at 50% |
+| 18 | Widget — List/Scroll | done, **batched**, then **fixed on screen** | `d7240c8` | **none** — see *Gates skipped* | **ACs 2, 3**, and the "scrollable" half of **AC 7** — all three need a pointer or a wheel on this host. **AC 2 is not a defect**: dragging *up* scrolls, through the demo's real event path, and dragging *down* at offset 0 cannot move a list past its own start. ACs 1, 4, 5, 6 and AC 7's *100 rows on screen* are **capture-verified and unit-tested**, and the clipping defect the operator reported is fixed — see *A defect the operator found* |
+| 19 | Widget — TextInput | pending — **next** | | | |
+| — | Frame-rate readout, stdout report, `fps-check.sh` | implemented, **uncommitted** | | none yet | n/a — an operator request, not a task with criteria. Verified: the suite is green, six mutations killed, the readout seen on screen, and both run-end paths measured — see *The frame rate, measured* |
 | 20 | Widget — Gauge | pending | | | |
 | 21 | Widget — Chart | pending | | | |
 | 22 | Widget — Dialog | pending | | | |
@@ -1588,7 +1683,6 @@ Note this is **independent of the subsystem decision** above: the X11
 sub-options are not subsystems, so accepting default subsystems does not bring
 this closer to fixed, and disabling the documented four would not have fixed it
 either. It was always going to be needed.
-
 
 - Task 04 places "widget node structure" out of scope, deferring it to task 05;
   task 05 is titled *Property System* and does not list a widget node type
@@ -2232,3 +2326,20 @@ operator's rule, none of these is treated as satisfied.
   `NEVERAGAIN`: a deleted `#[test]` attribute that left the suite green with a
   test unregistered, and a test expectation that was wrong where the code was
   right (an `EaseInOut` colour transition's first frame rounds back to its start).
+- 2026-10-01 — **the operator committed tasks 15–18 as `d7240c8`**, all four in
+  one changeset as decided on 2026-09-30. The `Review` column reads `none` and
+  that is still accurate: the batch was never reviewed by anybody, and the
+  per-task revert point the workflow asks for does not exist for any of the four.
+  A reviewer dispatched against `d7240c8` needs no working tree.
+- 2026-10-01 — **the demo measures its own frame rate.** Operator request, not a
+  task file: a readout at the foot of the window, a `roados-fps …` line on stdout
+  when the demo stops, `ROADOS_RUN_SECONDS` to end a run, and
+  `.ai/tools/fps-check.sh` to run all of it and judge the result. **The finding is
+  the number: 49.7 fps on a release build, against a 60 fps target** — and the
+  cause is the loop's 16 ms event wait plus the frame's own cost being serialised,
+  so 62.5 fps is the ceiling of the loop's present shape. The operator decided
+  this round measures and does not retime the loop. See *The frame rate, measured*.
+- 2026-10-01 — **the rule is wired into the AI system**, once and in one place:
+  `.ai/agents/developer.md` § Phase 3 owns it, `.ai/workflows/task-sequence.md`
+  § Gates and `.ai/agents/reviewer.md` § *Performance and idioms* point at it, and
+  `.ai/tools/README.md` documents the tool with what it may not be used for.

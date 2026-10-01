@@ -513,3 +513,27 @@ is nothing to bypass.
 calling it. A helper that is called from one place and tested from another has
 two places to be wrong, and only one of them is under test. Put the decision in
 a function the production loop also calls, and test that.
+
+## 2026-10-01 — Two captures of a moving number can be identical
+
+The frame-rate readout landed, and the first check of it was two `magick import`
+captures of the window two seconds apart with `magick compare -metric AE` — which
+came back **0**. That reads as "the readout is not updating", and it is the
+reading a session will stop on: the number on screen is the whole point of the
+change, so an unchanged picture is the one thing that would say it is broken. It
+was updating. Six captures half a second apart read `fps 50, avg 52.8`, `51,
+52.5`, `50, 52.1`, `51, 52.0`, **`51, 52.0`**, `50, 51.6` — a formatted average
+lands on the same tenth twice about as often as it moves, so *consecutive* samples
+are routinely the same string and the pair matches.
+
+The process was verified as alive, and its own report was read, so the reading was
+safe to dismiss — but only because something else in the session had already
+established it. That is luck, not method.
+
+**Rule:** a `metric AE` of 0 on a window that is supposed to be *changing* is
+ambiguous between "nothing happened" and "the same value twice", and the two need
+different responses. Sample **five or six times** and compare the set of readings,
+not a pair; and when the thing being watched is a number, read the number rather
+than the pixels. This is the `a still proves what is drawn, never how fast it is
+drawn` entry with the other half of the trap: a still cannot tell you a counter
+is frozen either, and a counter's format is what decides the two apart.

@@ -63,6 +63,15 @@ prevent.
   becomes a fiction.
 - **No uncommitted advance.** Step 5 precedes step 6. An uncommitted task leaves
   no revert point for the next one.
+- **No unmeasured run of the demo.** Every run of `ui_demo` an agent launches is
+  measured with `.ai/tools/fps-check.sh`, and the numbers go into the handoff
+  whether they are good or bad. This is a gate because the only other checks in
+  the sequence are blind to a frame-cost regression: no test can see it, and a
+  capture cannot either — a still of a 4 fps application is pixel-identical to a
+  still of a 60 fps one, which is how a four-fps regression survived three
+  reviews in this repository. **The rule itself is
+  `.ai/agents/developer.md` § Phase 3**, which owns what is run and what is
+  reported; it is not restated here.
 
 ## State
 

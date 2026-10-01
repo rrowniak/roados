@@ -420,6 +420,29 @@ snapshot before the *first* mutation of a session, not before each one — the
 per-mutation snapshot protects the next mutation, and only a from-session-start
 one proves the tree was ever clean.
 
+**Fourth mechanism, 2026-10-01: a failure count parsed off the whole log.**
+`grep -o '[0-9]* failed' | head -1` — a runner's own idea of how to count
+failures — matched a **bare `" failed"`** in cargo's `error: test failed, to
+rerun pass …` trailer before it ever reached `4 failed`. `head -1` took the
+empty-number match, `cut -d' ' -f1` produced nothing, and `${failed:-0}` turned
+that into zero. Every mutation was reported **SURVIVED** while the log showed
+**4 failed**. Three mutations in a row were declared weak tests on the strength
+of a parse bug; had the runner been believed, the next reader would have gone
+to strengthen assertions that were never weak — the exact harm the third
+mechanism was written about.
+
+The same session had already shipped the `grep -q '^test result'` guard and the
+`trap`, and **the guard did not catch it**, because the log *did* contain a
+`test result:` line — a `FAILED` one. Asserting that a line exists is not
+asserting what it says. Parse it: `sed -n 's/.*[^0-9]\([0-9]\+\) failed.*/\1/p'`
+against the `test result:` line specifically.
+
+**Rule:** a guard that checks *presence* is not a guard on *content*. When a
+runner's verdict is parsed out of a log, read the field it means and nothing
+else, and make the parser's failure mode **loud** — an unparseable log must
+abort, never default to "0 failures", because "0" is the one value that turns a
+broken runner into a confident report that the code is untested.
+
 ## 2026-10-01 — A drawn control with nothing behind it
 
 The operator reported the list's scrollbar two ways — *"is too narrow, I have

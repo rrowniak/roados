@@ -3784,10 +3784,13 @@ mod tests {
                 keymod: sdl3::keyboard::Mod::empty(),
             },
         ] {
+            // `kind` is not `Copy` any more — `InputEventKind::Text` carries a
+            // `String` — so the message is rendered before the move, not after.
+            let label = format!("{kind:?}");
             let mut event = InputEvent::new(kind, Some(Offset::new(100.0, 250.0)));
             assert!(
                 !list.on_event(&mut event, VIEWPORT),
-                "{kind:?} is not this list's"
+                "{label} is not this list's"
             );
             assert!(!event.consumed());
         }

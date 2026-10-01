@@ -400,6 +400,7 @@ ui/
         list.rs
         scroll.rs
         text_input.rs
+        keyboard.rs
         image.rs
         progress.rs
         gauge.rs

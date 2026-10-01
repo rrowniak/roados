@@ -176,9 +176,11 @@ impl<T: 'static> Default for Callback<T> {
 pub mod button;
 pub mod container;
 pub mod image;
+pub mod keyboard;
 pub mod label;
 pub mod list;
 pub mod progress;
 pub mod scroll;
 pub mod slider;
+pub mod text_input;
 pub mod toggle;

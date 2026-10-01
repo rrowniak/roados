@@ -96,11 +96,13 @@ use ui_core::theme::{PropertyValue, Theme, ThemeToken};
 use ui_core::widgets::button::{Button, Callback, Motion, Palette};
 use ui_core::widgets::container::Container;
 use ui_core::widgets::image::{Image, ImageFit, ImageSource};
+use ui_core::widgets::keyboard::{KeyAction, Keyboard, Palette as KeyboardPalette};
 use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapMode};
 use ui_core::widgets::list::{ItemFactory, List};
 use ui_core::widgets::progress::{Palette as ProgressPalette, Progress};
 use ui_core::widgets::scroll::Palette as ScrollPalette;
 use ui_core::widgets::slider::{Orientation, Palette as SliderPalette, Slider};
+use ui_core::widgets::text_input::{Palette as TextInputPalette, TextInput};
 use ui_core::widgets::toggle::{Palette as TogglePalette, Toggle};
 // The button band's `Callback` is the payload-free alias of this same type, so
 // the demo imports it under a second name: a slider's handler takes the value it
@@ -109,13 +111,30 @@ use ui_core::widgets::Callback as ValueCallback;
 
 /// The window, and the box the root is laid out in.
 ///
-/// 1280 by 720 rather than 1024 by 600: the four widgets the later tasks added
+/// 1280 by 1020 rather than 1024 by 600: the four widgets the later tasks added
 /// do not fit beside the ones already here, and every position in the demo is
 /// absolute, so growing the window moves nothing and lets four more in. See the
 /// module documentation for the whole of the argument.
+///
+/// **The height grew twice, and the second time is task 19's.** 720 was reached
+/// because the controls would not fit beside the text panel, and 1020 because
+/// [`BAND_TOP`] is 720: everything above it is the gallery exactly as it was, and
+/// the text-entry band goes below. **Nothing above [`BAND_TOP`] moved**, which is
+/// the point, and `the_gallery_above_the_band_is_where_it_was` checks it rather
+/// than trusting it.
+///
+/// **1020 is measured, not chosen.** The first attempt was 1160 — a field and a
+/// keyboard stacked — and the window came back **1052 pixels tall**: this host
+/// has two stacked displays, `eDP-1` at 1920x1080 and `HDMI-A-1` at 1920x1200,
+/// and the window manager capped the height where the window landed. A window
+/// taller than the cap is not merely awkward, it is **unverifiable**: the bottom
+/// of the keyboard never reaches the screen, so the capture that is supposed to
+/// prove the widget draws cannot see it. 1020 leaves room under the cap, and the
+/// band is laid out **side by side** rather than stacked for the same reason — a
+/// field over a 300-tall keyboard needs 364 pixels of band and the budget is 300.
 const WINDOW: Size = Size {
     width: 1280.0,
-    height: 720.0,
+    height: 1020.0,
 };
 
 /// How long the loop blocks waiting for the next event. Nothing moves on
@@ -555,6 +574,170 @@ const FPS_READOUT_ORIGIN: (f32, f32) = (60.0, 684.0);
 /// [`BUTTON_ORIGIN`]'s 664. A box wider than the line in it costs nothing: the
 /// text is drawn from the box's own left edge.
 const FPS_READOUT_WIDTH: f32 = 400.0;
+
+// ------------------------------------------------------------------ task 19
+
+/// The y at which the text-entry band begins: the old bottom of the window.
+///
+/// Everything above this line is tasks 11–18's layout and **has not moved**. The
+/// window grew downwards rather than the demo being re-laid-out, so every capture
+/// taken of the earlier tasks is still a capture of the same pixels. That is the
+/// whole argument for growing the window rather than rearranging it, and it is
+/// why the operator chose it over restructuring the gallery.
+const BAND_TOP: f32 = 720.0;
+
+/// How far below [`BAND_TOP`] the band starts.
+///
+/// Sixteen is the same margin the whole demo has on its left edge, so the band
+/// starts where the gallery's margin already is rather than at a new number.
+/// Written as a drop from [`BAND_TOP`] rather than as an absolute 736, because the
+/// relationship is the fact: move the band and the whole of it follows.
+const BAND_DROP: f32 = 16.0;
+
+/// The top of everything in the band.
+const BAND_TOP_OF_BAND: f32 = BAND_TOP + BAND_DROP;
+
+/// Where the demo's text input sits, at the left of the band.
+///
+/// **Left of the keyboard rather than above it**, which is the layout decision
+/// this band makes. Stacked is the arrangement most phone keyboards use, and it
+/// needs [`BAND_HEIGHT`] to be a field plus a gap plus a 260-tall keyboard; beside
+/// it the band is as tall as the keyboard alone, which is what fits the 300 pixels
+/// [`WINDOW`] leaves below the gallery. For a car it is also the better shape: a
+/// driver reaches a keyboard to the side of the field without the field moving
+/// under their hand.
+const TEXT_INPUT_ORIGIN: (f32, f32) = (BAND_MARGIN, BAND_TOP_OF_BAND + 20.0);
+
+/// The box the text input is given.
+///
+/// **Both numbers are the demo's, not the widget's**, and both go in through the
+/// properties task 19's own review asked for. The widget defaults to 240 by 44;
+/// 480 by 64 is a field read at arm's length from a driver's seat, which is the
+/// same judgement the operator made twice already when they called a 6-pixel
+/// slider track and a 6-pixel scrollbar unusable with a finger. This is the
+/// third control in that series and the first one that could have been answered
+/// without a code change.
+const TEXT_INPUT_SIZE: Size = Size {
+    width: 420.0,
+    height: 64.0,
+};
+
+/// The margin the band keeps on the left, the same 60 the gallery uses.
+const BAND_MARGIN: f32 = 60.0;
+
+/// How tall the band is: [`WINDOW`] less [`BAND_TOP`].
+///
+/// The whole of the space task 19 was given, and the number the layout has to fit
+/// inside. It is a named constant rather than an expression at each use because
+/// the alternative is a `- BAND_TOP` at four different places, which is four
+/// chances to disagree about where the gallery ends.
+const BAND_HEIGHT: f32 = WINDOW.height - BAND_TOP;
+
+/// The font size the text input's own text is drawn at.
+///
+/// Larger than [`BUTTON_FONT`]'s 20 because this is *the thing being read*, and
+/// a field whose value is set in 16-pixel type is a field read by leaning in.
+const TEXT_INPUT_FONT: f32 = 24.0;
+
+/// Where the on-screen keyboard sits, right of the field.
+///
+/// **Side by side rather than under it**, which is the layout decision this band
+/// makes, and [`WINDOW`] gives the reason: a field over a keyboard needs the band
+/// to be a field plus a gap plus a 260-tall keyboard, and [`BAND_HEIGHT`] is 300.
+/// For a car the side-by-side shape is also the better one — a driver reaches the
+/// keys beside the field without the field moving under their hand.
+const KEYBOARD_ORIGIN: (f32, f32) = (520.0, BAND_TOP_OF_BAND);
+
+/// How tall one key is drawn, in pixels.
+///
+/// **44 is the widget's own touch floor, and the demo does not go below it.** The
+/// widget's *default* is 52, which is taller than this band has room for, so the
+/// demo asks for the floor rather than for something smaller — the same
+/// relationship [`SCROLLBAR_THICKNESS`] and [`SLIDER_TRACK_THICKNESS`] have with
+/// their widgets' defaults, except that those two were widened and this one is
+/// lowered **to** the floor and never under it.
+const KEY_HEIGHT: f32 = 44.0;
+
+/// The gap between two keys, in pixels: the widget's own `KEY_GAP`.
+const KEY_GAP: f32 = 6.0;
+
+/// The keyboard's own padding, in pixels, on every side.
+const KEY_PADDING: f32 = 8.0;
+
+/// The height the keyboard occupies: the padding top and bottom, five rows of
+/// [`KEY_HEIGHT`], and four gaps between them.
+///
+/// Written out rather than read from `keyboard.size().height` so the demo's
+/// layout and the demo's constants cannot disagree about where the window ends.
+/// `the_keyboard_is_the_height_the_demo_says_it_is` is what holds the two in step,
+/// and it fails if either number is changed alone.
+const KEYBOARD_HEIGHT: f32 = KEY_PADDING * 2.0 + KEY_HEIGHT * 5.0 + KEY_GAP * 4.0;
+
+/// The width the keyboard is given.
+///
+/// 700 of the window's 1280, with the field and its two readouts in the other
+/// [`BAND_MARGIN`] to 480 and 60 of margin beyond that. **Ten keys across 700
+/// comes to 63 pixels each**, which is comfortably over [`KEY_HEIGHT`] and
+/// therefore over the touch floor; the width is a layout choice and the floor is
+/// the constraint, and `every_key_is_at_least_forty_four_across_and_tall` is what
+/// checks the second against the first.
+const KEYBOARD_WIDTH: f32 = 700.0;
+
+/// The font size the keyboard draws its key labels at.
+///
+/// Below the widget's own 22, because the band is laid out side by side and each
+/// key is 63 pixels wide rather than 110: a label is centred by an average
+/// advance and the demo measures that advance at *this* size from its own
+/// `TextMetrics`, so the two cannot disagree.
+const KEY_FONT: f32 = 18.0;
+
+/// Where the readout naming what the field holds sits, right of the input.
+///
+/// On the field's own first line rather than its centre, so the readout's baseline
+/// and the field's text are on one line and a driver reads the two as a pair.
+const TEXT_READOUT_ORIGIN: (f32, f32) = (BAND_MARGIN, BAND_TOP_OF_BAND + 100.0);
+
+/// The width the text readout is given.
+const TEXT_READOUT_WIDTH: f32 = 400.0;
+
+/// Where the readout naming what was last submitted sits, under the text one.
+///
+/// It is a separate readout rather than a second line of the first because
+/// `on_submit` is a different event from `on_change`: a value that was submitted
+/// and a value that is still being typed are different facts, and a driver
+/// glancing at the screen needs to tell them apart.
+const SUBMIT_READOUT_ORIGIN: (f32, f32) = (BAND_MARGIN, BAND_TOP_OF_BAND + 132.0);
+
+/// The width the submit readout is given.
+const SUBMIT_READOUT_WIDTH: f32 = 400.0;
+
+/// The font size both of the field's readouts are drawn at.
+const TEXT_FIELD_READOUT_FONT: f32 = 20.0;
+
+/// The grey text the field shows while it is empty.
+///
+/// Not `""`: an empty placeholder satisfies "shown when the text is empty" and
+/// shows nothing at all, which is the failure a test that only checks the
+/// placeholder's *presence* would pass. What a driver reads on an empty field is
+/// the field's purpose, so it names one.
+const PLACEHOLDER_TEXT: &str = "Search stations, cities…";
+
+/// What the submit readout says when nothing has been submitted yet.
+///
+/// A dash rather than an empty string, for the same reason [`PLACEHOLDER_TEXT`]
+/// is not empty: "no submission yet" and "an empty submission" are different
+/// facts and one of them is a bug.
+const NOTHING_SUBMITTED: &str = "-";
+
+/// What both readouts say when there is no value.
+///
+/// **The text readout is bound to the field's own `text`**, so with no value in
+/// the field it printed an empty line — a readout that cannot be seen, and a
+/// driver could not tell a missing readout from an empty field. This is the same
+/// argument as [`PLACEHOLDER_TEXT`] and [`NOTHING_SUBMITTED`], applied to the
+/// third place it turned up: a value that is absent has to be *shown* as absent,
+/// because "absent" and "blank" are indistinguishable on a screen.
+const NOTHING_ENTERED: &str = "-";
 
 /// The environment variable that bounds how long the demo runs, in seconds.
 ///
@@ -1006,6 +1189,52 @@ fn touches(a: Rect, b: Rect) -> bool {
     a.x <= b.x + b.width && b.x <= a.x + a.width && a.y <= b.y + b.height && b.y <= a.y + a.height
 }
 
+/// Turns one key press on the on-screen keyboard into an edit on the field.
+///
+/// **This is the whole of the wiring between the two widgets**, and it is one
+/// function for the same reason `scroll::gesture_delta` is one function: the
+/// convention "a key press means this edit" was written out in every arm of a
+/// dispatch and would have to be rewritten in every place it appeared. Neither
+/// widget knows the other exists — `Keyboard` reports a [`KeyAction`] and
+/// `TextInput` offers three edit methods — and this is where the two vocabularies
+/// are given the same meaning.
+///
+/// The three actions it ignores are the three the keyboard handles itself, and
+/// ignoring them here is deliberate rather than an oversight:
+///
+/// - [`KeyAction::Shift`] has already been applied to the *next* character by the
+///   keyboard, which is why it arrives as `Char('A')` and not as a shifted
+///   letter. Applying it again would double it.
+/// - [`KeyAction::PageUp`] and [`KeyAction::PageDown`] have already switched the
+///   keyboard's page by the time they are reported.
+///
+/// The one that is neither is [`KeyAction::Enter`], and it is the interesting
+/// one: `TextInput` fires `on_submit` from its **own** key handling, and a key
+/// on a touchscreen is not a key event — it is a `KeyAction` that reached this
+/// function instead. So an Enter from the keyboard calls the callback the same
+/// way a hardware Enter does, rather than leaving the demo with two different
+/// routes to the same fact.
+fn apply_key_action(field: &TextInput, action: KeyAction) {
+    match action {
+        KeyAction::Char(character) => {
+            let mut buffer = [0u8; 4];
+            field.insert_text(character.encode_utf8(&mut buffer));
+        }
+        KeyAction::Space => field.insert_text(" "),
+        KeyAction::Backspace => field.delete_backward(),
+        KeyAction::Enter => {
+            // Through the callback, not by writing the readout's property here.
+            // A hardware Enter takes this same route inside the widget, so an
+            // Enter on the touchscreen and an Enter on a keyboard produce one
+            // fact rather than two — which is the whole reason this is a call to
+            // `on_submit` and not a write.
+            field.on_submit.call(field.text.get());
+        }
+        // Handled by the keyboard itself — see the doc comment above.
+        KeyAction::Shift | KeyAction::PageUp | KeyAction::PageDown => {}
+    }
+}
+
 /// Returns the text the demo's list gives row `index`.
 ///
 /// A row is built once and recycled for whatever row comes next, so this is
@@ -1415,6 +1644,41 @@ struct Demo {
     fps_text: Property<String>,
     /// The label showing the frame rate, in the bottom left of the window.
     fps_readout: DemoLabel,
+    /// The demo's text field, under the gallery.
+    ///
+    /// A plain owned field, **not** an `Rc`. The first version of this wiring
+    /// shared it so the keyboard's `on_key` callback could reach it, and that was
+    /// wrong twice over: `set_palette` takes `&mut self`, so an `Rc` with a live
+    /// clone in a callback can never be re-themed — `Rc::get_mut` returns `None`
+    /// and the palette silently stayed the old one across a theme switch. It is
+    /// now the repo's own pattern instead: the callback writes
+    /// [`pending_key`](Demo::pending_key) and [`Demo::offer_to`] drains it.
+    text_input: TextInput,
+    /// The key the keyboard last reported, waiting for the demo to act on it.
+    ///
+    /// The mechanism [`List`]'s `on_item_click` uses — a widget whose callback
+    /// cannot reach the `Demo` writes a property, and the demo reads it — and the
+    /// reason it is a property and not a field is that `Callback` is `Fn`, so it
+    /// cannot write a `&mut self` it was not lent.
+    pending_key: Property<Option<KeyAction>>,
+    /// The on-screen keyboard, under the field.
+    ///
+    /// The text input's other half and not a child of it: the keyboard reports a
+    /// [`KeyAction`] and [`apply_key_action`] is what turns one into an
+    /// edit. Keeping the wiring in the demo is what lets the two widgets be built
+    /// and tested without either knowing the other exists.
+    keyboard: Keyboard,
+    /// Whether a pointer is holding a key down.
+    ///
+    /// The keyboard's counterpart to [`Demo::list_dragging`], and needed for the
+    /// same reason: `Keyboard::on_event` only ever sees a `Tap`, which the
+    /// recogniser reports on the *release*, so a key cannot light up from inside
+    /// it. `grab_key` and `release_key` are called from the press and the release.
+    keyboard_pressed: bool,
+    /// What the field last reported through `on_change`, for the readout.
+    text_readout: DemoLabel,
+    /// What the field last reported through `on_submit`, for the readout.
+    submit_readout: DemoLabel,
 }
 
 impl Demo {
@@ -1984,6 +2248,151 @@ impl Demo {
                 .set_constraints(Constraints::tight(size));
         }
 
+        // ------------------------------------------------- task 19: text entry
+        //
+        // The field and the keyboard are wired to each other by
+        // `apply_key_action`, and by nothing else. Neither widget knows the other
+        // exists — `Keyboard` reports a `KeyAction`, `TextInput` offers three edit
+        // methods — and that independence is what let the two be written, tested
+        // and mutation-checked as file-isolated sub-tasks and then meet here.
+
+        // What the field last submitted, for the second readout. Declared before
+        // the field because `on_submit` is wired into it.
+        let submitted = Property::new(String::new());
+        // The keyboard's report, waiting to be acted on. See
+        // [`Demo::pending_key`].
+        let pending_key = Property::new(None);
+
+        let mut field = TextInput::new(&mut nodes);
+        field.set_palette(TextInputPalette::from_theme(&theme));
+        // The field's own defaults are 240 by 44, which is a mouse-sized control.
+        // 480 by 64 is this demo's answer, for the reason the slider's track and
+        // the list's scrollbar were both widened, and it goes in through the
+        // properties task 19's review asked for rather than by editing the
+        // widget's constants.
+        field.width.set(TEXT_INPUT_SIZE.width);
+        field.height.set(TEXT_INPUT_SIZE.height);
+        field.font_size.set(TEXT_INPUT_FONT);
+        field.placeholder.set(String::from(PLACEHOLDER_TEXT));
+        field.snap_to_state();
+        {
+            // Wired **before** the `Rc`, because `on_submit` takes `&mut self` and
+            // an `Rc` has no `get_mut` to lend until it is the sole owner. Doing
+            // it here rather than inside `apply_key_action` is what makes a
+            // hardware Enter and an on-screen Enter one fact: both end in
+            // `on_submit.call`, and this is the only place that decides what that
+            // call means.
+            let submitted = submitted.clone();
+            field.on_submit = ValueCallback::from_fn(move |value: String| {
+                submitted.set(value);
+            });
+        }
+        let text_input = field;
+
+        let mut keyboard = Keyboard::new(&mut nodes);
+        keyboard.set_palette(KeyboardPalette::from_theme(&theme));
+        // The demo's three sizing numbers, and the widget's defaults left behind:
+        // 52-tall keys do not fit the band, and the band is what decides them.
+        keyboard.key_height.set(KEY_HEIGHT);
+        keyboard.font_size.set(KEY_FONT);
+        // The widget centres a key's label with a single average advance, and
+        // ships a guess. **This is a real font and a real measurement**, so every
+        // keycap's label is centred against what it is actually drawn with rather
+        // than against 0.6 of the font size. `n` is the glyph the guess is a
+        // stand-in for.
+        keyboard.advance.set(metrics.advance('n', KEY_FONT));
+        keyboard.snap_to_state();
+        {
+            // The keyboard's one callback is the whole of the wiring from the keys
+            // to the field, and this closure is the **only** place in the
+            // repository that knows a `KeyAction::Char` is a character.
+            let pending = pending_key.clone();
+            keyboard.on_key = ValueCallback::from_fn(move |action| {
+                pending.set(Some(action));
+            });
+        }
+
+        // The field's two readouts, both **bound** rather than written each
+        // frame: `on_change` and `on_submit` are the widget's own notifications,
+        // so a readout bound to the text property re-derives itself on every
+        // keystroke whatever asked for it — a key, a finger, or a test.
+        let text_readout = read_only_label(
+            &mut nodes,
+            &metrics,
+            TEXT_FIELD_READOUT_FONT,
+            TEXT_READOUT_WIDTH,
+            Property::bind({
+                // Cloned out of the widget rather than captured from it: the
+                // closure would otherwise move the `TextInput` itself, and the
+                // widget is still needed by handle two lines below.
+                let value = text_input.text.clone();
+                move || {
+                    let entered = value.get();
+                    if entered.is_empty() {
+                        format!("text: {NOTHING_ENTERED}")
+                    } else {
+                        format!("text: {entered}")
+                    }
+                }
+            }),
+            &color_token,
+            &token_properties,
+        )?;
+        let submit_readout = read_only_label(
+            &mut nodes,
+            &metrics,
+            TEXT_FIELD_READOUT_FONT,
+            SUBMIT_READOUT_WIDTH,
+            Property::bind(move || {
+                let value = submitted.get();
+                if value.is_empty() {
+                    format!("submitted: {NOTHING_SUBMITTED}")
+                } else {
+                    format!("submitted: {value}")
+                }
+            }),
+            &color_token,
+            &token_properties,
+        )?;
+
+        {
+            let size = Size {
+                width: TEXT_INPUT_SIZE.width,
+                height: TEXT_INPUT_SIZE.height,
+            };
+            nodes
+                .get_mut(text_input.handle())
+                .ok_or("ui_demo: the text input is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+        {
+            let size = Size {
+                width: KEYBOARD_WIDTH,
+                height: KEYBOARD_HEIGHT,
+            };
+            nodes
+                .get_mut(keyboard.handle())
+                .ok_or("ui_demo: the keyboard is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+
+        // The band has to fit the space the window gave it, and the first attempt
+        // at this layout did not: it asked for a 1160-tall window and this host
+        // returned 1052, which put the bottom of the keyboard off the bottom of
+        // the screen where nobody could see it. Checked here rather than only in
+        // a test because **this is the failure that is invisible until somebody
+        // looks at the screen**, and the demo is built long before that.
+        for (what, bottom) in [
+            ("the keyboard", KEYBOARD_ORIGIN.1 + KEYBOARD_HEIGHT),
+            ("the field", TEXT_INPUT_ORIGIN.1 + TEXT_INPUT_SIZE.height),
+        ] {
+            if bottom > BAND_TOP + BAND_HEIGHT {
+                return Err(what);
+            }
+        }
+
         // The row, the counter, the slider, its readout and the four newer
         // widgets are each placed inside the band, which is what `Absolute` is
         // for: each at its own offset from the band's origin, which is the
@@ -2024,6 +2433,10 @@ impl Demo {
             (list.handle(), LIST_ORIGIN),
             (list_readout.label.handle(), LIST_READOUT_ORIGIN),
             (fps_readout.label.handle(), FPS_READOUT_ORIGIN),
+            (text_input.handle(), TEXT_INPUT_ORIGIN),
+            (keyboard.handle(), KEYBOARD_ORIGIN),
+            (text_readout.label.handle(), TEXT_READOUT_ORIGIN),
+            (submit_readout.label.handle(), SUBMIT_READOUT_ORIGIN),
         ] {
             nodes
                 .get_mut(node)
@@ -2064,6 +2477,10 @@ impl Demo {
             || !button_area.add_child(&mut nodes, list.handle())
             || !button_area.add_child(&mut nodes, list_readout.label.handle())
             || !button_area.add_child(&mut nodes, fps_readout.label.handle())
+            || !button_area.add_child(&mut nodes, text_input.handle())
+            || !button_area.add_child(&mut nodes, text_readout.label.handle())
+            || !button_area.add_child(&mut nodes, submit_readout.label.handle())
+            || !button_area.add_child(&mut nodes, keyboard.handle())
         {
             return Err("ui_demo: the button band could not be assembled");
         }
@@ -2327,6 +2744,12 @@ impl Demo {
             fps: FrameRate::new(),
             fps_text,
             fps_readout,
+            text_input,
+            pending_key,
+            keyboard,
+            keyboard_pressed: false,
+            text_readout,
+            submit_readout,
         })
     }
 
@@ -2467,6 +2890,10 @@ impl Demo {
                         self.list.scroll().grab_thumb(Offset::new(x, y), rect);
                     }
                     self.list_dragging = true;
+                } else if self.keyboard_at(x, y) {
+                    // Same reason as the scrollbar's thumb above: the recogniser
+                    // has no press to give, so the key has to be lit from here.
+                    self.grab_key(Offset::new(x, y));
                 }
             }
             Event::MouseButtonUp {
@@ -2480,6 +2907,7 @@ impl Demo {
                 self.slider_dragging = false;
                 self.list_dragging = false;
                 self.list.scroll().release_thumb();
+                self.release_key();
             }
             // A finger is a pointer too, and a car has no mouse: the same press
             // and release the left button gets, from the touch events SDL delivers
@@ -2494,6 +2922,8 @@ impl Demo {
                         self.list.scroll().grab_thumb(Offset::new(x, y), rect);
                     }
                     self.list_dragging = true;
+                } else if self.keyboard_at(x, y) {
+                    self.grab_key(Offset::new(x, y));
                 }
             }
             Event::FingerUp { .. } | Event::FingerCanceled { .. } => {
@@ -2502,6 +2932,9 @@ impl Demo {
                 // A grab that outlived its finger would be the next gesture's,
                 // and a drag of the content would move the thumb instead.
                 self.list.scroll().release_thumb();
+                // A canceled touch releases the key too, for the same reason: a
+                // finger that is gone must not leave a key lit.
+                self.release_key();
             }
             _ => {}
         }
@@ -2619,6 +3052,33 @@ impl Demo {
                 None => false,
             };
         }
+        if handle == self.text_input.handle() {
+            // The advance closure is the demo's own `TextMetrics`, exactly as it
+            // is for a button's `paint` — the caret's x is measured per character
+            // and nothing outside the widget can measure it for it.
+            let advance = |ch: char| self.metrics.advance(ch, TEXT_INPUT_FONT);
+            return match self.text_input_rect() {
+                Some(rect) => self.text_input.on_event(event, rect, &advance),
+                None => false,
+            };
+        }
+        if handle == self.keyboard.handle() {
+            let consumed = match self.keyboard_rect() {
+                Some(rect) => self.keyboard.on_event(event, rect),
+                None => false,
+            };
+            // The key the keyboard just reported is applied here, immediately
+            // after the event that reported it, rather than in the next frame.
+            // Waiting a frame would put a keystroke behind everything else the
+            // demo does per frame and make a typing test depend on `frame` being
+            // called, which the "a key inserts its character" tests deliberately
+            // do not do.
+            if let Some(action) = self.pending_key.get() {
+                self.pending_key.set(None);
+                apply_key_action(&self.text_input, action);
+            }
+            return consumed;
+        }
         self.buttons
             .iter()
             .find(|button| button.node() == handle)
@@ -2680,6 +3140,7 @@ impl Demo {
                 self.toggle.handle(),
                 self.progress.handle(),
                 self.list.handle(),
+                self.text_input.handle(),
             ] {
                 focus.set_focusable(handle, true);
             }
@@ -2734,6 +3195,19 @@ impl Demo {
         self.progress_focused
             .set(Some(self.progress.handle()) == focused);
         self.image_focused.set(Some(self.image.handle()) == focused);
+        // The field is given its own `focus()`/`blur()` rather than having its
+        // `focused` property written like the others, because those two are not
+        // the same thing: `blur` also restarts the blink, and a field whose caret
+        // stayed mid-phase could come back from `Tab` with no caret at all. The
+        // property is the field's appearance; the methods are its state.
+        let field_wanted = Some(self.text_input.handle()) == focused;
+        if self.text_input.focused.get() != field_wanted {
+            if field_wanted {
+                self.text_input.focus();
+            } else {
+                self.text_input.blur();
+            }
+        }
     }
 
     /// Advances the clocks by one frame's worth of time, lays the tree out in
@@ -2781,6 +3255,12 @@ impl Demo {
         let _ = self.toggle.tick(delta);
         let _ = self.progress.tick(delta);
         let _ = self.list.scroll().tick(delta);
+        // The field's blink and the keyboard's key colours. The field's is the
+        // one that matters: it is the only clock in the demo that is *always*
+        // running while a control has focus, and `tick` returning true on a
+        // phase flip is what makes the caret redraw.
+        let _ = self.text_input.tick(delta);
+        let _ = self.keyboard.tick(delta);
 
         let list_rect: Option<Rect> = {
             let mut nodes = self.nodes.borrow_mut();
@@ -2871,11 +3351,15 @@ impl Demo {
             if handle == self.toggle.handle()
                 || handle == self.image.handle()
                 || handle == self.progress.handle()
+                || handle == self.keyboard.handle()
             {
                 let commands = match node.layout().rect() {
                     Some(rect) if handle == self.toggle.handle() => self.toggle.paint(rect.into()),
                     Some(rect) if handle == self.image.handle() => self.image.paint(rect.into()),
-                    Some(rect) => self.progress.paint(rect.into()),
+                    Some(rect) if handle == self.progress.handle() => {
+                        self.progress.paint(rect.into())
+                    }
+                    Some(rect) => self.keyboard.paint(rect.into()),
                     None => Vec::new(),
                 };
                 *node.paint_mut() = PaintState::from_commands(commands);
@@ -2936,6 +3420,8 @@ impl Demo {
             (&self.progress_readout, BUTTON_FONT),
             (&self.list_readout, LIST_FONT),
             (&self.fps_readout, BUTTON_FONT),
+            (&self.text_readout, TEXT_FIELD_READOUT_FONT),
+            (&self.submit_readout, TEXT_FIELD_READOUT_FONT),
         ] {
             let handle = readout.label.handle();
             let rect = nodes
@@ -2943,6 +3429,23 @@ impl Demo {
                 .and_then(|node| node.layout().rect())
                 .map(Into::into);
             record_label(&mut nodes, handle, readout, &self.metrics, font, rect);
+        }
+
+        // The text field, after its readouts rather than with the other
+        // rect-only widgets, for one reason: its `paint` needs an **advance
+        // closure** — the caret's x is measured a character at a time — so it
+        // cannot go in the walk above without every arm of that walk gaining a
+        // parameter it does not otherwise need.
+        {
+            let advance = |ch: char| self.metrics.advance(ch, TEXT_INPUT_FONT);
+            let handle = self.text_input.handle();
+            let commands = match nodes.get(handle).and_then(|node| node.layout().rect()) {
+                Some(rect) => self.text_input.paint(rect.into(), &advance),
+                None => Vec::new(),
+            };
+            if let Some(node) = nodes.get_mut(handle) {
+                *node.paint_mut() = PaintState::from_commands(commands);
+            }
         }
 
         // The list's own frame, last of all and outside the borrow above: its
@@ -3265,6 +3768,12 @@ impl Demo {
         let toggle_palette = TogglePalette::from_theme(&new_theme);
         let progress_palette = ProgressPalette::from_theme(&new_theme);
         let scroll_palette = ScrollPalette::from_theme(&new_theme);
+        // Read from `new_theme`, **before** `switch_to` consumes it. The switch
+        // animates the theme's own tokens, so a palette read after it is the
+        // palette the theme is leaving, which re-aims every widget at what it
+        // already had and the transition goes nowhere.
+        let text_input_palette = TextInputPalette::from_theme(&new_theme);
+        let keyboard_palette = KeyboardPalette::from_theme(&new_theme);
         let motion = Motion::from_theme(&new_theme);
         self.theme.switch_to(new_theme, THEME_TRANSITION);
         for button in &mut self.buttons {
@@ -3287,6 +3796,21 @@ impl Demo {
         // to the new palette over the theme's own transition.
         self.list.set_palette(scroll_palette);
         self.list.scroll().animate_to_state(motion);
+        // The field and the keyboard both carry a palette, and both are aimed
+        // rather than snapped, for the same reason as everything above: the
+        // theme's own transition is 300ms and a keycap that jumped to the light
+        // palette while the window behind it was still crossfading would be a
+        // visible disagreement.
+        //
+        // `set_palette` on the field takes `&mut self` and the field is behind an
+        // `Rc`, so this is `get_mut` — and it is infallible here only because
+        // nothing else holds a clone yet: the keyboard's callback is the one
+        // clone and it is created in `Demo::new`. A `None` here would be a clone
+        // the demo made and forgot about, so it is reported rather than ignored.
+        self.text_input.set_palette(text_input_palette);
+        self.text_input.animate_to_state(motion);
+        self.keyboard.set_palette(keyboard_palette);
+        self.keyboard.animate_to_state(motion);
         // The image has no palette at all — an image is not themed, it is a
         // picture — and a theme switch reaches it nowhere, which is correct: the
         // window behind it changes and the picture does not.
@@ -3488,6 +4012,50 @@ impl Demo {
         self.node_rect(self.list.handle())
     }
 
+    /// Returns the text field's rect in window coordinates. See
+    /// [`Demo::slider_rect`].
+    fn text_input_rect(&self) -> Option<Rect> {
+        self.node_rect(self.text_input.handle())
+    }
+
+    /// Returns the keyboard's rect in window coordinates. See
+    /// [`Demo::slider_rect`].
+    fn keyboard_rect(&self) -> Option<Rect> {
+        self.node_rect(self.keyboard.handle())
+    }
+
+    /// Reports whether `(x, y)` is over the keyboard, for the press that grabs
+    /// a key.
+    ///
+    /// **Over the keyboard's box, not over a key.** A press in a gap between two
+    /// keys still has to grab, release and unlight something, and the keyboard
+    /// decides which: `grab_key` reports whether it found a key at all. Narrowing
+    /// this to "over a key" would leave a key lit by a press that started in a
+    /// gap and travelled onto it.
+    fn keyboard_at(&self, x: f32, y: f32) -> bool {
+        self.keyboard_rect()
+            .is_some_and(|rect| over_rect(rect, x, y))
+    }
+
+    /// Lights the key under `position`, if there is one.
+    ///
+    /// Called from the press, for the reason the scrollbar's thumb is grabbed
+    /// there: the recogniser reports a tap on the release and a drag only once
+    /// the pointer has moved, so there is no press for the widget to read.
+    fn grab_key(&mut self, position: Offset) {
+        if let Some(rect) = self.keyboard_rect() {
+            self.keyboard_pressed = self.keyboard.grab_key(position, rect);
+        }
+    }
+
+    /// Unlights whatever key was lit. Called from every release.
+    fn release_key(&mut self) {
+        if self.keyboard_pressed {
+            self.keyboard.release_key();
+            self.keyboard_pressed = false;
+        }
+    }
+
     /// Returns the node at `handle`'s laid-out rect, converted to the painter's,
     /// or `None` if the node is not there or has not been placed.
     ///
@@ -3563,6 +4131,10 @@ impl Demo {
             ("list", self.list.handle()),
             ("list readout", self.list_readout.label.handle()),
             ("fps readout", self.fps_readout.label.handle()),
+            ("text input", self.text_input.handle()),
+            ("text readout", self.text_readout.label.handle()),
+            ("submit readout", self.submit_readout.label.handle()),
+            ("keyboard", self.keyboard.handle()),
         ] {
             if let Some(found) = rect(what, handle) {
                 rects.push(found);
@@ -4678,15 +5250,15 @@ mod tests {
         // A control that refuses interaction has nothing to be activated by a
         // key, so it is not in the order focus walks.
         //
-        // The walk has **seven** stops since tasks 15 to 18 added the toggle, the
-        // progress bar, the image and the list: the two buttons that can be
-        // activated, and then the five that follow the band in the tree's paint
-        // order — the slider, the image, the toggle, the bar and the list. The
-        // claim here is still that the disabled one is never visited, and it is
-        // stated over the whole walk rather than over the band's first three.
+        // The walk has **eight** stops: the two buttons that can be activated,
+        // and then the six that follow the band in the tree's paint order — the
+        // slider, the image, the toggle, the bar, the list and, since task 19,
+        // the text field. The claim here is still that the disabled one is never
+        // visited, and it is stated over the whole walk rather than over the
+        // band's first three.
         //
-        // The eight presses are the seven stops and a wrap, which is what says
-        // the order is a cycle rather than a run that stops.
+        // The nine presses are the eight stops and a wrap, which is what says the
+        // order is a cycle rather than a run that stops.
         let mut demo = laid_out();
         let enabled: Vec<Handle> = demo
             .buttons
@@ -4700,9 +5272,10 @@ mod tests {
         let toggle = demo.toggle.handle();
         let progress = demo.progress.handle();
         let list = demo.list.handle();
+        let text_input = demo.text_input.handle();
 
         let mut visited = Vec::new();
-        for _ in 0..8 {
+        for _ in 0..9 {
             demo.handle_event(key(Keycode::Tab));
             visited.push(demo.focused);
         }
@@ -4717,11 +5290,12 @@ mod tests {
                 Some(toggle),
                 Some(progress),
                 Some(list),
+                Some(text_input),
                 Some(enabled[0])
             ],
             "the walk is press, reset, the slider, the image, the toggle, the \
-             progress bar, the list, and wraps back to press — never the \
-             disabled one in the middle"
+             progress bar, the list, the text field, and wraps back to press — \
+             never the disabled one in the middle"
         );
     }
 
@@ -7350,6 +7924,521 @@ mod tests {
         }
         let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
         assert!(inside(window, fps), "and it is inside the {WINDOW:?}");
+    }
+
+    // -------------------------------------------------- task 19: the text-entry band
+
+    /// A left-button release at `(x, y)`.
+    ///
+    /// The other half of [`mouse_down_at`], and named rather than inlined because
+    /// task 19's tests press and release a great many keys and a release written
+    /// out at each call site is 10 lines of noise per key.
+    fn mouse_up_at(x: f32, y: f32, ts: u64) -> Event {
+        Event::MouseButtonUp {
+            timestamp: ts,
+            window_id: 0,
+            which: 0,
+            mouse_btn: MouseButton::Left,
+            clicks: 1,
+            x,
+            y,
+        }
+    }
+
+    /// A key-down event for `keycode`, which is what a `Tab` or an arrow is.
+    fn key_event(keycode: Keycode) -> Event {
+        Event::KeyDown {
+            timestamp: 0,
+            window_id: 0,
+            keycode: Some(keycode),
+            scancode: None,
+            keymod: Mod::empty(),
+            repeat: false,
+            which: 0,
+            raw: 0,
+        }
+    }
+
+    /// Returns the centre of the key that would report `wanted`, in window
+    /// coordinates.
+    ///
+    /// Found by asking the widget rather than worked out from the layout
+    /// constants: the demo's job here is to aim a real press at the control **as
+    /// it is drawn**, and a hand-computed point is a fixture near the key rather
+    /// than the key. A test that presses 40 pixels to the left of the key it means
+    /// proves only that pressing a gap does nothing.
+    fn key_center(demo: &Demo, wanted: KeyAction) -> (f32, f32) {
+        let rect = demo
+            .keyboard_rect()
+            .expect("the keyboard has been laid out");
+        // Walk the keys by index and ask for each one's own rect, then hit-test
+        // that rect's centre to get the widget's `KeyId` for it. Going through
+        // `key_at` rather than assuming index N is `KeyId` N is the point: the two
+        // pages have different key counts, so an index is not an identity.
+        (0..demo.keyboard.key_count())
+            .filter_map(|index| {
+                let key = demo.keyboard.key_rect(index, rect)?;
+                let centre = Offset::new(key.x + key.width / 2.0, key.y + key.height / 2.0);
+                let id = demo.keyboard.key_at(centre, rect)?;
+                (demo.keyboard.key_action(id) == Some(wanted))
+                    .then_some((key.x + key.width / 2.0, key.y + key.height / 2.0))
+            })
+            .next()
+            .unwrap_or_else(|| panic!("no key reports {wanted:?}"))
+    }
+
+    /// Presses and releases the key reporting `wanted`, through the demo's own
+    /// event path — `MouseButtonDown` into `Demo::handle_event`, the recogniser,
+    /// `input::route`, and back — rather than by calling the widget directly.
+    #[test]
+    fn a_key_on_the_keyboard_inserts_its_character_into_the_field() {
+        let mut demo = laid_out();
+        let (x, y) = key_center(&demo, KeyAction::Char('q'));
+
+        demo.handle_event(mouse_down_at(x, y, 0));
+        demo.handle_event(mouse_up_at(x, y, 40_000_000));
+
+        assert_eq!(
+            demo.text_input.text.get(),
+            "q",
+            "one key press is one character in the field"
+        );
+        // And the readout, which is bound to the same property rather than
+        // written each frame, followed it — **after a frame**, because
+        // `readout_text_of` reads the *recorded draw commands*, so a readout that
+        // has not been repainted is a readout whose text this repository cannot
+        // see. That is the distinction between the property being right and the
+        // pixels being right, and both are worth asserting.
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.readout_text_of(&demo.text_readout).as_deref(),
+            Some("text: q"),
+            "the text readout did not follow the field"
+        );
+    }
+
+    #[test]
+    fn a_run_of_keys_accumulates_in_order_and_the_field_starts_empty() {
+        let mut demo = laid_out();
+        assert_eq!(
+            demo.text_input.text.get(),
+            "",
+            "the field opens empty, which is what makes the placeholder visible"
+        );
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.readout_text_of(&demo.text_readout).as_deref(),
+            Some("text: -"),
+            "an empty field reads as empty on the readout too, rather than as a \
+             line that is not there"
+        );
+
+        for wanted in ['r', 'o', 'a', 'd'] {
+            let (x, y) = key_center(&demo, KeyAction::Char(wanted));
+            demo.handle_event(mouse_down_at(x, y, 0));
+            demo.handle_event(mouse_up_at(x, y, 40_000_000));
+        }
+
+        assert_eq!(demo.text_input.text.get(), "road");
+    }
+
+    #[test]
+    fn backspace_on_the_keyboard_deletes_the_character_before_the_caret() {
+        let mut demo = laid_out();
+        demo.text_input.insert_text("road");
+        demo.text_input.move_caret(4);
+
+        let (x, y) = key_center(&demo, KeyAction::Backspace);
+        demo.handle_event(mouse_down_at(x, y, 0));
+        demo.handle_event(mouse_up_at(x, y, 40_000_000));
+
+        assert_eq!(
+            demo.text_input.text.get(),
+            "roa",
+            "one backspace removes exactly one character"
+        );
+    }
+
+    #[test]
+    fn enter_on_the_keyboard_submits_and_the_readout_says_so() {
+        let mut demo = laid_out();
+        demo.text_input.insert_text("hamburg");
+
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.readout_text_of(&demo.submit_readout).as_deref(),
+            Some("submitted: -"),
+            "nothing has been submitted yet, and the readout says that rather \
+             than showing nothing at all"
+        );
+
+        let (x, y) = key_center(&demo, KeyAction::Enter);
+        demo.handle_event(mouse_down_at(x, y, 0));
+        demo.handle_event(mouse_up_at(x, y, 40_000_000));
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert_eq!(
+            demo.readout_text_of(&demo.submit_readout).as_deref(),
+            Some("submitted: hamburg"),
+            "Enter went through on_submit, not through a write of the property"
+        );
+    }
+
+    #[test]
+    fn a_tap_on_the_field_focuses_it_and_puts_the_caret_where_the_pointer_was() {
+        let mut demo = laid_out();
+        demo.text_input.insert_text("hamburg");
+        let field = demo.text_input_rect().expect("the field has been laid out");
+
+        // Three quarters along the text, which is past the fourth character.
+        let x = field.x + field.width * 0.75;
+        let y = field.y + field.height / 2.0;
+        demo.handle_event(mouse_down_at(x, y, 0));
+        demo.handle_event(mouse_up_at(x, y, 40_000_000));
+
+        assert!(
+            demo.text_input.focused.get(),
+            "a tap on the field focuses it"
+        );
+        assert!(
+            demo.text_input.caret() > 2,
+            "the caret followed the pointer: it is at {} in a seven-character \
+             field three quarters of the way along",
+            demo.text_input.caret()
+        );
+    }
+
+    #[test]
+    fn a_key_lights_on_the_press_and_goes_out_on_the_release() {
+        let mut demo = laid_out();
+        let (x, y) = key_center(&demo, KeyAction::Char('a'));
+
+        // Before any press, nothing is lit.
+        assert!(
+            !demo.keyboard.is_key_grabbed(),
+            "no key is grabbed before anything is pressed"
+        );
+
+        demo.handle_event(mouse_down_at(x, y, 0));
+        assert!(
+            demo.keyboard.is_key_grabbed(),
+            "the press lit a key — the recogniser reports a tap on the release, \
+             so nothing else could"
+        );
+
+        demo.handle_event(mouse_up_at(x, y, 40_000_000));
+        assert!(
+            !demo.keyboard.is_key_grabbed(),
+            "the release put it out again"
+        );
+    }
+
+    #[test]
+    fn a_press_that_misses_every_key_lights_nothing() {
+        let mut demo = laid_out();
+        let rect = demo
+            .keyboard_rect()
+            .expect("the keyboard has been laid out");
+
+        // The padding just inside the keyboard's own edge, which is where the
+        // widget draws no key at all.
+        let x = rect.x + 2.0;
+        let y = rect.y + 2.0;
+        demo.handle_event(mouse_down_at(x, y, 0));
+
+        assert!(
+            !demo.keyboard.is_key_grabbed(),
+            "a press in the keyboard's margin grabbed a key it should not have"
+        );
+        demo.handle_event(mouse_up_at(x, y, 40_000_000));
+        assert_eq!(demo.text_input.text.get(), "", "and it typed nothing");
+    }
+
+    #[test]
+    fn a_character_typed_on_a_hardware_keyboard_reaches_the_field() {
+        let mut demo = laid_out();
+        demo.set_focus(Some(demo.text_input.handle()));
+
+        demo.handle_event(Event::TextInput {
+            timestamp: 0,
+            window_id: 0,
+            text: String::from("ok"),
+        });
+
+        assert_eq!(
+            demo.text_input.text.get(),
+            "ok",
+            "SDL's TEXTINPUT is the layout-correct route and reaches a focused \
+             field; this is the path the new InputEventKind::Text exists for"
+        );
+    }
+
+    #[test]
+    fn tab_reaches_the_field_and_lights_its_border() {
+        let mut demo = laid_out();
+        let field = demo.text_input.handle();
+
+        for _ in 0..40 {
+            demo.handle_event(key_event(Keycode::Tab));
+            if demo.focused == Some(field) {
+                break;
+            }
+        }
+        assert_eq!(demo.focused, Some(field), "Tab reaches the field");
+        assert!(
+            demo.text_input.focused.get(),
+            "and the field knows it: set_focus calls focus(), not a bare write, \
+             so the blink restarts with the caret visible"
+        );
+    }
+
+    #[test]
+    fn the_field_draws_its_placeholder_only_while_it_is_empty() {
+        let demo = laid_out();
+        let field = demo.text_input_rect().expect("the field has been laid out");
+        let advance = |ch: char| demo.metrics.advance(ch, TEXT_INPUT_FONT);
+
+        let empty = demo.text_input.paint(field, &advance);
+        let placeholder = empty.iter().find(
+            |command| matches!(command, DrawCommand::Text { text, .. } if text == PLACEHOLDER_TEXT),
+        );
+        assert!(
+            placeholder.is_some(),
+            "an empty field shows what it is for: {PLACEHOLDER_TEXT:?}"
+        );
+
+        demo.text_input.insert_text("x");
+        let filled = demo.text_input.paint(field, &advance);
+        assert!(
+            !filled.iter().any(
+                |command| matches!(command, DrawCommand::Text { text, .. } if text == PLACEHOLDER_TEXT)
+            ),
+            "the placeholder is gone once there is text to show instead"
+        );
+    }
+
+    #[test]
+    fn every_key_is_at_least_forty_four_across_and_tall() {
+        // The 44dp floor is the widget's own constant and its own test. This is the
+        // demo asking the question for the geometry it actually handed the
+        // keyboard, because a widget can satisfy its floor at its default size and
+        // be given a box where it does not.
+        let demo = laid_out();
+        let rect = demo
+            .keyboard_rect()
+            .expect("the keyboard has been laid out");
+
+        for index in 0..demo.keyboard.key_count() {
+            let key = demo
+                .keyboard
+                .key_rect(index, rect)
+                .unwrap_or_else(|| panic!("key {index} has no rect"));
+            assert!(
+                key.width >= 44.0 && key.height >= 44.0,
+                "key {index} at {key:?} is smaller than a fingertip"
+            );
+        }
+    }
+
+    #[test]
+    fn the_keyboard_and_the_field_are_both_inside_the_window() {
+        let demo = laid_out();
+        let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
+        for (what, handle) in [
+            ("text input", demo.text_input.handle()),
+            ("keyboard", demo.keyboard.handle()),
+            ("text readout", demo.text_readout.label.handle()),
+            ("submit readout", demo.submit_readout.label.handle()),
+        ] {
+            let rect = demo.node_rect(handle).expect("a laid-out node");
+            assert!(
+                inside(window, rect),
+                "the {what} at {rect:?} is outside the {WINDOW:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_gallery_above_the_band_is_where_it_was() {
+        // The whole argument for growing the window instead of re-laying the demo
+        // was that **nothing above the band moves**. This is what checks it, and
+        // it is the test that makes the claim checkable rather than a sentence in
+        // a doc comment.
+        let demo = laid_out();
+        let task_19 = ["text input", "text readout", "submit readout", "keyboard"];
+
+        for (what, rect) in demo.placed_rects() {
+            if task_19.contains(&what) {
+                assert!(
+                    rect.y >= BAND_TOP,
+                    "the {what} at {rect:?} is inside the gallery rather than \
+                     below the band"
+                );
+            } else {
+                assert!(
+                    rect.y + rect.height <= BAND_TOP,
+                    "the {what} at {rect:?} reaches into the band, so the window \
+                     did not grow — it moved something"
+                );
+            }
+        }
+
+        // And the two figures that would move if the root's own box had changed,
+        // written out rather than derived: the gallery's tallest leaf is the
+        // progress bar at 668..712 and the frame-rate readout is at y 684.
+        let at = |handle: Handle| demo.node_rect(handle).expect("a laid-out node");
+        let bar = at(demo.progress.handle());
+        assert_eq!(bar.y, PROGRESS_ORIGIN.1, "the progress bar did not move");
+        let fps = at(demo.fps_readout.label.handle());
+        assert_eq!(
+            (fps.x, fps.y),
+            (FPS_READOUT_ORIGIN.0, FPS_READOUT_ORIGIN.1),
+            "the frame-rate readout did not move"
+        );
+    }
+
+    #[test]
+    fn the_field_is_finger_sized_rather_than_the_widgets_mouse_sized_default() {
+        // 240 by 44 is the widget's default and 480 by 64 is the demo's. Both
+        // numbers are here so that a reader who rejects the demo's has the
+        // widget's to fall back to, which is the point of the setter existing.
+        let demo = laid_out();
+        let rect = demo.text_input_rect().expect("the field has been laid out");
+        assert_eq!(
+            (rect.width, rect.height),
+            (TEXT_INPUT_SIZE.width, TEXT_INPUT_SIZE.height),
+            "the field is not the size the demo asked for"
+        );
+        assert!(
+            rect.height > 44.0,
+            "which is taller than the widget's own 44dp default, for the same \
+             reason the slider's track is 12 rather than 6"
+        );
+    }
+
+    #[test]
+    fn a_theme_switch_reaches_the_field_and_the_keyboard() {
+        let mut demo = laid_out();
+        let field_before = demo.text_input.background.get();
+        let key_before = demo
+            .commands_at(demo.keyboard.handle())
+            .first()
+            .and_then(|command| match command {
+                DrawCommand::RoundedRect { color, .. } => Some(*color),
+                _ => None,
+            });
+        assert!(
+            field_before != Color::new(0, 0, 0, 0),
+            "the field was painted before the switch, so there is something to \
+             change from"
+        );
+
+        demo.handle_event(toggle_theme_event());
+        // One frame puts `animate_to` at the start of the transition, which for a
+        // colour is the old value; the value only differs once frames have run.
+        for _ in 0..30 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+
+        assert_ne!(
+            demo.text_input.background.get(),
+            field_before,
+            "the field's background did not follow the theme"
+        );
+        let key_after = demo
+            .commands_at(demo.keyboard.handle())
+            .first()
+            .and_then(|command| match command {
+                DrawCommand::RoundedRect { color, .. } => Some(*color),
+                _ => None,
+            });
+        assert_ne!(
+            key_after, key_before,
+            "a key's colour did not follow the theme"
+        );
+    }
+
+    #[test]
+    fn the_whole_band_fits_in_the_space_below_the_gallery() {
+        // [`BAND_HEIGHT`] is the whole of what task 19 was given, and this is what
+        // spends it. Every band node is checked against the bottom of the window,
+        // which is the constraint that actually bit: the first attempt asked for a
+        // 1160-tall window and this host's window manager returned **1052**, so a
+        // keyboard whose bottom was off the bottom was a keyboard nobody could
+        // photograph. A band that overflows here is a band that cannot be
+        // verified.
+        let demo = laid_out();
+        let band = Rect::new(0.0, BAND_TOP, WINDOW.width, BAND_HEIGHT);
+        assert!(
+            inside(Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height), band),
+            "the band at {band:?} is not inside the {WINDOW:?} at all"
+        );
+
+        for (what, handle) in [
+            ("text input", demo.text_input.handle()),
+            ("keyboard", demo.keyboard.handle()),
+            ("text readout", demo.text_readout.label.handle()),
+            ("submit readout", demo.submit_readout.label.handle()),
+        ] {
+            let rect = demo.node_rect(handle).expect("a laid-out node");
+            assert!(
+                inside(band, rect),
+                "the {what} at {rect:?} is not inside the band at {band:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_keyboard_is_the_height_the_demo_says_it_is() {
+        // The demo writes [`KEYBOARD_HEIGHT`] out rather than reading it from the
+        // widget, because the demo's layout uses it and the widget's is the
+        // widget's business. Two copies of one number is a second thing to keep in
+        // step, and this is what makes changing either one alone a failure rather
+        // than a surprise on screen.
+        //
+        // **After** the key height is set, which is the only state the demo's
+        // layout is ever in: the widget's own default of 52-tall keys gives 300,
+        // and asserting against that would be asserting about a keyboard this demo
+        // does not have.
+        let keyboard = Keyboard::new(&mut Arena::new());
+        keyboard.key_height.set(KEY_HEIGHT);
+        assert_eq!(
+            keyboard.size().height,
+            KEYBOARD_HEIGHT,
+            "the demo says the keyboard is {KEYBOARD_HEIGHT} tall at {} tall keys \
+             and the widget says otherwise",
+            KEY_HEIGHT
+        );
+
+        // And the arithmetic, written out, because the constant is the widget's
+        // and a reader is entitled to see where it came from: 8 of padding top
+        // and bottom, five rows, four gaps.
+        assert_eq!(
+            KEYBOARD_HEIGHT,
+            8.0 * 2.0 + KEY_HEIGHT * 5.0 + 6.0 * 4.0,
+            "the demo's keyboard height is not the padding plus five rows plus \
+             four gaps"
+        );
+    }
+
+    #[test]
+    fn the_demo_lowers_the_keys_to_the_floor_and_never_below_it() {
+        // The one number here that is a **floor** rather than a preference. The
+        // band was too short for the widget's 52-tall default, so the demo asked
+        // for 44 — and 44 is where it stops. If this is ever lowered it is not a
+        // layout change, it is a rejection of the touch target the operator
+        // rejected twice already on two other controls.
+        let demo = laid_out();
+        assert_eq!(KEY_HEIGHT, 44.0, "the demo's key height moved");
+        assert_eq!(
+            demo.keyboard.key_height.get(),
+            KEY_HEIGHT,
+            "and the widget was not told"
+        );
+        // Deliberately **not** `assert!(KEY_HEIGHT >= 44.0)`: that is a constant
+        // compared with a constant, it cannot fail, and clippy is right to say
+        // so. What can fail is the line above it — the widget being told — and
+        // that is the assertion that has any power.
     }
 
     #[test]

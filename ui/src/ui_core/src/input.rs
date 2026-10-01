@@ -141,7 +141,15 @@ pub enum Key {
 /// The kind carries the gesture's own payload — a swipe's direction, a pinch's
 /// scale, a drag's delta — while the position and the consumed flag live on
 /// the event itself, because every kind has them.
-#[derive(Clone, Copy, Debug, PartialEq)]
+///
+/// **`Text` is why this type is not `Copy`.** Every other kind's payload is a
+/// number or a `Copy` type, so handing one out was free. A typed run is a
+/// [`String`], and a `Copy` enum cannot hold one: the alternatives were a
+/// `char`, which cannot carry the multi-character run SDL delivers for an IME
+/// composition commit, or a fixed buffer, which would truncate. `kind()`
+/// clones instead, which costs one allocation on the rare event that carries
+/// text and nothing at all on every other.
+#[derive(Clone, Debug, PartialEq)]
 pub enum InputEventKind {
     /// A press released quickly without moving.
     Tap,
@@ -185,6 +193,27 @@ pub enum InputEventKind {
         /// The scroll amount; `x` is the wheel, `y` a vertical one.
         delta: Offset,
     },
+    /// Text was typed.
+    ///
+    /// This is SDL's `EVENT_TEXT_INPUT`, which is the **layout-correct** text:
+    /// SDL has already applied Shift, the keyboard layout and any dead-key or
+    /// IME composition, and this is the string a word processor would receive.
+    /// It is deliberately not derived from [`KeyDown`](Self::KeyDown) — a
+    /// keycode names a physical key and says nothing about which character that
+    /// key produces on the layout in use, so a widget that built characters from
+    /// keycodes would re-implement, wrongly, what this event already delivers.
+    ///
+    /// One event carries the whole run SDL sent, which is a single character for
+    /// an ordinary keypress and a whole word for a composition commit. A widget
+    /// that inserts text should insert the string as given.
+    ///
+    /// Like the key events, this has no position: a character does not happen
+    /// anywhere in particular. That is what puts it on the focused control's
+    /// path rather than the positional route.
+    Text {
+        /// The text that was typed.
+        text: String,
+    },
 }
 
 /// One unified input event.
@@ -211,9 +240,13 @@ impl InputEvent {
     }
 
     /// Returns what happened.
+    ///
+    /// Clones, because [`InputEventKind::Text`] carries a `String` and the type
+    /// is therefore not `Copy`. Every other kind's payload is a number, so the
+    /// clone is a copy of a few bytes.
     #[must_use]
     pub fn kind(&self) -> InputEventKind {
-        self.kind
+        self.kind.clone()
     }
 
     /// Returns the position the event happened at, or `None` if it has none.
@@ -774,6 +807,18 @@ impl GestureRecognizer {
                 },
                 None,
             )),
+            Event::TextInput { text, .. } => {
+                // An empty run is not text. SDL can deliver one — clearing an IME
+                // composition reports the text that is left, which is nothing —
+                // and a `Text` carrying "" would be an event every consumer has
+                // to learn to ignore.
+                if !text.is_empty() {
+                    out.push(InputEvent::new(
+                        InputEventKind::Text { text: text.clone() },
+                        None,
+                    ));
+                }
+            }
             Event::GamepadButtonDown { button, .. } => out.push(InputEvent::new(
                 InputEventKind::KeyDown {
                     key: Key::Gamepad(*button),
@@ -1110,6 +1155,15 @@ mod tests {
             repeat: false,
             which: 0,
             raw: 0,
+        }
+    }
+
+    /// Returns a text-input event carrying `text`.
+    fn text_input(text: &str) -> Event {
+        Event::TextInput {
+            timestamp: 0,
+            window_id: 0,
+            text: text.to_string(),
         }
     }
 
@@ -2195,6 +2249,100 @@ mod tests {
         });
 
         assert_eq!(tapped, vec![child]);
+    }
+
+    // -------------------------------------------------------------- typed text
+
+    #[test]
+    fn typed_text_becomes_one_event_carrying_the_whole_run() {
+        let mut recognizer = GestureRecognizer::new();
+
+        // A single character for an ordinary keypress...
+        let events = recognizer.process(&text_input("a"));
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].kind(),
+            InputEventKind::Text {
+                text: "a".to_string()
+            }
+        );
+
+        // ...and a whole word for an IME composition commit, which is the case a
+        // per-character event would have had to invent a boundary for. Written as
+        // two runs on purpose: SDL delivers them as two events, and this says the
+        // recogniser does not merge them and does not split them either.
+        let events = recognizer.process(&text_input("ni hao"));
+        assert_eq!(
+            events[0].kind(),
+            InputEventKind::Text {
+                text: "ni hao".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn typed_text_carries_no_position_because_a_character_happens_nowhere() {
+        let mut recognizer = GestureRecognizer::new();
+        let events = recognizer.process(&text_input("x"));
+
+        assert_eq!(events[0].position(), None);
+        // Which is what puts it on the focused control's path: `route` sends a
+        // positionless event to the root, not to whatever is under a point.
+        assert!(events[0].position().is_none());
+    }
+
+    #[test]
+    fn an_empty_run_is_not_an_event() {
+        let mut recognizer = GestureRecognizer::new();
+
+        // Clearing an IME composition reports what is left, which is nothing. An
+        // event carrying "" would be one every consumer has to learn to ignore,
+        // and "ignore it" is exactly what a widget with a text buffer would fail
+        // to do.
+        assert!(recognizer.process(&text_input("")).is_empty());
+    }
+
+    #[test]
+    fn typed_text_and_a_key_down_are_two_events_from_two_sdl_events() {
+        let mut recognizer = GestureRecognizer::new();
+
+        // The distinction the variant exists for: SDL sends BOTH a KEYDOWN and a
+        // TEXTINPUT for one physical keypress. A widget must be able to read the
+        // character from one and the navigation keys from the other, so neither
+        // may swallow the other.
+        let key = recognizer.process(&key_down(Keycode::A));
+        let text = recognizer.process(&text_input("a"));
+        assert_eq!(key.len(), 1);
+        assert!(matches!(key[0].kind(), InputEventKind::KeyDown { .. }));
+        assert!(matches!(text[0].kind(), InputEventKind::Text { .. }));
+    }
+
+    #[test]
+    fn typed_text_does_not_disturb_a_pointer_gesture_in_flight() {
+        let mut recognizer = GestureRecognizer::new();
+
+        let mut down = finger_down(1, 10.0, 10.0);
+        still_timestamp(&mut down, 0);
+        assert!(recognizer.process(&down).is_empty());
+
+        // A character arriving mid-drag must not look like a pointer event, nor
+        // reset the drag's start point: the drag that follows is still measured
+        // from where the finger went down.
+        assert_eq!(recognizer.process(&text_input("q")).len(), 1);
+
+        let mut motion = finger_motion(1, 60.0, 10.0);
+        still_timestamp(&mut motion, 1_000_000);
+        let dragged: Vec<InputEventKind> = recognizer
+            .process(&motion)
+            .iter()
+            .map(InputEvent::kind)
+            .collect();
+        assert!(
+            dragged
+                .iter()
+                .any(|kind| matches!(kind, InputEventKind::Drag { .. })),
+            "the drag after an intervening character was lost: {dragged:?}"
+        );
     }
 
     /// Sets the timestamp of a finger event to `now`, the way SDL stamps an

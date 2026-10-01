@@ -12,33 +12,58 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 18 committed (`d7240c8`). Task 19 (TextInput) is next.** Tasks 15
-(Toggle), 16 (Image), 17 (Progress) and 18 (List/Scroll) were implemented in one
-pass on the operator's decision of 2026-09-30, reviewed by nobody, and **committed
-together as `d7240c8` on 2026-10-01**. The `Review` cells in the task table still
-read `none`, and that is a fact rather than a shrug — see *Gates skipped*.
+**Status: task 19 (TextInput + on-screen keyboard) implemented, awaiting review,
+uncommitted.** Tasks 15–18 are committed as `d7240c8`; the frame-rate readout as
+`3ddf5fa`. **Nothing in task 19 has been reviewed by anybody** and it is not
+committed, so `task-sequence.md`'s *No unreviewed advance* gate has not been
+tested. That is recorded rather than glossed, and the *Gates skipped* section
+below still describes tasks 15–18 only.
 
-**Since that commit: the demo measures and reports its own frame rate.** A
-readout in the bottom left of the window, a `roados-fps …` line on stdout when
-the demo stops, `ROADOS_RUN_SECONDS` to end a run at all, and
-`.ai/tools/fps-check.sh` to run the whole thing and judge it. It is also how the
-demo's rate became a **number**: **49.7 fps**, measured. See *The frame rate,
-measured*.
+**Three operator decisions shaped this task, taken 2026-10-01 before any code was
+written**, each because the task file did not authorise it:
 
-**Last task: the frame-rate readout** — not a `TASK_UI_PRIM_n` task, an operator
-request of 2026-10-01 to make performance measurable after every run an agent
-launches. `ui/src/ui_demo/src/fps.rs` is new; `ui_demo` gained three constants,
-the readout and the bounded run. **838 `ui_core` unit tests (1 ignored) + 122
-demo tests + 129 doctests**, all green.
+1. **The on-screen keyboard is a `ui_core::widgets` module** — not demo-local code,
+   and not a second type inside `text_input.rs`. `PRIMITIVES_ARCHITECTURE.md`'s
+   § *Module Layout* is amended to list `keyboard.rs`.
+2. **`InputEventKind::Text { text: String }` was added** to `input.rs`, with a
+   `GestureRecognizer::process` arm over SDL's `EVENT_TEXT_INPUT`. Without it
+   *"Keyboard input inserts characters"* cannot be met: no event the crate
+   produced carried a character, and `process` ended in `_ => {}`.
+3. **The window grew rather than the demo being re-laid-out**, and the band is
+   laid out **side by side** rather than stacked. Both are measured below, and the
+   second one was not the plan.
 
-**Last widget task: 18 — Widgets: List and Scroll**, with 15, 16 and 17 in the
-same changeset. Six new files (`texture.rs`, `widgets/toggle.rs`, `image.rs`,
-`progress.rs`, `scroll.rs`, `list.rs`), `paint.rs` and `batch.rs` extended,
-`render.rs` given a third pass, `ui_demo` enlarged to 1280×720 and given all four
-widgets, and one new dependency: `sdl3`'s `image` feature. The two scrollbar
-defects the operator reported against the list — a 6-pixel bar too narrow to aim
-at, and a drag that lagged the cursor by about ten to one — are fixed inside that
-same commit; see *The fourth operator report*.
+**1053 `ui_core` unit tests (1 ignored) + 140 demo tests + 154 doctests**, all
+green; `cargo fmt --check` clean, `cargo clippy --all-targets --all-features -D
+warnings` clean, `cargo doc --no-deps` with no warnings, and the **aarch64
+cross-build passes with no sysroot** — artifact `Machine: AArch64`, and the same
+**four** dynamic dependencies, so task 19 added no dependency and changed nothing
+about how the target links.
+
+**The frame rate is 50.0 fps** against a recorded baseline of 49.7, and the two
+new widgets cost about **1.1 points of a core**, measured interleaved against
+`HEAD` rather than against a number from another session.
+
+**The work was split** per `.ai/protocols/subagents.md` § *Implementation fan-out*,
+because it touched six files and four independent components: `input.rs` first,
+since both widgets depend on its new variant; then `keyboard.rs` and
+`text_input.rs` as two **file-isolated** subagents that do not import each other;
+then the demo wiring, here. See *Task 19 — what it decided*.
+
+**Last task before this: the frame-rate readout** — not a `TASK_UI_PRIM_n` task,
+an operator request of 2026-10-01 to make performance measurable after every run
+an agent launches. `ui/src/ui_demo/src/fps.rs` is new; `ui_demo` gained three
+constants, the readout and the bounded run. **838 `ui_core` unit tests (1
+ignored) + 122 demo tests + 129 doctests**, all green.
+
+**Task 18 — Widgets: List and Scroll**, with 15, 16 and 17 in the same changeset.
+Six new files (`texture.rs`, `widgets/toggle.rs`, `image.rs`, `progress.rs`,
+`scroll.rs`, `list.rs`), `paint.rs` and `batch.rs` extended, `render.rs` given a
+third pass, `ui_demo` enlarged to 1280×720 and given all four widgets, and one new
+dependency: `sdl3`'s `image` feature. The two scrollbar defects the operator
+reported against the list — a 6-pixel bar too narrow to aim at, and a drag that
+lagged the cursor by about ten to one — are fixed inside that same commit; see
+*The fourth operator report*.
 
 **Task 13 — Widget: Container.** `widgets/container.rs` is new (18 tests),
 `layout.rs` gained `Padding` and the pass now honours it, and `ui_demo`'s
@@ -95,6 +120,208 @@ cheap whenever it is wanted. The order that would be least wasteful is to let
 task 14 land first and review the two together, since the unexamined fixes are
 test and comment changes with no behavioural surface.
 
+## Task 19 — what it decided, and what it found
+
+Written to be reviewed. Nothing here has been through `reviewer.md`.
+
+### The three decisions that were the operator's, not the agent's
+
+Each of the three was put to the operator as a question with the facts behind it
+**before any code was written**, because the task file requires something it does
+not describe. They are also under *Ratified by the operator* with their dates.
+
+1. **`widgets/keyboard.rs` is a module of its own.** The alternatives were a
+   second type inside `text_input.rs` — which puts two widgets in a module named
+   after the first, the argument `widgets/mod.rs` already makes against
+   one-module-per-shared-type — and demo-local code, which would have proven
+   task 19's keyboard criterion against code the next vehicle cannot reach. The
+   Module Layout is amended.
+2. **`InputEventKind::Text { text: String }`, and a `process` arm over
+   `Event::TextInput`.** The alternative the operator declined was deriving
+   characters from `KeyDown` keycodes, which needs no `input.rs` change and is the
+   wrong mechanism: a keycode names a physical key and says nothing about which
+   character that key produces on the layout in use, so a widget doing it would
+   re-implement, wrongly, what `EVENT_TEXT_INPUT` exists to deliver.
+3. **The window grows; nothing in the gallery moves.** The band goes below
+   `BAND_TOP = 720`, which is where task 14 recorded the window was already full.
+
+### What `InputEventKind::Text` cost, and it is a public API change
+
+**`InputEventKind` is no longer `Copy`.** It was
+`#[derive(Clone, Copy, Debug, PartialEq)]`, and a `String` payload cannot live in
+a `Copy` enum. The alternatives were a `char`, which cannot carry the
+multi-character run SDL delivers for an IME composition commit, and a fixed
+buffer, which truncates. `InputEvent::kind()` therefore clones.
+
+The whole-repository cost was **two call sites**, both in this repository:
+`InputEvent::kind` (`input.rs:248`, which now clones and says so in its doc) and
+one `list.rs` test that formatted a `kind` *after* moving it into
+`InputEvent::new` (`list.rs:3790`, which now renders the message first). That is
+the number to check a claim like "removing `Copy` is invasive" against — the
+build finds both of them, and nothing else in the tree needed changing.
+
+**An empty run produces no event.** SDL delivers `""` when an IME composition is
+cleared, and an event carrying `""` would be one every consumer has to learn to
+ignore — which is exactly what a widget with a text buffer would fail to do.
+
+### The window is 1020 tall, and 1160 was what the first attempt asked for
+
+**The plan was a stacked band and a 1280×1160 window.** The window came back
+**1052 pixels tall**. Measured, on this host: two stacked displays —
+`eDP-1` at 1920x1080 at `+0+1200` and `HDMI-A-1` at 1920x1200 at `+0+0`, a root
+of 1920x2280 — and the window manager capped the height where the window landed
+(`xwininfo`: `Absolute upper-left Y: 78`, `Height: 1052`).
+
+**This is why the band is side by side and not stacked, and it is worth stating as
+a general fact rather than as this task's story.** A window taller than the cap is
+not merely awkward: **the bottom of the keyboard never reaches the screen, so the
+capture that is supposed to prove the widget draws cannot see it.** The band gets
+[`BAND_HEIGHT`] = 300 pixels. A field over a keyboard needs 64 + a gap + a
+260-tall keyboard = 344, which does not fit; a field beside one needs the height
+of the keyboard alone, which does. For a car the side-by-side shape is also the
+better one — a driver reaches the keys beside the field without the field moving
+under their hand.
+
+`the_whole_band_fits_in_the_space_below_the_gallery` checks the budget, and
+`Demo::new` **also** checks it at build time and returns the offending name as the
+error, because this is the class of failure that is invisible until somebody looks
+at a screen.
+
+**Nothing above `BAND_TOP` moved**, which is the whole argument for growing the
+window rather than re-laying the demo.
+`the_gallery_above_the_band_is_where_it_was` asserts every non-band rect ends
+above 720 and every band rect starts below it, and pins the progress bar at y 668
+and the frame-rate readout at (60, 684) so "nothing moved" is a claim about two
+numbers rather than about the absence of a failure.
+
+### The three sizing numbers, and one of them is a floor
+
+The demo asks the field for **420×64** against the widget's **240×44**, and the
+keyboard for **44-tall keys** against the widget's **52**.
+
+The field is the third control in a series the operator has already judged twice:
+a 6-pixel slider track, then a 6-pixel scrollbar. Task 19's review asked for a
+door so that a rejection could be answered without a code change, and
+`TextInput::width` / `TextInput::height` are that door. **`the_size_is_settable_and
+_size_reads_what_was_written` fails if `size()` goes back to reading two
+constants**, which is the `.ai/NEVERAGAIN.md` entry *one sibling got the operator's
+fix* made concrete.
+
+The key height is the opposite case and the distinction is worth keeping: 44 is
+the **touch floor**, the widget's 52 is a *default*, and the band was too short
+for the default. So the demo asks for the floor and `the_demo_lowers_the_keys_to
+_the_floor_and_never_below_it` says so.
+
+### Three defects this task found, all fixed
+
+1. **An `Rc` around the field made it un-rethemeable.** The first wiring shared
+   `TextInput` behind an `Rc` so the keyboard's `on_key` callback could reach it.
+   `TextInput::set_palette` takes `&mut self`, so an `Rc` with a live clone can
+   never be re-themed — `Rc::get_mut` returns `None` and **the palette silently
+   stayed the old one across a theme switch**. The demo was sharing state for the
+   wrong reason: it now uses the repository's own pattern, the one `List`'s
+   `on_item_click` uses — the callback writes a `Property<Option<KeyAction>>` and
+   `Demo::offer_to` drains it — and owns the field plainly. Caught by
+   `a_theme_switch_reaches_the_field_and_the_keyboard`, which is why that test
+   exists.
+2. **The palettes were read from the theme *after* `switch_to` had consumed it.**
+   Every other widget in `toggle_theme` reads its palette from `new_theme` first,
+   for a reason the first draft of this wiring missed: `switch_to` **animates the
+   theme's own tokens**, so a palette read afterwards is the palette the theme is
+   leaving, and every widget is re-aimed at what it already had. The transition
+   goes nowhere and every test that does not wait for it stays green. Both are
+   mutation-checked — reading from `self.theme` instead fails
+   `a_theme_switch_reaches_the_field_and_the_keyboard`.
+3. **A readout bound to an empty field printed an empty line.** The field's text
+   readout is bound to `text`, so with nothing in the field it showed nothing at
+   all — a readout that cannot be seen, and a driver could not tell a missing
+   readout from an empty field. This is the third time this round's reasoning
+   landed in the same place (`PLACEHOLDER_TEXT`, `NOTHING_SUBMITTED`), which is
+   why `NOTHING_ENTERED` exists as a named constant rather than as a literal.
+
+### Deliberate breaks — 38 run, 38 killed
+
+| writer | mutations | killed |
+|---|---|---|
+| `input.rs` (the `Text` variant) | 4 | 4 |
+| `keyboard.rs` (subagent) | 12 | 12 |
+| `text_input.rs` (subagent, plus the two size setters added here) | 15 | 15 |
+| the integrator: the demo wiring and the theme palettes | 7 | 7 |
+
+**One further attempt was vacuous and is not counted as a result**: a
+replacement that applied cleanly and changed no behaviour at all, which the runner
+faithfully reported as a survivor. That is the third mechanism in the
+`.ai/NEVERAGAIN.md` entry on mutation runners, caught for the second time in one
+session; the real mutation it stood in for was written and killed.
+
+### What is NOT claimed
+
+- **No acceptance criterion was verified through injected input.** Every criterion
+  that needs a tap, a key or a drag was verified **through the demo's own event
+  path** — `MouseButtonDown`/`MouseButtonUp` into `Demo::handle_event`, the
+  recogniser, `input::route` — and **through the pixels** for what is drawn.
+  Whether XTEST injection reaches the window on this host is still unknown; see
+  *Verifying a change that draws*, and no criterion is claimed on injection.
+- **The blink was not seen mid-cycle in a capture.** It is covered by tests that
+  drive explicit deltas, and the caret is visible in the capture because the
+  field is **not** focused, which is the correct resting state.
+- **The symbols page was not captured.** `set_page` is the widget's own API and
+  its own tests; reaching it needs a key press on `?123`.
+- **`cargo audit` was not run** — not installed on this host, the standing tool
+  gate. **No dependency changed**, which is the thing it would have checked.
+
+### What is on screen, and how it was got — no instrument
+
+**One capture of the default state, by the stock method** in *Verifying a change
+that draws*: `cargo build --release`, `setsid ./target/release/ui_demo >
+/tmp/demo.log 2>&1 &`, the window id from `xwininfo -root -tree | rg '"roados
+ui_demo"'`, and `magick import -window <id>`.
+
+**Stated explicitly because the entry exists:** **no seed, no temporary
+environment variable, and no rebuilt binary.** Nothing in `ui_demo`'s `main.rs`
+was modified to produce this picture — `rg -c "PREVIEW|LIST_OFFSET|SEED"
+ui/src/ui_demo/src/main.rs` is **0** — and the field is shown in its **resting,
+unfocused** state, which is the state the demo opens in. Every one of the task
+file's four clipped-or-instrumented acceptance criteria is therefore either
+visible in this capture or covered by a test through the real event path, and
+none of them is evidenced by a build that was altered to produce it.
+
+What the capture shows, checked by cropping and scaling rather than by looking at
+a whole window:
+
+- **the whole gallery unchanged** — the three pads, the seven text-panel labels,
+  the button band, the slider, the toggle, the progress bar, the list and both
+  readouts are where they were before the window grew.
+- **the field**, cropped at 250 %: rounded corners, a two-pixel border reading as
+  an **outline** rather than a filled card, and the placeholder in the theme's
+  muted grey.
+- **the keyboard**, cropped at 300 %: every label **centred inside its own key**,
+  which is the subagent's `0.6 × font_size` guess replaced by a measurement from
+  the demo's real `TextMetrics`. `Shift`, `Bksp` and `Space` — the three widest —
+  all fit inside their keys.
+- **both readouts visible while empty** (`text: -`, `submitted: -`), which is
+  defect 3 above and the reason the crop was taken.
+
+`stderr` was empty and the process was confirmed alive by `pgrep` in the same
+call as the capture, so the asset and the stand-in path were not involved.
+
+### Two findings offered to the operator rather than acted on
+
+- **`label::measure` should be public.** Raised by the `text_input.rs` subagent
+  and not acted on here. `label`'s `measure` and `fit` are private, so a caret's
+  per-character positions cannot be reached from another module; the subagent
+  reported that `text_input.rs`'s own tests assert its character walk against its
+  **own copy** of the `advance(ch) + letter_spacing` rule rather than against
+  `label`, so a change to `measure` that stopped adding the trailing letter spacing
+  would not be caught there. Three widgets now walk characters the same way and a
+  fourth will. Exposing the two functions is a change to a module task 11
+  shipped, and a reviewer should check the subagent's claim against the source
+  before treating it as established.
+- **The demo's keyboard label centring needed a real number.** `Keyboard` centres
+  a keycap's label with one average `advance` and ships `0.6 × font_size` as a
+  guess. The demo overwrites it with a measurement from its own `TextMetrics`,
+  which is why the labels in the capture are centred on what they are drawn with.
+
 ## The frame rate, measured
 
 **This section is what `.ai/agents/developer.md` § Phase 3, `.ai/workflows/task-sequence.md`
@@ -129,6 +356,31 @@ reach it, and before this change nobody could tell:
 also running a browser and a compositor, and the reason the floor a check should
 use is around **40** rather than the best number above. A floor at 49.7 would
 fail on a build that has not changed.
+
+**Task 19 added two widgets and one text-event variant, and the rate did not
+move: 50.0 fps** (`fps-check.sh 12 40`, 601 frames in 12.014 s, worst frame
+63.2 ms, 1 frame over 33 ms). Two new widgets and a whole keyboard of ~50
+rounded rectangles, drawn every frame, for nothing — which is what the batching
+task 06 bought and is worth one sentence.
+
+### The frame cost, measured against `HEAD` in the same session
+
+The table above is not a comparison, and **a number from another session is not
+one either**: this host is quieter now than it was, so the whole-machine figures
+have moved and only an interleaved pair means anything.
+
+`git worktree` at `3ddf5fa`, built release, three interleaved rounds of ten
+seconds each, `utime + stime` from `/proc/<pid>/stat`:
+
+| build | round 1 | round 2 | round 3 | median |
+|---|---|---|---|---|
+| `HEAD` (tasks 15–18 + the fps readout) | 19.1 % | 18.9 % | 18.9 % | **18.9 %** |
+| task 19 (field + keyboard + band) | 21.4 % | 20.0 % | 19.3 % | **20.0 %** |
+
+**About 1.1 points of a core, roughly 0.2 ms a frame at the loop's 16 ms pace.**
+The *absolute* numbers are about half the 34.6 % and 43.6 % recorded above, which
+is the host and not the code — and is exactly why the comparison is against
+`HEAD` in the same session and not against that table.
 
 **The ceiling is in the shape of the loop, not in the interface.** The loop calls
 `wait_event_timeout(EVENT_WAIT)` with `EVENT_WAIT = 16 ms` and *then* draws, so
@@ -1253,6 +1505,19 @@ stands in a transparent 320×192 image rather than taking the window down.
   SDL3 core's own `load_bmp`/`load_png`, which need no new dependency and cannot
   decode JPEG, and over the pure-Rust `image` crate. Justification, alternatives
   and licence in `PRIMITIVES_ARCHITECTURE.md` § *Dependencies*.
+- **Task 19's three gaps are the operator's decisions, 2026-10-01**, each taken
+  after being shown the facts and before any code was written, because the task
+  file requires something it does not describe. (i) **The on-screen keyboard is a
+  `ui_core::widgets` module**, `keyboard.rs`, rather than demo-local code or a
+  second type inside `text_input.rs`; `PRIMITIVES_ARCHITECTURE.md`'s
+  § *Module Layout* is amended accordingly. (ii) **`InputEventKind::Text` is
+  added to `input.rs`** with a `process` arm over `EVENT_TEXT_INPUT`, rather than
+  deriving characters from `KeyDown` keycodes — which is the mechanism SDL's text
+  event exists to replace. (iii) **The demo's window grows and the band is laid
+  out side by side**, rather than the demo being re-laid-out or the band stacked.
+  The reason for the third half of (iii) is measured, not chosen: this host's
+  window manager caps the window at 1052 pixels, so a stacked band's keyboard
+  would never have reached the screen. See *Task 19 — what it decided*.
 - **aarch64 target libraries are deferred until the target image is decided.**
   The operator's decision, 2026-09-28. Native builds proceed and stay verified;
   aarch64 remains a documented waiver. No sysroot strategy is committed to yet.
@@ -1490,8 +1755,8 @@ verified. A blank cell is unknown, not "none".
 | 16 | Widget — Image | done, **batched** | `d7240c8` | **none** — see *Gates skipped* | **ACs 2, 3, 4, 5, for the picture only.** The *geometry* of all four fits and the opacity are asserted as recorded draw commands, and AC 6's corner clip and AC 7's image on screen were **capture-verified**; only `Contain` has been *seen*, because reaching the other three needs a key |
 | 17 | Widget — Progress | done, **batched** | `d7240c8` | **none** — see *Gates skipped* | **ACs 3, 4** — a value animating and the indeterminate slide both need frames with something moving, and moving them needs a key. ACs 1, 2 and 5 were **capture-verified**, the bar on screen at 50% |
 | 18 | Widget — List/Scroll | done, **batched**, then **fixed on screen** | `d7240c8` | **none** — see *Gates skipped* | **ACs 2, 3**, and the "scrollable" half of **AC 7** — all three need a pointer or a wheel on this host. **AC 2 is not a defect**: dragging *up* scrolls, through the demo's real event path, and dragging *down* at offset 0 cannot move a list past its own start. ACs 1, 4, 5, 6 and AC 7's *100 rows on screen* are **capture-verified and unit-tested**, and the clipping defect the operator reported is fixed — see *A defect the operator found* |
-| 19 | Widget — TextInput | pending — **next** | | | |
-| — | Frame-rate readout, stdout report, `fps-check.sh` | implemented, **uncommitted** | | none yet | n/a — an operator request, not a task with criteria. Verified: the suite is green, six mutations killed, the readout seen on screen, and both run-end paths measured — see *The frame rate, measured* |
+| 19 | Widget — TextInput + On-screen Keyboard | **implemented, uncommitted** | — | **none yet** | **none waived** — every criterion is covered by the demo's own event path or by a capture. What is *not* claimed is anything about XTEST injection, which was not used; see *Task 19 — what it decided* |
+| — | Frame-rate readout, stdout report, `fps-check.sh` | done | `3ddf5fa` | none yet | n/a — an operator request, not a task with criteria. Verified: the suite is green, six mutations killed, the readout seen on screen, and both run-end paths measured — see *The frame rate, measured* |
 | 20 | Widget — Gauge | pending | | | |
 | 21 | Widget — Chart | pending | | | |
 | 22 | Widget — Dialog | pending | | | |
@@ -2339,6 +2604,43 @@ operator's rule, none of these is treated as satisfied.
   cause is the loop's 16 ms event wait plus the frame's own cost being serialised,
   so 62.5 fps is the ceiling of the loop's present shape. The operator decided
   this round measures and does not retime the loop. See *The frame rate, measured*.
+- 2026-10-01 — **task 19 implemented — the text field, the on-screen keyboard, a
+  typed-text event, and a demo band. Awaiting review, uncommitted.** Two new
+  widgets (`widgets/text_input.rs`, 115 tests; `widgets/keyboard.rs`, 96 tests),
+  one new `InputEventKind::Text` variant in `input.rs` with a `process` arm over
+  SDL's `EVENT_TEXT_INPUT`, and the demo wired to both. **1053 `ui_core` + 140
+  demo + 154 doctests**, fmt clean, clippy `-D warnings` clean, `cargo doc` clean,
+  aarch64 cross-build clean with the same four dynamic dependencies.
+  **Split per `.ai/protocols/subagents.md` § *Implementation fan-out*** —
+  `input.rs` first as the shared prerequisite, then the two widgets as
+  file-isolated subagents that do not import each other, then the demo here.
+  **38 deliberate breaks run, 38 killed**, including one vacuous mutation of the
+  integrator's own that was reported as a survivor and re-run properly.
+  **The frame rate is 50.0 fps**, unchanged, and the two widgets cost about **1.1
+  points of a core** measured interleaved against `HEAD`.
+  **Three defects found and fixed**, two of them in the integrator's own wiring:
+  an `Rc` around the field that made `set_palette` permanently unreachable so a
+  theme switch did nothing to it; the palettes read from the theme *after*
+  `switch_to` had begun animating it, which re-aims every widget at the palette it
+  already had; and a readout bound to an empty field printing an empty line. The
+  first two were caught by one test, which is now the reason it exists.
+  **The window is 1020 tall because 1160 was not seeable**: this host caps the
+  window at 1052 pixels, so the band's first arrangement — field over keyboard —
+  put the keyboard's bottom off the bottom of the screen. Measured, and the band
+  is now laid out side by side. **No acceptance criterion is waived**; none was
+  verified through XTEST injection, which was not used.
+  **`cargo audit` was not run** — not installed, unchanged, and no dependency
+  changed, which is what it would have checked.
+- 2026-10-01 — **a mutation runner's failure count was parsed off the whole log**,
+  and every mutation was reported SURVIVED while the log showed 4 failures: the
+  regex also matched a bare `" failed"` in cargo's `error: test failed` trailer,
+  `head -1` took it, `cut` produced nothing, and `${failed:-0}` turned that into
+  zero. The `grep -q '^test result'` guard did **not** catch it, because the log
+  did contain a `test result:` line — a `FAILED` one. Added to `.ai/NEVERAGAIN.md`
+  as a fourth mechanism: **a guard that checks presence is not a guard on
+  content**, and an unparseable log must abort rather than default to "0 failures",
+  because "0" is the one value that turns a broken runner into a confident report
+  that the code is untested.
 - 2026-10-01 — **the rule is wired into the AI system**, once and in one place:
   `.ai/agents/developer.md` § Phase 3 owns it, `.ai/workflows/task-sequence.md`
   § Gates and `.ai/agents/reviewer.md` § *Performance and idioms* point at it, and

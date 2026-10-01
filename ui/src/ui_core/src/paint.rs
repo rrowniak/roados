@@ -31,24 +31,91 @@ impl Rect {
     }
 }
 
-/// A handle to a texture in the atlas.
+/// A handle to a texture the renderer has bound.
 ///
-/// Texture atlas population is out of scope for this task; the handle exists
-/// so image draw commands can be recorded and batched.
+/// The cache that issues these, and the two places an image can end up — the
+/// shared atlas or a texture of its own — are [`crate::texture`]'s business.
+/// What a draw command needs is only the handle, so a widget can record an
+/// image without borrowing the cache for the frame.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TextureId(u32);
 
 impl TextureId {
-    /// Creates a texture handle from a raw atlas index.
+    /// Creates a texture handle from a raw texture index.
     #[must_use]
     pub fn new(id: u32) -> Self {
         TextureId(id)
     }
 
-    /// Returns the raw atlas index.
+    /// Returns the raw texture index.
     #[must_use]
     pub fn get(self) -> u32 {
         self.0
+    }
+}
+
+/// The part of a texture a quad samples, in normalised texture coordinates.
+///
+/// `u` runs across the texture and `v` down it, both `0.0..=1.0`, with the
+/// origin at the texture's top left: the same origin, the same four names and
+/// the same order as [`Placement`](crate::texture::Placement), so a widget
+/// holding a placement hands its four fields straight over.
+///
+/// A named struct rather than four loose `f32`s because a quad is two sets of
+/// four numbers — `rect` and `uv` — and the shader reads both. A transposed
+/// pair of coordinates is a vertically mirrored image, and with a bare tuple
+/// the mix-up is invisible at the point it happens.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::paint::UvRect;
+///
+/// let whole = UvRect::full();
+/// assert_eq!((whole.u0, whole.v0, whole.u1, whole.v1), (0.0, 0.0, 1.0, 1.0));
+/// assert!(whole.is_full());
+///
+/// // A window into a texture that holds more than one image.
+/// let left_half = UvRect { u0: 0.0, v0: 0.0, u1: 0.5, v1: 1.0 };
+/// assert!(!left_half.is_full(), "half a texture is not the texture");
+/// assert_eq!(left_half.u1, 0.5, "and it is still the window it was given");
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UvRect {
+    /// Left edge, `0.0..=1.0` across the texture.
+    pub u0: f32,
+    /// Top edge, `0.0..=1.0` down the texture.
+    pub v0: f32,
+    /// Right edge, `0.0..=1.0` across the texture.
+    pub u1: f32,
+    /// Bottom edge, `0.0..=1.0` down the texture.
+    pub v1: f32,
+}
+
+impl UvRect {
+    /// Returns the whole texture: what a caller records when the texture holds
+    /// one image and the whole of it is on screen.
+    #[must_use]
+    pub const fn full() -> Self {
+        UvRect {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+        }
+    }
+
+    /// Returns whether this is the whole texture.
+    ///
+    /// An exact comparison against [`UvRect::full`] rather than a tolerance:
+    /// the question is whether the caller *asked* for the whole texture, and a
+    /// sub-rectangle that rounds to within a float of it is still a
+    /// sub-rectangle. Being wrong in this direction costs a blended draw call;
+    /// being wrong the other way costs a quad submitted with blending off,
+    /// which is a wrong picture rather than a slow one.
+    #[must_use]
+    pub fn is_full(&self) -> bool {
+        *self == UvRect::full()
     }
 }
 
@@ -98,14 +165,46 @@ pub enum DrawCommand {
     },
     /// A textured rectangle.
     ///
+    /// The quad is drawn with the image shader: `uv` says which part of the
+    /// texture it samples, `opacity` how much of what it samples reaches the
+    /// screen, and `radius` how many pixels of corner the shader clips away.
     /// Rendering needs the texture atlas, which arrives with the Image widget
     /// (task 16); the command is recorded and batched but not yet submitted to
     /// the GPU.
     Image {
-        /// The rectangle to fill.
+        /// The rectangle to fill, in window coordinates.
         rect: Rect,
         /// The texture to sample.
         texture: TextureId,
+        /// Which part of `texture` the rect samples.
+        ///
+        /// [`UvRect::full`] when the texture holds this image and no other; a
+        /// window into it when the image shares the atlas with other images,
+        /// which is every image small enough to be worth packing.
+        uv: UvRect,
+        /// How much of the image to draw, `0.0..=1.0`.
+        ///
+        /// A scalar rather than a [`Color`] because the colours are already in
+        /// the texture: this scales the alpha the image brought with it, so
+        /// `0.5` is *the image, half as present* and not *the image, tinted*.
+        /// A [`Color`] would have to be folded into the sampled texel at every
+        /// fragment to say the same thing.
+        ///
+        /// A value outside the range is clamped when the command is drawn, not
+        /// when it is recorded — below `0.0` draws nothing, above `1.0` draws
+        /// the image in full. The recorder stores what it was handed, so a
+        /// caller whose opacity is a computed quantity can see the value it
+        /// computed instead of a value this layer invented.
+        opacity: f32,
+        /// Corner radius in pixels, `0.0` for square corners.
+        ///
+        /// This is a **clip**, not a fill: the shader discards the fragments
+        /// outside the rounded rect, so the corners show whatever the widget
+        /// drew behind the image rather than being painted with a corner
+        /// colour. A radius past half the shorter side is treated as half of it,
+        /// as it is for [`DrawCommand::RoundedRect`], so a radius too large to
+        /// fit is a rounded pill rather than an inverted shape.
+        radius: f32,
     },
     /// A thick line segment.
     Line {
@@ -256,9 +355,21 @@ impl Painter {
         });
     }
 
-    /// Records a textured rectangle.
-    pub fn image(&mut self, rect: Rect, texture: TextureId) {
-        self.commands.push(DrawCommand::Image { rect, texture });
+    /// Records a textured rectangle: `rect` in window coordinates, sampling
+    /// `texture` through `uv`, drawn at `opacity`, with `radius` pixels of
+    /// rounded corners clipped away.
+    ///
+    /// The one way to record an image, so the two things a textured quad has to
+    /// say — which part of the texture, and how much of it — cannot be left to
+    /// a default that silently draws the wrong picture.
+    pub fn image(&mut self, rect: Rect, texture: TextureId, uv: UvRect, opacity: f32, radius: f32) {
+        self.commands.push(DrawCommand::Image {
+            rect,
+            texture,
+            uv,
+            opacity,
+            radius,
+        });
     }
 
     /// Records a thick line segment.
@@ -311,7 +422,13 @@ mod tests {
             Color::new(0, 255, 0, 255),
         );
         painter.text(2.0, 3.0, "hi", Color::new(0, 0, 255, 255), 16.0, 0.0);
-        painter.image(Rect::new(4.0, 4.0, 8.0, 8.0), TextureId::new(7));
+        painter.image(
+            Rect::new(4.0, 4.0, 8.0, 8.0),
+            TextureId::new(7),
+            UvRect::full(),
+            1.0,
+            2.0,
+        );
         painter.line((0.0, 0.0), (10.0, 10.0), 2.0, Color::new(1, 2, 3, 255));
         painter.circle((5.0, 5.0), 3.0, Color::new(4, 5, 6, 255));
         painter.path(
@@ -379,5 +496,163 @@ mod tests {
     fn texture_id_roundtrip() {
         let id = TextureId::new(42);
         assert_eq!(id.get(), 42);
+    }
+
+    #[test]
+    fn the_whole_texture_runs_from_zero_to_one() {
+        let whole = UvRect::full();
+        assert_eq!(whole.u0, 0.0, "the left edge of the texture is 0");
+        assert_eq!(
+            whole.v0, 0.0,
+            "and so is the top: 0 is the top, not the bottom"
+        );
+        assert_eq!(whole.u1, 1.0, "the right edge is the whole width");
+        assert_eq!(whole.v1, 1.0, "and the bottom edge the whole height");
+        assert!(whole.is_full());
+    }
+
+    #[test]
+    fn a_window_into_a_texture_is_not_the_whole_texture() {
+        // An image packed into the atlas records its placement rather than the
+        // whole texture, and the batcher tells the two apart by exactly this
+        // question. The recording is in the path because that is where a widget
+        // puts a placement.
+        let window = UvRect {
+            u0: 0.25,
+            v0: 0.5,
+            u1: 0.75,
+            v1: 1.0,
+        };
+        let mut painter = Painter::new();
+        painter.image(
+            Rect::new(0.0, 0.0, 1.0, 1.0),
+            TextureId::new(1),
+            window,
+            1.0,
+            0.0,
+        );
+
+        let commands = painter.finish();
+        let DrawCommand::Image { uv, .. } = &commands[0] else {
+            panic!("the painter recorded something that is not an image");
+        };
+        assert_eq!(*uv, window, "the window reaches the command unmoved");
+        assert!(
+            !uv.is_full(),
+            "and a window into a texture is not the texture"
+        );
+    }
+
+    #[test]
+    fn is_full_reads_all_four_edges_exactly() {
+        // One float below the whole texture is not the whole texture: the
+        // question is what the caller asked for, and rounding would turn a
+        // caller asking for a window into one asking for everything.
+        let almost = UvRect {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0 - f32::EPSILON,
+            v1: 1.0,
+        };
+        assert!(!almost.is_full(), "a hair short of the whole is a window");
+
+        // Each edge on its own: a window that is otherwise the whole texture is
+        // still a window. An `is_full` reading three of the four edges lets one
+        // of these through, and it would then be drawn in the opaque pass.
+        let windows = [
+            UvRect {
+                u0: 0.0,
+                v0: 0.0,
+                u1: 1.0,
+                v1: 0.5,
+            },
+            UvRect {
+                u0: 0.0,
+                v0: 0.5,
+                u1: 1.0,
+                v1: 1.0,
+            },
+            UvRect {
+                u0: 0.0,
+                v0: 0.0,
+                u1: 0.5,
+                v1: 1.0,
+            },
+            UvRect {
+                u0: 0.5,
+                v0: 0.0,
+                u1: 1.0,
+                v1: 1.0,
+            },
+        ];
+        for window in windows {
+            assert!(!window.is_full(), "{window:?} is a window, not a texture");
+        }
+    }
+
+    #[test]
+    fn a_painter_records_the_uv_the_opacity_and_the_radius_it_was_given() {
+        let rect = Rect::new(20.0, 30.0, 40.0, 50.0);
+        let uv = UvRect {
+            u0: 0.1,
+            v0: 0.2,
+            u1: 0.3,
+            v1: 0.4,
+        };
+        let mut painter = Painter::new();
+        painter.image(rect, TextureId::new(9), uv, 0.25, 6.0);
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 1);
+        // Destructure rather than match on the variant with `..`: the renderer's
+        // quad builder names these fields, so a rename here is a rename there.
+        let DrawCommand::Image {
+            rect: recorded_rect,
+            texture,
+            uv: recorded_uv,
+            opacity,
+            radius,
+        } = &commands[0]
+        else {
+            panic!("the painter recorded something that is not an image");
+        };
+        assert_eq!(*recorded_rect, rect);
+        assert_eq!(*texture, TextureId::new(9));
+        assert_eq!(*recorded_uv, uv);
+        assert_eq!(*opacity, 0.25);
+        assert_eq!(*radius, 6.0);
+    }
+
+    #[test]
+    fn an_opacity_outside_the_range_is_recorded_as_it_was_given() {
+        // The clamp belongs to the draw, not to the recorder: a caller that
+        // computed the value keeps the number it computed, and the batcher sees
+        // the same number the renderer will clamp.
+        let mut painter = Painter::new();
+        painter.image(
+            Rect::new(0.0, 0.0, 1.0, 1.0),
+            TextureId::new(1),
+            UvRect::full(),
+            1.5,
+            0.0,
+        );
+        painter.image(
+            Rect::new(0.0, 0.0, 1.0, 1.0),
+            TextureId::new(1),
+            UvRect::full(),
+            -0.5,
+            0.0,
+        );
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 2);
+        let DrawCommand::Image { opacity: over, .. } = &commands[0] else {
+            panic!("not an image");
+        };
+        let DrawCommand::Image { opacity: under, .. } = &commands[1] else {
+            panic!("not an image");
+        };
+        assert_eq!(*over, 1.5, "above the range survives recording");
+        assert_eq!(*under, -0.5, "and so does below it");
     }
 }

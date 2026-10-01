@@ -33,6 +33,26 @@
 //! and dispatch routes it to the node under it, which is what makes a button
 //! consume the events meant for it. `Tab` and `Shift+Tab` move focus and `Enter`
 //! activates the button holding it.
+//!
+//! Under the slider the band carries the four widgets the primitive tasks added
+//! after the buttons: a **toggle**, whose click turns it on and off and whose
+//! label says which state it is in; a **progress bar** at half, moved by `[` and
+//! `]` and switched into its sliding mode by `P`; a **list of a hundred rows**,
+//! which scrolls under a finger, the wheel and the arrow keys, and whose readout
+//! names the first row on screen and the length of the free list so that the
+//! virtualisation is visible rather than merely asserted; and an **image** in
+//! the top right, loaded from `assets/demo.png` and cycled through its four fits
+//! by `F`.
+//!
+//! The window is 1280 by 720 rather than the 1024 by 600 the first three pads
+//! and the text panel were laid out for, because those two regions are full: the
+//! card of pads ends at x 788 and the text panel's column at x 654, so the four
+//! new widgets had nowhere to go. Enlarging the window is the smallest change
+//! that fits them, because every widget's position in it is absolute and
+//! independent of the window's size — only the root's constraint and the
+//! background node's tight constraint read [`WINDOW`] — so nothing that was
+//! already there moves. `no_two_placed_rects_overlap` and
+//! `every_placed_rect_is_inside_the_window` are what hold that claim up.
 
 use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::Keycode;
@@ -40,6 +60,8 @@ use sdl3::keyboard::Keycode;
 use sdl3::keyboard::Mod;
 use sdl3::mouse::MouseButton;
 use std::cell::RefCell;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 use ui_core::animation::{AnimationClock, AnyAnimation, Easing, Interpolate, Stagger};
@@ -51,26 +73,37 @@ use ui_core::layout::{
     MainAxisAlignment, Offset, Padding, Size,
 };
 use ui_core::node::{self, WidgetNode};
+use ui_core::paint::{Color, PaintState, Painter, Rect};
 #[cfg(test)]
-use ui_core::paint::DrawCommand;
-use ui_core::paint::{Color, PaintState, Painter};
+use ui_core::paint::{DrawCommand, UvRect};
 use ui_core::property::Property;
 use ui_core::render::context::Context;
 use ui_core::render::Renderer;
+use ui_core::texture::{Pixels, TextureCache, TextureHandle};
 use ui_core::theme::{PropertyValue, Theme, ThemeToken};
 use ui_core::widgets::button::{Button, Callback, Motion, Palette};
 use ui_core::widgets::container::Container;
+use ui_core::widgets::image::{Image, ImageFit, ImageSource};
 use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapMode};
+use ui_core::widgets::list::{ItemFactory, List};
+use ui_core::widgets::progress::{Palette as ProgressPalette, Progress};
+use ui_core::widgets::scroll::Palette as ScrollPalette;
 use ui_core::widgets::slider::{Orientation, Palette as SliderPalette, Slider};
+use ui_core::widgets::toggle::{Palette as TogglePalette, Toggle};
 // The button band's `Callback` is the payload-free alias of this same type, so
 // the demo imports it under a second name: a slider's handler takes the value it
 // moved to, and `Callback::from_fn` on the alias would be `Callback<()>`.
 use ui_core::widgets::Callback as ValueCallback;
 
 /// The window, and the box the root is laid out in.
+///
+/// 1280 by 720 rather than 1024 by 600: the four widgets the later tasks added
+/// do not fit beside the ones already here, and every position in the demo is
+/// absolute, so growing the window moves nothing and lets four more in. See the
+/// module documentation for the whole of the argument.
 const WINDOW: Size = Size {
-    width: 1024.0,
-    height: 600.0,
+    width: 1280.0,
+    height: 720.0,
 };
 
 /// How long the loop blocks waiting for the next event. Nothing moves on
@@ -232,12 +265,47 @@ const COUNTER_WIDTH: f32 = 320.0;
 /// [`BUTTON_ORIGIN`]'s 396 plus [`COUNTER_DROP`]'s 60 and its own 24 pixels.
 const SLIDER_ORIGIN: (f32, f32) = (664.0, 496.0);
 
+/// How thick the demo's slider track is, in pixels.
+///
+/// **The widget's own default is 6, and the operator called that unusable:**
+/// *"the slider is very narrow, can't imagine how I could use it in a car with my
+/// finger"* (2026-09-30). Six pixels is a hairline — correct with a mouse, where
+/// precision is free, and wrong with a fingertip, which is roughly 40 across.
+///
+/// The widget's constants are **not** changed: they are a documented baseline and
+/// task 14's record says each one says what would reverse it. This is the setter
+/// doing what it exists for, which is also what makes the two numbers visible side
+/// by side. What would reverse *that* choice is the head unit's own bezel and
+/// glove spec, and it is the operator's call.
+const SLIDER_TRACK_THICKNESS: f32 = 12.0;
+
+/// The radius of the demo's slider's thumb, in pixels.
+///
+/// 18 is a 36-pixel knob with the widget's 2-pixel border, against the 6-pixel
+/// track and 24-pixel knob the widget defaults to.
+///
+/// **Why not larger.** 22 gave a 44-pixel knob and a 62-tall node, and the node is
+/// what the hit test uses — but the right-hand column then stopped fitting: six
+/// controls, of which the slider, the toggle and the progress bar are all finger-
+/// sized, need more than the 324 pixels between the button row and the bottom of
+/// the window, and `no_two_placed_rects_overlap` said so. **This is the ceiling for
+/// a bigger slider without moving the progress bar out of this column**, and that
+/// trade is the operator's to make rather than an agent's.
+const SLIDER_THUMB_RADIUS: f32 = 18.0;
+
+/// How long the demo's slider is, in pixels.
+///
+/// The widget asks for its own [`DEFAULT_LENGTH`](ui_core::widgets::slider)
+/// default of 240; a finger benefits from a longer swipe, and 300 still clears the
+/// list's left edge at 1000 by 36 pixels.
+const SLIDER_LENGTH: f32 = 300.0;
+
 /// How far below the slider its value readout sits.
 ///
-/// A slider asks for the same minimum touch target the button band does, 44
-/// pixels tall, so this clears it and leaves the readout's own 24-pixel line
-/// inside the window.
-const SLIDER_READOUT_DROP: f32 = 52.0;
+/// The slider is **52** tall now, not the 44 its default sizing asked for, so this
+/// has to clear 52 rather than 44. It leaves the readout's own 24-pixel line at
+/// 560..584, clear of the toggle at 592 below it.
+const SLIDER_READOUT_DROP: f32 = 64.0;
 
 /// The width the value readout is given, wide enough for the longest string it
 /// shows: a value out of the maximum, and a count of the adjustments so far.
@@ -255,6 +323,250 @@ const SLIDER_MAX: f32 = 100.0;
 /// widget snaps to the nearest step whatever the range is, and a step that does
 /// not divide it leaves the top unreachable.
 const SLIDER_STEP: f32 = 5.0;
+
+/// Where the demo's image sits, in the gap right of the card of pads.
+///
+/// The card is 788 wide, so 800 is twelve clear of it, and the image is 160 tall
+/// against the card's 164: the two are side by side rather than stacked, because
+/// the band below them is where the other three new widgets are.
+const IMAGE_ORIGIN: (f32, f32) = (800.0, 0.0);
+
+/// The box the image is fitted into.
+///
+/// 220 by 160 is *wider* than `assets/demo.png`'s own 320 by 192 is tall in the
+/// sense that matters: the asset is 1.67 to 1 and the box is 1.375 to 1, so
+/// [`ImageFit::Contain`] letterboxes it top and bottom and [`ImageFit::Cover`]
+/// crops its width, and the two are visibly different pictures rather than two
+/// names for one.
+const IMAGE_SIZE: Size = Size {
+    width: 220.0,
+    height: 160.0,
+};
+
+/// Where the label naming the image's current fit sits.
+///
+/// It is **below** the image rather than beside it because
+/// [`ImageFit::None`] draws the image at its own size — 320 by 192, from the
+/// box's top left — and a label to the right of the box would be under it in
+/// that one mode and clear of it in the other three. Below the box it is clear
+/// of all four, and 200 is eight past the tallest of them.
+const IMAGE_FIT_ORIGIN: (f32, f32) = (800.0, 200.0);
+
+/// The width the fit label is given: the longest string it can show on one line.
+///
+/// The longest is `fit: Contain (stand-in), focused` — the longest fit name, the
+/// stand-in note and the focus marker together — and the width is what stops the
+/// label cutting it with an ellipsis. It is 360 rather than what the string needs
+/// under the demo's *test* font, because the width is fixed at construction and
+/// a face with wider glyphs than the monospace stand-in would otherwise ellipsise
+/// a line that is not really too long.
+const IMAGE_FIT_WIDTH: f32 = 360.0;
+
+/// Where the demo's toggle sits, under the slider's readout.
+///
+/// The readout's own line ends at [`SLIDER_ORIGIN`]'s 496 plus
+/// [`SLIDER_READOUT_DROP`]'s 52 and its own 24 pixels, and the toggle's box is
+/// the widget's own — a 48-wide track in a 44-tall touch target — so this is the
+/// next line that clears it.
+const TOGGLE_ORIGIN: (f32, f32) = (664.0, 592.0);
+
+/// Where the label naming the toggle's state sits, beside it.
+///
+/// Twelve to the right of the toggle's own 48 pixels, and low enough that its
+/// line is about the middle of the toggle's height rather than level with its
+/// top.
+///
+/// It follows [`TOGGLE_ORIGIN`] rather than repeating its number: the toggle moved
+/// down 20 when the slider grew above it, and a literal here was still sitting at
+/// the old 592 — clear of nothing, since the slider's readout now ends there.
+const TOGGLE_READOUT_ORIGIN: (f32, f32) = (728.0, TOGGLE_ORIGIN.1 + 20.0);
+
+/// The width the toggle's readout is given: enough for `on, 1 change` and
+/// `off, 0 changes` on one line each.
+const TOGGLE_READOUT_WIDTH: f32 = 240.0;
+
+/// Where the demo's progress bar sits, the last thing in the left column of the
+/// band.
+///
+/// 668 plus the bar's own 44 pixels is 712, and the window is 720: eight
+/// pixels of margin, which is the whole of what is left below the band.
+const PROGRESS_ORIGIN: (f32, f32) = (664.0, 668.0);
+
+/// The box the progress bar is given.
+///
+/// 240 by 44 is the slider's own box: a bar of the same width as the slider
+/// above it reads as part of the same column rather than as a second control of
+/// its own shape.
+const PROGRESS_SIZE: Size = Size {
+    width: 240.0,
+    height: 44.0,
+};
+
+/// Where the label naming the progress bar's value and mode sits, above it.
+///
+/// Above rather than beside, because the region to the right of the bar is
+/// where the list is: the bar ends at 904 and the list starts at
+/// [`LIST_ORIGIN`]'s 1000, and 96 pixels is not enough for the longest string
+/// this label shows.
+const PROGRESS_READOUT_ORIGIN: (f32, f32) = (664.0, 640.0);
+
+/// The width the progress readout is given: the longest string it can show on
+/// one line.
+///
+/// `50%, determinate, focused` is that string — a percentage, a mode and the
+/// focus marker — and the width is what stops the label cutting it, which it
+/// would at 240: the monospace stand-in the tests measure with is ten pixels a
+/// character, so twenty-three of them are 230 and the ellipsis goes on at the
+/// node's own width. A bar that says `50%, determinate, focus…` is a readout
+/// that cannot say what it is saying.
+const PROGRESS_READOUT_WIDTH: f32 = 280.0;
+
+/// The value the demo's progress bar starts at, and the fraction `[` and `]`
+/// move it by.
+///
+/// Half is task 17's acceptance criterion. A tenth is a step that divides one
+/// exactly, which ten steps of it do not: `0.5 + 0.1` ten times lands on
+/// `0.99999994`, and a bar filled to 99.999994 per cent of its track is a bar
+/// that is not quite full. The demo snaps the value to tenths for the reason
+/// [`PROGRESS_TENTHS`] gives.
+const PROGRESS_START: f32 = 0.5;
+const PROGRESS_STEP: f32 = 0.1;
+
+/// How finely the progress bar's value is snapped, as a count of steps.
+///
+/// It is the reciprocal of [`PROGRESS_STEP`], written down as the number it is
+/// used as: the demo rounds `value * 10` to an integer and divides, so a value
+/// that arrived by repeated addition lands on the grid rather than near it.
+const PROGRESS_TENTHS: f32 = 10.0;
+
+/// Where the demo's list sits, filling the right of the window below the text
+/// panel's band.
+///
+/// The list is a hundred rows tall and the point of it is the **viewport**: a
+/// 280-tall box over [`LIST_ITEM_HEIGHT`] rows is ten of them, so ninety of the
+/// hundred are not in the tree at all and the readout says so. It starts at 1000
+/// because the click counter and the slider's readout are both given
+/// [`COUNTER_WIDTH`] and [`SLIDER_READOUT_WIDTH`] and both end at 984, and 16
+/// pixels of clearance is the gap `no_two_placed_rects_overlap` checks for.
+const LIST_ORIGIN: (f32, f32) = (1000.0, 396.0);
+
+/// The box the list is given: a viewport, not a content height.
+///
+/// 270 by 280 is ten rows of [`LIST_ITEM_HEIGHT`] exactly, so the list does not
+/// open with a row half off the bottom of it.
+const LIST_SIZE: Size = Size {
+    width: 270.0,
+    height: 280.0,
+};
+
+/// How many rows the list has.
+///
+/// A hundred, which is task 18's acceptance criterion and enough that the
+/// scrollbar's thumb is a tenth of its groove — visible at a glance, where
+/// twenty rows would fill a fifth of it and read as nearly full.
+const LIST_ITEM_COUNT: usize = 100;
+
+/// How tall one row is, and therefore how far apart two rows' indices are.
+const LIST_ITEM_HEIGHT: f32 = 28.0;
+
+/// How thick the list's scrollbar draws, in pixels.
+///
+/// **The widget's own default is 6, and the operator called that unusable for the
+/// scrollbar for the same reason they called the slider's 6-pixel track
+/// unusable** (2026-09-01 after 2026-09-30): *"is too narrow, I have issues with
+/// pointing on it with my mouse, so doing that on tablet with a finger is
+/// impossible"*. Six pixels is a hairline — correct with a mouse, where precision
+/// is free, and wrong with a fingertip, which is roughly 40 across.
+///
+/// The widget's constant is **not** changed, for the reason its own doc gives:
+/// it is a documented baseline, and `Scroll::set_thickness` is what exists to
+/// change it. This is that setter doing its job, which is also what makes the
+/// two numbers visible side by side. It is the same split, at the same value, as
+/// [`SLIDER_TRACK_THICKNESS`] — one operator, one judgement about a finger, two
+/// widgets that were both 6.
+const SCROLLBAR_THICKNESS: f32 = 12.0;
+
+/// Where the label naming what the list is showing sits, under it.
+const LIST_READOUT_ORIGIN: (f32, f32) = (1000.0, 684.0);
+
+/// The width the list's readout is given, which is the list's own width: the
+/// line names four numbers and the longest of them is `first 99, live 10, free
+/// 0, tap 99`.
+const LIST_READOUT_WIDTH: f32 = 270.0;
+
+/// The font size the list's readout and its rows are drawn at.
+///
+/// Smaller than [`BUTTON_FONT`] for the readout because it is four numbers
+/// rather than one, and the list is narrower than the column above it; the rows
+/// are at the same size because a row is one short word and 20 pixels of it in a
+/// 28-pixel row leaves four either side.
+const LIST_FONT: f32 = 16.0;
+
+/// The gap between a row's edge and its text, on the left and the right.
+///
+/// It is also the row's vertical inset, because the label is painted inside a
+/// box inset by the same number all round and a 28-tall row has 20 left over at
+/// 16 pixels of type.
+const ROW_PADDING: f32 = 8.0;
+
+/// The corner radius the demo's image is painted with.
+///
+/// Not zero, because a rounded corner is a shader feature and a square one is
+/// no evidence that the shader ran — and because the asset is a square test card
+/// whose edges are the only thing in it that would show it.
+const IMAGE_CORNER_RADIUS: f32 = 10.0;
+
+/// The image the demo shows: a texture and the window of it the fit needs.
+///
+/// The two together, because [`ImageSource::of`] is what turns a handle into
+/// something a fit can be computed from, and a caller that has a handle and no
+/// source has half an image.
+struct Picture {
+    /// The decoded image's handle.
+    texture: TextureHandle,
+    /// Where the image sits inside its texture, and how big it is.
+    source: ImageSource,
+}
+
+/// The fits the demo's image cycles through, in the order `F` walks them.
+///
+/// It is the task's four in the task's order, and `Cover` comes second on
+/// purpose: it is the one whose result differs most from `Contain`'s on this
+/// asset, so a reader pressing `F` twice sees the fit change rather than see
+/// two names for the same picture.
+const IMAGE_FITS: [ImageFit; 4] = [
+    ImageFit::Contain,
+    ImageFit::Cover,
+    ImageFit::Fill,
+    ImageFit::None,
+];
+
+/// The name of each fit in [`IMAGE_FITS`], in the same order.
+const IMAGE_FIT_NAMES: [&str; 4] = ["Contain", "Cover", "Fill", "None"];
+
+/// The file name of the demo's image, under whichever directory is found.
+const ASSET_FILE: &str = "demo.png";
+
+/// Where the image is, relative to a directory in the workspace's own layout.
+///
+/// The path from the workspace root — `ui/` — and not from the repository root,
+/// because the asset belongs to the `ui_demo` crate and the executable is built
+/// under `ui/target`.
+const ASSET_RELATIVE: &str = "src/ui_demo/assets/demo.png";
+
+/// The environment variable that overrides where the image is looked for.
+///
+/// A path to the **directory** holding the image rather than to the image, so
+/// the file's name is written down once in [`ASSET_FILE`].
+const ASSET_DIR_VAR: &str = "ROADOS_ASSET_DIR";
+
+/// The size `assets/demo.png` is, which the stand-in is built at.
+///
+/// It is written down rather than read, because a stand-in has to be the shape
+/// of the thing it stands in for: every fit's geometry is computed from the
+/// source's own width and height, and a stand-in of a different shape would make
+/// `Cover` crop a different amount from the one on screen.
+const ASSET_SIZE: (u32, u32) = (320, 192);
 
 /// What a button in the demo's band does when it is clicked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -285,9 +597,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?)?;
     let font = Font::from_path(FONT_PATH)?;
     renderer.set_font(font.clone());
+    // The image is loaded before the demo is built and before the window has
+    // been shown anything, because `Demo::new` needs a texture and a source to
+    // build its `Image` at all. A failure is not a failure of the demo: the
+    // caller gets `None`, says so once on stderr, and the demo stands in a
+    // transparent image of the same shape — see `stand_in_picture`.
+    let picture = load_picture(&mut renderer);
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
-    let mut demo = Demo::new(TextMetrics::new(font))?;
+    let mut demo = Demo::new(TextMetrics::new(font), picture)?;
 
     let mut last = Instant::now();
     'running: loop {
@@ -321,6 +639,117 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Loads the demo's image and returns it, or `None` after saying why.
+///
+/// **A missing asset must not take the window down.** The demo draws everything
+/// else, the image's own label says it is standing in, and this function says
+/// once on stderr where it looked — a silent stand-in is a picture of nothing
+/// with no explanation, and an unexplained blank rectangle is what
+/// `.ai/NEVERAGAIN.md` records two of this repository's defects as having been
+/// mistaken for.
+fn load_picture(renderer: &mut Renderer) -> Option<Picture> {
+    let candidates = asset_candidates();
+    let path = candidates.iter().find(|path| path.is_file());
+    let Some(path) = path else {
+        eprintln!(
+            "ui_demo: {ASSET_FILE} not found; looked in {}",
+            join_paths(&candidates)
+        );
+        return None;
+    };
+    let texture = match renderer.load_texture(path) {
+        Ok(texture) => texture,
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
+            return None;
+        }
+    };
+    match ImageSource::of(renderer.textures(), texture) {
+        Some(source) => Some(Picture { texture, source }),
+        None => {
+            eprintln!(
+                "ui_demo: {}: the cache could not place it; standing in",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+/// Returns `paths` as one comma-separated string, for a message about where
+/// something was looked for.
+///
+/// A `PathBuf` is not `Display` — it is not necessarily text — so this is where
+/// the demo turns a list of them into something a reader can act on, which is
+/// the whole of what the line above it is for.
+fn join_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<String>>()
+        .join(", ")
+}
+
+/// Returns the paths the demo's image may be at, in the order it looks.
+///
+/// Nothing here is relative to the process's own working directory, because
+/// that is not the same for `cargo run` and `cargo test` — the first is the
+/// workspace root and the second is the crate's — so a path relative to "here"
+/// finds the asset in one and not the other. The environment variable comes
+/// first so a caller can say where the file is; the rest are the workspace's own
+/// layout walked **up** from the executable, which is under `ui/target` whether
+/// it was run by Cargo or not.
+fn asset_candidates() -> Vec<PathBuf> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    asset_candidates_from(&exe, std::env::var_os(ASSET_DIR_VAR).as_deref())
+}
+
+/// Returns the candidates for an executable at `exe` and an override directory
+/// of `dir`, in the order [`asset_candidates`] looks in them.
+///
+/// This is the half of the search that is arithmetic rather than the filesystem,
+/// which is what makes it a function a test can call: the `is_file` check that
+/// picks between them is one line in [`load_picture`].
+fn asset_candidates_from(exe: &Path, dir: Option<&OsStr>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(dir) = dir {
+        candidates.push(Path::new(dir).join(ASSET_FILE));
+    }
+    // `ancestors` starts at the executable itself, which is a file and not a
+    // directory to walk out of, so the first candidate is its own directory.
+    candidates.extend(
+        exe.ancestors()
+            .skip(1)
+            .map(|directory| directory.join(ASSET_RELATIVE)),
+    );
+    candidates
+}
+
+/// Returns a transparent image the shape of [`ASSET_SIZE`], to stand in for the
+/// asset when it could not be loaded.
+///
+/// It is a [`TextureCache`] and a handle rather than a texture of its own,
+/// because that is all an [`Image`] needs: a stand-in is not drawn from a GPU
+/// texture, it is given to the same widget with the same geometry, so every fit
+/// is computed from the same 320 by 192 the asset is and a `Cover` crop of it
+/// is the crop on screen. The cache is dropped on the way out, which is safe
+/// because [`Image`] holds the handle and the window and asks nothing of the
+/// cache again.
+///
+/// A stand-in therefore draws **nothing** — an image of transparent pixels is
+/// an image of the background — and the demo's own label says so, because
+/// "nothing there" with a label saying which fit it is would be the wrong
+/// answer to a reader.
+fn stand_in_picture() -> Option<Picture> {
+    let mut cache = TextureCache::new();
+    let mut loader = |_: &Path| Ok(Pixels::transparent(ASSET_SIZE.0, ASSET_SIZE.1));
+    let texture = cache.load(Path::new("stand-in"), &mut loader).ok()?;
+    let source = ImageSource::of(&cache, texture)?;
+    Some(Picture { texture, source })
+}
+
 /// Converts a float extent to the pixel count the window is created with.
 ///
 /// There is no `From`/`TryFrom` between `f32` and any unsigned integer in std,
@@ -331,11 +760,153 @@ fn f32_to_u32(value: f32) -> u32 {
     value as u32
 }
 
+/// Returns the fit at `index` in [`IMAGE_FITS`], or the first one.
+///
+/// `F` only ever writes an index it has just taken modulo the length, so the
+/// fallback is unreachable from the demo; it is here rather than an index
+/// expression so that nothing in the demo can panic on a number it wrote
+/// itself, and because the same question is asked of the fit's *name* below.
+fn image_fit_at(index: usize) -> ImageFit {
+    IMAGE_FITS.get(index).copied().unwrap_or(IMAGE_FITS[0])
+}
+
+/// Returns the name of the fit at `index` in [`IMAGE_FITS`], or of the first
+/// one. See [`image_fit_at`] for the fallback.
+fn image_fit_name(index: usize) -> &'static str {
+    IMAGE_FIT_NAMES
+        .get(index)
+        .copied()
+        .unwrap_or(IMAGE_FIT_NAMES[0])
+}
+
+/// Builds one of the demo's readouts: a label whose text is `text`, drawn once
+/// on a line at `font_size` and never wrapped.
+///
+/// Every readout the band below the pads carries is one of these, and they are
+/// all built the same way for two reasons. The text is **bound** to whatever the
+/// widget's own properties are, so a label never has to be told what the toggle
+/// is or what the list is showing — it recomputes, and a binding rather than a
+/// callback is the whole difference between a number that cannot go stale and a
+/// number that has to be kept in step. And the options say `wrap: None` with an
+/// ellipsis, because the node is given a box of the *first* string's size and a
+/// label that wrapped would put its second line outside the box the layout gave
+/// it — which is the same shape of mistake as a control placed over its
+/// neighbour, and the collision tests would not see it either.
+///
+/// The colour is the demo's cycling one, so `C` and `T` reach these readouts
+/// exactly as they reach the text panel.
+fn read_only_label(
+    nodes: &mut Arena<WidgetNode>,
+    metrics: &TextMetrics,
+    font_size: f32,
+    max_width: f32,
+    text: Property<String>,
+    color_token: &Property<ThemeToken>,
+    tokens: &[(ThemeToken, Property<PropertyValue>)],
+) -> Result<DemoLabel, &'static str> {
+    let mut label = Label::new(nodes, String::new());
+    label.text = text;
+    label.color = cycling_color(color_token, tokens);
+    label.font_size.set(font_size);
+    let demo_label = DemoLabel {
+        label,
+        options: LayoutOptions {
+            max_width,
+            wrap: WrapMode::None,
+            truncation: Truncation::Ellipsis,
+            ..LayoutOptions::default()
+        },
+    };
+    let size = demo_label.size(metrics, font_size);
+    nodes
+        .get_mut(demo_label.label.handle())
+        .ok_or("ui_demo: a readout's node is missing")?
+        .layout_mut()
+        .set_constraints(Constraints::tight(size));
+    Ok(demo_label)
+}
+
+/// Records `demo_label`'s draw commands into the node at `handle`, in `rect`.
+///
+/// The one place a label is painted, for the panel's seven and the band's six
+/// and the list's rows between them. `rect` is the node's own **laid-out** rect
+/// converted to the painter's, except for a row — a row's commands are read by
+/// [`List::paint`] and translated by it, so a row is painted in its own
+/// coordinates and `rect` is the row's local box rather than anything the layout
+/// pass placed.
+///
+/// A missing node or a node the pass has not placed records nothing and says
+/// nothing: a widget that is not in the tree draws nothing, which is the same
+/// answer [`Painter`] gives.
+fn record_label(
+    nodes: &mut Arena<WidgetNode>,
+    handle: Handle,
+    demo_label: &DemoLabel,
+    metrics: &TextMetrics,
+    font_size: f32,
+    rect: Option<Rect>,
+) {
+    let Some(node) = nodes.get_mut(handle) else {
+        return;
+    };
+    let Some(rect) = rect else {
+        return;
+    };
+    let mut options = demo_label.options;
+    options.line_height = metrics.line_height(font_size);
+    let commands = demo_label
+        .label
+        .paint(rect, &options, &|ch: char| metrics.advance(ch, font_size));
+    *node.paint_mut() = PaintState::from_commands(commands);
+}
+
 /// Lifts a colour toward white, for a pad's held colour: the pad's rest colour
 /// is a theme token, and its held colour is that token lifted toward white, so
 /// a press reads as the same hue brightened.
 fn lighten(color: Color) -> Color {
     Color::interpolate(&color, &Color::new(255, 255, 255, 255), HELD_LIGHTEN)
+}
+
+/// Returns whether the point `(x, y)` is inside `rect`, edges included.
+///
+/// Inclusive on every edge, which is `ui_core::input::contains`'s convention and
+/// the one every "is the pointer over this control" question in the demo is
+/// already answering; a rect that did not claim its own last pixel row would
+/// have a one-pixel strip where a control could not be pressed.
+fn over_rect(rect: Rect, x: f32, y: f32) -> bool {
+    x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
+}
+
+/// Returns whether `inner` is wholly inside `outer`, edges included.
+///
+/// Edges included, so a box whose right edge is the window's right edge is
+/// inside the window rather than one pixel proud of it: the alternative would
+/// make a demo that fits exactly look like one that does not.
+#[cfg(test)]
+fn inside(outer: Rect, inner: Rect) -> bool {
+    inner.x >= outer.x
+        && inner.y >= outer.y
+        && inner.x + inner.width <= outer.x + outer.width
+        && inner.y + inner.height <= outer.y + outer.height
+}
+
+/// Returns whether `a` and `b` share at least one pixel.
+///
+/// Also edges included, and for the same reason: two boxes that meet along an
+/// edge have not been laid out badly, and a test that called that a collision
+/// would be reporting a difference in taste. What it is here for is a box drawn
+/// **over** another, which is the defect three previous tasks each found by eye.
+#[cfg(test)]
+fn touches(a: Rect, b: Rect) -> bool {
+    a.x <= b.x + b.width && b.x <= a.x + a.width && a.y <= b.y + b.height && b.y <= a.y + a.height
+}
+
+/// Returns the text the demo's list gives row `index`.
+///
+/// A row is built once and recycled for whatever row comes next, so this is
+/// written on the row rather than built into it — see [`Demo::paint_rows`].
+fn row_text(index: usize) -> String {
+    format!("item {index}")
 }
 
 /// A pad that presses: one property says how far down it is, and its colour
@@ -459,6 +1030,21 @@ struct ButtonFlags {
     focused: bool,
 }
 
+/// The two things a toggle's drawn appearance is derived from.
+///
+/// A record rather than a re-aim every frame, for
+/// [`Demo::sync_button_state`]'s reason: aiming restarts the transition, so
+/// aiming on every frame would leave the thumb creeping toward its target for
+/// ever instead of arriving at it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ToggleState {
+    /// Which way the switch is, which is the thumb's position and the pill's
+    /// colour together.
+    checked: bool,
+    /// Whether it holds focus, which is what its ring is derived from.
+    focused: bool,
+}
+
 /// A button in the demo's band: the widget, and the state the demo last wrote to
 /// it and last aimed it at.
 ///
@@ -549,6 +1135,21 @@ fn button_callback(clicks: &Property<u32>, action: ButtonAction) -> Callback {
     })
 }
 
+/// A row of the demo's list: the node the factory built and the label in it.
+///
+/// The list's factory is given **no index**, because a row is built once and
+/// then recycled for whatever row comes next, so a factory that baked an index
+/// into its row would put the wrong text on the wrong line. The index is
+/// therefore written by the frame, from [`List::visible_items`], onto whichever
+/// row currently holds it.
+struct DemoRow {
+    /// The row's own node, which is the label's: the list gives it the position
+    /// and the size and the demo gives it the text.
+    node: Handle,
+    /// The label inside it, painted in the row's **own** coordinates.
+    label: DemoLabel,
+}
+
 /// A slider in the demo: the widget, and the dragging state the demo last wrote
 /// to it and last aimed it at.
 ///
@@ -628,6 +1229,70 @@ struct Demo {
     slider_readout: DemoLabel,
     /// Whether a pointer is holding the slider down.
     slider_dragging: bool,
+    /// The toggle, under the slider's readout.
+    toggle: Toggle,
+    /// The state the toggle was last aimed at.
+    toggle_aimed: ToggleState,
+    /// The label showing the toggle's state and how many times it has been
+    /// switched.
+    toggle_readout: DemoLabel,
+    /// The image, right of the card of pads.
+    image: Image,
+    /// Which of [`IMAGE_FITS`] the image is showing, as an index into it.
+    ///
+    /// A property rather than a plain field because the label naming the fit is
+    /// bound to it, which is the one link in the demo that is a binding rather
+    /// than a callback: the label does not need telling, it recomputes.
+    image_fit: Property<usize>,
+    /// Whether the image's node holds focus, for the fit label to say so.
+    ///
+    /// An [`Image`] has no `focused` property of its own, so there is nothing
+    /// for the widget to draw a ring with and the demo has to say where focus
+    /// is in words instead. `image_focused` and `progress_focused` are this
+    /// question asked twice, once per widget that cannot answer it.
+    image_focused: Property<bool>,
+    /// The label naming the image's current fit.
+    image_fit_readout: DemoLabel,
+    /// The progress bar, at the foot of the band's left column.
+    progress: Progress,
+    /// Whether the progress bar is sliding rather than showing a value.
+    ///
+    /// The demo's own record of it, because [`Progress::indeterminate`] is a
+    /// plain field behind a setter: there is no property for the readout to bind
+    /// to, so this is the one the readout follows and the one the setter is
+    /// driven from. It is written **after** the widget's, so a frame in which
+    /// they disagree draws a bar the label has not caught up with rather than
+    /// the reverse.
+    progress_indeterminate: Property<bool>,
+    /// Whether the progress bar's node holds focus, for its readout to say so.
+    progress_focused: Property<bool>,
+    /// The label showing the progress bar's value and mode.
+    progress_readout: DemoLabel,
+    /// The list, filling the right of the window.
+    list: List,
+    /// The rows the list's factory has built, in the order it built them.
+    ///
+    /// A handle and a label, because a row is built by a closure the demo hands
+    /// to the list and the closure cannot reach the [`Demo`] it is being built
+    /// for. It is a `RefCell` for the same reason the arena is: a node cannot
+    /// reach the tree that holds it, and a factory takes `&mut Arena` rather
+    /// than `&mut Demo`.
+    rows: Rc<RefCell<Vec<DemoRow>>>,
+    /// The first row the list has on screen, for the readout.
+    first_visible: Property<usize>,
+    /// How many rows the list has in the tree, for the readout.
+    live_count: Property<usize>,
+    /// How many rows are on the list's free list, for the readout.
+    free_count: Property<usize>,
+    /// The label naming what the list is showing.
+    list_readout: DemoLabel,
+    /// Whether a pointer is holding the list down.
+    ///
+    /// A [`Scroll`](ui_core::widgets::scroll::Scroll) has no grabbed state, so a drag that leaves the list stops
+    /// being offered to it — which is the case that matters most, because a
+    /// finger that has travelled past the end of a list wants the end of the
+    /// list. This is `slider_dragging`'s fix applied to the other widget.
+    list_dragging: bool,
 }
 
 impl Demo {
@@ -646,7 +1311,7 @@ impl Demo {
     /// The error is a message rather than a type of its own: the tree is
     /// written out here, so a node that cannot be attached is a bug in this
     /// file and not a runtime condition a caller could act on.
-    fn new(metrics: TextMetrics) -> Result<Self, &'static str> {
+    fn new(metrics: TextMetrics, picture: Option<Picture>) -> Result<Self, &'static str> {
         let theme = Theme::new();
         let mut nodes = Arena::new();
         let mut pads = Vec::new();
@@ -863,12 +1528,18 @@ impl Demo {
         widget.set_step(Some(SLIDER_STEP));
         widget.set_orientation(Orientation::Horizontal);
         widget.set_palette(SliderPalette::from_theme(&theme));
+        // Finger-sized, through the widget's own setters: a 14-pixel track and a
+        // 44-pixel knob rather than the 6-pixel hairline the widget defaults to.
+        // Set before asking for a size, because the size is computed from them.
+        widget.set_track_thickness(SLIDER_TRACK_THICKNESS);
+        widget.set_thumb_radius(SLIDER_THUMB_RADIUS);
         widget.snap_to_state();
-        // The size is the widget's own, rather than a number written out here: a
-        // slider has no content to measure, so this is the widget saying how big
-        // a slider should be until a caller says otherwise.
+        // The size is the widget's own maths for the **across** axis — a slider has
+        // no content to measure, so `size()` is the widget saying how thick it wants
+        // to be — with this demo's own length along the track.
         {
-            let size = widget.size();
+            let mut size = widget.size();
+            size.width = SLIDER_LENGTH;
             nodes
                 .get_mut(widget.handle())
                 .ok_or("ui_demo: the slider node is missing")?
@@ -931,10 +1602,243 @@ impl Demo {
             aimed: false,
         };
 
-        // The row, the counter, the slider and its readout are each placed inside
-        // the band, which is what `Absolute` is for: the row at the band's own
-        // offset, the counter `COUNTER_DROP` below it, and the slider and its
-        // readout below that.
+        // The toggle, under the slider's readout, and the label that says which
+        // state it is in. The toggle is snapped onto the theme before it is ever
+        // drawn for the reason `snap_to_state` exists, and its `on_change` counts
+        // the switches, so the label reports two things: which way the switch is
+        // and how many times it has been thrown.
+        let toggle_changes = Property::new(0u32);
+        let mut toggle = Toggle::new(&mut nodes);
+        toggle.set_palette(TogglePalette::from_theme(&theme));
+        toggle.snap_to_state();
+        let toggle_state = toggle.checked.get();
+        {
+            let counted = toggle_changes.clone();
+            toggle.on_change = ValueCallback::from_fn(move |_checked: bool| {
+                counted.set(counted.get() + 1);
+            });
+        }
+        {
+            let size = toggle.size();
+            nodes
+                .get_mut(toggle.handle())
+                .ok_or("ui_demo: the toggle node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+        let toggle_readout = read_only_label(
+            &mut nodes,
+            &metrics,
+            BUTTON_FONT,
+            TOGGLE_READOUT_WIDTH,
+            {
+                let checked = toggle.checked.clone();
+                let counted = toggle_changes.clone();
+                Property::bind(move || {
+                    let state = if checked.get() { "on" } else { "off" };
+                    let count = counted.get();
+                    let noun = if count == 1 { "change" } else { "changes" };
+                    format!("{state}, {count} {noun}")
+                })
+            },
+            &color_token,
+            &token_properties,
+        )?;
+
+        // The image, right of the card of pads, and the label naming the fit it
+        // is showing. `F` cycles the fit and the label is bound to the same
+        // property, so it cannot name a fit the image is not showing.
+        //
+        // A missing asset is a transparent image of the asset's own shape rather
+        // than no image: the node has to exist for the layout, the paint order
+        // and the collision tests to mean anything. The label says which of the
+        // two it is, because an image of transparent pixels is a rectangle of
+        // background and an unexplained one is the shape a defect looks like.
+        let (picture, image_is_stand_in) = match picture {
+            Some(picture) => (picture, false),
+            None => (stand_in_picture().ok_or("ui_demo: no image to show")?, true),
+        };
+        let image_fit = Property::new(0usize);
+        let image_focused = Property::new(false);
+        let mut image = Image::new(&mut nodes, picture.texture, picture.source);
+        // A rounded corner rather than the widget's square default: the corner is
+        // a shader feature, and a square corner is not evidence it ran.
+        image.corner_radius.set(IMAGE_CORNER_RADIUS);
+        image.set_fit(image_fit_at(0));
+        image.snap_to_state();
+        {
+            let size = IMAGE_SIZE;
+            nodes
+                .get_mut(image.handle())
+                .ok_or("ui_demo: the image node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+        let image_fit_readout = read_only_label(
+            &mut nodes,
+            &metrics,
+            BUTTON_FONT,
+            IMAGE_FIT_WIDTH,
+            {
+                let fit = image_fit.clone();
+                let focused = image_focused.clone();
+                Property::bind(move || {
+                    let mut line = format!("fit: {}", image_fit_name(fit.get()));
+                    if image_is_stand_in {
+                        line.push_str(" (stand-in)");
+                    }
+                    // The word rather than a ring: an `Image` has no `focused`
+                    // property, so there is no shape of its own to grow a ring
+                    // around and put back over — see `image_focused`.
+                    if focused.get() {
+                        line.push_str(", focused");
+                    }
+                    line
+                })
+            },
+            &color_token,
+            &token_properties,
+        )?;
+
+        // The progress bar, at the foot of the band's left column, and the label
+        // naming its value and which of the two modes it is in. The mode is a
+        // property of the demo's own because `Progress::indeterminate` is a
+        // plain field behind a setter, so a label bound to it would have to be
+        // told rather than recompute.
+        let progress_focused = Property::new(false);
+        let progress_indeterminate = Property::new(false);
+        let mut progress = Progress::new(&mut nodes);
+        progress.set_palette(ProgressPalette::from_theme(&theme));
+        progress.set_orientation(Orientation::Horizontal);
+        progress.value.set(PROGRESS_START);
+        progress.snap_to_state();
+        {
+            let size = PROGRESS_SIZE;
+            nodes
+                .get_mut(progress.handle())
+                .ok_or("ui_demo: the progress bar node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+        let progress_readout = read_only_label(
+            &mut nodes,
+            &metrics,
+            BUTTON_FONT,
+            PROGRESS_READOUT_WIDTH,
+            {
+                let value = progress.value.clone();
+                let focused = progress_focused.clone();
+                let indeterminate = progress_indeterminate.clone();
+                Property::bind(move || {
+                    let mode = if indeterminate.get() {
+                        "sliding"
+                    } else {
+                        "determinate"
+                    };
+                    let mut line = format!("{:.0}%, {mode}", value.get() * 100.0);
+                    if focused.get() {
+                        line.push_str(", focused");
+                    }
+                    line
+                })
+            },
+            &color_token,
+            &token_properties,
+        )?;
+
+        // The list, its rows and the label naming what it is showing. The rows
+        // come from a factory rather than from a hundred nodes written out here,
+        // which is the whole of the virtualisation: the factory is called for the
+        // rows on screen and for nothing else, and again only when the free list
+        // is empty and a row is genuinely needed.
+        let rows: Rc<RefCell<Vec<DemoRow>>> = Rc::new(RefCell::new(Vec::new()));
+        let first_visible = Property::new(0usize);
+        let live_count = Property::new(0usize);
+        let free_count = Property::new(0usize);
+        let tapped = Property::new(None);
+        let mut list = List::new(&mut nodes, LIST_ITEM_COUNT, LIST_ITEM_HEIGHT);
+        {
+            let factory_rows = Rc::clone(&rows);
+            let row_color = cycling_color(&color_token, &token_properties);
+            list.set_item_factory(
+                &mut nodes,
+                ItemFactory::new(move |nodes: &mut Arena<WidgetNode>| {
+                    let mut label = Label::new(nodes, String::new());
+                    label.font_size.set(LIST_FONT);
+                    label.color = row_color.clone();
+                    let node = label.handle();
+                    factory_rows.borrow_mut().push(DemoRow {
+                        node,
+                        label: DemoLabel {
+                            label,
+                            options: LayoutOptions {
+                                max_width: LIST_SIZE.width - ROW_PADDING * 2.0,
+                                wrap: WrapMode::None,
+                                truncation: Truncation::Ellipsis,
+                                ..LayoutOptions::default()
+                            },
+                        },
+                    });
+                    node
+                }),
+            );
+            let tapped = tapped.clone();
+            list.on_item_click =
+                ValueCallback::from_fn(move |index: usize| tapped.set(Some(index)));
+            // `List::new` has already told the embedded scroll how tall the
+            // content is — the count and the height are the only things that can
+            // change either, so they are the only things that write it — and a
+            // scroll with no content height clamps every offset to zero, which is
+            // a list that does not scroll and draws no scrollbar. `set_palette`
+            // is the door for the scrollbar's colours, and `snap_to_state`
+            // through `scroll()` is what puts them there at once rather than
+            // leaving the scrollbar on the neutral defaults `Scroll::new` wrote.
+            let palette = ScrollPalette::from_theme(&theme);
+            list.set_palette(palette);
+            // The scrollbar is 12 wide here and not the widget's 6, for the same
+            // reason the slider's track is: a finger cannot aim at a hairline.
+            list.set_scrollbar_thickness(SCROLLBAR_THICKNESS);
+            list.scroll().snap_to_state();
+        }
+        {
+            let size = LIST_SIZE;
+            nodes
+                .get_mut(list.handle())
+                .ok_or("ui_demo: the list node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+        let list_readout = read_only_label(
+            &mut nodes,
+            &metrics,
+            LIST_FONT,
+            LIST_READOUT_WIDTH,
+            {
+                let first = first_visible.clone();
+                let live = live_count.clone();
+                let free = free_count.clone();
+                let tapped = tapped.clone();
+                Property::bind(move || {
+                    let tap = match tapped.get() {
+                        Some(index) => index.to_string(),
+                        None => "-".to_string(),
+                    };
+                    format!(
+                        "first {}, live {}, free {}, tap {tap}",
+                        first.get(),
+                        live.get(),
+                        free.get()
+                    )
+                })
+            },
+            &color_token,
+            &token_properties,
+        )?;
+
+        // The row, the counter, the slider, its readout and the four newer
+        // widgets are each placed inside the band, which is what `Absolute` is
+        // for: each at its own offset from the band's origin, which is the
+        // window's own top left.
         nodes
             .get_mut(button_row.handle())
             .ok_or("ui_demo: the button row is missing")?
@@ -961,6 +1865,22 @@ impl Demo {
                 SLIDER_ORIGIN.0,
                 SLIDER_ORIGIN.1 + SLIDER_READOUT_DROP,
             )));
+        for (node, origin) in [
+            (toggle.handle(), TOGGLE_ORIGIN),
+            (toggle_readout.label.handle(), TOGGLE_READOUT_ORIGIN),
+            (image.handle(), IMAGE_ORIGIN),
+            (image_fit_readout.label.handle(), IMAGE_FIT_ORIGIN),
+            (progress.handle(), PROGRESS_ORIGIN),
+            (progress_readout.label.handle(), PROGRESS_READOUT_ORIGIN),
+            (list.handle(), LIST_ORIGIN),
+            (list_readout.label.handle(), LIST_READOUT_ORIGIN),
+        ] {
+            nodes
+                .get_mut(node)
+                .ok_or("ui_demo: a node in the band is missing")?
+                .layout_mut()
+                .set_position(Some(Offset::new(origin.0, origin.1)));
+        }
         // The band is the window, not a box of its own: it is a `Stack` child,
         // and a `Stack` sizes a child from its own constraints but places it at
         // the origin. Giving it the window's size makes the offsets inside it
@@ -973,10 +1893,26 @@ impl Demo {
             band.layout_mut()
                 .set_constraints(Constraints::tight(WINDOW));
         }
+        // The order the band holds its children in **is** their paint order and
+        // therefore their `Tab` order, so it is a list and not a set: the four
+        // children of tasks 12 and 14 first, in the order those tasks put them
+        // in, and then the four of tasks 15 to 18 in the order this file
+        // introduces them. The image comes after the slider and before the
+        // toggle because that is where it sits in the window — top right, above
+        // the band — and putting it first would move the first `Tab` off the
+        // first button, which two existing tests are about.
         if !button_area.add_child(&mut nodes, button_row.handle())
             || !button_area.add_child(&mut nodes, counter.label.handle())
             || !button_area.add_child(&mut nodes, slider.widget.handle())
             || !button_area.add_child(&mut nodes, slider_readout.label.handle())
+            || !button_area.add_child(&mut nodes, image.handle())
+            || !button_area.add_child(&mut nodes, image_fit_readout.label.handle())
+            || !button_area.add_child(&mut nodes, toggle.handle())
+            || !button_area.add_child(&mut nodes, toggle_readout.label.handle())
+            || !button_area.add_child(&mut nodes, progress.handle())
+            || !button_area.add_child(&mut nodes, progress_readout.label.handle())
+            || !button_area.add_child(&mut nodes, list.handle())
+            || !button_area.add_child(&mut nodes, list_readout.label.handle())
         {
             return Err("ui_demo: the button band could not be assembled");
         }
@@ -1137,7 +2073,58 @@ impl Demo {
             }
         }
 
+        // The same link for each of the four new readouts, whose text is bound
+        // to a widget's own properties: a change to the text or to the colour
+        // marks that readout's node dirty, so the next pass repaints it. Their
+        // **rects** never change — each was given the box of the string it
+        // started with, and every string they go on to show is inside that box
+        // by the `wrap: None` `read_only_label` set — so the link is a paint
+        // link in effect, and it is kept because it is the pattern the counter
+        // and the slider's readout already follow and because a caller who
+        // widened one of these labels would need it.
+        for readout in [
+            &toggle_readout,
+            &image_fit_readout,
+            &progress_readout,
+            &list_readout,
+        ] {
+            let text_nodes = Rc::clone(&nodes);
+            let node = readout.label.handle();
+            readout.label.text.on_change(move |_| {
+                mark_dirty(&mut text_nodes.borrow_mut(), node);
+            });
+            let color_nodes = Rc::clone(&nodes);
+            readout.label.color.on_change(move |_| {
+                mark_dirty(&mut color_nodes.borrow_mut(), node);
+            });
+        }
+
+        // The toggle, the progress bar, the image and the list get **no**
+        // `on_change` links of their own, and that is the same decision the card
+        // behind the pads gets above, for the same reason: every property the
+        // four animate is a *paint* property — each draws itself inside whatever
+        // rect the layout pass gave its node, and none of them is an input to
+        // that rect — and `Demo::frame` rebuilds every node's paint state on
+        // every frame, so a write to one reaches the screen without a link and a
+        // link here would be `mark_dirty` on layout that did not change.
+        //
+        // The two that do have a *layout* input get one. A readout's text is
+        // one, and the four above are linked for it. A row's text is not: the
+        // demo writes it and paints the row itself, in the same frame, and the
+        // row's rect is the list's arithmetic rather than anything a text change
+        // could move — so a link would fire a callback that re-entered an arena
+        // the frame already held, which is a `RefCell` panic on the first scroll
+        // rather than a wrong picture.
+
         // The tree never changes shape, so the order is computed once.
+        //
+        // The list's **rows** are not in it, and cannot be: they do not exist
+        // yet, because `List::sync` builds them on the first frame and
+        // recycles them after that. That is what keeps a row from being drawn
+        // twice — once by this walk, at whatever rect the layout pass gave it,
+        // and once by `List::paint`, which reads the same node's commands and
+        // translates them into place. The content node they hang from *is* in
+        // the order, because `Scroll::new` attached it before this ran.
         let order = paint_order(&nodes.borrow(), root.handle());
         Ok(Demo {
             nodes,
@@ -1165,6 +2152,27 @@ impl Demo {
             slider,
             slider_readout,
             slider_dragging: false,
+            toggle,
+            toggle_aimed: ToggleState {
+                checked: toggle_state,
+                focused: false,
+            },
+            toggle_readout,
+            image,
+            image_fit,
+            image_focused,
+            image_fit_readout,
+            progress,
+            progress_indeterminate,
+            progress_focused,
+            progress_readout,
+            list,
+            rows,
+            first_visible,
+            live_count,
+            free_count,
+            list_readout,
+            list_dragging: false,
         })
     }
 
@@ -1234,6 +2242,12 @@ impl Demo {
     /// `0` and `1` put the slider at its two ends without a pointer, which is the
     /// one thing a drag cannot show: the thumb travelling to a value it was not
     /// given.
+    ///
+    /// `F` cycles the image's fit, `[` and `]` move the progress bar's value by
+    /// [`PROGRESS_STEP`] either way, and `P` switches the bar into its sliding
+    /// mode and back. `0` and `1` and `[` and `]` are the same idea four times
+    /// over — a control a pointer cannot reach, moved by a key — which is the one
+    /// thing the band was missing before these four widgets were in it.
     fn handle_event(&mut self, event: Event) {
         let produced = self.recognizer.process(&event);
 
@@ -1256,6 +2270,10 @@ impl Demo {
                 Keycode::C => self.cycle_text_color(),
                 Keycode::_0 => self.set_slider_value(SLIDER_MIN),
                 Keycode::_1 => self.set_slider_value(SLIDER_MAX),
+                Keycode::F => self.cycle_image_fit(),
+                Keycode::LeftBracket => self.step_progress(-PROGRESS_STEP),
+                Keycode::RightBracket => self.step_progress(PROGRESS_STEP),
+                Keycode::P => self.set_progress_indeterminate(!self.progress_indeterminate.get()),
                 _ => {}
             },
             Event::KeyUp {
@@ -1283,6 +2301,18 @@ impl Demo {
                     self.pressed = Some(index);
                 } else if self.slider_at(x, y).is_some() {
                     self.slider_dragging = true;
+                } else if self.list_at(x, y).is_some() {
+                    // The scrollbar's thumb is grabbed **here**, on the press,
+                    // and nowhere else: the gesture recogniser reports a tap on
+                    // the release and a drag only once the pointer has already
+                    // moved, so it has no "the finger went down on the thumb"
+                    // for the widget to read. A press that missed the thumb grabs
+                    // nothing, and the list keeps scrolling under the finger the
+                    // way it always has.
+                    if let Some(rect) = self.list_rect() {
+                        self.list.scroll().grab_thumb(Offset::new(x, y), rect);
+                    }
+                    self.list_dragging = true;
                 }
             }
             Event::MouseButtonUp {
@@ -1294,18 +2324,30 @@ impl Demo {
                 }
                 self.pressed = None;
                 self.slider_dragging = false;
+                self.list_dragging = false;
+                self.list.scroll().release_thumb();
             }
             // A finger is a pointer too, and a car has no mouse: the same press
             // and release the left button gets, from the touch events SDL delivers
-            // for the same gesture. A canceled touch drops the slider as well as
-            // the pointer, because a canceled finger is one that is gone.
+            // for the same gesture. A canceled touch drops the slider and the list
+            // as well as the pointer, because a canceled finger is one that is
+            // gone.
             Event::FingerDown { x, y, .. } => {
                 if self.slider_at(x, y).is_some() {
                     self.slider_dragging = true;
+                } else if self.list_at(x, y).is_some() {
+                    if let Some(rect) = self.list_rect() {
+                        self.list.scroll().grab_thumb(Offset::new(x, y), rect);
+                    }
+                    self.list_dragging = true;
                 }
             }
             Event::FingerUp { .. } | Event::FingerCanceled { .. } => {
                 self.slider_dragging = false;
+                self.list_dragging = false;
+                // A grab that outlived its finger would be the next gesture's,
+                // and a drag of the content would move the thumb instead.
+                self.list.scroll().release_thumb();
             }
             _ => {}
         }
@@ -1352,9 +2394,22 @@ impl Demo {
         // pointer, and a finger that has travelled past the end of a slider is
         // outside it — which is exactly when the slider most needs to hear about
         // the drag, because the answer is its own end of the range.
+        //
+        // The list is the same case and for the same reason: a `Scroll` has no
+        // grabbed state, so a drag that has left the list's own rect would stop
+        // reaching it, and a finger halfway down a hundred rows is most of the
+        // way outside a viewport ten rows tall.
         if self.slider_dragging && matches!(event.kind(), InputEventKind::Drag { .. }) {
             if let Some(rect) = self.slider_rect() {
                 self.slider.widget.on_event(event, rect);
+                if event.consumed() {
+                    return;
+                }
+            }
+        }
+        if self.list_dragging && matches!(event.kind(), InputEventKind::Drag { .. }) {
+            if let Some(rect) = self.list_rect() {
+                self.list.on_event(event, rect);
                 if event.consumed() {
                     return;
                 }
@@ -1384,12 +2439,29 @@ impl Demo {
 
     /// Offers `event` to the widget at `handle`, and reports whether it took it.
     ///
-    /// A handle that belongs to neither the band nor the slider is nobody's, which
-    /// is what lets one loop serve both without asking what is there.
+    /// A handle that belongs to no widget at all is nobody's, which is what lets
+    /// one loop serve six kinds of control without asking what is there.
+    ///
+    /// The two that answer a `KeyDown` only while they hold focus are the slider
+    /// and the toggle; the list answers through its own
+    /// [`Scroll`](ui_core::widgets::scroll::Scroll), which answers the same way.
+    /// So a `Tab` reaches all of them and none of them takes it.
     fn offer_to(&self, handle: Handle, event: &mut InputEvent) -> bool {
         if handle == self.slider.node() {
             return match self.slider_rect() {
                 Some(rect) => self.slider.widget.on_event(event, rect),
+                None => false,
+            };
+        }
+        if handle == self.toggle.handle() {
+            return match self.toggle_rect() {
+                Some(rect) => self.toggle.on_event(event, rect),
+                None => false,
+            };
+        }
+        if handle == self.list.handle() {
+            return match self.list_rect() {
+                Some(rect) => self.list.on_event(event, rect),
                 None => false,
             };
         }
@@ -1407,8 +2479,13 @@ impl Demo {
     /// them: `GestureRecognizer` gives a wheel event the pointer's position, so
     /// it is routed as a positional event and lands on the node under the cursor
     /// rather than here. The focusable set is rebuilt from the buttons and the
-    /// slider each time, which is what makes a disabled button fall out of the
-    /// order rather than sit in it.
+    /// five other controls each time, which is what makes a disabled button fall
+    /// out of the order rather than sit in it.
+    ///
+    /// The order itself is the tree's paint order, so the band's children are
+    /// what decide it and **the order they were added in is the `Tab` order**:
+    /// the two enabled buttons, the slider, the image, the toggle, the progress
+    /// bar and the list. `tab_steps_over_the_disabled_button` walks it.
     fn focus_navigation(&mut self, event: &InputEvent) -> bool {
         if event.position().is_some() {
             return false;
@@ -1434,10 +2511,24 @@ impl Demo {
             for button in &self.buttons {
                 focus.set_focusable(button.node(), button.is_focusable());
             }
-            // The slider is the last stop in the tree's paint order, so `Tab`
-            // reaches it after the band. It has no disabled state of its own, so
-            // it is always in the order.
-            focus.set_focusable(self.slider.node(), true);
+            // The five that follow the band in the tree's paint order, and so in
+            // the `Tab` order. None of them has a disabled state of its own, so
+            // every one of them is in the order always — which is not the same as
+            // saying every one of them answers every key: `offer_to` is what
+            // decides, and a widget with no key of its own declines.
+            //
+            // The **list's** node is the one registered, not the content node its
+            // rows hang from: a row is not a control, and registering the content
+            // node would put a `Tab` stop on the inside of a viewport.
+            for handle in [
+                self.slider.node(),
+                self.image.handle(),
+                self.toggle.handle(),
+                self.progress.handle(),
+                self.list.handle(),
+            ] {
+                focus.set_focusable(handle, true);
+            }
             // Re-entering the order where focus already is. `Focus` starts with
             // nothing focused, so without this a wheel turned twice in a row
             // would walk from the top both times, and Shift+Tab from the first
@@ -1458,6 +2549,12 @@ impl Demo {
 
     /// Records which control holds focus, and writes the flag each widget's
     /// `focused` property holds, so the rings move.
+    ///
+    /// Three of the five that follow the band have a `focused` property to
+    /// write — the slider, the toggle and the list's embedded scroll — and the
+    /// other two, the progress bar and the image, have none, so their readouts
+    /// say where focus is in words instead. See `progress_focused` and
+    /// `image_focused`.
     fn set_focus(&mut self, next: Option<Handle>) {
         self.focused = next;
         let focused = self.focused;
@@ -1472,6 +2569,17 @@ impl Demo {
         if self.slider.widget.focused.get() != slider_wanted {
             self.slider.widget.focused.set(slider_wanted);
         }
+        let toggle_wanted = Some(self.toggle.handle()) == focused;
+        if self.toggle.focused.get() != toggle_wanted {
+            self.toggle.focused.set(toggle_wanted);
+        }
+        let list_wanted = Some(self.list.handle()) == focused;
+        if self.list.scroll().focused.get() != list_wanted {
+            self.list.scroll().focused.set(list_wanted);
+        }
+        self.progress_focused
+            .set(Some(self.progress.handle()) == focused);
+        self.image_focused.set(Some(self.image.handle()) == focused);
     }
 
     /// Advances the clocks by one frame's worth of time, lays the tree out in
@@ -1483,19 +2591,72 @@ impl Demo {
     /// clock is ticked alongside the pads': a theme switch is an animation
     /// like any other, and its frames have to land before the pass too. Each
     /// button ticks its own clock, which is the same order for the same reason.
+    ///
+    /// The **list's** frame comes after the layout pass and not with the rest,
+    /// because it is the one step here that needs the rect the pass has just
+    /// given it: `List::sync` is what attaches a row, and a row's own size is a
+    /// fraction of the viewport's. A frame that skipped it would scroll and
+    /// allocate nothing, which is what `List::sync`'s own documentation calls a
+    /// list that has never been called.
+    ///
+    /// The arena is therefore borrowed **twice** rather than once, and the split
+    /// is not tidiness. The three numbers the list's readout names are properties
+    /// its text is bound to, so writing one recomputes that text, and the text's
+    /// own `on_change` link reaches the arena to mark its node dirty — which a
+    /// frame already holding the arena refuses, with a `RefCell` panic on the
+    /// first frame rather than on anything a test could have found by reading the
+    /// numbers. The same is true of every bound readout in the demo, and the
+    /// reason the counter's is written from a button's callback rather than from
+    /// here.
     fn frame(&mut self, size: Size, delta: Duration) {
         let _ = self.clock.tick(delta);
         let _ = self.theme.tick(delta);
         self.track_hover();
         self.sync_button_state();
         self.sync_slider_state();
+        self.sync_toggle_state();
         for button in &self.buttons {
             let _ = button.widget.tick(delta);
         }
         let _ = self.slider.widget.tick(delta);
+        // The toggle's own thumb slide, the bar's value and — the reason it is
+        // worth a line of its own — the *loop*: `Progress::tick` aims the next
+        // leg of the slide on the tick the last one arrives, so a bar in
+        // indeterminate mode that has been aimed once keeps moving without the
+        // demo coming back to it.
+        let _ = self.toggle.tick(delta);
+        let _ = self.progress.tick(delta);
+        let _ = self.list.scroll().tick(delta);
+
+        let list_rect: Option<Rect> = {
+            let mut nodes = self.nodes.borrow_mut();
+            Layout::new(&mut nodes).layout(self.root, Constraints::tight(size));
+            // The list's viewport, read off its own node. It is an owned value
+            // because this borrow ends with the block and the row painting at the
+            // end of the frame wants it too.
+            let rect: Option<Rect> = nodes
+                .get(self.list.handle())
+                .and_then(|node| node.layout().rect())
+                .map(Into::into);
+            if let Some(rect) = rect {
+                self.list.sync(&mut nodes, rect);
+            }
+            rect
+        };
+
+        // The three numbers the list's readout names, read after the sync and
+        // not before: they are what the sync decided, and a readout written
+        // before it would name last frame's rows.
+        self.first_visible.set(
+            self.list
+                .visible_items()
+                .first()
+                .map_or(0, |(index, _)| *index),
+        );
+        self.live_count.set(self.list.visible_items().len());
+        self.free_count.set(self.list.free_len());
 
         let mut nodes = self.nodes.borrow_mut();
-        Layout::new(&mut nodes).layout(self.root, Constraints::tight(size));
 
         for handle in self.order.iter().copied() {
             let Some(node) = nodes.get_mut(handle) else {
@@ -1545,6 +2706,31 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
+            // The three widget nodes that paint themselves with nothing but a
+            // rect. Each is the widget's **own** node, which is the whole of what
+            // it takes to put one of them on the screen: `order` reaches it, the
+            // commands go on it, and `draw` sends it.
+            if handle == self.toggle.handle()
+                || handle == self.image.handle()
+                || handle == self.progress.handle()
+            {
+                let commands = match node.layout().rect() {
+                    Some(rect) if handle == self.toggle.handle() => self.toggle.paint(rect.into()),
+                    Some(rect) if handle == self.image.handle() => self.image.paint(rect.into()),
+                    Some(rect) => self.progress.paint(rect.into()),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+
+            // The list's node is **not** painted here, and neither is the content
+            // node its rows hang from. The rows are painted further down, in
+            // their own coordinates, and `List::paint` reads those and translates
+            // them; painting either node from this walk would draw every row a
+            // second time, at the rect the layout pass gave it rather than at the
+            // one its index implies. Both fall through to the pad arm and out of
+            // it, which is where a node that is nobody's ends up.
             let Some(pad) = self.pads.iter().find(|pad| pad.node == handle) else {
                 continue;
             };
@@ -1566,60 +2752,102 @@ impl Demo {
         // labels are reached through the panel, not as its siblings.
         let text_size = self.text_size;
         for (demo_label, &handle) in self.labels.iter().zip(self.label_nodes.iter()) {
-            let Some(node) = nodes.get_mut(handle) else {
-                continue;
-            };
-            let Some(rect) = node.layout().rect() else {
-                continue;
-            };
-            let mut options = demo_label.options;
-            options.line_height = self.metrics.line_height(text_size);
-            let commands = demo_label.label.paint(rect.into(), &options, &|ch: char| {
-                self.metrics.advance(ch, text_size)
-            });
-            *node.paint_mut() = PaintState::from_commands(commands);
+            let rect = nodes
+                .get(handle)
+                .and_then(|node| node.layout().rect())
+                .map(Into::into);
+            record_label(
+                &mut nodes,
+                handle,
+                demo_label,
+                &self.metrics,
+                text_size,
+                rect,
+            );
         }
 
-        // The click counter is reached through the band, so it is painted the
-        // same way the panel's labels are.
-        {
-            let Some(node) = nodes.get_mut(self.counter.label.handle()) else {
-                return;
-            };
-            let Some(rect) = node.layout().rect() else {
-                return;
-            };
-            let mut options = self.counter.options;
-            options.line_height = self.metrics.line_height(BUTTON_FONT);
-            let commands = self
-                .counter
-                .label
-                .paint(rect.into(), &options, &|ch: char| {
-                    self.metrics.advance(ch, BUTTON_FONT)
-                });
-            *node.paint_mut() = PaintState::from_commands(commands);
+        // The band's own labels, which are reached through the band rather than
+        // as its siblings. They are painted after the widgets they report on, so
+        // a number is on top of the control it is a number about — the slider's
+        // readout over the slider has been the rule since task 14.
+        for (readout, font) in [
+            (&self.counter, BUTTON_FONT),
+            (&self.slider_readout, BUTTON_FONT),
+            (&self.toggle_readout, BUTTON_FONT),
+            (&self.image_fit_readout, BUTTON_FONT),
+            (&self.progress_readout, BUTTON_FONT),
+            (&self.list_readout, LIST_FONT),
+        ] {
+            let handle = readout.label.handle();
+            let rect = nodes
+                .get(handle)
+                .and_then(|node| node.layout().rect())
+                .map(Into::into);
+            record_label(&mut nodes, handle, readout, &self.metrics, font, rect);
         }
 
-        // And the slider's readout, which is reached through the band as well.
-        // It is painted last of all so the text is on top of the slider it is
-        // reporting.
-        {
-            let Some(node) = nodes.get_mut(self.slider_readout.label.handle()) else {
-                return;
-            };
-            let Some(rect) = node.layout().rect() else {
-                return;
-            };
-            let mut options = self.slider_readout.options;
-            options.line_height = self.metrics.line_height(BUTTON_FONT);
-            let commands = self
-                .slider_readout
-                .label
-                .paint(rect.into(), &options, &|ch: char| {
-                    self.metrics.advance(ch, BUTTON_FONT)
-                });
-            *node.paint_mut() = PaintState::from_commands(commands);
+        // The list's own frame, last of all and outside the borrow above: its
+        // rows have to be painted first, and painting them writes a row's text,
+        // and a text write is a property write. The rows carry no `on_change`
+        // link — see the note in `Demo::new` — so nothing here reaches back into
+        // the arena, and one borrow is enough.
+        if let Some(rect) = list_rect {
+            self.paint_rows(&mut nodes, rect);
+            let commands = self.list.paint(&nodes, rect);
+            if let Some(node) = nodes.get_mut(self.list.handle()) {
+                *node.paint_mut() = PaintState::from_commands(commands);
+            }
         }
+    }
+
+    /// Writes each live row's text and paints it, in the row's **own**
+    /// coordinates.
+    ///
+    /// A row's recorded commands are row-local — the origin is the row's own top
+    /// left — because [`List::paint`] reads them and translates them by
+    /// [`List::item_rect`]. A row is recycled, so a row that baked in a window
+    /// position would be in the wrong place the moment it was attached for a
+    /// different index, and the demo writes the index on instead.
+    ///
+    /// The background is the theme's `Surface`, so a row reads as a row and the
+    /// list reads as a panel rather than as loose text on the window. It is drawn
+    /// first, in the row's own box, so the text is on top of it.
+    fn paint_rows(&self, nodes: &mut Arena<WidgetNode>, list_rect: Rect) {
+        let background = self.row_background();
+        let mut rows = self.rows.borrow_mut();
+        for &(index, handle) in self.list.visible_items() {
+            let Some(row) = rows.iter_mut().find(|row| row.node == handle) else {
+                continue;
+            };
+            row.label.label.text.set(row_text(index));
+            let area = Rect::new(0.0, 0.0, list_rect.width, LIST_ITEM_HEIGHT);
+            let mut painter = Painter::new();
+            painter.rect(area, background);
+            let mut commands = painter.finish();
+            let mut options = row.label.options;
+            options.line_height = self.metrics.line_height(LIST_FONT);
+            let text = Rect::new(
+                ROW_PADDING,
+                ROW_PADDING,
+                area.width - ROW_PADDING * 2.0,
+                area.height - ROW_PADDING * 2.0,
+            );
+            commands.extend(row.label.label.paint(text, &options, &|ch: char| {
+                self.metrics.advance(ch, LIST_FONT)
+            }));
+            if let Some(node) = nodes.get_mut(handle) {
+                *node.paint_mut() = PaintState::from_commands(commands);
+            }
+        }
+    }
+
+    /// Returns the colour a list row is painted behind its text: the theme's
+    /// `Surface`, or black if the theme ever holds something else there.
+    fn row_background(&self) -> Color {
+        self.theme
+            .get(ThemeToken::Surface)
+            .as_color()
+            .unwrap_or(Color::new(0, 0, 0, 255))
     }
 
     /// Writes each button's `hovered` flag from where the pointer is.
@@ -1702,6 +2930,31 @@ impl Demo {
         }
     }
 
+    /// Re-aims the toggle when the state its appearance is derived from has
+    /// moved.
+    ///
+    /// The same two records as [`Demo::sync_button_state`] and the same reason:
+    /// `Toggle::animate_to_state` is what starts the thumb's slide and the pill's
+    /// colour transition, and aiming it on every frame would restart those
+    /// transitions on every frame. **Nothing else aims it** — a tap and an
+    /// activation key write `checked` and stop there, and a caller that never
+    /// re-aims gets a toggle that is *on* and draws as *off*, because the drawn
+    /// state is the transition's and the transition never started.
+    ///
+    /// It is called before the tick, so the frame in which the state moves is
+    /// the frame the transition starts on.
+    fn sync_toggle_state(&mut self) {
+        let wanted = ToggleState {
+            checked: self.toggle.checked.get(),
+            focused: self.toggle.focused.get(),
+        };
+        if self.toggle_aimed != wanted {
+            self.toggle_aimed = wanted;
+            self.toggle
+                .animate_to_state(Motion::from_theme(&self.theme));
+        }
+    }
+
     /// Puts the slider at `value` without a pointer having asked for it, and
     /// carries the thumb there.
     ///
@@ -1730,8 +2983,73 @@ impl Demo {
     /// Hands the recorded commands to the renderer, in paint order.
     fn draw(&mut self, renderer: &mut Renderer) {
         let mut nodes = self.nodes.borrow_mut();
-        for handle in self.order.iter().copied() {
-            renderer.draw_node(handle, &mut nodes);
+        let clips = self.frame_clips(&nodes);
+        for (handle, clip) in self.order.iter().copied().zip(clips) {
+            renderer.draw_node_clipped(handle, &mut nodes, clip);
+        }
+    }
+
+    /// Returns the clip for every node in paint order, positionally matching
+    /// [`Demo::order`].
+    ///
+    /// **This is the whole of the frame's clipping, in one place, and the frame
+    /// loop uses it rather than deciding inline.** That is not tidiness: an
+    /// earlier version had the loop call `clip_for` itself, and a mutation that
+    /// inlined the same logic into the loop instead sailed through every test,
+    /// because the tests were calling `clip_for` and the defect was in a caller
+    /// of it. A test that exercises a helper cannot see a call site that stopped
+    /// using the helper. One function, used by the loop and by the tests, closes
+    /// that.
+    ///
+    /// The rects come from the `nodes` the caller already borrows, rather than
+    /// from `self`: [`Demo::draw`] holds the arena mutably for the whole loop,
+    /// so reaching through `self` would be a `RefCell` double borrow, which
+    /// panics on the first frame instead of failing a test.
+    fn frame_clips(&self, nodes: &Arena<WidgetNode>) -> Vec<Option<Rect>> {
+        let list = self.list.handle();
+        self.order
+            .iter()
+            .map(|handle| {
+                let rect = nodes
+                    .get(*handle)
+                    .and_then(|node| node.layout().rect())
+                    .map(Into::into);
+                Demo::clip_for(*handle, list, rect)
+            })
+            .collect()
+    }
+
+    /// Returns the rect the node at `handle` must be clipped to, or `None` for
+    /// the whole window. `rect` is that node's own laid-out rect.
+    ///
+    /// A free function over its arguments rather than a method, because
+    /// [`Demo::draw`] already holds the arena mutably and a method would have to
+    /// borrow it again — the same `RefCell` double borrow that
+    /// [`ui_core::input::route`] was documented around. One
+    /// definition, callable from both the frame loop and a test.
+    ///
+    /// **The list is the only clipped node here**, and it is the reason this
+    /// function exists. A scrolling viewport's rows are laid out in the content's
+    /// own coordinates and drawn at `viewport.y + index * item_height - offset`,
+    /// so the topmost and bottommost rows are drawn **half outside the viewport by
+    /// design** — that is what makes a smooth scroll rather than a jumping one.
+    /// With nothing to clip them they were drawn on top of whatever is behind the
+    /// list: a row's text appeared over the window background above the panel, and
+    /// then vanished. It read as the list's first row jumping about.
+    ///
+    /// `List::paint` cannot fix this on its own, and the reason is worth writing
+    /// down: a [`ui_core::paint::DrawCommand::Text`] carries an `x`, a `y` and a string and **no
+    /// width**, so nothing outside the text pipeline can tell how far a run
+    /// reaches, and trimming one is not something that can be done from outside
+    /// it. `scroll::clip_commands` can therefore only drop a command that is
+    /// *wholly* outside — which is the limitation it documents — and the
+    /// half-row needs the GPU. So it gets the GPU: a scissor, carried on the
+    /// batch and set at submission by [`Renderer::draw_node_clipped`].
+    fn clip_for(handle: Handle, list: Handle, rect: Option<Rect>) -> Option<Rect> {
+        if handle == list {
+            rect
+        } else {
+            None
         }
     }
 
@@ -1754,6 +3072,9 @@ impl Demo {
         // `switch_to`, which takes it by value.
         let palette = Palette::from_theme(&new_theme);
         let slider_palette = SliderPalette::from_theme(&new_theme);
+        let toggle_palette = TogglePalette::from_theme(&new_theme);
+        let progress_palette = ProgressPalette::from_theme(&new_theme);
+        let scroll_palette = ScrollPalette::from_theme(&new_theme);
         let motion = Motion::from_theme(&new_theme);
         self.theme.switch_to(new_theme, THEME_TRANSITION);
         for button in &mut self.buttons {
@@ -1762,6 +3083,63 @@ impl Demo {
         }
         self.slider.widget.set_palette(slider_palette);
         self.slider.widget.animate_to_state(motion);
+        self.toggle.set_palette(toggle_palette);
+        self.toggle.animate_to_state(motion);
+        self.progress.set_palette(progress_palette);
+        // The bar's aim is also what keeps the indeterminate loop going, so it is
+        // re-aimed on a theme switch for the second reason as well as the first:
+        // the colours move on the theme's own transition and the slide carries on
+        // where it was.
+        self.progress.animate_to_state(motion);
+        // The list's scrollbar themes with everything else, and now animates with
+        // it: `set_palette` is the door the widget could not otherwise be given,
+        // and `animate_to_state` through `scroll()` is what carries the scrollbar
+        // to the new palette over the theme's own transition.
+        self.list.set_palette(scroll_palette);
+        self.list.scroll().animate_to_state(motion);
+        // The image has no palette at all — an image is not themed, it is a
+        // picture — and a theme switch reaches it nowhere, which is correct: the
+        // window behind it changes and the picture does not.
+    }
+
+    /// Moves the image to the next fit in [`IMAGE_FITS`], wrapping round.
+    ///
+    /// The demo shows **one** image in **one** place and changes what that one
+    /// draws: four copies of the same picture in four fits would be a widget
+    /// gallery, and a gallery is a screenshot rather than a demonstration. The
+    /// label naming the fit is bound to the same property, so it cannot fall out
+    /// of step with what is drawn.
+    fn cycle_image_fit(&mut self) {
+        let next = (self.image_fit.get() + 1) % IMAGE_FITS.len();
+        self.image_fit.set(next);
+        self.image.set_fit(image_fit_at(next));
+    }
+
+    /// Moves the progress bar's value by `step`, and carries its fill there.
+    ///
+    /// The value is snapped to tenths rather than accumulated, so ten presses of
+    /// `]` land on exactly one and a bar is a bar that is full. The fill is
+    /// animated rather than jumped, which is the demo's "changes
+    /// programmatically" case and the same one `0` and `1` are for the slider.
+    fn step_progress(&mut self, step: f32) {
+        let stepped = (self.progress.value.get() + step).clamp(0.0, 1.0);
+        let snapped = (stepped * PROGRESS_TENTHS).round() / PROGRESS_TENTHS;
+        self.progress.value.set(snapped);
+        self.progress
+            .animate_to_state(Motion::from_theme(&self.theme));
+    }
+
+    /// Switches the progress bar between its two modes.
+    ///
+    /// The widget's own setter is the only route into the mode, and it parks the
+    /// slide at the start of a leg; `animate_to_state` is what starts the loop,
+    /// and the loop is then the widget's — [`Progress::tick`] aims the next leg
+    /// itself, so this is called once per switch rather than once a frame.
+    fn set_progress_indeterminate(&mut self, indeterminate: bool) {
+        self.progress.set_indeterminate(indeterminate);
+        self.progress_indeterminate.set(indeterminate);
+        self.progress
+            .animate_to_state(Motion::from_theme(&self.theme));
     }
 
     /// Presses every pad, cascading across them one `STAGGER_STEP` apart.
@@ -1870,9 +3248,7 @@ impl Demo {
     /// that part of the window.
     fn slider_at(&self, x: f32, y: f32) -> Option<()> {
         self.slider_rect()
-            .is_some_and(|rect| {
-                x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
-            })
+            .is_some_and(|rect| over_rect(rect, x, y))
             .then_some(())
     }
 
@@ -1883,13 +3259,125 @@ impl Demo {
     /// measured against, so it is the demo's own statement of where the slider is
     /// rather than each caller working it out — and it is why the widget's
     /// `on_event` takes a rect: a node cannot reach the arena that holds it.
-    fn slider_rect(&self) -> Option<ui_core::paint::Rect> {
+    fn slider_rect(&self) -> Option<Rect> {
+        self.node_rect(self.slider.node())
+    }
+
+    /// Returns the toggle's rect in window coordinates, or `None` if it has not
+    /// been laid out. See [`Demo::slider_rect`].
+    fn toggle_rect(&self) -> Option<Rect> {
+        self.node_rect(self.toggle.handle())
+    }
+
+    /// Returns the image's box in window coordinates, or `None` if it has not
+    /// been laid out. See [`Demo::slider_rect`].
+    ///
+    /// `cfg(test)` because the demo itself paints the image from the node the
+    /// paint walk already holds, and only a test asks where the box is: what
+    /// each fit does *with* that box is a question about the four draws, and
+    /// that is what the fit test asks.
+    #[cfg(test)]
+    fn image_rect(&self) -> Option<Rect> {
+        self.node_rect(self.image.handle())
+    }
+
+    /// Returns `Some(())` when the point is over the list, and `None` when it is
+    /// not.
+    ///
+    /// A press here starts a drag the list is offered every movement of, whether
+    /// or not the pointer is still over it — see [`Demo::list_dragging`].
+    fn list_at(&self, x: f32, y: f32) -> Option<()> {
+        self.list_rect()
+            .is_some_and(|rect| over_rect(rect, x, y))
+            .then_some(())
+    }
+
+    /// Returns the list's rect in window coordinates, or `None` if it has not
+    /// been laid out. See [`Demo::slider_rect`].
+    fn list_rect(&self) -> Option<Rect> {
+        self.node_rect(self.list.handle())
+    }
+
+    /// Returns the node at `handle`'s laid-out rect, converted to the painter's,
+    /// or `None` if the node is not there or has not been placed.
+    ///
+    /// The conversion is because the layout pass and the painters speak two
+    /// `Rect` types, and every widget in the demo is handed the painter's: this
+    /// is the one place that turns one into the other.
+    fn node_rect(&self, handle: Handle) -> Option<Rect> {
         let nodes = self.nodes.borrow();
-        nodes
-            .get(self.slider.node())?
-            .layout()
-            .rect()
-            .map(Into::into)
+        nodes.get(handle)?.layout().rect().map(Into::into)
+    }
+
+    /// Returns the rect of every **leaf** the demo places, with the name of what
+    /// it belongs to.
+    ///
+    /// This is what the two collision tests are about, and the word doing the
+    /// work in it is *leaf*. The demo's tree is [`Container`]s and widgets, and
+    /// a `Container` with no background draws nothing: the band is the whole
+    /// window, the text panel is 900 by 380 of nothing, and the list's content
+    /// node is as tall as its rows. Two of those "overlap" everything, so a test
+    /// over all of them would assert that everything overlaps everything and
+    /// prove nothing.
+    ///
+    /// What a reader can actually see is a set of boxes with names, and this is
+    /// that set: the card the pads sit in, the seven labels of the text panel,
+    /// the three buttons, the counter, the slider and its readout, and then the
+    /// eight things tasks 15 to 18 added. Two tests read it —
+    /// `every_placed_rect_is_inside_the_window` and
+    /// `no_two_placed_rects_overlap` — and the third defect this repository has
+    /// found only by looking at the screen was a control placed over the thing
+    /// next to it, so this is the pair of tests that would have found the first
+    /// two.
+    ///
+    /// It is `cfg(test)` because nothing in the running demo asks: the demo lays
+    /// its widgets out and paints them, and a list of the boxes it placed is
+    /// something only a reader checking the arithmetic wants.
+    #[cfg(test)]
+    fn placed_rects(&self) -> Vec<(&'static str, Rect)> {
+        let nodes = self.nodes.borrow();
+        let rect = |what: &'static str, handle: Handle| {
+            let found = nodes
+                .get(handle)
+                .and_then(|node| node.layout().rect())
+                .map(Into::into);
+            found.map(|rect| (what, rect))
+        };
+        let mut rects: Vec<(&'static str, Rect)> = Vec::new();
+        if let Some(found) = rect("pads card", self.card().handle()) {
+            rects.push(found);
+        }
+        for &handle in &self.label_nodes {
+            if let Some(found) = rect("text panel label", handle) {
+                // Named for what it is rather than for its text: the text moves
+                // with `+` and `-` and a name that moved with it would name a
+                // different failure every run.
+                rects.push(found);
+            }
+        }
+        for index in 0..self.buttons.len() {
+            if let Some(found) = rect("button", self.buttons[index].node()) {
+                rects.push(found);
+            }
+        }
+        for (what, handle) in [
+            ("click counter", self.counter.label.handle()),
+            ("slider", self.slider.node()),
+            ("slider readout", self.slider_readout.label.handle()),
+            ("image", self.image.handle()),
+            ("image fit label", self.image_fit_readout.label.handle()),
+            ("toggle", self.toggle.handle()),
+            ("toggle readout", self.toggle_readout.label.handle()),
+            ("progress bar", self.progress.handle()),
+            ("progress readout", self.progress_readout.label.handle()),
+            ("list", self.list.handle()),
+            ("list readout", self.list_readout.label.handle()),
+        ] {
+            if let Some(found) = rect(what, handle) {
+                rects.push(found);
+            }
+        }
+        rects
     }
 
     /// Returns the centre of the button at `index` in window coordinates, or
@@ -1980,6 +3468,31 @@ impl Demo {
             .get(self.slider.node())
             .map(|node| node.paint().commands().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Returns the draw commands the node at `handle` recorded on the last frame.
+    #[cfg(test)]
+    fn commands_at(&self, handle: Handle) -> Vec<DrawCommand> {
+        let nodes = self.nodes.borrow();
+        nodes
+            .get(handle)
+            .map(|node| node.paint().commands().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Returns the text a readout is showing, as the last frame recorded it.
+    ///
+    /// Every readout in the band is a label whose text is a bound property, so
+    /// "what the readout says" is the only thing a test can observe about the
+    /// chain that produced it — and the thing a reader sees.
+    #[cfg(test)]
+    fn readout_text_of(&self, readout: &DemoLabel) -> Option<String> {
+        self.commands_at(readout.label.handle())
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
     }
 }
 
@@ -2073,8 +3586,14 @@ mod tests {
     }
 
     /// Returns a demo with the stand-in measurements.
+    ///
+    /// The image is the **stand-in**, not the asset: a test may not need a
+    /// filesystem, and the stand-in is a `TextureCache` and a handle with no GPU
+    /// behind it. Everything the tests measure about the image — its box, its
+    /// fit's geometry, its place in the paint order — is the same either way,
+    /// because the two are the same size.
     fn demo() -> Demo {
-        Demo::new(mono_metrics()).unwrap()
+        Demo::new(mono_metrics(), None).unwrap()
     }
 
     /// Lays the demo out once, the way the first frame does, so a test can ask
@@ -2968,10 +4487,15 @@ mod tests {
         // A control that refuses interaction has nothing to be activated by a
         // key, so it is not in the order focus walks.
         //
-        // The walk has four stops since task 14 added the slider: the two
-        // buttons that can be activated, the slider, and back round. The claim
-        // here is still that the disabled one is never visited, and it is stated
-        // over the whole walk rather than over the band's first three.
+        // The walk has **seven** stops since tasks 15 to 18 added the toggle, the
+        // progress bar, the image and the list: the two buttons that can be
+        // activated, and then the five that follow the band in the tree's paint
+        // order — the slider, the image, the toggle, the bar and the list. The
+        // claim here is still that the disabled one is never visited, and it is
+        // stated over the whole walk rather than over the band's first three.
+        //
+        // The eight presses are the seven stops and a wrap, which is what says
+        // the order is a cycle rather than a run that stops.
         let mut demo = laid_out();
         let enabled: Vec<Handle> = demo
             .buttons
@@ -2981,9 +4505,13 @@ mod tests {
             .map(|(_, button)| button.node())
             .collect();
         let slider = demo.slider.node();
+        let image = demo.image.handle();
+        let toggle = demo.toggle.handle();
+        let progress = demo.progress.handle();
+        let list = demo.list.handle();
 
         let mut visited = Vec::new();
-        for _ in 0..4 {
+        for _ in 0..8 {
             demo.handle_event(key(Keycode::Tab));
             visited.push(demo.focused);
         }
@@ -2994,10 +4522,15 @@ mod tests {
                 Some(enabled[0]),
                 Some(enabled[1]),
                 Some(slider),
+                Some(image),
+                Some(toggle),
+                Some(progress),
+                Some(list),
                 Some(enabled[0])
             ],
-            "the walk is press, reset, the slider, and wraps back to press — \
-             never the disabled one in the middle"
+            "the walk is press, reset, the slider, the image, the toggle, the \
+             progress bar, the list, and wraps back to press — never the \
+             disabled one in the middle"
         );
     }
 
@@ -3183,15 +4716,32 @@ mod tests {
     }
 
     #[test]
-    fn every_parent_in_the_demo_is_a_container_widget() {
+    fn every_parent_the_demo_assembles_is_a_container_widget() {
         // The demo used to assemble its own parent nodes, which meant two
         // implementations of the same composition primitive in one repository:
         // the demo's private helper and the widget. Nothing in the suite would
-        // have noticed a new one appearing, so this is the check that a node
-        // with children is a `Container` and not a node the demo wired up.
-        let demo = demo();
+        // have noticed a new one appearing, so this is the check that a parent
+        // the *demo* built is a `Container` and not a node the demo wired up.
+        //
+        // Since task 18 there are two parents in the tree that the demo did not
+        // build and cannot: the node a `List` scrolls in, and the content node it
+        // hangs its rows from. Both belong to the `Scroll` inside the list, the
+        // demo holds no handle that is not already owned by the widget, and
+        // wrapping either in a `Container` would put a node between the scroll
+        // and the rows the scroll is positioning — or between the list and the
+        // scroll itself. They are named here rather than papered over, because
+        // the names are the whole of the exception: **the two parents that are
+        // not the demo's are the two the widget owns**, and a third would fail
+        // this test.
+        //
+        // The demo is **laid out** first, not merely built, because the content
+        // node only becomes a parent once `List::sync` has put a row in it: an
+        // unbuilt list holds ten rows nowhere, and a test run on it would pass
+        // with one exception while the real frame has two.
+        let demo = laid_out();
         let nodes = demo.nodes.borrow();
         let containers: Vec<Handle> = demo.containers.iter().map(Container::handle).collect();
+        let widget_owned = [demo.list.handle(), demo.list.content()];
         let mut parents = 0;
         for &handle in &demo.order {
             let node = nodes.get(handle).expect("a node in the demo's tree");
@@ -3200,15 +4750,20 @@ mod tests {
             }
             parents += 1;
             assert!(
-                containers.contains(&handle),
-                "node {handle:?} has children but is not a Container"
+                containers.contains(&handle) || widget_owned.contains(&handle),
+                "node {handle:?} has children but is neither a Container nor one \
+                 of the two nodes the list's own scroll owns"
             );
         }
-        assert_eq!(parents, containers.len(), "and every one of them is");
+        assert_eq!(
+            parents,
+            containers.len() + 2,
+            "and every one of them is one of those eight"
+        );
         assert_eq!(
             containers.len(),
             6,
-            "the demo has six: the card, the text \
+            "the demo still assembles six: the card, the text \
              column and its panel, the button row and its band, and the root"
         );
     }
@@ -3526,10 +5081,14 @@ mod tests {
         }
         assert_eq!(demo.slider.widget.value.get(), SLIDER_MAX);
 
+        // The thumb's centre stops one radius in from the far end of the node, so
+        // the number is **the widget's own thumb radius** rather than a literal
+        // that went stale when the demo's slider grew: the node is 300 wide and the
+        // radius is 22, so 300 - 22 = 278 px of travel from the left inset.
         let rect = demo.slider_rect().expect("a laid-out slider");
         assert_eq!(
             painted_thumb_x(&demo),
-            rect.x + rect.width - 12.0,
+            rect.x + rect.width - SLIDER_THUMB_RADIUS,
             "and the thumb is a radius in from the far end of the track"
         );
     }
@@ -3558,10 +5117,11 @@ mod tests {
             Some("0 of 100, 0 adjustments")
         );
 
-        // A finger that goes down on the track a little right of the minimum and
-        // drags forty pixels further lands at 70: the point it started from is
-        // where the thumb would be at half, and the drag adds 40 of the 216 the
-        // thumb can travel.
+        // A finger that goes down at the thumb's position for the **middle** of
+        // the range and drags forty pixels further lands past 50, not at 90: the
+        // thumb now has `SLIDER_LENGTH - 2 * SLIDER_THUMB_RADIUS` = 300 - 36 =
+        // 264 px of run rather than 240 - 24 = 216, so 40 px of it is 40/264 of
+        // the range — about 15 points, not 20.
         let (x, y) = demo.slider_at_fraction(0.5).expect("a laid-out slider");
         for event in drag_on(x, y, x + 40.0, y) {
             demo.handle_event(event);
@@ -3569,7 +5129,7 @@ mod tests {
         }
         let readout = demo.readout_text().expect("a readout");
         assert!(
-            readout.starts_with("70 of 100"),
+            readout.starts_with("65 of 100"),
             "the value followed the drag: {readout}"
         );
         assert!(
@@ -3816,5 +5376,1655 @@ mod tests {
             readout_at > slider_at,
             "the readout at {readout_at} is painted after the slider at {slider_at}"
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Tasks 15 to 18: the four widgets the later tasks added, wired into the
+    // band. Everything below is about the wiring, not about the widgets: each
+    // of the four has its own module's own tests for what it draws and what it
+    // does with an event, and repeating them here would be a second opinion
+    // about someone else's code rather than a check of this one.
+    // ---------------------------------------------------------------------
+
+    /// Returns the toggle's centre in window coordinates, or `None` if it has
+    /// not been laid out. This is what a click test aims at.
+    fn toggle_center(demo: &Demo) -> Option<(f32, f32)> {
+        let rect = demo.toggle_rect()?;
+        Some((rect.x + rect.width / 2.0, rect.y + rect.height / 2.0))
+    }
+
+    /// Returns a point inside the list's own rect, `rows` rows down and `across`
+    /// pixels from its left edge.
+    ///
+    /// `across` is default 20 because a tap near the list's right edge would land
+    /// on its scrollbar, which is a `Scroll`'s own geometry rather than the row
+    /// under the finger.
+    fn list_point(demo: &Demo, rows: f32, across: f32) -> Option<(f32, f32)> {
+        let rect = demo.list_rect()?;
+        Some((rect.x + across, rect.y + rows))
+    }
+
+    /// Clicks the toggle and lays the demo out, which is the whole path a click
+    /// takes: two SDL events, the recogniser's tap, and the dispatch that routes
+    /// it to the node under the pointer.
+    fn click_toggle(demo: &mut Demo) {
+        let (x, y) = toggle_center(demo).expect("a laid-out toggle");
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+    }
+
+    #[test]
+    fn the_demo_has_the_four_widgets_the_later_tasks_added() {
+        // The four are in the band, in the order they were added, and each is
+        // wired to something the demo can show: the toggle to a label that names
+        // its state, the progress bar to a label that names its value, the list to
+        // a label that names what it is holding, and the image to a label that
+        // names its fit.
+        let demo = laid_out();
+        for (what, handle) in [
+            ("toggle", demo.toggle.handle()),
+            ("image", demo.image.handle()),
+            ("progress bar", demo.progress.handle()),
+            ("list", demo.list.handle()),
+        ] {
+            assert!(
+                demo.nodes.borrow().get(handle).is_some(),
+                "the {what} has a node of its own in the tree"
+            );
+            assert!(
+                demo.order.contains(&handle),
+                "and the {what} is in the paint order, or it is never drawn"
+            );
+        }
+        assert_eq!(
+            demo.readout_text_of(&demo.toggle_readout).as_deref(),
+            Some("off, 0 changes"),
+            "the toggle starts off and its label says so"
+        );
+        assert_eq!(
+            demo.readout_text_of(&demo.progress_readout).as_deref(),
+            Some("50%, determinate"),
+            "the bar starts at half, which is task 17's acceptance criterion"
+        );
+        assert_eq!(
+            demo.readout_text_of(&demo.image_fit_readout).as_deref(),
+            Some("fit: Contain (stand-in)"),
+            "and the image starts fitted inside its box"
+        );
+    }
+
+    #[test]
+    fn clicking_the_toggle_switches_it_and_its_label_follows() {
+        // "A click turns it on and off, with a readout showing its state": the
+        // readout is checked after each of two clicks, so a toggle that stuck on
+        // would pass a test that only looked at the first.
+        let mut demo = laid_out();
+        assert!(!demo.toggle.checked.get(), "it starts off");
+
+        click_toggle(&mut demo);
+
+        assert!(demo.toggle.checked.get(), "the click turned it on");
+        assert_eq!(
+            demo.readout_text_of(&demo.toggle_readout).as_deref(),
+            Some("on, 1 change"),
+            "and the label says which way it is and how many times it was thrown"
+        );
+
+        click_toggle(&mut demo);
+
+        assert!(
+            !demo.toggle.checked.get(),
+            "and a second click turned it off"
+        );
+        assert_eq!(
+            demo.readout_text_of(&demo.toggle_readout).as_deref(),
+            Some("off, 2 changes"),
+            "with the count following, so the second click is not the first again"
+        );
+    }
+
+    #[test]
+    fn the_toggle_thumb_slides_rather_than_jumping() {
+        // Requirement 4 is a transition, not an end state: a `set` instead of an
+        // animation would be at the far end on the first frame and pass a test
+        // that only looked at where it ended up.
+        let mut demo = laid_out();
+        let rect = demo.toggle_rect().expect("a laid-out toggle");
+        let off_end = demo.toggle.thumb_center(rect).0;
+
+        click_toggle(&mut demo);
+        let midway = demo.toggle.thumb_center(rect).0;
+
+        assert!(
+            midway > off_end && midway < rect.x + rect.width,
+            "one frame in, the thumb is part way from {off_end} to the far end: \
+             {midway} in a track from {} to {}",
+            rect.x,
+            rect.x + rect.width
+        );
+
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(
+            demo.toggle.thumb_center(rect).0,
+            rect.x + rect.width - 12.0,
+            "and it arrives at the on end, a thumb radius in"
+        );
+        assert!(
+            !demo.toggle.is_animating(),
+            "a transition that has arrived has stopped"
+        );
+    }
+
+    #[test]
+    fn the_toggles_pill_changes_colour_between_its_two_states() {
+        // "Track colour changes: off / on" is a colour, so the assertion is on
+        // the colour: two rounded rects of the same size and the same place with
+        // the same shape are the same drawing, and only one of the two numbers
+        // distinguishes them.
+        let mut demo = laid_out();
+        let before = demo.toggle.style().track;
+        assert_eq!(
+            before,
+            demo.toggle.palette().track_off,
+            "off is the off colour"
+        );
+
+        click_toggle(&mut demo);
+
+        assert_ne!(
+            demo.toggle.style().track,
+            before,
+            "and on is a different one"
+        );
+        assert_eq!(
+            demo.toggle.style().track,
+            demo.toggle.palette().track_on,
+            "namely the theme's on colour"
+        );
+    }
+
+    #[test]
+    fn the_toggle_paints_a_pill_and_a_thumb_and_nothing_else() {
+        // "Renders track and thumb" is two shapes on one node, in the order that
+        // makes the thumb's shadow read as a ring rather than a disc.
+        let demo = laid_out();
+        let commands = demo.commands_at(demo.toggle.handle());
+        let pills = commands
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::RoundedRect { .. }))
+            .count();
+        let circles = commands
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::Circle { .. }))
+            .count();
+        assert_eq!(pills, 1, "one pill, an unfocused toggle");
+        assert_eq!(circles, 2, "a thumb, which is a shadow and a thumb on top");
+    }
+
+    #[test]
+    fn a_key_switches_the_toggle_once_it_holds_focus() {
+        // A key is not routed by position, so the toggle has to be the focused
+        // node to hear one — and the demo is what has to put it there.
+        let mut demo = laid_out();
+        demo.handle_event(key(Keycode::Return));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            !demo.toggle.checked.get(),
+            "an unfocused toggle ignores the key, or nothing would ever focus it"
+        );
+
+        // The fifth stop: the two enabled buttons, the slider, the image, and
+        // then the toggle — the band's paint order, which is the `Tab` order.
+        for _ in 0..5 {
+            demo.handle_event(key(Keycode::Tab));
+        }
+        assert_eq!(demo.focused, Some(demo.toggle.handle()), "Tab reached it");
+
+        demo.handle_event(key(Keycode::Return));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.toggle.checked.get(),
+            "and the key switched it once it was the focused control"
+        );
+    }
+
+    #[test]
+    fn the_f_key_cycles_the_image_through_its_four_fits() {
+        // "The demo must show one fit at a time, in one place": there is **one**
+        // image node, and pressing `F` changes what that one draws. Four copies
+        // would be a gallery, and a test that counted four images would pass on
+        // one.
+        let mut demo = laid_out();
+        let image_node = demo.image.handle();
+        let images = |demo: &Demo| {
+            demo.commands_at(image_node)
+                .iter()
+                .filter(|command| matches!(command, DrawCommand::Image { .. }))
+                .count()
+        };
+        assert_eq!(images(&demo), 1, "one image, and one command for it");
+
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            seen.push(demo.image.fit());
+            demo.handle_event(key(Keycode::F));
+            demo.frame(WINDOW, Duration::from_millis(16));
+            assert_eq!(images(&demo), 1, "still one image after cycling");
+        }
+        seen.push(demo.image.fit());
+
+        assert_eq!(
+            seen,
+            vec![
+                ImageFit::Contain,
+                ImageFit::Cover,
+                ImageFit::Fill,
+                ImageFit::None,
+                ImageFit::Contain
+            ],
+            "and the four fits, in the task's order, wrapping back to the first"
+        );
+    }
+
+    #[test]
+    fn the_image_says_which_fit_it_is_showing() {
+        // The label is bound to the same property the key writes, so a cycle
+        // that changed the fit without changing the label would show here.
+        let mut demo = laid_out();
+        let mut said = Vec::new();
+        for _ in 0..4 {
+            said.push(
+                demo.readout_text_of(&demo.image_fit_readout)
+                    .unwrap_or_default(),
+            );
+            demo.handle_event(key(Keycode::F));
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert_eq!(
+            said,
+            vec![
+                "fit: Contain (stand-in)",
+                "fit: Cover (stand-in)",
+                "fit: Fill (stand-in)",
+                "fit: None (stand-in)",
+            ],
+            "one name per fit, in the order the key walks them"
+        );
+    }
+
+    #[test]
+    fn the_four_fits_draw_the_image_in_four_different_places() {
+        // "Contain works", "Cover works", "Fill works" and "None works" are four
+        // claims about geometry, and the numbers that tell them apart are the
+        // drawn rect and the sampled window. A test that only checked "an image
+        // was drawn" would pass on four copies of the same call.
+        let mut demo = laid_out();
+        let bounds = demo.image_rect().expect("a laid-out image");
+        let mut drawn: Vec<(Rect, UvRect)> = Vec::new();
+        for _ in 0..4 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+            let commands = demo.commands_at(demo.image.handle());
+            let found = commands
+                .iter()
+                .find_map(|command| match command {
+                    DrawCommand::Image { rect, uv, .. } => Some((*rect, *uv)),
+                    _ => None,
+                })
+                .expect("the image paints an image");
+            drawn.push(found);
+            demo.handle_event(key(Keycode::F));
+        }
+
+        let (contain, contain_uv) = drawn[0];
+        let (cover, cover_uv) = drawn[1];
+        let (fill, fill_uv) = drawn[2];
+        let (none, none_uv) = drawn[3];
+
+        // The source is 320 by 192 and the box is 220 by 160, so the source is
+        // relatively *wider* than the box: `Contain` binds the width and follows
+        // the shape down, which is 220 by 132, letterboxed inside 160.
+        assert_eq!(contain.width, bounds.width, "Contain binds the width");
+        assert!(
+            (contain.height - 132.0).abs() < 0.01,
+            "and 220 by 132 is the shape of 320 by 192, not {}",
+            contain.height
+        );
+
+        // `Cover` fills the box and crops the image's *width* to the middle of
+        // it, so the same two numbers are not the same picture.
+        assert_eq!(cover, bounds, "Cover is the box itself");
+        assert!(
+            !cover_uv.is_full(),
+            "and it samples a window of it: {cover_uv:?} against {contain_uv:?}"
+        );
+        // Which axis is cropped follows from which side is relatively wider:
+        // the source is 1.67 to 1 and the box is 1.375 to 1, so covering the box
+        // binds the image's **height** and crops its width, and the window
+        // narrows across and not down.
+        assert!(
+            cover_uv.u0 > contain_uv.u0 && cover_uv.u1 < contain_uv.u1,
+            "a narrower window across the texture: {cover_uv:?} against \
+             {contain_uv:?}"
+        );
+        assert_eq!(
+            (cover_uv.v0, cover_uv.v1),
+            (contain_uv.v0, contain_uv.v1),
+            "and the full height, which is the side that was bound"
+        );
+
+        // `Fill` is the box as well, and the difference from `Contain` is that
+        // it does not follow the shape: the same window, drawn on a box of a
+        // different proportion. So the two UVs are equal and the two rects are
+        // not, and that pair is what "ignores aspect ratio" means.
+        assert_eq!(fill, bounds, "Fill is the box as well");
+        assert_ne!(fill, contain, "and not the shape of the image inside it");
+        assert_eq!(
+            fill_uv, contain_uv,
+            "sampling the same window of it, which is what stretches it"
+        );
+
+        // `None` is the source's own size, from the box's own top left, and it is
+        // the one fit that is not the box.
+        assert_eq!(
+            (none.width, none.height),
+            (ASSET_SIZE.0 as f32, ASSET_SIZE.1 as f32),
+            "None is the image at its own size: {none:?}"
+        );
+        assert_eq!(none.x, bounds.x, "from the box's own left edge");
+        assert_eq!(none.y, bounds.y, "and its own top");
+        assert_eq!(
+            none_uv, contain_uv,
+            "and the same window as Contain, unscaled"
+        );
+
+        // And the claim every one of the above is making, stated once: the four
+        // are four different drawings. The UVs are **not** `UvRect::full` and
+        // are not expected to be: a 320 by 192 image is small enough for the
+        // shared atlas, so its window is a window *into the atlas* and only the
+        // comparison between two fits says anything about it.
+        assert_ne!(cover_uv, contain_uv, "Cover and Contain sample differently");
+        assert_ne!(cover_uv, none_uv, "and so does None");
+    }
+
+    #[test]
+    fn the_image_stays_inside_the_window_and_clear_of_its_label_at_every_fit() {
+        // The collision the placement of the fit label has to survive: `None`
+        // draws the image at its own 320 by 192 rather than the box's 220 by
+        // 160, so a label beside the box would be under it in that one mode and
+        // clear of it in the other three. It is below the box, and this is what
+        // says so for all four.
+        let mut demo = laid_out();
+        let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
+        let label = demo
+            .node_rect(demo.image_fit_readout.label.handle())
+            .expect("a laid-out fit label");
+        for _ in 0..4 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+            let drawn = demo
+                .image
+                .destination(demo.image_rect().expect("a laid-out image"));
+            assert!(
+                inside(window, drawn),
+                "the image at {} is inside the window",
+                image_fit_name(demo.image_fit.get())
+            );
+            assert!(
+                !touches(drawn, label),
+                "and clear of the label naming its fit: {drawn:?} against {label:?}"
+            );
+            demo.handle_event(key(Keycode::F));
+        }
+    }
+
+    #[test]
+    fn the_image_paints_with_a_rounded_corner() {
+        // "Rounded corners work" is the radius on the command, not the shape: a
+        // textured quad is a quad whatever the radius, and only the number tells
+        // the shader was asked.
+        let demo = laid_out();
+        let radius = demo
+            .commands_at(demo.image.handle())
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::Image { radius, .. } => Some(*radius),
+                _ => None,
+            })
+            .expect("the image paints an image");
+        assert_eq!(
+            radius, IMAGE_CORNER_RADIUS,
+            "at the radius the demo asked for"
+        );
+        assert!(radius > 0.0, "which is not none");
+    }
+
+    #[test]
+    fn the_bracket_keys_move_the_progress_bars_value_and_stop_at_its_ends() {
+        // The step is a tenth and the ends are 0 and 1, and the readout names the
+        // **value** rather than the drawn one — which on the frame after a press
+        // is a claim, because the two are not the same number then.
+        let mut demo = laid_out();
+        assert_eq!(demo.progress.value.get(), PROGRESS_START);
+
+        demo.handle_event(key(Keycode::RightBracket));
+        assert_eq!(demo.progress.value.get(), 0.6, "one press up is a tenth");
+
+        demo.frame(WINDOW, Duration::from_millis(10));
+        assert!(
+            demo.progress.shown.get() < demo.progress.value.get(),
+            "the drawn value is still on its way from 50 to 60: {} of {}",
+            demo.progress.shown.get(),
+            demo.progress.value.get()
+        );
+        assert_eq!(
+            demo.readout_text_of(&demo.progress_readout).as_deref(),
+            Some("60%, determinate"),
+            "and the readout has already said where the bar is going, which a \
+             readout bound to the animated property would not"
+        );
+
+        demo.handle_event(key(Keycode::LeftBracket));
+        assert_eq!(
+            demo.progress.value.get(),
+            0.5,
+            "and one press down is a tenth"
+        );
+
+        // The clamp, and it is the only part of this that is observable: five
+        // tenths up from a half reaches the top, forty more presses leave it
+        // there rather than at four and a half, and eighty down is the bottom.
+        for _ in 0..5 {
+            demo.handle_event(key(Keycode::RightBracket));
+        }
+        assert_eq!(
+            demo.progress.value.get(),
+            1.0,
+            "five tenths up from a half is the top of the bar"
+        );
+        for _ in 0..40 {
+            demo.handle_event(key(Keycode::RightBracket));
+        }
+        assert_eq!(
+            demo.progress.value.get(),
+            1.0,
+            "and forty more presses leave it at the top"
+        );
+        for _ in 0..80 {
+            demo.handle_event(key(Keycode::LeftBracket));
+        }
+        assert_eq!(
+            demo.progress.value.get(),
+            0.0,
+            "and eighty down is the bottom"
+        );
+    }
+
+    #[test]
+    fn the_progress_bars_fill_animates_to_its_value_rather_than_jumping() {
+        // "Value changes animate smoothly" is two halves, and a `set` instead of
+        // an animation would be at the value on the first frame and pass an
+        // end-only assertion. So the test reads the drawn fill half way.
+        let mut demo = laid_out();
+        // The **second** rounded rect, which is the fill: the track is drawn
+        // first and is the whole width, so the widest of the two is the track and
+        // asking for it would report a fill that never moves.
+        let fill_width = |demo: &Demo| {
+            demo.commands_at(demo.progress.handle())
+                .iter()
+                .filter_map(|command| match command {
+                    DrawCommand::RoundedRect { rect, .. } => Some(rect.width),
+                    _ => None,
+                })
+                .nth(1)
+                .unwrap_or_default()
+        };
+        let start = fill_width(&demo);
+
+        demo.handle_event(key(Keycode::RightBracket));
+        demo.frame(WINDOW, Duration::from_millis(10));
+        let midway = fill_width(&demo);
+
+        assert!(
+            midway > start,
+            "ten milliseconds in, the fill has grown from {start} to {midway}"
+        );
+        assert!(
+            demo.progress.shown.get() < demo.progress.value.get(),
+            "and it is behind the value, not already there: {} of {}",
+            demo.progress.shown.get(),
+            demo.progress.value.get()
+        );
+
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(
+            demo.progress.shown.get(),
+            demo.progress.value.get(),
+            "and it arrives rather than creeping"
+        );
+        assert!(
+            !demo.progress.is_animating(),
+            "a transition that has arrived has stopped"
+        );
+    }
+
+    #[test]
+    fn the_p_key_switches_the_progress_bar_into_its_sliding_mode_and_back() {
+        // "Indeterminate mode shows sliding animation": the two halves are the
+        // mode and the *movement*, and a bar that said it was sliding while its
+        // slide sat still would pass a test on the label alone.
+        let mut demo = laid_out();
+        assert!(!demo.progress.indeterminate(), "it starts determinate");
+        assert_eq!(
+            demo.readout_text_of(&demo.progress_readout).as_deref(),
+            Some("50%, determinate")
+        );
+
+        demo.handle_event(key(Keycode::P));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.progress.indeterminate(),
+            "P put it in indeterminate mode"
+        );
+        assert_eq!(
+            demo.readout_text_of(&demo.progress_readout).as_deref(),
+            Some("50%, sliding"),
+            "and the label followed"
+        );
+
+        let parked = demo.progress.slide.get();
+        for _ in 0..6 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        let moved = demo.progress.slide.get();
+        assert_ne!(
+            moved, parked,
+            "and the bar is sliding, not sitting where it was parked"
+        );
+        assert!(
+            demo.progress.is_animating(),
+            "for as long as it is in this mode, which is the loop the widget owns"
+        );
+
+        demo.handle_event(key(Keycode::P));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(!demo.progress.indeterminate(), "and P again puts it back");
+        assert_eq!(
+            demo.progress.shown.get(),
+            PROGRESS_START,
+            "with the drawn value written at once, not animated in from the slide"
+        );
+    }
+
+    #[test]
+    fn the_progress_bar_paints_a_track_and_a_fill_and_nothing_else() {
+        // "Progress bar renders track and fill" is two rounded rectangles, and
+        // the second test above is what says the second of them is a *fill*.
+        let demo = laid_out();
+        let commands = demo.commands_at(demo.progress.handle());
+        assert_eq!(commands.len(), 2, "a track and a fill");
+        assert!(
+            commands
+                .iter()
+                .all(|command| matches!(command, DrawCommand::RoundedRect { .. })),
+            "and both of them are rounded rectangles"
+        );
+    }
+
+    #[test]
+    fn the_list_holds_a_hundred_rows_and_builds_only_the_ones_it_can_show() {
+        // "Virtualization: only visible items are allocated", on screen and not
+        // only in the widget's own tests: a hundred rows of 28 in a 280-tall
+        // viewport is ten on screen, and the other ninety are not in the tree.
+        let demo = laid_out();
+        assert_eq!(demo.list.item_count(), LIST_ITEM_COUNT);
+        assert_eq!(
+            demo.list.content_height(),
+            LIST_ITEM_COUNT as f32 * LIST_ITEM_HEIGHT
+        );
+        let live = demo.list.visible_items();
+        let expected = (LIST_SIZE.height / LIST_ITEM_HEIGHT) as usize;
+        assert_eq!(live.len(), expected, "ten rows in a ten-row viewport");
+        assert!(
+            live.len() < demo.list.item_count(),
+            "and a tenth of the hundred, so the other {} were never built",
+            demo.list.item_count() - live.len()
+        );
+        assert_eq!(
+            live.iter().map(|(index, _)| *index).collect::<Vec<usize>>(),
+            (0..expected).collect::<Vec<usize>>(),
+            "which are the first ten, at the top of the list"
+        );
+    }
+
+    #[test]
+    fn the_list_says_which_rows_it_is_holding_and_what_is_on_the_free_list() {
+        // "so the *virtualisation* is visible on screen, not just in a test": the
+        // readout is the only place a reader can see that ninety rows are not
+        // there, and the three numbers in it are all the widget's own.
+        let mut demo = laid_out();
+        assert_eq!(
+            demo.readout_text_of(&demo.list_readout).as_deref(),
+            Some("first 0, live 10, free 0, tap -"),
+            "ten rows on screen out of a hundred, and no tap yet"
+        );
+
+        // A drag **down** by exactly three rows: 3 of 28 is 84, and a whole
+        // number of rows is what keeps the count at ten rather than eleven — a
+        // row half off the top is in the tree too, and `visible_range` is a
+        // range, not a count of whole rows. Down is the direction that advances,
+        // since the convention changed on 2026-09-30.
+        let (x, y) = list_point(&demo, 140.0, 20.0).expect("a laid-out list");
+        for event in drag_on(x, y, x, y + 84.0) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+
+        let said = demo
+            .readout_text_of(&demo.list_readout)
+            .expect("the list's readout");
+        assert_eq!(
+            said, "first 3, live 10, free 0, tap -",
+            "three rows down, the same ten in the tree, and the free list empty \
+             because every row that left was reused"
+        );
+        assert!(
+            demo.list
+                .visible_items()
+                .iter()
+                .all(|(index, _)| *index >= 3),
+            "with nothing below the offset left in the tree"
+        );
+    }
+
+    #[test]
+    fn a_tap_on_the_list_reports_the_row_it_hit() {
+        let mut demo = laid_out();
+        // 100 down a viewport whose rows are 28 tall is the fourth row: three
+        // whole rows are above it.
+        let (x, y) = list_point(&demo, 100.0, 20.0).expect("a laid-out list");
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert_eq!(
+            demo.readout_text_of(&demo.list_readout).as_deref(),
+            Some("first 0, live 10, free 0, tap 3"),
+            "a tap a hundred pixels down is the fourth row of 28"
+        );
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_list() {
+        // "Scrolling works via mouse wheel": a wheel event carries the pointer's
+        // position, so it is routed as a positional event and lands on the node
+        // under the cursor rather than on the focused control. A list that only
+        // answered the *focused* one would not move here at all.
+        let mut demo = laid_out();
+        let (x, y) = list_point(&demo, 140.0, 20.0).expect("a laid-out list");
+        assert!(
+            demo.focused.is_none(),
+            "nothing holds focus, so this is not a key"
+        );
+
+        let before = demo.list.scroll().scroll_offset.get();
+        // `y = -1.0` is SDL's "the wheel rolled towards the user", and under the
+        // scrollbar convention the list adopted that is the notch which advances
+        // *down* the document. It used to be `+1.0`; the operator inverted it on
+        // 2026-09-30 because a reader's first instinct is to roll the wheel down.
+        demo.handle_event(Event::MouseWheel {
+            timestamp: 0,
+            window_id: 0,
+            which: 0,
+            x,
+            y: -1.0,
+            direction: sdl3::mouse::MouseWheelDirection::Normal,
+            mouse_x: x,
+            mouse_y: y,
+            integer_x: 0,
+            integer_y: -1,
+        });
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert!(
+            demo.list.scroll().scroll_offset.get() > before,
+            "one notch down moved the list from {before} to {}",
+            demo.list.scroll().scroll_offset.get()
+        );
+    }
+
+    #[test]
+    fn a_drag_past_the_end_of_the_list_still_scrollles_it() {
+        // The finger that has left the viewport is the case that matters, and it
+        // is the reason the demo has a `list_dragging` flag at all: a `Scroll`
+        // has no grabbed state, so a drag offered only to whatever is under the
+        // pointer would stop the moment the pointer left.
+        let mut demo = laid_out();
+        let rect = demo.list_rect().expect("a laid-out list");
+        let bottom = (rect.y + rect.height - 4.0).min(rect.y + 100.0);
+        let (x, y) = list_point(&demo, bottom - rect.y, 20.0).expect("a laid-out list");
+        // **Downwards**, which is the direction that advances — the convention is
+        // *down is later* since 2026-09-30, so the finger leaves the list below
+        // rather than above it.
+        for event in drag_on(x, y, x, y + 400.0) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert!(
+            demo.list.scroll().scroll_offset.get() > 0.0,
+            "a drag that ended far below the list still scrolled it to {}",
+            demo.list.scroll().scroll_offset.get()
+        );
+    }
+
+    /// The demo's scrollbar is drawn at the width the operator asked for, and
+    /// the setter is what put it there.
+    ///
+    /// *"is too narrow, I have issues with pointing on it with my mouse, so doing
+    /// that on tablet with a finger is impossible"* (2026-10-01). The widget's
+    /// own default is still 6, so this test is the only thing standing between
+    /// that report and a repeat of it: it asserts the number that reached the
+    /// list's own draw commands, which is where the complaint was about.
+    #[test]
+    fn the_demos_scrollbar_is_twelve_wide_and_finger_sized() {
+        let demo = laid_out();
+        let rect = demo.list_rect().expect("a laid-out list");
+        let bar = demo
+            .list
+            .scroll()
+            .scrollbar_rect(rect)
+            .expect("a hundred rows in a 280 viewport scrolls, so a bar is drawn");
+
+        assert_eq!(
+            bar.width, SCROLLBAR_THICKNESS,
+            "the width the operator asked for, and the widget's default is 6"
+        );
+        // 2 is the widget's own `SCROLLBAR_MARGIN`, which is private to
+        // `ui_core`; what matters here is that widening the bar did not push it
+        // out of the list.
+        assert_eq!(
+            bar.x + bar.width,
+            rect.x + rect.width - 2.0,
+            "still inset from the list's right edge by the widget's own margin"
+        );
+
+        // And the drawn groove agrees, because a hit target wider than the bar
+        // that is drawn is a target nobody can see.
+        let groove = demo
+            .commands_at(demo.list.handle())
+            .into_iter()
+            .find_map(|command| match command {
+                DrawCommand::RoundedRect { rect, .. } => Some(rect),
+                _ => None,
+            })
+            .expect("the scrollbar's groove is drawn on the list's node");
+        assert_eq!(groove, bar);
+    }
+
+    /// Dragging the scrollbar's thumb moves the **thumb**, at the cursor's speed.
+    ///
+    /// This is the operator's second complaint end to end — *"when I click it and
+    /// drag, it doesn't follow my mouse cursor exactly, it's like something was
+    /// keeping it from moving faster"* — measured through the real event path
+    /// (an SDL finger down, a motion, and the recogniser's own `Drag`).
+    ///
+    /// The arithmetic is the demo's own geometry: a 280-tall viewport over 2 800
+    /// of rows gives a thumb of 28 travelling a run of 252, against a maximum
+    /// offset of 2 520. So a 40-pixel drag of the thumb is **400** pixels of
+    /// offset, and the content-drag path this replaced would have answered **40**.
+    /// The two differ by ten, which is the size of the bug.
+    #[test]
+    fn a_drag_on_the_scrollbars_thumb_moves_the_thumb_and_not_the_drags_delta() {
+        let mut demo = laid_out();
+        let rect = demo.list_rect().expect("a laid-out list");
+        // The thumb at offset zero: 280 * 280 / 2 800 is 28 of the 280.
+        let thumb = Rect::new(rect.x + rect.width - 14.0, rect.y, 12.0, 28.0);
+        let (x, y) = (thumb.x + thumb.width / 2.0, thumb.y + thumb.height / 2.0);
+
+        assert_eq!(
+            demo.list.scroll().scroll_offset.get(),
+            0.0,
+            "the list opens at the top"
+        );
+
+        for event in drag_on(x, y, x, y + 40.0) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+
+        let after = demo.list.scroll().scroll_offset.get();
+        assert!(
+            (after - 400.0).abs() < 0.5,
+            "40 pixels along a run of 252 is a fraction of 0.1587, and that \
+             fraction of 2 520 is 400 — the list moved to {after}, not the 40 the \
+             drag's own delta would have given"
+        );
+    }
+
+    /// A drag that starts on a **row** still scrolls the content, at the
+    /// finger's own speed, which is the behaviour the thumb must not have taken.
+    #[test]
+    fn a_drag_on_a_row_still_scrolls_the_content_by_the_drags_own_delta() {
+        let mut demo = laid_out();
+        let rect = demo.list_rect().expect("a laid-out list");
+        // Well left of the scrollbar, and inside row 1.
+        let (x, y) = (rect.x + 20.0, rect.y + 40.0);
+
+        for event in drag_on(x, y, x, y + 40.0) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+
+        assert_eq!(
+            demo.list.scroll().scroll_offset.get(),
+            40.0,
+            "a drag on a row is a scroll of the content, one for one"
+        );
+    }
+
+    /// A press on the scrollbar no longer selects the row behind it.
+    ///
+    /// The same complaint, second half: the strip is 12 pixels of a 270-wide
+    /// list, and before this it named whichever row was under it.
+    #[test]
+    fn a_click_on_the_scrollbar_selects_no_row() {
+        let mut demo = laid_out();
+        let rect = demo.list_rect().expect("a laid-out list");
+        let bar = demo
+            .list
+            .scroll()
+            .scrollbar_rect(rect)
+            .expect("a bar is drawn");
+
+        // The scrollbar first, because the readout is a **sticky** property: it holds
+        // the last tap and is never cleared, so a second click cannot be told
+        // from the first by reading it. Clicking the bar first is what makes
+        // "nothing happened" observable at all.
+        let (down, up) = click_at(bar.x + bar.width / 2.0, rect.y + 40.0);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let readout = demo.readout_text_of(&demo.list_readout).expect("a readout");
+        assert!(
+            readout.contains("tap -"),
+            "a click on the scrollbar selects nothing, because a scrollbar is not \
+             a row — the readout says {readout:?}"
+        );
+
+        // And a row, for the control: the same gesture a few pixels to the left
+        // does select one, so the assertion above is about the bar and not about
+        // clicks being off in this build.
+        let (down, up) = click_at(rect.x + 20.0, rect.y + 40.0);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let readout = demo.readout_text_of(&demo.list_readout).expect("a readout");
+        assert!(
+            readout.contains("tap 1"),
+            "and a click 20 pixels to the left selects the second row, so the \
+             gesture and the routing both work — the readout says {readout:?}"
+        );
+    }
+
+    #[test]
+    fn an_arrow_key_scrolls_the_list_once_it_holds_focus() {
+        let mut demo = laid_out();
+        for _ in 0..7 {
+            demo.handle_event(key(Keycode::Tab));
+        }
+        assert_eq!(
+            demo.focused,
+            Some(demo.list.handle()),
+            "Tab reached the list"
+        );
+
+        let before = demo.list.scroll().scroll_offset.get();
+        demo.handle_event(key(Keycode::Down));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.list.scroll().scroll_offset.get() > before,
+            "one press of the down arrow scrolled it from {before} to {}",
+            demo.list.scroll().scroll_offset.get()
+        );
+    }
+
+    #[test]
+    fn the_list_draws_its_rows_where_their_indices_say_and_not_a_second_time() {
+        // The hazard `List::paint` exists to be handled: a row's commands are
+        // **row-local** and are translated by the widget, so a row whose commands
+        // were also recorded on its own node at the rect the layout pass gave it
+        // would be drawn twice — once at the origin and once in place. The
+        // check is both halves: the rows are **not** in the paint order, and the
+        // text on the list's own node is at the row's own place.
+        let demo = laid_out();
+        for (_, handle) in demo.list.visible_items() {
+            assert!(
+                !demo.order.contains(handle),
+                "a row at {handle:?} is in the paint order, so it is drawn twice"
+            );
+        }
+        let rect = demo.list_rect().expect("a laid-out list");
+        let text_x: Vec<f32> = demo
+            .commands_at(demo.list.handle())
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Text { x, .. } => Some(*x),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            text_x.len(),
+            demo.list.visible_items().len(),
+            "one text run per row on the list's node, and no more"
+        );
+        assert!(
+            text_x
+                .iter()
+                .all(|x| *x > rect.x && *x < rect.x + rect.width),
+            "and every one of them is inside the list's own rect: {text_x:?}"
+        );
+        // Row 0's own rect starts at the list's top left, so the first row's text
+        // is the list's left edge plus the row's padding — the number that says
+        // it was translated rather than drawn where the row node happened to be.
+        assert_eq!(
+            text_x[0],
+            rect.x + ROW_PADDING,
+            "row zero, inset by the padding"
+        );
+    }
+
+    #[test]
+    fn the_list_labels_each_row_with_its_own_index() {
+        // The factory is given no index, because a row is recycled; the demo
+        // writes the index on. So the *text* of a row is the demo's and it has to
+        // be there, on every row, in ascending order.
+        let demo = laid_out();
+        let nodes = demo.nodes.borrow();
+        let rows = demo.rows.borrow();
+        let mut said = Vec::new();
+        for (index, handle) in demo.list.visible_items() {
+            assert!(
+                rows.iter().any(|row| row.node == *handle),
+                "a row at {handle:?} is one the factory built"
+            );
+            said.push((
+                *index,
+                nodes
+                    .get(*handle)
+                    .map(|node| node.paint().commands().len())
+                    .unwrap_or_default(),
+            ));
+        }
+        assert_eq!(
+            said.iter().map(|(index, _)| *index).collect::<Vec<usize>>(),
+            (0..said.len()).collect::<Vec<usize>>(),
+            "the rows on screen are the first ten, in order"
+        );
+        for (index, commands) in said {
+            assert!(
+                commands >= 2,
+                "row {index} recorded a background and a text run, and recorded \
+                 {commands}"
+            );
+        }
+        drop(nodes);
+        // The two commands are the row's, and they are **row-local**: the
+        // background is the row's own box from its own top left, and the text is
+        // that box inset by the padding. `List::paint` is what puts them on the
+        // screen, by translating them by the row's index — a background already
+        // at a window position would be translated a second time and land
+        // nowhere near its row, which no assertion about *how many* commands a
+        // row holds could see.
+        for &(index, handle) in demo.list.visible_items() {
+            let commands = demo.commands_at(handle);
+            let background = commands
+                .iter()
+                .find_map(|command| match command {
+                    DrawCommand::Rect { rect, .. } => Some(*rect),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("row {index} painted no background"));
+            assert_eq!(
+                (background.x, background.y),
+                (0.0, 0.0),
+                "row {index}'s background is its own box from its own top left"
+            );
+            assert_eq!(
+                (background.width, background.height),
+                (LIST_SIZE.width, LIST_ITEM_HEIGHT),
+                "and it is the list's width by one row's height"
+            );
+        }
+    }
+
+    #[test]
+    fn the_list_recycles_a_row_rather_than_building_a_second_one() {
+        // "Items recycle when scrolling", and the number that says it is the
+        // node count: a list that allocated a node per row on the way past would
+        // have grown by one for every row it scrolled over.
+        let mut demo = laid_out();
+        let before = demo.nodes.borrow().len();
+        let (x, y) = list_point(&demo, 140.0, 20.0).expect("a laid-out list");
+        // Downwards, since the convention is *down is later*.
+        for event in drag_on(x, y, x, y + 900.0) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        let after = demo.nodes.borrow().len();
+        // At most **one** more node than the ten that fit: a row half off the
+        // top and a row half off the bottom are both in the tree, so eleven can
+        // be live. Thirty-odd rows were scrolled past and the arena grew by at
+        // most one, which is the whole of "items recycle when scrolling" — a
+        // list that allocated a node per row would have grown by thirty.
+        assert!(
+            after <= before + 1 && after > before,
+            "scrolled past {} rows and the arena went from {before} to {after}",
+            (900.0 / LIST_ITEM_HEIGHT) as usize
+        );
+        assert!(
+            demo.list.free_len() <= demo.list.visible_items().len() + 1,
+            "with a free list no longer than the rows on screen: {} free against \
+             {} live",
+            demo.list.free_len(),
+            demo.list.visible_items().len()
+        );
+    }
+
+    #[test]
+    fn a_scrolled_list_clamps_at_its_last_row() {
+        // "Scroll offset is clamped to [0, max_scroll]": a drag of the length of
+        // the whole content must stop at the end rather than run into ninety rows
+        // of nothing.
+        let mut demo = laid_out();
+        let (x, y) = list_point(&demo, 140.0, 20.0).expect("a laid-out list");
+        // Downwards, since the convention is *down is later*.
+        for event in drag_on(x, y, x, y + 20000.0) {
+            demo.handle_event(event);
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        let rect = demo.list_rect().expect("a laid-out list");
+        assert_eq!(
+            demo.list.scroll().scroll_offset.get(),
+            demo.list.max_scroll_for(rect),
+            "the whole content is 100 rows of 28 and the viewport is 280 of them"
+        );
+        assert_eq!(
+            demo.list.visible_items().last().map(|(index, _)| *index),
+            Some(LIST_ITEM_COUNT - 1),
+            "and the last row on screen is the last row there is"
+        );
+    }
+
+    #[test]
+    fn every_placed_rect_is_inside_the_window() {
+        // The window grew to 1280 by 720 so that four more widgets fitted, and
+        // every one of them is placed by hand. A hand-placed box is a claim about
+        // the window, and a claim about the window is the kind of thing that is
+        // only ever true until somebody moves something.
+        let demo = laid_out();
+        let rects = demo.placed_rects();
+        assert!(
+            rects.len() > 20,
+            "the demo places {} boxes, so this is walking the whole set",
+            rects.len()
+        );
+        let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
+        for (what, rect) in rects {
+            assert!(
+                inside(window, rect),
+                "the {what} is at {rect:?}, which is outside the {WINDOW:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_two_placed_rects_overlap() {
+        // The collision three previous tasks each found by eye. A control placed
+        // over the thing next to it is laid out correctly on its own, so neither
+        // the control's tests nor its own layout pass can see it — and both of
+        // this repository's first two rendering defects were a *drawing* that was
+        // right about everything except where it was.
+        let demo = laid_out();
+        let rects = demo.placed_rects();
+        for (index, (what, rect)) in rects.iter().enumerate() {
+            for (other_what, other) in &rects[index + 1..] {
+                assert!(
+                    !touches(*rect, *other),
+                    "the {what} at {rect:?} and the {other_what} at {other:?} share \
+                     a pixel"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_new_widgets_sit_clear_of_the_things_already_in_the_window() {
+        // The same claim, one at a time, in the words the previous three tasks
+        // used: the toggle is below the slider's readout, the image is right of
+        // the card of pads, and the list is right of the click counter. The pair
+        // of tests above says no two boxes touch; this one says which boxes the
+        // new ones are *not* allowed to be near, so a failure names the
+        // neighbour rather than reporting forty pairs.
+        let demo = laid_out();
+        let at = |handle: Handle| demo.node_rect(handle).expect("a laid-out node");
+
+        let slider_readout = at(demo.slider_readout.label.handle());
+        let toggle = at(demo.toggle.handle());
+        assert!(
+            toggle.y > slider_readout.y + slider_readout.height,
+            "the toggle at {toggle:?} is below the slider's readout at \
+             {slider_readout:?}"
+        );
+
+        let card = at(demo.card().handle());
+        let image = at(demo.image.handle());
+        assert!(
+            image.x > card.x + card.width,
+            "the image at {image:?} is right of the card at {card:?}"
+        );
+
+        let counter = at(demo.counter.label.handle());
+        let list = at(demo.list.handle());
+        assert!(
+            list.x > counter.x + counter.width,
+            "the list at {list:?} is right of the click counter at {counter:?}"
+        );
+
+        let column_right = TEXT_PANEL_ORIGIN.0 + TEXT_COLUMN_WIDTH;
+        for (what, handle) in [
+            ("image", demo.image.handle()),
+            ("list", demo.list.handle()),
+            ("progress bar", demo.progress.handle()),
+            ("toggle", demo.toggle.handle()),
+        ] {
+            assert!(
+                at(handle).x > column_right,
+                "the {what} is right of the text column's edge at {column_right}"
+            );
+        }
+    }
+
+    fn mouse_down_at(x: f32, y: f32, ts: u64) -> Event {
+        Event::MouseButtonDown {
+            timestamp: ts,
+            window_id: 0,
+            which: 0,
+            mouse_btn: MouseButton::Left,
+            clicks: 1,
+            x,
+            y,
+        }
+    }
+
+    /// A mouse motion with the **left button down**, which is the whole point:
+    /// `GestureRecognizer` only reports a `Drag` for a pointer whose button
+    /// state says it is held, so a test that forgets this is not testing a drag.
+    /// SDL's mask for the left button is `SDL_BUTTON_LEFT = 1`, and the binding
+    /// computes `1 << (button as u32 - 1)`, so bit 0 is the left button.
+    fn mouse_move_held(x: f32, y: f32, ts: u64) -> Event {
+        Event::MouseMotion {
+            timestamp: ts,
+            window_id: 0,
+            which: 0,
+            mousestate: sdl3::mouse::MouseState::from_sdl_state(1),
+            x,
+            y,
+            xrel: 0.0,
+            yrel: 0.0,
+        }
+    }
+
+    fn wheel_notch(dy: f32, x: f32, y: f32) -> Event {
+        Event::MouseWheel {
+            timestamp: 0,
+            window_id: 0,
+            which: 0,
+            x: 0.0,
+            y: dy,
+            direction: sdl3::mouse::MouseWheelDirection::Normal,
+            mouse_x: x,
+            mouse_y: y,
+            integer_x: 0,
+            integer_y: if dy > 0.0 { 1 } else { -1 },
+        }
+    }
+
+    /// The operator reported that dragging the slider with a **mouse** did
+    /// nothing, and every test in this file that dragged the slider used
+    /// [`drag_on`] — a `FingerDown`/`FingerMotion`/`FingerUp` sequence, not a
+    /// mouse. So the exact route the operator uses had no coverage at all.
+    ///
+    /// It works, and the numbers here are the ones it produced: the value tracks
+    /// the pointer to within a step at every motion, the thumb is written with it
+    /// rather than animated after it, and both survive the release and a frame.
+    /// The stamps are nanoseconds, as SDL delivers them, and the drag takes 400 ms
+    /// — task 12's blocker was a unit mistake in exactly this field.
+    #[test]
+    fn a_mouse_drag_moves_the_slider_through_its_real_event_path() {
+        let mut demo = laid_out();
+        let rect = demo.slider_rect().expect("the slider is placed");
+        let y = rect.y + rect.height / 2.0;
+
+        // The pointer is already over the slider before the press, which is what
+        // a hand does and what the recogniser needs to pair the motion with a
+        // pointer that is held.
+        demo.handle_event(mouse_move_held(rect.x + 10.0, y, 0));
+        demo.handle_event(mouse_down_at(rect.x + 10.0, y, 1_000_000));
+        assert_eq!(
+            demo.slider.widget.value.get(),
+            0.0,
+            "the press alone moves nothing"
+        );
+
+        for (step, dx) in [40.0_f32, 90.0, 140.0, 190.0].into_iter().enumerate() {
+            demo.handle_event(mouse_move_held(
+                rect.x + dx,
+                y,
+                2_000_000 + (step as u64) * 100_000_000,
+            ));
+            let value = demo.slider.widget.value.get();
+            assert!(
+                value > 0.0,
+                "each motion moves the value, and it had not after step {step}"
+            );
+            assert_eq!(
+                demo.slider.widget.thumb.get(),
+                value,
+                "and the thumb is written with it, not animated after it — a thumb \
+                 chasing a finger is a thumb the finger has passed"
+            );
+        }
+        // The arithmetic, from the geometry rather than from a remembered number:
+        // the thumb's centre travels from `x + radius` to `x + width - radius`, so
+        // over a 300-wide node with an 18 radius it has 300 - 36 = 264 px of run.
+        // 190 px of pointer from the node's left edge is 190 - 18 = 172 px along
+        // that run, which is 172/264 = 0.6515 of the range, and 65.15 snapped to
+        // [`SLIDER_STEP`]'s grid is 65.
+        assert_eq!(
+            demo.slider.widget.value.get(),
+            65.0,
+            "which is the pointer's own position mapped through the run between \
+             the two thumb centres"
+        );
+
+        demo.handle_event(Event::MouseButtonUp {
+            timestamp: 600_000_000,
+            window_id: 0,
+            which: 0,
+            mouse_btn: MouseButton::Left,
+            clicks: 1,
+            x: rect.x + 190.0,
+            y,
+        });
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.slider.widget.value.get(),
+            65.0,
+            "and the release does not send it back"
+        );
+    }
+
+    /// A press held still before moving, which is what a hand does — you put the
+    /// cursor on the control and pause. It is the case where a long press could
+    /// plausibly eat the drag, so it is the case worth pinning: the value does not
+    /// move while the pointer is still, and moves on the first motion after it.
+    #[test]
+    fn a_mouse_press_held_still_before_draging_still_drags() {
+        let mut demo = laid_out();
+        let rect = demo.slider_rect().expect("the slider is placed");
+        let y = rect.y + rect.height / 2.0;
+        demo.handle_event(mouse_down_at(rect.x + 10.0, y, 0));
+        // 900 ms of holding still: past every tap threshold in the recogniser.
+        demo.handle_event(mouse_move_held(rect.x + 10.0, y, 900_000_000));
+        assert_eq!(
+            demo.slider.widget.value.get(),
+            0.0,
+            "a pointer that has not moved moves nothing"
+        );
+        demo.handle_event(mouse_move_held(rect.x + 150.0, y, 1_100_000_000));
+        // 150 px of pointer is 150 - 18 = 132 px along a 264 px run, which is
+        // exactly half the range and needs no snapping to say so.
+        assert_eq!(
+            demo.slider.widget.value.get(),
+            50.0,
+            "and the first motion after the hold is a drag like any other"
+        );
+    }
+
+    /// The wheel's two directions at the top of the list, **after the operator
+    /// inverted the sign on 2026-09-30.**
+    ///
+    /// The list uses the **scrollbar convention**: SDL reports the wheel rolling
+    /// *towards* the user as a negative `y`, and that is the notch that advances
+    /// *down* the document. So the direction a reader tries first now works from
+    /// the top, and the direction that does nothing is the other one — which is
+    /// the whole reason the change was made.
+    ///
+    /// SDL already normalises that sign, and must not be inverted again: it
+    /// reports `MouseWheelDirection::Flipped` to say the *device* runs the other
+    /// way, and `GestureRecognizer` drops that field on purpose.
+    #[test]
+    fn the_wheel_scrolls_towards_the_user_down_the_list_and_no_further() {
+        let mut demo = laid_out();
+        let rect = demo.list_rect().expect("the list is placed");
+
+        // One notch *towards* the user — SDL's negative y — goes down the list.
+        demo.handle_event(wheel_notch(-1.0, rect.x + 40.0, rect.y + 40.0));
+        assert_eq!(
+            demo.list.scroll().scroll_offset.get(),
+            48.0,
+            "the direction a reader tries first moves the list"
+        );
+
+        // And one notch *away* brings it straight back to the top.
+        demo.handle_event(wheel_notch(1.0, rect.x + 40.0, rect.y + 40.0));
+        assert_eq!(demo.list.scroll().scroll_offset.get(), 0.0);
+    }
+
+    /// The other half of the above, and the case that makes the asymmetry visible
+    /// rather than theoretical: from offset 0 there is nothing **above**, so the
+    /// notch that would go back up the list is clamped and the list does not move.
+    #[test]
+    fn a_wheel_notch_away_from_the_user_at_the_top_of_the_list_does_nothing() {
+        let mut demo = laid_out();
+        let rect = demo.list_rect().expect("the list is placed");
+        demo.handle_event(wheel_notch(1.0, rect.x + 40.0, rect.y + 40.0));
+        assert_eq!(
+            demo.list.scroll().scroll_offset.get(),
+            0.0,
+            "already at the top, so there is nothing above to reveal"
+        );
+        assert_eq!(
+            demo.list.visible_range(rect).start,
+            0,
+            "and the top row is still the first"
+        );
+    }
+
+    #[test]
+    fn the_lists_scrollbar_animates_to_the_new_theme_rather_than_jumping() {
+        let mut demo = laid_out();
+        // 158 is the dark theme's `TextMuted` and 117 the light theme's, which
+        // is the whole of the distance there is to travel: 41 a channel.
+        assert_eq!(
+            demo.list.scroll().thumb.get(),
+            Color::new(158, 158, 158, 255)
+        );
+
+        demo.handle_event(toggle_theme_event());
+
+        demo.frame(WINDOW, Duration::from_millis(10));
+        assert_eq!(
+            demo.list.scroll().thumb.get(),
+            Color::new(158, 158, 158, 255),
+            "the first frame of an EaseInOut over 150 ms rounds back to where it \
+             started, because the channels have not moved yet"
+        );
+        assert!(
+            demo.list.scroll().is_animating(),
+            "but the scrollbar is mid-transition, which a direct property write \
+             would never report"
+        );
+
+        for _ in 0..4 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(
+            demo.list.scroll().thumb.get(),
+            Color::new(149, 149, 149, 255),
+            "50 ms in it is part way across, not at either end"
+        );
+
+        for _ in 0..40 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+        assert_eq!(
+            demo.list.scroll().thumb.get(),
+            Color::new(117, 117, 117, 255),
+            "and it finishes on the light theme's own colour"
+        );
+    }
+
+    /// The regression for the defect the operator reported: a row scrolled half
+    /// out of the list was **drawn over the window background above it**, because
+    /// nothing clipped the list to its own viewport.
+    ///
+    /// The test cannot see the scissor — that is GPU state — so it pins the two
+    /// halves of it that it can. First, that the demo hands the renderer a clip
+    /// for the list and for nothing else. Second, that the geometry really does
+    /// put a row outside the viewport, because that is what makes the clip
+    /// load-bearing: without it this test would pass on a list that needed no
+    /// clipping at all.
+    #[test]
+    fn the_list_is_the_only_node_clipped_and_it_does_have_rows_outside_itself() {
+        let mut demo = laid_out();
+        let rect = demo.list_rect().expect("the list is placed");
+        // One wheel notch is 48 px, which over 28 px rows leaves the top row
+        // 20 px off the top of the viewport. Negative is SDL's "towards the
+        // user", and it is the direction that goes down the list.
+        demo.handle_event(Event::MouseWheel {
+            timestamp: 0,
+            window_id: 0,
+            which: 0,
+            x: 0.0,
+            y: -1.0,
+            direction: sdl3::mouse::MouseWheelDirection::Normal,
+            mouse_x: rect.x + 40.0,
+            mouse_y: rect.y + 40.0,
+            integer_x: 0,
+            integer_y: -1,
+        });
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        let drawn_above = demo
+            .commands_at(demo.list.handle())
+            .iter()
+            .filter(|c| match c {
+                DrawCommand::Text { y, .. } => *y < rect.y,
+                _ => false,
+            })
+            .count();
+        assert_eq!(
+            drawn_above, 1,
+            "half a row is meant to be drawn past the top edge — a smooth scroll \
+             is a row leaving, not a row popping — so this is the case a clip has \
+             to exist for"
+        );
+        // The frame's own list of clips, which is the one `Demo::draw` walks —
+        // not `clip_for` called directly, because a test of a helper cannot see a
+        // call site that stopped using it. That was a real survivor: a mutation
+        // inlining the logic into the loop passed every test written against the
+        // helper.
+        let nodes = demo.nodes.borrow();
+        let clips = demo.frame_clips(&nodes);
+        drop(nodes);
+        assert_eq!(
+            clips.len(),
+            demo.order.len(),
+            "one clip per node in paint order, positionally matching"
+        );
+        let list_index = demo
+            .order
+            .iter()
+            .position(|handle| *handle == demo.list.handle())
+            .expect("the list is in the paint order");
+        assert_eq!(
+            clips[list_index],
+            Some(rect),
+            "and the list's is its own viewport, so the GPU cuts the half-row at \
+             the edge instead of letting it draw over the window"
+        );
+
+        // Every other node is offered its **own real rect**, not `None`. Passing
+        // `None` and comparing against `None` is an assertion that cannot fail:
+        // it was written that way first, and a mutation that clipped *everything*
+        // sailed through it. A mutation run is what found that out.
+        let clipped_others: Vec<Handle> = demo
+            .order
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != list_index && clips[*index].is_some())
+            .map(|(_, handle)| *handle)
+            .collect();
+        assert!(
+            clipped_others.is_empty(),
+            "and no node but the list is clipped — but these are: {clipped_others:?}"
+        );
+    }
+
+    /// The bottom edge, which the test above cannot reach: the operator's wheel
+    /// moves the offset *down*, so the defect above was seen against the top edge
+    /// and the bottom one is asserted here from the other direction.
+    ///
+    /// It asserts the **row's rect**, not a drawn text run, and the reason is
+    /// worth stating because it cost a test: a [`DrawCommand::Text`] carries the
+    /// top of its line box and not the row's lower edge, so a row straddling the
+    /// bottom has its *text* inside the viewport and its *band* outside it.
+    /// Asking about the text asks the wrong question. The band is what the scissor
+    /// cuts.
+
+    #[test]
+    fn the_four_new_widgets_follow_the_theme_switch() {
+        // `T` carries a new theme to every widget here, and the way it does is
+        // each widget's own: the three that take a palette are aimed at the new
+        // one and animated. The image is not in this list and must not be: it has
+        // no palette, and a picture of a test card is the same picture in either
+        // theme.
+        let mut demo = laid_out();
+        // It starts on the **dark** theme, which is the half of the claim that is
+        // easy to leave out: a widget built with the neutral defaults
+        // `Toggle::new` and `Progress::new` write is aimed at nothing, and it
+        // would still pass everything below.
+        assert_eq!(
+            demo.toggle.style().track,
+            TogglePalette::from_theme(&Theme::dark()).track_off,
+            "the pill starts on the dark theme's own off colour"
+        );
+        assert_eq!(
+            demo.progress.style().fill,
+            ProgressPalette::from_theme(&Theme::dark()).fill,
+            "and so does the bar's fill"
+        );
+        assert_eq!(
+            demo.list.scroll().thumb.get(),
+            ScrollPalette::from_theme(&Theme::dark()).thumb,
+            "and so does the scrollbar's thumb, which `List::set_palette` + \
+             `snap_to_state` put there the way the other two are put there"
+        );
+        let dark_toggle = demo.toggle.style().track;
+        let dark_progress = demo.progress.style().fill;
+        let dark_scroll = demo.list.scroll().thumb.get();
+
+        demo.handle_event(toggle_theme_event());
+        for _ in 0..35 {
+            demo.frame(WINDOW, Duration::from_millis(10));
+        }
+
+        assert_ne!(demo.toggle.style().track, dark_toggle, "the pill moved");
+        assert_eq!(
+            demo.toggle.style().track,
+            TogglePalette::from_theme(&Theme::light()).track_off,
+            "and arrived at the light theme's own off colour — the toggle was \
+             never switched on, so the off colour is the state it is in"
+        );
+        assert_ne!(
+            demo.progress.style().fill,
+            dark_progress,
+            "and so did the bar's fill"
+        );
+        assert_ne!(
+            demo.list.scroll().thumb.get(),
+            dark_scroll,
+            "and the scrollbar, whose two colours the demo writes rather than sets"
+        );
+        assert_eq!(
+            demo.list.scroll().thumb.get(),
+            ScrollPalette::from_theme(&Theme::light()).thumb,
+            "arriving at the light theme's own TextMuted"
+        );
+    }
+
+    #[test]
+    fn the_two_widgets_with_no_focus_state_say_where_focus_is() {
+        // An `Image` and a `Progress` have no `focused` property, so a `Tab` onto
+        // either of them would show nothing at all and the demo would be telling
+        // the reader a control is selected with no mark on it. Their readouts say
+        // so in words, which is the whole of what a widget with no focus state of
+        // its own can be given.
+        let mut demo = laid_out();
+        for _ in 0..6 {
+            demo.handle_event(key(Keycode::Tab));
+        }
+        assert_eq!(
+            demo.focused,
+            Some(demo.progress.handle()),
+            "six Tabs from the top is the progress bar"
+        );
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.readout_text_of(&demo.progress_readout).as_deref(),
+            Some("50%, determinate, focused"),
+            "and its readout says so"
+        );
+
+        // The other one is the **fourth** stop, so a fresh demo rather than a
+        // walk from the progress bar: the band's order is the buttons, the
+        // slider, the image, the toggle, the bar and the list.
+        let mut demo = laid_out();
+        for _ in 0..4 {
+            demo.handle_event(key(Keycode::Tab));
+        }
+        assert_eq!(demo.focused, Some(demo.image.handle()));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.readout_text_of(&demo.image_fit_readout).as_deref(),
+            Some("fit: Contain (stand-in), focused"),
+            "and the image's readout says so as well"
+        );
+    }
+
+    #[test]
+    fn the_asset_is_looked_for_next_to_the_executable_and_never_in_the_working_directory() {
+        // A `cargo test` run's working directory is the crate's and a
+        // `cargo run`'s is the workspace root, so a path relative to "here" finds
+        // the asset in one and not the other. Everything the demo looks at is
+        // therefore an absolute path built from the executable — and the
+        // environment variable is first, so a caller can say where the file is.
+        let candidates = asset_candidates_from(
+            Path::new("/w/ui/target/debug/ui_demo"),
+            Some(OsStr::new("/somewhere/else")),
+        );
+        assert_eq!(
+            candidates[0],
+            PathBuf::from("/somewhere/else/demo.png"),
+            "the override directory is looked at first, and it names the file"
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|path| path == Path::new("/w/ui/src/ui_demo/assets/demo.png")),
+            "and the workspace root is in there: {candidates:?}"
+        );
+        assert!(
+            !candidates
+                .iter()
+                .any(|path| path.is_relative() || path.starts_with("./")),
+            "and not one of them is relative to the working directory"
+        );
+
+        // Without an override the walk starts at the executable's own directory,
+        // which is `target/debug`, and climbs.
+        let plain = asset_candidates_from(Path::new("/w/ui/target/debug/ui_demo"), None);
+        assert_eq!(
+            plain.first().map(PathBuf::as_path),
+            Some(Path::new("/w/ui/target/debug/src/ui_demo/assets/demo.png")),
+            "it starts one above the executable, which is not a directory to walk out of"
+        );
+        assert_eq!(plain.len(), 5, "and it walks every ancestor it has");
     }
 }

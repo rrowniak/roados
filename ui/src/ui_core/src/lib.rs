@@ -21,5 +21,6 @@ pub mod node;
 pub mod paint;
 pub mod property;
 pub mod render;
+pub mod texture;
 pub mod theme;
 pub mod widgets;

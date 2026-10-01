@@ -58,6 +58,20 @@ sdl3 = { version = "0.20", features = [
     "build-from-source",
     "build-from-source-static",
     "build-from-source-unix-console",
+    # `image` pulls in `sdl3-image-sys`, which builds SDL_image 3.4.6 from
+    # vendored C source and statically links it. Task 16 needs a JPEG decoder
+    # and SDL3 core carries none: `Surface::load_bmp` and `Surface::load_png`
+    # cover the other two formats, and JPEG is baseline DCT, Huffman coding and
+    # chroma upsampling that this repository does not want to own. Same
+    # from-source, no-system-library, no-sysroot model as SDL3 and FreeType, so
+    # the aarch64 cross build needs nothing new for it. The full justification,
+    # the alternatives and the licence are in
+    # `doc/ui/PRIMITIVES_ARCHITECTURE.md` § Dependencies.
+    #
+    # Do not remove this one: it is the only route to a JPEG in the tree, and
+    # `build-from-source` reaches it — SDL_image is built from its vendored
+    # sources rather than linked from the system.
+    "image",
 ] }
 glow = "0.18"
 freetype-rs = { version = "0.38", features = ["bundled"] }

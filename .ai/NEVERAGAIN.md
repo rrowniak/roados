@@ -351,3 +351,165 @@ size a suspected component against a brute-force reference before rewriting it:
 two of the three hypotheses here were wrong (the per-call `set_pixel_sizes`
 resize, then the chamfer approximation), and only a reference measurement
 separated them from the one that was right.
+
+## 2026-09-30 — A deleted `#[test]` attribute is a green suite with a hole in it
+
+Inserting a test by anchoring on a `fn` line rather than on its `#[test]`
+attribute leaves the attribute attached to the **new** function and the old one
+unregistered. Clippy caught it as `dead_code`, but only after the edit had been
+verified once and the count reconciled wrongly: 97 tests became 96, and 96 was
+also the count before the new test, so the two errors cancelled. The suite was
+green at every step. A *second* symptom pointed at the same cause and was
+misread: every test name printed twice, which looked like the library and the
+binary both running.
+
+**Rule:** after any edit that adds, moves or removes a test, check the test
+**count** against what it was, and treat a name printing twice as a duplicated
+registration rather than as two binaries. Anchor new tests on the attribute and
+the signature together, never on the signature alone. And a count that goes down
+while you are adding something is not a rounding error — it is a test that
+stopped running.
+
+## 2026-09-30 — A mutation runner whose reporting pipe is `head` never restores
+
+A deliberate-break loop piped its output through `head`. `head` closed the pipe
+once it had read enough lines, the script took `SIGPIPE`, and the process died
+**before the restore step**. The next three mutations were therefore applied on
+top of the un-restored previous one, and their failure counts described a file
+three breaks deep rather than the break being measured. It was caught by
+`diff`-ing the file against its pristine snapshot, not by the runner, which
+reported those runs as ordinary results.
+
+**Rule:** a mutation runner must not pipe its own output through anything that
+can close the pipe — redirect to a file and read the file. A run that dies of
+`SIGPIPE` has performed no restore, and **the exit status of the runner is not
+evidence that the tree is back**: verify with `diff` against a snapshot taken
+immediately before, and re-read the symbols added since. This is the same defect
+as the two backup-trap entries above, with a new mechanism — the reporter, not
+the backup.
+
+**Second mechanism, found the same day: the replacement text did not match.**
+A mutation written as a string replace against a one-line `if handle == list {
+rect } else { None }` was a silent no-op, because `cargo fmt` had already
+expanded it to five lines. The runner reported it as a survivor, which is
+worse than useless — it looks like a weak test and sends the next reader to
+strengthen an assertion that was never exercised. The runner now **aborts when
+the file it is about to mutate is unchanged**, and says so, rather than
+reporting the run. A mutation that did not apply is not a survivor; it is no
+result at all.
+
+**Third mechanism, 2026-10-01: a runner that reports a run which never happened,
+and a restore that is not on a trap.** A rebuilt runner aborted with *"cargo
+never ran any test — NOT a result"* once — good — but only because a guard was
+added after the fact; before that it printed an ordinary-looking line for a run
+where `cargo` had rejected its own arguments and run nothing. In the same session
+a `set -u` abort on an unbound positional parameter fired **between the mutation
+and the restore**, so the next command's mutation landed on top of an un-restored
+one and `grep` afterwards found `self.thickness = SCROLLBAR_THICKNESS` — a
+mutation — sitting in a file whose real body clamps with `.max(0.0)`. It was
+caught by `diff` against a snapshot taken *before* any mutation, which is why
+that snapshot is the one to take.
+
+**Rule:** two more, on top of the existing ones. **Assert that the run ran** —
+`grep -q '^test result'` on the log, and treat a log without one as an abort, not
+a survivor, because a filter argument typo and a weak test print the same
+nothing. And **put the restore on `trap ... EXIT INT TERM`**, so it cannot be
+skipped by an error path; the `diff` afterwards still has to be run, because a
+trap proves the restore was attempted and not that it landed. Take the pristine
+snapshot before the *first* mutation of a session, not before each one — the
+per-mutation snapshot protects the next mutation, and only a from-session-start
+one proves the tree was ever clean.
+
+## 2026-10-01 — A drawn control with nothing behind it
+
+The operator reported the list's scrollbar two ways — *"is too narrow, I have
+issues with pointing on it with my mouse, so doing that on tablet with a finger is
+impossible"* and *"when I click it and drag - it doesn't follow my mouse cursor
+exactly, it's like something was keeping it from moving faster"* — and the
+second half was not a feel problem at all: **there was no thumb dragging in the
+code.** `Scroll::on_event` handled every `Drag` by scrolling the content by its
+delta wherever the pointer was, so the scrollbar was drawn geometry and nothing
+else. The thumb travelled a run of 252 against a maximum offset of 2 520, so it
+moved **a tenth** of the distance the cursor did — the "something keeping it from
+moving faster" was the ratio, and no tuning of that drag could have fixed it
+because the drag was the wrong mapping.
+
+Every test in the module was green. All of them asserted on recorded draw
+commands or on the offset after an event, and **not one asked whether the control
+could be operated at all**: a widget that draws a thumb and has no code path that
+reads the thumb is indistinguishable from one that works, to a suite that only
+looks at what was recorded.
+
+**Rule:** for every control drawn, name the gesture that operates it and assert
+that the gesture moves it — a test that presses where the control is drawn, not
+one that presses on a fixture near it. And when a control's geometry is drawn
+from one number (a thickness, a radius, a thickness of a groove), assert that
+**hit testing and drawing read the same number**, because they are two consumers
+of one constant and a change to it that misses one of them produces a target
+nobody can see or a hit area nothing is drawn in.
+
+## 2026-10-01 — One sibling got the operator's fix; the other with the same constant did not
+
+On 2026-09-30 the operator called the slider's 6-pixel track unusable with a
+finger, and `ui_demo` answered it by asking for **12** through the widget's
+existing `set_track_thickness`. A day later the operator reported the same thing
+about the **scrollbar**, whose default was also 6 — and there the answer did not
+exist, because **`Scroll` had no thickness setter at all**. The demo had nothing
+to call. The report was true, it was predictable from the previous round's own
+numbers, and the previous round had written them down.
+
+**Rule:** when the operator rejects a **sizing constant**, grep every widget for
+that constant before declaring the fix done, and ask which of them is reachable
+by a setter. A fix that only reaches the widget in front of you is half a fix,
+and the other half fails later, in front of the same person, and costs a round.
+A rejected number is a property of the **device and the finger**, not of the
+control that happened to be on screen — so the next control with the same number
+is the same defect, already reported.
+
+## 2026-09-30 — A draw-command assertion cannot see where a command *lands*
+
+The operator reported the list jumping about while scrolling. Every one of the
+list's 88 unit tests passed, and so did the demo's, because the list was
+recording exactly the right commands: rows are laid out in the content's own
+coordinates and drawn at `viewport.y + index * item_height - offset`, so at any
+offset that is not a whole number of rows **the top and bottom rows are drawn
+outside the viewport by design** — that is what makes a scroll smooth rather
+than a row popping in. And nothing clipped them. A row's text was drawn on top
+of the window background above the panel, and then vanished as it scrolled
+away.
+
+Nothing in the suite could see it. A draw-command assertion asks *what was
+recorded*; every assertion in this repository asks exactly that. The defect was
+not in the commands and could not have been fixed there.
+
+It could not be fixed in the widget either, and the reason is worth keeping: a
+`DrawCommand::Text` carries an `x`, a `y` and a string and **no width**, so
+nothing outside the text pipeline can tell how far a run reaches, and
+`scroll::clip_commands` can therefore only drop a command that is *wholly*
+outside. Half a row needs the GPU.
+
+**Rule:** assert on where a command lands, not only that it was recorded, and
+expect to need a scissor for anything that is meant to cross a boundary. A
+widget whose content is *designed* to overflow its own box — a scrolling
+viewport, a marquee, a shadow — is drawing something no recorded-command
+assertion can see. When a widget's geometry deliberately puts a primitive
+outside its bounds, that is the moment to ask who clips it, and the answer
+cannot be "the test suite is green".
+
+## 2026-09-30 — A test of a helper cannot see a call site that stopped using it
+
+The regression test for the clipping defect called `Demo::clip_for(..)` directly
+and was green. A mutation that made `clip_for` return `None` was caught. A
+mutation that **inlined the same logic into the frame loop instead**, so the
+loop stopped calling the helper and inverted the rule — clips everything *except*
+the list — passed every test written against the helper.
+
+The fix was structural rather than another assertion: the frame loop and the
+tests now both read one function, `Demo::frame_clips`, which returns a clip for
+every node in paint order. There is no second place to put the logic, so there
+is nothing to bypass.
+
+**Rule:** when a test exercises a helper, ask what a caller could do *instead of*
+calling it. A helper that is called from one place and tested from another has
+two places to be wrong, and only one of them is under test. Put the decision in
+a function the production loop also calls, and test that.

@@ -21,16 +21,63 @@ Research date: 2026-09-27
 
 ```toml
 [dependencies]
-sdl3 = { version = "0.20", features = ["build-from-source"] }
+sdl3 = { version = "0.20", features = ["build-from-source", "image"] }
 glow = "0.18"
 freetype-rs = { version = "0.38", features = ["bundled"] }
 ```
 
 - `sdl3` with `build-from-source` builds SDL3 from vendored source via `sdl3-sys` (cmake crate). No system SDL3 package needed.
+- `sdl3` with `image` pulls in `sdl3-image-sys`, which builds **SDL_image 3.4.6** from vendored C source and statically links it. Justified in *SDL_image* below; the operator approved it 2026-09-30.
 - `glow` loads GLES 3.1 function pointers via `SDL_GL_GetProcAddress` — compatible with SDL3-created contexts.
 - `freetype-rs` with `bundled` builds FreeType 2.13.2 from vendored C source (via `freetype-sys` + `cc`) and statically links it — glyph rasterisation, no system FreeType needed.
 - Text *shaping* (ligatures, complex scripts, bidirectional text) would need HarfBuzz. Its safe Rust binding exposes no shaping API — only `unsafe` C calls — so the operator declined `unsafe` and dropped the dependency 2026-09-30; FreeType alone renders Latin text. Revisit when a complex-script or bidi requirement lands.
 - SDL3 subsystems disabled at build time: audio, render, camera, filesystem — only video, events, input, joystick/gamepad needed.
+
+### SDL_image
+
+Task 16 requires loading PNG, JPEG and BMP from file. **What is needed and why
+it is a dependency rather than code:** decoding a JPEG is a baseline DCT, a
+Huffman decoder and a chroma upsampler — several thousand lines of
+signal-processing code that no part of this repository wants to own. BMP is
+built into SDL3 core; PNG needs zlib, which SDL3 also carries. JPEG is the one
+format with no decoder anywhere in the tree, and task 16's requirement 2 names
+it.
+
+**Alternatives considered:**
+
+| Route | Why not |
+|---|---|
+| SDL3 core only — `Surface::load_bmp`, `Surface::load_png` | Needs **no new dependency** and would have covered BMP and PNG. It cannot decode JPEG, so requirement 2 would be partially unmet, and the demo's image would be a format the head unit's own assets may not use. |
+| `image` crate (pure Rust) | No C toolchain and a single decoder API, but a large transitive tree and a second licence (MIT/Apache-2.0) alongside SDL3's own zlib/libpng path. |
+| `sdl3-image` Rust binding | Chosen — see below. |
+
+**The crate.** `sdl3-image-sys 0.7.0+SDL-image-3.4.6`, from the same author as
+`sdl3` and `sdl3-sys` (`vspace`), released alongside them and part of the same
+versioned series. SDL_image itself is a long-standing, actively maintained
+library in its own right, under the **zlib** licence — the same terms the
+vendored zlib that FreeType already pulls in is under, so the licence audit this
+cost is one this project has already paid.
+
+**What portion is used.** One function: load a file into a decoded `Surface`,
+which `ui_core::texture` then converts to premultiplied RGBA and uploads. No
+scaling, no colour conversion, no animated formats — the widget scales on the
+GPU and GIF/APNG are out of scope in task 16.
+
+**Build model.** `build-from-source`, exactly like SDL3 and FreeType: the C is
+compiled from vendored sources by `cc`/`cmake` and statically linked. **No system
+library, and therefore no sysroot for the aarch64 cross build** — which is the
+property that decided it, given the sysroot question is still open
+(`CROSSBUILD.md` §8 item 1).
+
+**Cost if it had to be replaced.** The only thing this project would have to
+redo is one `load` call: the decoder hands back pixels, and everything
+downstream — premultiplication, the texture cache, the fit modes — is this
+repository's own code and does not know where the pixels came from. That is an
+argument for keeping `texture.rs` decoder-agnostic, and it is why the decoder is
+behind a small seam rather than called from the widget.
+
+**What it does not do:** animated images, SVG, and image loading from the
+network — all three are out of scope in task 16.
 
 ## Widget Tree
 

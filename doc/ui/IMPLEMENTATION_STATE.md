@@ -12,19 +12,26 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: 13 committed (`2dc9193`). Task 14 implemented, awaiting review.** Tasks
-01–13 are done. Task 13 was reviewed *approve with minor findings* and its
-findings fixed before the commit. Task 12 was committed with its review findings
-fixed but without a dedicated re-review; what has and has not been looked at is
-set out below.
+**Status: 14 committed (`11f4134`). Tasks 15–18 implemented together, awaiting
+the operator's review.** Tasks 01–14 are done and committed. Tasks 15 (Toggle),
+16 (Image), 17 (Progress) and 18 (List/Scroll) were implemented in one pass on
+the operator's decision of 2026-09-30, and are **not yet reviewed by anybody**.
+They are one uncommitted changeset, not four tasks.
 
-**Last task: 14 — Widget: Slider.** `widgets/slider.rs` is new (54 tests), the
-action `Callback` moved out of `widgets::button` and became
-`widgets::Callback<T>`, and `ui_demo` gained a slider with a value readout under
-the button band. 380 `ui_core` unit tests + 65 demo tests + 57 doctests.
+**Last task: 18 — Widgets: List and Scroll**, with 15, 16 and 17 in the same
+changeset. Six new files (`texture.rs`, `widgets/toggle.rs`, `image.rs`,
+`progress.rs`, `scroll.rs`, `list.rs`), `paint.rs` and `batch.rs` extended,
+`render.rs` given a third pass, `ui_demo` enlarged to 1280×720 and given all four
+widgets, and one new dependency: `sdl3`'s `image` feature.
 
-**Next task: 15 — Widget: Toggle.** It is the third caller of the shared
-`Callback`, and the second of `widgets::Callback<f32>`'s `from_fn`.
+**Since that changeset was written, the operator reported two scrollbar defects
+against the list** — a 6-pixel bar too narrow to aim at, and a drag that lagged
+the cursor by about ten to one — and both are fixed in the same uncommitted
+changeset. See *The fourth operator report*. The count below is current:
+**838 `ui_core` unit tests + 106 demo tests + 129 doctests**.
+
+**Next task: review of tasks 15–18**, which the operator is doing. Task 19
+(TextInput) is next after that.
 
 **Task 13 — Widget: Container.** `widgets/container.rs` is new (18 tests),
 `layout.rs` gained `Padding` and the pass now honours it, and `ui_demo`'s
@@ -80,6 +87,516 @@ A reviewer dispatched against `9973185` needs no working tree, so closing this i
 cheap whenever it is wanted. The order that would be least wasteful is to let
 task 14 land first and review the two together, since the unexamined fixes are
 test and comment changes with no behavioural surface.
+
+## Tasks 15–18 — what was decided, and what the operator should look at
+
+One changeset, four tasks. Everything below is the integrator's record; nothing
+here has been through a review, so it is written to be reviewed.
+
+### Gates skipped, named rather than glossed
+
+`task-sequence.md` puts a review between the implementation and the operator's
+commit, and step 5 is "**Operator commits. Per task, not per batch.**" The
+operator decided on 2026-09-30 to batch all four into one changeset and to review
+afterwards. The gates that goes around, recorded so they are decisions:
+
+- **No self-review and no review at all.** Step 2 did not happen. Each task's
+  `Review` cell above reads `none`, which is a fact and not a shrug.
+- **One commit instead of four.** Step 5 was per task; this is one. There is
+  **no per-task revert point**: a defect found in task 17 has to be fixed in a
+  commit that also contains tasks 15, 16 and 18.
+- **The per-task operator stop** (step 4) did not happen between tasks.
+- What *did* hold: the whole verification suite was run after integration, and
+  the four sub-tasks were file-isolated and independently tested, per
+  `.ai/protocols/subagents.md` § *Implementation fan-out*.
+
+**The cheapest way to review this is by file, not by task.** `texture.rs` and
+`render.rs` are task 16's, `widgets/toggle.rs` is task 15's, and so on; each is
+self-contained.
+
+### The dependency, and it is the operator's
+
+`sdl3`'s `image` feature, which pulls in `sdl3-image-sys` and builds **SDL_image
+3.4.6** from vendored C source. Approved by the operator 2026-09-30 after being
+shown the alternatives. `PRIMITIVES_ARCHITECTURE.md` § *Dependencies* now owns
+the justification, the alternatives table, the licence (**zlib**, the same terms
+the vendored zlib FreeType already pulls in is under) and the replacement cost.
+The feature comment in `ui_core/Cargo.toml` says why it must not be removed.
+
+Measured, not assumed: the aarch64 cross-build still passes **with no sysroot**,
+the artifact is `AArch64`, and the binary's dynamic dependencies are unchanged —
+SDL_image, like SDL3 and FreeType, is statically linked.
+
+### Decisions the operator may want to reverse
+
+1. **`ui_demo`'s window went from 1024×600 to 1280×720.** This is the one
+   change that is visible in a screenshot and is not additive. It was necessary:
+   task 14 recorded that the window was already full, and four more widgets — one
+   of them a **100-row list needing a tall viewport** — do not fit in the free
+   `788..1024 × 0..164` and `660..1024 × 396..600`. Nothing existing moved:
+   every widget's position is absolute, and only the root and background
+   constraints read `WINDOW`. The subagent verified that by building `HEAD` and
+   the new demo and diffing the pixel runs of the pads card, the button row and
+   the slider track — byte-identical. **Reversing it means shrinking something.**
+2. **`Image::ImageFit::Cover` crops rather than overflows.** The quad *is* the
+   node's rect and the source is cropped to its shape. The task file says
+   "scale to cover bounds, preserve aspect ratio, clip overflow", and a crop is
+   the same picture under a clip — which matters because `DrawCommand` carries no
+   scissor state, so an overflowing quad could not be clipped at all. The
+   subagent's argument, which is the reason to agree: with an overflowing quad
+   the destination's aspect equals the source's, so "a crop matching the
+   destination's aspect" is the whole image in every case.
+3. **`List::scroll_offset` is reached through `List::scroll()`**, not as a field
+   on `List`. Two properties would be two truths to write in step.
+4. **`Progress`'s indeterminate leg is `2 × DurationFast`.** Requirement 4 says
+   the duration comes from theme tokens and a single leg is 3.3 Hz of shimmer.
+   One constant, `INDETERMINATE_LEG_MULTIPLIER`, if the operator wants
+   Material's 1.4 s period.
+5. **`Toggle`'s and `Progress`'s sizing are named constants, not theme tokens**,
+   for the reason `slider.rs` and `button.rs` give, and each constant's doc says
+   what would reverse it.
+6. **`List` rows are read as row-local and translated by `List::paint`.** The
+   demo skips the row handles in its draw order, and the widget's docs say so.
+   A caller that paints a row at absolute coordinates and then also hands its
+   handle to `draw_node` will draw it twice.
+
+### A stale claim this round caught by measuring instead of repeating it
+
+The *Resolved since task 01* section claimed that `ui_demo`'s "only dynamic
+dependencies are `libm`, `libgcc_s`, `libc` and the loader". It is **false for the
+native build**: `readelf -d` reports five, with **`libz.so.1`** among them,
+because `freetype-sys`'s vendored `libpng.a` leaves `inflate`/`deflate`/`crc32`
+undefined and links the *system* zlib on this host. It is not SDL_image's doing
+— `nm -u` on the native `libSDL3_image.a` finds no undefined zlib symbol — and
+it is **pre-existing**, confirmed by a `git worktree` build of `11f4134`. The
+aarch64 build has no system zlib to find, builds the vendored one and links it,
+so the target really does carry four.
+
+Task 16's SDL_image adds no dynamic dependency on either target, which is the
+claim worth making about it, and the justification in
+`PRIMITIVES_ARCHITECTURE.md` says "no system library" — true, because a system
+zlib being linked is not a *library SDL_image needs installed*, but the honest
+wording is that SDL_image resolves zlib the same way FreeType's bundled libpng
+already did. The stale sentence is corrected in place and marked superseded,
+not deleted.
+
+### The frame cost, measured
+
+The `NEVERAGAIN` entry about a still of a 4 fps app looking exactly like a 60 fps
+one applies to four new widgets and a new render pass, so the rate was measured
+rather than inferred — `/proc/<pid>/stat` `utime + stime` over 10 seconds, both
+builds on the same host:
+
+| build | CPU over 10 s | of a core |
+|---|---|---|
+| `HEAD` (`11f4134`), the three-widget demo | 3.46 core-seconds | **34.6 %** |
+| tasks 15–18, all four widgets | 4.36 core-seconds | **43.6 %** |
+
+So the four widgets and the image pass cost **about 9 points of a core**, roughly
+1.4 ms a frame at the loop's 16 ms pace. Reproduced independently: the demo
+subagent measured 43.4 % against the same 34 % baseline before this round did.
+It is not the 4 fps defect; it is also not free, and it is the number to re-take
+if a fifth widget is added.
+
+### What is on screen, and how it was got
+
+One capture, of the **default state only**, taken by this round after
+integration. Window id `0x100002f`, 1280×720, the process verified alive by
+`pgrep` in the same call, and `stderr` empty — so the asset was found and the
+stand-in path was not taken.
+
+- **Image** (top right, 220×160): the PNG decoded through SDL_image, drawn with
+  the source's crosshair and centre circle intact, **letterboxed top and bottom**
+  so `Contain` is visibly a fit, and **rounded corners visibly clipped** — the
+  corners show the window's background through a curve. That was checked by
+  cropping and scaling 300 %, because a full-window still cannot show a corner
+  clip, and because a filled corner instead of a discarded one is the exact
+  failure `NEVERAGAIN` records for `Slider`.
+- **Toggle** (664, 584): grey pill, white thumb hard left, its shadow ring,
+  labelled `off, 0 changes`.
+- **Progress** (664, 668): filled to exactly half of the track, both ends
+  rounded, labelled `50%, determinate`.
+- **List** (1000, 396): `item 0` … `item 9` on a Surface panel, a scrollbar thumb
+  one tenth of the groove at the top — which is right for 100 rows in a ten-row
+  viewport — and the readout `first 0, live 10, free 0, tap -`, so **the
+  virtualisation is visible on screen** rather than only in a test.
+
+**No injected input reached the app in this round**, and the control that says so
+is task 12's button: `XTestFakeMotionEvent` returned success and the pointer did
+not move, so a synthetic click landed outside the window and the click counter
+was byte-identical before and after. Per the standing rule, **no rebuilt binary
+with a seed was used** to manufacture the states that need a key — the `A capture
+whose only route was instrumented` entry is why. Every criterion above that needs
+a pointer or a key is in the `AC waived` column and is not claimed as verified.
+
+### A defect this round found in its own work, and fixed
+
+**A deleted `#[test]` attribute was a green suite with a hole in it.** Adding a
+test by anchoring on a `fn` line rather than on its attribute left the attribute
+attached to the new function and **unregistered the old one** — so
+`the_four_new_widgets_follow_the_theme_switch` silently stopped running, and the
+suite stayed green at every step. It was caught because the count went 97 → 96
+and 96 was also the count *before* the new test: two errors cancelling. Clippy's
+`dead_code` found it too, after the edit had already been verified once. Recorded
+in `.ai/NEVERAGAIN.md`.
+
+**One test expectation was wrong on its first run, and the code was right.** A
+new test asserted that the list's scrollbar has *left* the dark theme's colour
+one 10 ms frame into a 150 ms switch. It had not: `EasingStandard` is `EaseInOut`,
+which starts quadratically, and `Color::interpolate` rounds each channel to a
+`u8` — so the first frame writes a value **byte-identical** to the one it started
+from. Measured, not reasoned: 158, 158, 157, 155, 152, 149 over six frames. The
+test now asserts those measured numbers, and its point is the mid-transition
+value, which is what distinguishes an animated palette from a property write.
+
+### A defect the operator found on screen, and what it was
+
+Reported 2026-09-30: *"The list/scroll doesn't work. I can't drag down the
+slider, it doesn't move when clicking and dragging. It moves when I use my
+mouse's wheel. But then, I see some artifacts like the position of the first
+items jumps by one row up and down, kinda glitch."*
+
+**One real defect, and one thing that is not a defect.**
+
+**The artefact was real, and no test could see it.** Rows are drawn at
+`viewport.y + index * item_height - offset`, so at any offset that is not a whole
+number of rows **the top and bottom rows are drawn outside the viewport by
+design** — that is what makes a scroll smooth instead of a row popping in — and
+**nothing clipped them**. Measured before the fix: at offsets 10, 20 and 48 the
+list recorded exactly one text run *above its own top edge* (`y = 384` against a
+list whose top is `396`). It was drawn on the window background above the panel,
+and it vanished as it scrolled away. That is the "first item jumps about".
+
+It could not be fixed in the widget, and the reason is worth keeping: a
+`DrawCommand::Text` carries an `x`, a `y` and a string and **no width**, so
+nothing outside the text pipeline can say how far a run reaches, and
+`scroll::clip_commands` can only drop a command that is *wholly* outside. Half a
+row needs the GPU.
+
+**The fix discharges a deferral rather than inventing a mechanism.**
+`doc/ui/IMPLEMENTATION_STATE.md` § *Deviations* recorded that a per-node clip is
+"deferred to the task that draws within a node's own bounds". That task is now.
+`Batch` carries a `clip: Option<Rect>` — **not** in `BatchKey`, because a clip is
+not a property of the material and keying on it would split one list into one
+batch per command — and `Renderer::end_frame` sets the scissor when the clip
+*changes between batches*, through `Renderer::apply_clip`. The old obstruction is
+named in the code: a scissor set while recording was applied at the wrong moment
+and the last one won for the whole frame. `begin_frame` clears the renderer's
+idea of what is applied, because it disables the scissor directly and the next
+clipped batch would otherwise be skipped as "unchanged". `Renderer::draw_node`
+still exists and is `draw_node_clipped(.., None)`; the demo's `Demo::frame_clips`
+returns one clip per node and the list is the only one that is not `None`.
+
+**Verified on screen, and the capture is what proves it.** The method is the one
+in *Verifying a change that draws*, plus a **temporary seed in `Demo::new`**
+reading `LIST_OFFSET` from the environment — the same six-line technique task 14
+used and recorded, needed because no injected event reaches the app. **The seed
+is reverted**: `rg -c "LIST_PROBE|LIST_OFFSET" ui/src/ui_demo/src/main.rs` is
+**0**. Before the fix, captures at offsets 0/48/96 showed whole evenly-spaced
+rows. After it, offset 48 shows **`item 1` sliced at the top edge and `item 5`
+sliced at the bottom**, with the 41 px of window above the panel clean — which is
+the half-row being cut where it should be cut.
+
+**Dragging is a convention, not a fault, and the demo is unchanged by it.**
+`Scroll::on_event` maps a `Drag` to `scroll_by(rect, -delta.y)`: drag the content
+**down** to reveal what is **above**, which is the direct-manipulation
+convention every native scroll view uses. At offset 0 the offset cannot go below
+zero, so **dragging down at the top does nothing, and must** — you cannot scroll
+past the start. Dragging **up** works, and that was verified through the demo's
+real event path (`MouseButtonDown` / `MouseMotion` / `MouseButtonUp` into
+`Demo::handle_event`, not a hand-built `InputEvent`): from offset 400, 60 px up
+gives 460 and 120 px up gives 520. The wheel works in both directions because
+its sign is taken from the event and is not clamped by the gesture's own start.
+
+**What this costs the operator's workflow, stated plainly:** the demo still has
+no pointer-free way to move the list — arrow keys reach a **focused** scroll, and
+`Tab` reaches the list — so a pointer is not required to scroll, but it is
+required to *reach* it first.
+
+### The fourth operator report: the scrollbar is a hairline, and it lagged
+
+Reported 2026-10-01, against the list: *"Is too narrow, I have issues with
+pointing on it with my mouse, so doing that on tablet with a finger is
+impossible"* and *"when I click it and drag - it doesn't follow my mouse cursor
+exactly, it's like something was keeping it from moving faster."* Both halves are
+the scrollbar, which is why this section is about one widget and two numbers.
+
+**The width was a missing door, not a wrong number.** `Scroll` drew a **6-pixel**
+bar — the same six the operator rejected for the slider's track a day earlier,
+which `ui_demo` had answered with `SLIDER_TRACK_THICKNESS = 12.0` through the
+widget's `set_track_thickness`. **`Scroll` had no equivalent setter**, so the demo
+had nothing to call and the report was true for a reason the slider's was not.
+`Scroll::set_thickness` now exists, the demo asks for **12**, and the widget's
+constant is still 6 for the reason its own doc gives: it is a documented baseline,
+and the operator's number is the operator's call. `List::set_scrollbar_thickness`
+is the matching door, because `List::scroll()` hands out a `&Scroll` and the
+setter needs a `&mut` — the same argument `List::set_palette` already makes.
+
+**The lag was not a tuning problem. There was no thumb dragging at all.**
+`Scroll::on_event` handled **every** `Drag` by scrolling the content by the
+delta, wherever the pointer was — the scrollbar was drawn geometry and nothing
+else. So the content tracked the finger 1:1 in *content* pixels while the thumb
+travelled a *shorter* run, and on the demo's own numbers (a 280 viewport over
+2 800 of rows: a 28-tall thumb on a run of **252**, against a maximum offset of
+**2 520**) the thumb moved **a tenth** of the distance the cursor did. No tuning
+of that drag could have fixed it, because the drag was the wrong mapping.
+
+The fix tracks the pointer's **position** against the groove, which is 1:1 by
+construction, and records **where inside the thumb** the pointer landed, so the
+thumb does not jump its own width sideways on the first frame of the drag.
+`grab_thumb` is a **call, not a match arm**, because the gesture recogniser has no
+press to give: it reports a `Tap` on the *release* and a `Drag` only after the
+pointer has moved. That is the same reason `Slider::dragging` is written by its
+caller, and the demo now calls `grab_thumb` from `MouseButtonDown`/`FingerDown`
+and `release_thumb` from the matching releases.
+
+**A third defect found while fixing these, and fixed with them.** `List::item_at`
+tested the whole viewport rect, so a tap on the scrollbar named **whichever row
+was behind it** — 12 pixels of a 270-wide list silently activating row 0. A
+scrollbar is a control drawn over the rows, so `item_at` now asks the embedded
+`Scroll` for the strip (`scrollbar_rect`) rather than recomputing it: a second copy
+of the scrollbar's geometry in the list would be a second thing to keep in step
+with the thickness the operator just changed, and it would have been wrong the
+moment they changed it again.
+
+**Verified.** The width was verified **on screen**, because that is a claim about
+what is drawn: `magick import -window <id>` on the running demo measures the
+thumb at **12 pixels** wide at abs x 1256..1267 and the groove at 12 as well,
+with the 28-pixel thumb starting at the list's top edge as offset zero says it
+must. The **drag was not verified by a capture**, and could not be: a still
+proves what is drawn and never how it moves, and pointer injection is unreliable
+on this host (*Verifying a change that draws*). It is verified instead by
+`a_drag_on_the_scrollbars_thumb_moves_the_thumb_and_not_the_drags_delta`, which
+drives a real `FingerDown`/`FingerMotion`/`FingerUp` through `Demo::handle_event`
+and the recogniser — **400** pixels of offset for a 40-pixel drag of a run of 252,
+against the **40** the delta path gave.
+
+**Seven mutations, all killed**, and two of them are the two reports themselves:
+ignoring the recorded grab offset, and disabling the grabbed branch entirely (the
+old behaviour) which is caught by three unit tests and the end-to-end demo test.
+The other five: `set_thickness` as a no-op, the scrollbar exclusion removed from
+`item_at`, `release_thumb` as a no-op, `run` and `max` transposed, and the clamp
+at the two ends removed.
+
+**What was NOT changed.** A press on the **empty groove** still does nothing
+rather than paging or jumping the thumb there — a conventional behaviour, and one
+the operator did not ask for. The bar is 12 wide rather than the 40-plus a
+fingertip covers; a *wider invisible hit strip* around a bar drawn at 12 was
+offered and declined in favour of widening the bar itself, so a tablet user is
+better served than before and not yet served ideally.
+
+### The third operator report: both directions inverted, and the slider resized
+
+Reported 2026-09-30: *"when I drag down the slider, the list goes up — this
+direction has to be reversed"* and *"the slider is very narrow, can't imagine how
+I could use it in a car with my finger"*.
+
+**The diagnostic settled the first half in one reading.** A temporary probe in
+`Demo::handle_event` appended every event to `/tmp/roados-input.log`, and the
+operator reproduced against it. **1223 lines, three `MouseButtonDown` events, all
+of them at x ≈ 1265 — inside the list, which spans 1000..1270. Zero presses
+anywhere near the slider at 664..904.** So there was no slider-drag defect to find:
+the control had not been touched, and *"the slider"* meant the list. The probe is
+removed (`rg -c "INPUT_PROBE" ui/src/ui_demo/src/main.rs` is **0**). What it did
+establish is that the pointer arrives with `state=1` set — **SDL does populate
+`mousestate`** (`SDL/src/events/SDL_mouse.c:839`,
+`event.motion.state = SDL_GetMouseButtonState(...)`) — so the recogniser's drag
+path is sound on real hardware, not only in the synthetic events the tests build.
+
+**Both directions are now inverted, and they are one rule.** The wheel was
+inverted first and the drag was left following the finger, which put one control
+answering two directions — and that is the state the operator reported. The drag
+was then inverted too, so **down is later for both**: a finger travelling down the
+screen advances the list, and so does a wheel rolled towards the user.
+
+The rule is now **`scroll::gesture_delta`**, and it is the only copy. This was not
+the shape it started in: the sign was written out in both arms of
+`Scroll::on_event` and restated in **eleven tests**, so inverting the convention
+meant finding and rewriting eleven places across two modules — four of them with
+the old direction in the *test's name*, which cannot be silently flipped without
+the name and the body drifting apart. Now there is one named function, a doctest
+that states the convention, and **one test**
+(`down_is_later_and_a_wheel_agrees_with_a_finger`) that pins it as a fact about
+numbers it chooses. Every other test derives its expectation from the arithmetic,
+which is direction-agnostic. `wheel_delta` sits beside it and holds the one
+asymmetry: **only the wheel is negated**, because SDL's positive `y` is *away from*
+the user and so is *up* the document, while a finger's positive `y` really is
+travelling down.
+
+Two tests written the day before to pin that the wheel and the drag *disagree*
+were **rewritten, not deleted**, to pin that they agree — the matched-magnitude
+form, because *a 48 px notch and a 48 px drag now land in the same place* is the
+sharpest statement of the new invariant.
+
+### The slider is finger-sized, and the column is what stopped it
+
+The widget's defaults are a **6-pixel** track and a 24-pixel knob. The demo now
+asks for **12 and 18** through the widget's own setters — a 36-pixel knob and a
+**52-tall** node, which is the hit target, against 44 before. It is also **300
+wide rather than 240**, because a finger wants a longer swipe. The widget's own
+constants are unchanged: task 14's record says each states what would reverse it,
+and this is the setter doing what it exists for, which also puts the two numbers
+side by side.
+
+**Why not larger, and this is the ceiling.** A 22 radius gives a 44-pixel knob and
+a 62-tall node, and the right-hand column then stops fitting:
+`no_two_placed_rects_overlap` reported the toggle against the progress bar's
+readout. Six controls, of which three are now finger-sized, need more than the
+**324 pixels** between the button row at y = 396 and the bottom of the window.
+**A bigger slider means moving the progress bar out of that column** — there is
+free space under the image at x 788..1000 — and that is the operator's trade to
+make, not an agent's. The column is currently: buttons 396..440, counter 456..480,
+slider 496..548, its readout 560..584, toggle 592..636, the progress bar's readout
+640..664, the bar 668..712.
+
+Two constants had to follow the slider and one had to stop repeating a number:
+`SLIDER_READOUT_DROP` 52 → 64, `TOGGLE_ORIGIN` 584 → 592, and
+`TOGGLE_READOUT_ORIGIN` was a **literal 592** that stayed behind at the old
+position and collided with the slider's new readout — it is now derived from
+`TOGGLE_ORIGIN`. Three geometry tests that quoted the old thumb run (216 px of
+240 minus 24) were re-derived from the new one (264 px of 300 minus 36), and one
+expected value changed with it: a 40-pixel drag from the middle lands at **65**,
+not 70, because 40 of 264 is 15 points and 40 of 216 was 20.
+
+**Verified on screen.** The track is visibly a bar rather than a hairline and the
+knob is visibly larger; the column is clear from the button row to the progress
+bar with the readout lines between them.
+
+### What was NOT changed, and why
+
+**The toggle and the progress bar still have 6-pixel tracks.** The same complaint
+is waiting for both of them and neither was in the report. The toggle's pill is 28
+tall and the progress bar's track is 6, and fixing them needs the same column
+space this round ran out of — which is the argument for moving the progress bar
+rather than for enlarging one control at a time.
+
+**`Slider`'s hit target is its node, not its track.** Every position test measures
+the node's laid-out rect, so the enlarged slider answers a press anywhere in a
+52-pixel band rather than only on the 12-pixel line.
+
+### The second operator report: the wheel, and the slider
+
+Reported 2026-09-30, after the clipping fix: *"the mouse wheel seems to work in
+reversed direction"* and *"clicking and dragging the slider doesn't work — this
+is the main functionality as in a car you don't have mouse"*.
+
+**The slider works, and there were no mouse tests for it at all.** Every slider
+drag test in the demo used `drag_on`, which builds a
+`FingerDown`/`FingerMotion`/`FingerUp` sequence — **not a mouse**. So the exact
+route the operator used had zero coverage, and "the tests pass" said nothing
+about it. Four tests now cover it through the real event path:
+`MouseButtonDown` / `MouseMotion` / `MouseButtonUp` into `Demo::handle_event`,
+with nanosecond stamps and SDL's real button mask
+(`SDL_BUTTON_LEFT = 1`, and the binding computes `1 << (button as u32 - 1)`, so
+bit 0). Measured behaviour:
+
+| motion | value | thumb |
+|---|---|---|
+| press at x+10 | 0 | 0 |
+| x+40 | 15 | 15 |
+| x+90 | 35 | 35 |
+| x+140 | 60 | 60 |
+| x+190 | 80 | 80 |
+| after release + a frame | 80 | 80 |
+
+and a 900 ms hold before moving changes nothing and then drags normally, which is
+the case where a long press could plausibly have eaten it.
+
+**The demo has two independent routes for a slider drag, and only one is
+load-bearing.** Disabling `Demo::slider_dragging`'s fast path leaves every test
+green, because the drag then falls through to the positional chain, finds the
+slider under the pointer and is handled there. That is a robustness property —
+a drag that starts on the slider and wanders off is what the fast path is *for*,
+and `a_drag_past_the_end_of_the_slider_clamps_at_its_maximum` covers that — but it
+also means a mutation of the flag is unobservable, and worth knowing before
+anyone writes a test that claims to cover it.
+
+**The wheel's direction is a product decision this repository has not made, and
+it is recorded here rather than changed.** What is implemented is
+content-follows-the-gesture: a `Drag` and a wheel notch both move the offset so
+that **the content moves the way the gesture did**, which is what every
+touch-first interface does and the only convention that makes a wheel and a
+finger agree. So SDL's positive `y` (the wheel rolling *away* from the user)
+takes the content up and shows later rows.
+
+**SDL already normalises that sign, and it is worth writing down before anyone
+"fixes" it.** SDL3 documents a mouse wheel's `y` as positive for scrolling away
+from the user and reports `MouseWheelDirection::Flipped` to say the *device* is
+inverted relative to that. `GestureRecognizer` drops the `direction` field, and
+that is correct: **negating on `Flipped` would double the inversion.** The
+information is not lost for any purpose that matters here.
+
+**The wheel was inverted on the operator's decision, 2026-09-30.** The list now
+uses the **scrollbar convention** — SDL reports the wheel rolling *towards* the
+user as a negative `y`, and that is the notch that advances *down* the document
+— while the **drag keeps the touch convention**, so the content follows the
+finger. A `Drag` and a `Scroll` on the same axis therefore mean opposite things,
+which is now stated at the line that decides it and pinned by
+`a_wheel_notch_and_a_drag_travel_opposite_ways_on_one_scroll` and
+`a_drag_down_and_a_wheel_notch_move_the_list_opposite_ways`. **The drag was
+deliberately not touched**: the operator's report named the wheel, and inverting
+both would break the agreement between a wheel and a finger on one control.
+
+Six tests across `scroll.rs` and `list.rs` encoded the old sign and were rewritten
+rather than flipped — each carries the date and the reason, because a flipped
+sign with no explanation is indistinguishable from a typo. Reverting the
+inversion fails all six; the restore was verified byte-identical.
+
+**The consequence, which the operator should confirm:** `Slider`'s wheel keeps the
+*other* convention, so the wheel now goes **down** the list and **up** the
+slider. They are two different controls and the operator named one of them, but
+the asymmetry is real and is one line in `Slider::on_event` if it should change
+too.
+
+**What the operator is most likely to have hit was an asymmetry at the top of the
+list, not a reversal.** From offset 0 the offset cannot go below zero, so **one
+notch direction is a no-op** — measured: `dy = +1` moves the offset 0 → 48 and
+`dy = -1` leaves it at 0. A caller who scrolls *down* the list first sees a list
+that ignores the wheel, exactly as a caller who drags down sees a list that does
+not move. Both complaints have the same root: **at the top of a list, the
+direction most people try first is the one that cannot work.** Two tests now pin
+both halves, and the fix for the confusion is the operator's to choose:
+
+- leave the convention and make the demo start the list part way down, so both
+  directions do something on launch; or
+- invert the wheel only (not the drag), which breaks agreement between a wheel
+  and a finger on the same control.
+
+### Two test defects this fix round found in itself
+
+**An assertion that could not fail.** The first version of the regression test
+looped over every other node and asserted `clip_for(handle, list, None) == None`
+— passing `None` in and comparing against `None`. A mutation that clipped
+*everything* sailed through it. The loop now passes each node's **own real
+rect**, so clipping everything fails.
+
+**A test of a helper that could not see its call site.** The test called
+`Demo::clip_for(..)`; a mutation that inlined the logic into the frame loop
+instead — inverting the rule, so the *list* is the one thing not clipped — passed
+every test. The loop and the tests now both read `Demo::frame_clips`, so there is
+no second place to put the logic.
+
+Both were found by a mutation runner that **aborts when the mutation does not
+apply**: an earlier runner reported two such runs as survivors, because
+`cargo fmt` had expanded the one-line text the replacement was written against.
+A mutation that did not apply is no result at all, and reporting it as a survivor
+is worse than useless. All three mutations are now caught — the revert, clip
+everything, and the inversion — with the restore verified byte-identical.
+Recorded in `.ai/NEVERAGAIN.md`.
+
+### The integration gap the demo subagent found, and the fix
+
+`List` owns its `Scroll`, `List::scroll()` hands out `&Scroll`, and
+`Scroll::set_palette` takes `&mut self` — so **a caller holding a `List` had no
+route at all to a themed scrollbar**, and the demo reached past the widget and
+wrote two properties. That themes the scrollbar but takes the animation out of a
+theme switch, because there is no palette for the transition to aim at.
+
+Fixed by adding `List::set_palette`, which forwards. The demo now uses it plus
+`scroll().animate_to_state`, so the scrollbar animates with everything else, and
+`the_lists_scrollbar_animates_to_the_new_theme_rather_than_jumping` pins the
+mid-transition value. That test was mutation-checked: reverting to the two direct
+property writes fails it.
 
 ## Task 14 — what it decided, and what it found
 
@@ -552,6 +1069,25 @@ taken and only the first is reachable from the demo as it stands:
    0 and 100 and not 25 and 70.
 
 
+**2026-09-30, tasks 15–18: the capture method is the one above, and two things
+about it are new.** The window id is still read with `xwininfo` and captured with
+`magick import -window <id>`, and the pointer is still at the window rather than
+the origin — this round it was at root **+352+1408** and 1280×720, because the
+demo's window grew. **Input injection did not work again**, in the developer's
+session or the demo subagent's: `XTestFakeMotionEvent` returned 1, the pointer
+did not move (`XQueryPointer` reported it at root (1464, 1468) before and after a
+request for (1064, 1826)), and `magick compare -metric AE` between captures
+before and after a synthetic click on "Press me" was **0** with the counter still
+reading `0 clicks`. That is task 12's button failing to count a click, which is
+the control that makes the reading safe: the failure is the whole input path, not
+anything about the four new widgets.
+
+**The asset path is resolved from the executable, not the working directory.**
+`ui_demo/assets/demo.png` is looked for in `$ROADOS_ASSET_DIR` first and then by
+walking up from `std::env::current_exe()`, because `cargo run` and `cargo test`
+have different working directories. A missing asset prints one line to stderr and
+stands in a transparent 320×192 image rather than taking the window down.
+
 ## Ratified by the operator (2026-09-28, 2026-09-29, 2026-09-30)
 
 - **Task 09 lands before task 08**, decided 2026-09-29. Task 08's
@@ -610,6 +1146,19 @@ taken and only the first is reachable from the demo as it stands:
   `layout_walk_cost` benchmark both have to be re-run, because the pass itself
   changes and the benchmark is what the O(n·d) walk argument in *Deviations*
   rests on.
+- **Tasks 15–18 are implemented as ONE changeset and reviewed afterwards**, the
+  operator's decision of 2026-09-30, taken after being shown what it costs: the
+  per-task review (step 2) does not happen, there is one commit instead of four,
+  and **no per-task revert point** exists. The gates that goes around are named
+  in *Gates skipped*. This supersedes the earlier ratified rule "the operator
+  commits **per task** … no task starts before the previous one is committed" —
+  not the rule's intent, which was a reviewable revert point per task, but its
+  letter, which this round traded away knowingly.
+- **`sdl3`'s `image` feature is approved** (2026-09-30), which pulls in
+  `sdl3-image-sys` and builds SDL_image 3.4.6 from vendored source. Chosen over
+  SDL3 core's own `load_bmp`/`load_png`, which need no new dependency and cannot
+  decode JPEG, and over the pure-Rust `image` crate. Justification, alternatives
+  and licence in `PRIMITIVES_ARCHITECTURE.md` § *Dependencies*.
 - **aarch64 target libraries are deferred until the target image is decided.**
   The operator's decision, 2026-09-28. Native builds proceed and stay verified;
   aarch64 remains a documented waiver. No sysroot strategy is committed to yet.
@@ -842,11 +1391,11 @@ verified. A blank cell is unknown, not "none".
 | 11 | Widget — Label | done | `ffbb4d6` | **none — committed without review** | 0 |
 | 12 | Widget — Button | done | `9973185` | 1 pass, *fix first* — findings fixed, **not re-reviewed** | 0 |
 | 13 | Widget — Container | done | `2dc9193` | 1 pass, *approve with minor findings* — findings fixed | 1 (`cargo audit` not installed) |
-| 14 | Widget — Slider | implemented | | awaiting review | **ACs 2, 3, 4, 7, 8** — each needs a pointer or a key, and XTEST injection delivered no event to the app in either session (see *Verifying a change that draws*). AC 1 was capture-verified; ACs 5 and 6 are the widget's own arithmetic and a test is their whole verification. *Tool gate, not an AC:* `cargo audit` is not installed |
-| 15 | Widget — Toggle | pending | | | |
-| 16 | Widget — Image | pending | | | |
-| 17 | Widget — Progress | pending | | | |
-| 18 | Widget — List/Scroll | pending | | | |
+| 14 | Widget — Slider | done | `11f4134` | 1 pass, *approve with required changes* — 2 majors, 4 minors, all fixed before the commit | **ACs 2, 3, 4, 7, 8** — each needs a pointer or a key, and XTEST injection delivered no event to the app in either session (see *Verifying a change that draws*). AC 1 was capture-verified; ACs 5 and 6 are the widget's own arithmetic and a test is their whole verification. *Tool gate, not an AC:* `cargo audit` is not installed |
+| 15 | Widget — Toggle | implemented, **batched** | | **none** — see *Gates skipped* | **ACs 2, 3, 4, 5, 6** — every one needs a pointer or a key to happen at all, and no injected event reached the app. AC 1 (track and thumb render) was **capture-verified** |
+| 16 | Widget — Image | implemented, **batched** | | **none** — see *Gates skipped* | **ACs 2, 3, 4, 5, for the picture only.** The *geometry* of all four fits and the opacity are asserted as recorded draw commands, and AC 6's corner clip and AC 7's image on screen were **capture-verified**; only `Contain` has been *seen*, because reaching the other three needs a key |
+| 17 | Widget — Progress | implemented, **batched** | | **none** — see *Gates skipped* | **ACs 3, 4** — a value animating and the indeterminate slide both need frames with something moving, and moving them needs a key. ACs 1, 2 and 5 were **capture-verified**, the bar on screen at 50% |
+| 18 | Widget — List/Scroll | implemented, **batched**, then **fixed on screen** | | **none** — see *Gates skipped* | **ACs 2, 3**, and the "scrollable" half of **AC 7** — all three need a pointer or a wheel on this host. **AC 2 is not a defect**: dragging *up* scrolls, through the demo's real event path, and dragging *down* at offset 0 cannot move a list past its own start. ACs 1, 4, 5, 6 and AC 7's *100 rows on screen* are **capture-verified and unit-tested**, and the clipping defect the operator reported is fixed — see *A defect the operator found* |
 | 19 | Widget — TextInput | pending | | | |
 | 20 | Widget — Gauge | pending | | | |
 | 21 | Widget — Chart | pending | | | |
@@ -1325,11 +1874,23 @@ operator's rule, none of these is treated as satisfied.
   operator declined `unsafe`. FreeType alone renders Latin text; ligatures,
   complex scripts and bidirectional text wait for a future `unsafe` decision.
   **Build verified, both targets, 2026-09-30.** Native: `libfreetype2.a` and
-  `libpng.a` are produced from the vendored source; the binary's only dynamic
-  dependencies are `libm`, `libgcc_s`, `libc` and the loader. aarch64
-  cross-build: exit 0 in 57 s with **no sysroot**, the artifact is
-  `ELF 64-bit … ARM aarch64`, and FreeType and zlib are statically linked
-  (same four dynamic dependencies).
+  `libpng.a` are produced from the vendored source. aarch64 cross-build: exit 0
+  in 57 s with **no sysroot**, the artifact is `ELF 64-bit … ARM aarch64`, and
+  FreeType and zlib are statically linked.
+  **Superseded 2026-09-30 by the tasks 15–18 round, which measured this rather
+  than repeating it: the "same four dynamic dependencies" claim is true of the
+  aarch64 build and FALSE of the native one.** `readelf -d` on the native
+  `ui_demo` reports **five** `NEEDED` entries — `libz.so.1`, `libm`, `libgcc_s`,
+  `libc` and the loader — and `libz.so.1` is there because
+  `freetype-sys`'s vendored `libpng.a` leaves `inflate`, `deflate` and `crc32`
+  undefined and resolves them against the **system** zlib. Verified rather than
+  inferred: it is not SDL_image's doing (`nm -u` on the native
+  `libSDL3_image.a` finds no undefined zlib symbol), and it is **pre-existing** —
+  a `git worktree` build of `11f4134` reports the same five. The aarch64 build
+  has no system zlib to find, builds the vendored one, and links it: four
+  dependencies, as claimed. So the vendored-zlib claim was right for the target
+  and wrong for the host, and the native image path is one shared library wider
+  than this file said for two tasks.
 - 2026-09-30 — **the text pipeline renders; the demo shows it.** The text
   renderer is no longer the remaining work: the glyph atlas (shelf packing,
   LRU eviction with span reuse, atlas-owned dirty tracking), the SDF
@@ -1629,3 +2190,45 @@ operator's rule, none of these is treated as satisfied.
   click that took the live counter from 0 to 1. What remains unexamined is the
   three majors' fixes and the minors, which are test and comment changes with no
   behavioural surface. The note above now says that instead.
+
+- 2026-09-30 — **task 14 committed by the operator, `11f4134`,** reviewed *approve
+  with required changes* with all six findings fixed before the commit. Task 14's
+  fixes — the `NEVERAGAIN` entries on the filled-rounded-rect focus ring and the
+  origin-read-as-extent travel, the capture-method paragraph, and the three
+  counts that had to agree — are therefore no longer one agent's word.
+- 2026-09-30 — **tasks 15, 16, 17 and 18 implemented as one changeset, awaiting
+  the operator's review.** Four task files, one changeset, on the operator's
+  decision recorded under *Ratified*. Implementation was fanned out per
+  `.ai/protocols/subagents.md` § *Implementation fan-out* in two waves of
+  file-isolated sub-tasks, integrated and verified here:
+  - **Wave 1** (4 parallel, disjoint files): `paint.rs` + `batch.rs`
+    (`DrawCommand::Image` extended with `UvRect`, `opacity`, `radius`);
+    `widgets/toggle.rs` (task 15); `widgets/progress.rs` (task 17);
+    `widgets/scroll.rs` (task 18's `Scroll`).
+  - **Wave 2** (3 parallel, disjoint files): `render.rs` (the image pass — its
+    shader, its buffers, the RGBA8 atlas, per-image textures, and
+    `Renderer::load_texture`); `widgets/image.rs` (task 16);
+    `widgets/list.rs` (task 18's `List`).
+  - **Integration**: module registration, `texture.rs`'s `STANDALONE` bit — which
+    the first subagent's handoff correctly reported as documented but **not
+    actually set**, so a renderer could not have told an atlas image from one with
+    its own texture — the demo wiring, and the `List::set_palette` gap.
+  Six new files, `paint.rs`, `batch.rs`, `render.rs` and `ui_demo` extended.
+  **820 `ui_core` unit tests + 102 demo + 126 doctests**, `cargo fmt --check`
+  clean, `cargo clippy --all-targets --all-features -D warnings` clean,
+  `cargo doc --no-deps` with no warnings, and the aarch64 cross-build exit 0 with
+  `Machine: AArch64` and SDL_image statically linked alongside SDL3 and FreeType.
+  **`cargo audit` was not run — it is not installed on this host**, the standing
+  tool gate from tasks 07, 09, 10 and 13, unchanged by this round.
+  **Five subagents each ran 10–30 deliberate breaks and reported 0 survivors**;
+  the integrator's own integration work (the `STANDALONE` bit, the palette gap,
+  the scrollbar animation) was mutation-checked here.
+  **Four acceptance criteria are waived per task** and named in the table; all
+  of them need a pointer or a key, and the control that says so is task 12's
+  button. **Nothing was rebuilt with a seed to reach a state the demo cannot get
+  to** — the standing rule, and the reason the captures cover only the default
+  state.
+  **Two defects this round found in its own work**, both recorded in
+  `NEVERAGAIN`: a deleted `#[test]` attribute that left the suite green with a
+  test unregistered, and a test expectation that was wrong where the code was
+  right (an `EaseInOut` colour transition's first frame rounds back to its start).

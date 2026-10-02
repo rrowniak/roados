@@ -599,3 +599,53 @@ the measurement of that consequence in the tests. A geometry claim like "tangent
 circles have no notch" is one line of arithmetic; check it rather than reason
 about it. **And measure a rendered thing in pixels before its doc comment says it
 is smooth** — the doc is the claim, and the capture is the evidence.
+
+## 2026-10-02 — A debug build reads as a performance regression
+
+The operator reported *"some performance degradation, sometimes the fps drops to
+~30 fps"* against task 20, the gauge. It was not a degradation and the gauge was
+not involved: `ui/target/debug/ui_demo` had been rebuilt that morning and
+`cargo run` defaults to debug. Measured on the same commit — **debug 32.7 fps,
+release 51.2** — and an interleaved CPU comparison against `b4a2db8` (pre-gauge)
+gave 136/144/135 jiffies before against 137/131/149 after, indistinguishable.
+
+The interesting part is what the *number* meant. The recorded baseline already
+had a debug row — **34.2 fps** — sitting in the same table as the release figures,
+so a debug reading was not a mystery, it was a row nobody connected to the number
+in front of them. **A performance report names a rate, and a rate is meaningless
+without the build it came from.** Six runs of a release build spanning 4.4 fps
+was already the standing caveat; the missing half was that the *floor* of 40 was
+a release floor and a debug build sits below it by construction.
+
+**Rule:** a frame-rate claim is a claim about **a build**. State the profile with
+the rate, and before treating a report as a regression, check the binary's mtime
+against the source and run both profiles — `ls -la ui/target/{debug,release}/ui_demo`
+settles in one command which one is on screen. And a baseline table that records a
+debug number is a trap for the reader who finds the row and not the cause; say so
+next to the number.
+
+## 2026-10-02 — A flat wait before the work is a frame-rate ceiling wearing a frame-time costume
+
+The demo loop called `wait_event_timeout(16 ms)` and *then* drew, so a frame was
+`16 ms + work` whatever the work was. On this host that is `16 + 3.9 = 19.9 ms`,
+**50.2 fps**, for a frame whose own work was 3.9 ms — and an infinitely fast
+frame would still have capped it at 62.5 fps. The UI cost **0.18 ms**; the whole
+of the 4 ms was GL submission. The number looked like a hardware limit and was
+purely an artefact of where the wait sat.
+
+It survived every measurement the repository had, because every one of them
+reported an *average*, and 50 is a stable average: the loop was not slow, it was
+exactly as slow as it had been written to be. Only a per-phase breakdown — wait /
+update / record / submit — shows a term that should not be there, and the frame
+budget the wait was supposed to be had become a wait that *preceded* the frame
+instead of bounding it.
+
+**Rule:** in a frame loop, **measure the phases, not just the rate.** An average
+that has never moved is evidence the loop is doing what it was told, not evidence
+it is doing the right thing; and a pacing constant that is applied *before* the
+work rather than *around* it converts every future performance improvement into a
+smaller number that never reaches the screen. Budget the frame
+(`FRAME_BUDGET - work`), never wait a fixed slice and then work. Where such a
+constant is fixed rather than read from the display, say which display rate it
+assumes — this one hard-codes 60 Hz and no `GL_SetSwapInterval` is ever called, so
+it is not vsync-locked and a 30 Hz cluster panel would run it at half refresh.

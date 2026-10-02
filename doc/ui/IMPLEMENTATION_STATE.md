@@ -558,7 +558,12 @@ run lives with the agent that has to run it.
 | ending a run | `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo`, or `kill -TERM` — SDL installs SIGINT and SIGTERM handlers by default (`SDL/src/events/SDL_quit.c:117` and `:118`) and turns either into the quit event the loop already breaks on. **Both paths were measured**: a bounded run printed its report, and a `kill -TERM` of an 89-second run printed `frames=4409 duration_s=88.799 average_fps=49.7` |
 | one command | `.ai/tools/fps-check.sh [seconds] [minimum-fps]` — builds release, runs, parses, and exits 1 on a missed floor **or on a run that produced no report at all** |
 
-### The baseline, and it is below the 60 fps target
+### The baseline, and the 60 fps target it now reaches
+
+**Superseded on 2026-10-02 — the demo now runs at ~62 fps.** This section is kept
+because the numbers in it are how the ceiling was found, and because the *debug*
+row below is still the trap it was. What follows the historical table is the
+change; see *The frame budget, and the 60 fps it reaches*.
 
 `doc/ui/DEMO_APPLICATION.md` lists **60 FPS target** in scope and *"Smooth
 animations and transitions — 60 FPS"* as a design principle. The demo does not
@@ -573,8 +578,18 @@ reach it, and before this change nobody could tell:
 **Six release runs on this host, taken while writing this section, read 49.7,
 50.0, 51.0, 52.5, 53.7 and 54.1 fps** — a spread of 4.4 fps on a machine that is
 also running a browser and a compositor, and the reason the floor a check should
-use is around **40** rather than the best number above. A floor at 49.7 would
+use was around **40** rather than the best number above. A floor at 49.7 would
 fail on a build that has not changed.
+
+**That floor is now too loose, and the reason is worth stating.** A loop paced by
+a **frame budget** absorbs jitter in its work term: the wait is whatever is left,
+so a slow frame is followed by a short wait rather than adding to a fixed 16 ms.
+The consequence is that release no longer wanders — **61.9, 62.0 and 62.2 fps**
+across three runs, a spread of **0.3 fps** where the unpaced loop spread 4.4. **A
+release floor around 55 is now defensible** and a floor at 40 would miss a
+regression from 62 to 45, which is a third of the budget gone. The **debug** row
+above stays where it is, and a floor is a **release** floor: debug sits below any
+sensible one by construction, which is exactly the trap recorded in `NEVERAGAIN.md`.
 
 **Task 19 added two widgets and one text-event variant, and the rate did not
 move: 50.0 fps** (`fps-check.sh 12 40`, 601 frames in 12.014 s, worst frame
@@ -601,21 +616,66 @@ The *absolute* numbers are about half the 34.6 % and 43.6 % recorded above, whic
 is the host and not the code — and is exactly why the comparison is against
 `HEAD` in the same session and not against that table.
 
-**The ceiling is in the shape of the loop, not in the interface.** The loop calls
-`wait_event_timeout(EVENT_WAIT)` with `EVENT_WAIT = 16 ms` and *then* draws, so
-the wait and the frame's own cost are **serialised**: at 49.7 fps a frame is
-20.1 ms, of which about 16 is the wait and about 4 is the work. Even an
-infinitely fast frame would give 62.5 fps. Two things follow, and both are the
-operator's call rather than an agent's:
+**The ceiling was in the shape of the loop, not in the interface — and on
+2026-10-02 that ceiling was removed.** This subsection is the record of the
+finding; the paragraph immediately after it is what happened next.
 
-- **The gate is a floor, not the target.** Comparing later runs against
-  *this* table is what detects a regression; 60 is a ceiling the loop cannot
-  reach at all in its present shape.
-- **Reaching 60 means changing the loop**, not the interface: wait only for what
-  is left of a 16.67 ms frame after the work, and the frame budget rather than
-  the event timeout becomes the pace. The operator decided on 2026-10-01 **not**
-  to do that in this round — measure first — and the numbers above are what the
-  decision was waiting for.
+The loop called `wait_event_timeout(EVENT_WAIT)` with `EVENT_WAIT = 16 ms` and
+*then* drew, so the wait and the frame's own cost were **serialised**: a frame was
+`16 ms + work` whatever the work was. Measured per-phase on 2026-10-02, a frame
+was **19.9 ms — 50.2 fps** — of which the wait was 15.7 ms and the work 3.9 ms.
+Even an infinitely fast frame would have given 62.5 fps. The operator's decision
+on 2026-10-01 was **not** to change this in that round, *measure first*; these
+are the numbers the decision was waiting for.
+
+### The frame budget, and the 60 fps it reaches
+
+The operator authorised the loop change on 2026-10-02, after being shown the
+breakdown above. `EVENT_WAIT` is replaced by **`FRAME_BUDGET = 16_666_667 ns`**,
+and the loop now waits only what is **left** of the budget after the previous
+frame's work — so the work lands *inside* the frame rather than after it.
+
+The arithmetic is extracted as **`frame_wait(spent)`** and the loop calls it,
+rather than inlining the subtraction, for the reason `.ai/NEVERAGAIN.md` § *a
+test of a helper cannot see a call site that stopped using it* gives: a helper
+tested from one place and inlined in another has two places to be wrong and only
+one under test.
+
+| build | before | after |
+|---|---|---|
+| release | 50.2 fps | **61.9 / 62.0 / 62.2 fps** (three runs) |
+| debug | 32.7 fps | unchanged — and **cannot** be rescued |
+
+**The debug build is the operator's other half of this story**, and it is the
+more misleading number: `ui/target/debug/ui_demo` had been rebuilt on the morning
+of the report and `cargo run` defaults to debug, so *"sometimes the fps drops to
+~30"* was a debug build, not a regression. An interleaved CPU comparison against
+`b4a2db8` (pre-gauge) gave **136 / 144 / 135 jiffies before against 137 / 131 /
+149 after** — task 20 is free, and the gauge draws *fewer* primitives than the
+circle chain it replaced. **Frame rates are claims about a build**; this table
+already had a debug row (34.2 fps) and it is the row nobody connects to the
+number in front of them. Recorded in `NEVERAGAIN.md`.
+
+**Pacing cannot rescue a frame that costs more than the budget.** Debug work is
+18.7 ms against a 16.67 ms budget, so it runs at ~33 fps whatever the loop does.
+That is not a loop defect, it is unoptimised Rust being slower than a frame.
+
+**What is NOT fixed, and is the next thing that will bite.** The work is
+**0.18 ms of UI and ~3.9 ms of GL submission** — 22 draw calls a frame against
+Mesa on an Intel HD 530. Ruled out by measurement, not by assumption: it is
+**not vsync** (`swap()` costs 0.18 ms and no `SDL_GL_SetSwapInterval` is ever
+called), **not** opaque geometry being drawn twice (the unblended pre-pass is
+0.07 ms), **not** uncached font metrics (`ascent` is 0.01 ms over 70 calls), and
+the glyph atlas is uploaded only when dirty. So there is real headroom at 60 fps,
+but a car UI with ten times the widgets would not have it, and the text pass is
+where the next investigation should start.
+
+**One honest caveat on the 62.** The loop is **not vsync-locked** — it free-runs
+at its budget and reads slightly *over* 60. `FRAME_BUDGET` is a hard-coded rate,
+not a query of the display's refresh, so a 30 Hz cluster panel would run it at
+half refresh and waste half its budget. Reading the monitor's rate, or setting
+the swap interval to match it, is the change that would fix that; the constant's
+doc says so.
 
 The 15 fps between the two builds is why `fps-check.sh` builds **release**: a
 debug build's rate is a fact about unoptimised Rust, not about the interface, and

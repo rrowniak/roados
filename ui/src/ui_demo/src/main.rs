@@ -147,9 +147,30 @@ const WINDOW: Size = Size {
     height: 1020.0,
 };
 
-/// How long the loop blocks waiting for the next event. Nothing moves on
-/// screen, so this paces the loop rather than budgeting a frame.
-const EVENT_WAIT: Duration = Duration::from_millis(16);
+/// How long one frame is budgeted to take: **60 Hz**, the rate
+/// `doc/ui/DEMO_APPLICATION.md` lists as *"Smooth animations and transitions —
+/// 60 FPS"*.
+///
+/// A frame budget, **not** a wait. This replaced a fixed 16 ms
+/// `wait_event_timeout`, and the difference is the whole fix. That loop waited a
+/// fixed 16 ms and *then* drew, so the wait and the frame's own cost were
+/// **serialised** and a frame was `16 ms + work` no matter how little the work
+/// was. Measured on this host, that is `19.9 ms` — **50.2 fps** — for a frame
+/// whose own work is 3.9 ms, and an infinitely fast frame would still have
+/// capped it at 62.5 fps.
+///
+/// The budget inverts that: the loop waits only what is **left** of this frame
+/// after the work is done, so the frame self-paces at 60 Hz and the work is
+/// spent *inside* the budget rather than after it. With 3.9 ms of work that is
+/// 16.67 ms a frame, and the measured rate went **50.2 → 62.0 fps**.
+///
+/// What would reverse it is a display that is not 60 Hz: this is a hard-coded
+/// rate, not a query of the monitor's refresh, because SDL's
+/// `GL_SetSwapInterval` is never called and the demo has no mode to change. A
+/// cluster panel at 30 Hz would run this at half its refresh and waste half its
+/// budget; asking the display for its rate, or setting the swap interval to match
+/// it, is the change that would fix that and it is not this task's.
+const FRAME_BUDGET: Duration = Duration::from_nanos(16_666_667);
 
 /// The size of one pad.
 const PAD_SIZE: Size = Size {
@@ -971,7 +992,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last = Instant::now();
     let started = last;
     'running: loop {
-        let event = events.wait_event_timeout(EVENT_WAIT);
+        // The frame budget, spent properly: wait only what is left of
+        // `FRAME_BUDGET` after the previous frame's work. The old loop waited a
+        // fixed 16 ms here and drew afterwards, which made every frame
+        // `16 ms + work` and capped a perfectly good frame at 50 fps.
+        let spent = last.elapsed();
+        let event = events.wait_event_timeout(frame_wait(spent));
         if matches!(
             &event,
             Some(
@@ -1012,6 +1038,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", demo.fps_report());
 
     Ok(())
+}
+
+/// Returns how long the loop should block after a frame that took `spent`.
+///
+/// This is the whole of the frame budget as arithmetic, kept out of the loop so
+/// it can be tested: `.ai/NEVERAGAIN.md` § *a test of a helper cannot see a call
+/// site that stopped using it* is the reason the loop calls **this** function
+/// rather than inlining the subtraction, because a helper tested from one place
+/// and inlined in another has two places to be wrong and only one under test.
+///
+/// A frame that overran the budget has nothing left. **`Duration::saturating_sub`
+/// is the whole of that rule**: it stops at zero rather than handing SDL a
+/// negative duration, which would ask for a wait of undefined length.
+///
+/// There was a `.max(MIN_WAIT)` on top of it as well, and a deliberate break of
+/// that clamp **survived the whole suite** — `saturating_sub` already stops at
+/// zero, so the clamp restated a rule the subtraction had already enforced and no
+/// test could ever tell the two apart. It is gone rather than kept as a second
+/// place to be wrong. `.ai/NEVERAGAIN.md` § *a test of a helper cannot see a call
+/// site that stopped using it* is also why the loop calls **this** function
+/// rather than inlining the subtraction: a helper tested from one place and
+/// inlined in another has two places to be wrong and only one under test.
+///
+/// Returning zero for an overrun is not mercy, it is accuracy: the loop is
+/// already late and is reporting a frame that cost too much rather than waiting a
+/// while to hide it.
+fn frame_wait(spent: Duration) -> Duration {
+    FRAME_BUDGET.saturating_sub(spent)
 }
 
 /// Returns how long the demo should run for, read from [`RUN_SECONDS_VAR`], or
@@ -8801,6 +8855,66 @@ mod tests {
         // compared with a constant, it cannot fail, and clippy is right to say
         // so. What can fail is the line above it — the widget being told — and
         // that is the assertion that has any power.
+    }
+
+    #[test]
+    fn the_loop_waits_the_rest_of_the_frame_and_not_a_flat_sixteen_milliseconds() {
+        // The defect this replaced, stated as the arithmetic that fixes it. The
+        // old loop waited a fixed 16 ms and *then* drew, so a frame was
+        // `16 ms + work`; at this host's measured 3.9 ms of work that is 19.9 ms,
+        // which is the 50 fps the demo used to sit at. The rule is that the wait
+        // is what is **left** of the budget, so the work lands inside it.
+        let work = Duration::from_micros(3900);
+        assert_eq!(
+            frame_wait(work) + work,
+            FRAME_BUDGET,
+            "a frame's work plus its wait is the whole budget, so the loop \
+             self-paces at 60 Hz instead of paying the work on top of the wait"
+        );
+        assert_eq!(FRAME_BUDGET, Duration::from_nanos(16_666_667));
+        // And the number the old loop could not reach, spelled out: a zero-work
+        // frame waits the entire budget rather than a flat 16 ms.
+        assert_eq!(
+            frame_wait(Duration::ZERO),
+            FRAME_BUDGET,
+            "with nothing spent, the whole budget is waited"
+        );
+        assert_ne!(
+            frame_wait(Duration::ZERO),
+            Duration::from_millis(16),
+            "the flat 16 ms wait is the bug this replaced, not the fix"
+        );
+    }
+
+    #[test]
+    fn a_frame_that_overran_its_budget_waits_nothing_rather_than_a_negative_time() {
+        // Why the wait is zero and not some floor, and what would break if it were
+        // not. `Duration::saturating_sub` is what stops the subtraction handing SDL
+        // a negative `Duration`, which asks for a wait of undefined length — it is
+        // the whole mechanism, and there is deliberately no `.max(..)` on top of
+        // it: a deliberate break of such a clamp survived this suite once, because
+        // `saturating_sub` already stops at zero and no assertion could tell the
+        // two apart. An overrun reporting itself immediately is the point: a loop
+        // that slept here would hide a frame that cost too much.
+        for spent in [
+            FRAME_BUDGET,
+            FRAME_BUDGET + Duration::from_millis(1),
+            Duration::from_millis(200),
+        ] {
+            assert_eq!(
+                frame_wait(spent),
+                Duration::ZERO,
+                "a frame that spent {spent:?} of a {FRAME_BUDGET:?} budget has \
+                 nothing left, and asks for no wait rather than a negative one"
+            );
+        }
+        // And just under the budget there is still something left, so the clamp
+        // is not simply swallowing every late frame.
+        assert!(
+            frame_wait(FRAME_BUDGET - Duration::from_millis(1)) > Duration::ZERO,
+            "a frame one millisecond inside its budget still has a millisecond \
+             to wait, so the clamp is not hiding small overruns"
+        );
     }
 
     #[test]

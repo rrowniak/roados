@@ -84,11 +84,28 @@
 //! thumb's border.
 //!
 //! # There is no anti-aliasing, and this widget does not have any
+//! **(superseded 2026-10-02 — MSAA arrived; the title is kept so the section is
+//! findable, and read with the paragraph under it)**
 //!
-//! **Requirement 5's "anti-aliased edges via SDF or MSAA" is not met, and no
-//! part of this module claims that it is.** Neither mechanism exists in this
-//! renderer today, and the three facts below are why. The solid fragment shader
-//! has exactly one antialiasing branch and it is a **hard** one — `if (dist >
+//! **The central claim below is now false, and the section is kept because it
+//! records what was measured and why.** The GL context now asks for **4x MSAA on
+//! the default framebuffer**
+//! (`render::context`'s `MULTISAMPLE_SAMPLES` and `MULTISAMPLE_BUFFERS`, set
+//! before the window is built), the driver granted it (`GL_SAMPLE_BUFFERS` 1,
+//! `GL_SAMPLES` 4, read back from a live context), and every geometric edge the
+//! renderer draws is now resolved by the hardware rather than one whole pixel at
+//! a time. **What is superseded** is the first paragraph's *"Neither mechanism
+//! exists in this renderer today"* and its *"Requirement 5's 'anti-aliased edges
+//! via SDF or MSAA' is not met"*; **what is still true** is the account of what
+//! this module records and which of it reached the shader's branch, and of the
+//! *other* two mechanisms the original list ended with, which are still not
+//! here.
+//!
+//! **Requirement 5's "anti-aliased edges via SDF or MSAA" was not met when this
+//! was written, and the paragraph below is kept as the record of that.** Neither
+//! mechanism existed in this renderer then, and the three facts below are why.
+//! The solid fragment shader
+//! had exactly one antialiasing branch and it is a **hard** one — `if (dist >
 //! 0.0) { discard; }`, a binary test with no `smoothstep` and no `fwidth`
 //! (`render.rs`, `FRAGMENT_SHADER_SRC`) — and what it models is an axis-aligned
 //! rounded rectangle, so [`DrawCommand::Circle`] reaches it only because
@@ -103,22 +120,36 @@
 //! antialiasing — which, on a branch that is a hard `discard` on a rounded
 //! rectangle, was worth very little to begin with.
 //!
-//! What that costs, on a gauge specifically: the arc's inner and outer
-//! boundaries are stair-stepped rather than smooth, which shows most where the
-//! tangent is vertical — the left and right of the dial — and least along the
-//! top, where the curve is shallow. The needle's two long edges show it too.
-//! Nothing here is *wrong*; it is unfinished, and a reviewer should look at the
-//! pixels before believing otherwise.
+//! What that cost, on a gauge specifically, and what it now costs: the arc's
+//! inner and outer boundaries were stair-stepped rather than smooth, which shows
+//! most where the tangent is vertical — the left and right of the dial — and
+//! least along the top, where the curve is shallow. The needle's two long edges
+//! showed it too. **Measured on 2026-10-02, before and after**: the arc's outer
+//! edge on the horizontal through the dial's centre read `18 18 18 18 18 187 187`
+//! before — a step with nothing between it, the same shape as the text stem edge
+//! recorded in `NEVERAGAIN.md` — and `18 18 18 18 145 187 187` after, the 145
+//! being a pixel three of four samples covered. Over the 106 rows of the arc
+//! that carry an outer edge, 103 were full coverage and **3** were intermediate
+//! before; after, **88 of 108** are intermediate, at 1/4, 1/2 and 3/4 coverage.
+//! Nothing about the *shape* changed: the band's 33 quads, its radii and its
+//! chord sag are the same numbers, and the `Path` and the chain of circles are
+//! still worse for the reasons measured above. **What 4x does not reach is an
+//! edge that lands on a pixel boundary**, which resolves to full coverage on one
+//! side and none on the other: the fill's radial cut at twelve o'clock sits on
+//! `x = 764` and is still a hard step, in the capture, on purpose.
 //!
-//! What would reverse it, in the order of how little it costs: a `smoothstep`
-//! over `fwidth(dist)` in the solid fragment shader, which would antialias every
-//! rounded rectangle and every circle in the library at once; a distance field
-//! per primitive edge, which is a new shader and a new vertex type and is the
-//! only one of the three that would reach the band and the marks as well; and a
-//! multisampled default framebuffer or an FBO with `GL_MULTISAMPLE` and a resolve
-//! pass, which this pipeline does not have — the GL context sets a profile, a
-//! version, double buffering and a zero depth size, and no multisample attribute
-//! at all.
+//! The other two mechanisms the original list ended with — a shader `smoothstep`
+//! and a per-primitive distance field — are still not here, and **what would
+//! reverse, or replace, the antialiasing that arrived** is in the order of how
+//! little it costs: a `smoothstep` over `fwidth(dist)` in the solid fragment
+//! shader, which antialiases every rounded rectangle and every circle in the
+//! library at once and is free, but reaches none of the band or the marks that
+//! this widget actually draws; a distance field per primitive edge, a new shader
+//! and a new vertex type, which reaches them and would supersede the
+//! framebuffer's samples rather than add to them; and 8 samples on the same
+//! default framebuffer, which this driver's `GL_MAX_SAMPLES` reports as
+//! available (16) and which nobody has measured, because
+//! `MULTISAMPLE_SAMPLES`'s own doc says what it would cost.
 //!
 //! # Colours, and what is not a theme token
 //!
@@ -1144,10 +1175,23 @@ impl Gauge {
     /// paints its fill as far as the transition has got and its needle where the
     /// transition has reached, not as far as the value it is travelling toward.
     ///
-    /// **None of these edges is antialiased**, for the reason the module document
-    /// sets out at length: the renderer's one distance field is a hard `discard`
-    /// on axis-aligned rounded rectangles, the line and polygon quads carry a
-    /// radius of zero, and nothing in the pipeline is multisampled.
+    /// **These edges are antialiased, by the framebuffer rather than by this
+    /// widget** (superseded 2026-10-02 — the module document's *There is no
+    /// anti-aliasing* section is superseded in place, and this said
+    /// *"None of these edges is antialiased … and nothing in the pipeline is
+    /// multisampled"*, which was true of the context before
+    /// `render::context`'s `MULTISAMPLE_SAMPLES` and is false now). **What is
+    /// still true** is the account of what this method records: the band and the
+    /// needle are [`DrawCommand::Polygon`]s and the tick marks are
+    /// [`DrawCommand::Line`]s, `line_quad` and `polygon_quad` both hardcode
+    /// `radius: 0.0`, and **none of them reaches the solid shader's own
+    /// antialiasing branch** — a hard `discard` on an axis-aligned rounded
+    /// rectangle. The default framebuffer is now 4x multisampled, so every
+    /// geometric edge below is resolved from four coverage samples by the
+    /// hardware, and the module document has the before-and-after pixel counts.
+    /// **What 4x does not do** is make the pipeline resolution-independent, and
+    /// it costs measurable frame time on a fill-rate-bound target; both are in
+    /// `MULTISAMPLE_SAMPLES`'s own doc.
     ///
     /// # Examples
     ///

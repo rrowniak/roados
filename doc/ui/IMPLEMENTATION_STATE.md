@@ -6,17 +6,391 @@ requirements, and where this file and a task file disagree, the task file wins
 and this file gets corrected.
 
 **Spec:** `doc/ui/PRIMITIVES.md`, `doc/ui/PRIMITIVES_ARCHITECTURE.md`, and
-`doc/ui/TASK_UI_PRIM_01..24.md`.
+`doc/ui/TASK_UI_PRIM_01..32.md`.
 
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-02
 
 ## Current position
 
-**Status: task 20 (Gauge) implemented, awaiting review, uncommitted.** Task 19 is
-committed as `b4a2db8`, tasks 15–18 as `d7240c8`, the frame-rate readout as
-`3ddf5fa`. **Nothing in task 20 has been reviewed by anybody** and it is not
-committed, so `task-sequence.md`'s *No unreviewed advance* gate is untested for
-the second task running. See *Task 20 — what it decided*.
+**Status: task 21 (Chart) reviewed twice, uncommitted, awaiting the operator's
+commit.** Task 20 is
+committed as `79941cd`, task 19 as `b4a2db8`, tasks 15–18 as `d7240c8`, the
+frame-rate readout as `3ddf5fa`. **Task 21 is the first task in this sequence to
+go through `reviewer.md` twice** — task 20 was committed without ever being
+reviewed, the operator's decision, and this file recorded it as one. The
+*No unreviewed advance* gate skipped twice running is **closed as of this
+revision**: round one returned 1 blocker and 6 minors, all seven were fixed, and
+round two confirmed the blocker closed **by mutation** — removing the fix
+reproduces the original four measurements exactly — and left 5 minors, which
+the operator **waived with recorded reasons** rather than spend a third round
+on. See *The two review rounds, and the five findings the operator waived*.
+**"Reviewed" here does not mean "finished": all five are open.**
+
+**Two rows of the task table were stale and are corrected in this revision:**
+tasks 19 and 20 both read *implemented, uncommitted* while both have been
+committed since 2026-10-02. The rule this file is written under is that it may
+not contradict its artefact, so a state file nobody re-reads is worse than no
+state file.
+
+## Task 21 — what it decided, and what it found
+
+**Reviewed twice** — see *The two review rounds, and the five findings the
+operator waived*, which supersedes the "written to be reviewed" note this
+section carried before it.
+
+### The four operator decisions, taken 2026-10-02 before any code was written
+
+Each was put to the operator as a question with the facts behind it, because
+the task file requires something this pipeline cannot do as written. The
+anti-aliasing one was asked twice: the operator asked for the detail behind two
+of the three options before choosing, and the detail is what follows.
+
+1. **Anti-aliasing is now the pipeline's, and it is hardware.** Task 21
+   requirement 6 asks for *"Anti-aliased edges"*, and at the time of asking the
+   pipeline had none: `Context::new` set four GL attributes and no multisample
+   attribute (`render/context.rs:107-111`), there was no FBO anywhere in
+   `ui_core`, and the solid shader's only antialiasing branch is a hard
+   `discard` on an axis-aligned rounded rectangle. **The operator chose a
+   multisampled default framebuffer** over an FBO with a resolve pass — one line
+   rather than a change to `begin_frame`, `end_frame` and the resize path — after
+   being told that it antialiases the whole app rather than the chart, that it
+   may put a hairline seam where two quads share an edge, and that it costs
+   measurable frame time. It is `MULTISAMPLE_SAMPLES = 4` with
+   `MULTISAMPLE_BUFFERS = 1` in `render/context.rs`.
+2. **Area fill is per-segment convex quads.** `DrawCommand::Polygon` — added in
+   task 20 for the gauge needle — is **convex only**: the renderer fans `n - 2`
+   triangles, which is exact for a convex polygon and a wrong picture for a
+   concave one, and the region under a non-monotonic line is concave. The
+   operator declined ear-clipping triangulation in the renderer.
+3. **The demo gives up the list.** The window **cannot grow**: a 1280×1320
+   request comes back **1280×1052**, the window manager's cap, measured on this
+   host, and the window is 1020. The operator's answer was *"Remove some
+   existing widgets like list or so. (Keep fps label.)"* The chart takes the
+   list's column. **What that cost is written down below rather than left in a
+   diff.**
+4. **Line joins are mitred per-segment quads**, not one `Path` per series —
+   `Path` offsets each segment perpendicular, so thickness is exact along a run
+   and the joins notch on the outside of a turn.
+
+### The finding that is not this task's: the solid pass does not premultiply
+
+**`ui_core`'s solid-colour path blends as if its colours were premultiplied and
+does not premultiply them.** `render.rs:1528` sets
+`gl.blend_func(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)`, which is the premultiplied
+blend; the solid shader's own doc at `render.rs:143` says *"Colors arrive
+premultiplied"*; and `quad_color` at `render.rs:617` divides each channel by 255
+and **does not multiply rgb by alpha**. So a `Rect`, `RoundedRect`, `Line`,
+`Circle`, `Path` or `Polygon` with alpha below 255 composites as
+`rgb + dst·(1 − a)` instead of `rgb·a + dst·(1 − a)`, which **brightens over a
+lighter destination and is brightest over one of its own colour.**
+
+`Color::to_premultiplied()` exists at `property.rs:330` and has no caller in the
+solid path. **The image shader (`render.rs:293`) is correct** and for a stated
+reason: the texel is premultiplied at load and an alpha-only scale of a
+premultiplied colour stays premultiplied.
+
+**The text pass has the same latent defect, and this record first said it did
+not.** `text_quad` (`render.rs:459`) calls the same `quad_color`, and the text
+fragment shader (`render.rs:208`) scales by **glyph coverage**, not by alpha, so
+a text colour below full alpha composites wrongly exactly as a solid one does.
+**It is correct today only because every text colour in the tree is opaque** —
+every theme colour is `alpha 255` and no widget builds a translucent one — which
+is a fact about the callers, not about the pass. **The fix is one place**
+(`quad_color`), and a maintainer who read "the defect is the solid pass alone"
+and premultiplied inside the solid shader would fix nothing. Corrected here after
+the review found it; the reviewer is right and the first version of this section
+was an over-claim of the kind this file exists to catch.
+
+It was found by the chart's author, not by reading the code: the first
+measurement of a translucent area fill came back with two unexplained 64-px
+bands at the ends of the plot reading `(255,194,255)`. The follow-up's
+explanation was its own throwaway harness — a second chart drawn at the same x
+and y origin, so a translucent fill lay over an opaque bar of its own colour —
+and the arithmetic then predicted the measured value at **three** destinations
+exactly. `Color` values above the source's own channels cannot come out of a
+composite of that source, which is what ruled the widget out.
+
+**It is pre-existing, it is not task 21's, and it was not fixed here.** Fixing
+it changes every translucent primitive in the application, which is a change to
+every capture in this file. It is recorded here for the operator as a separate
+pipeline task.
+
+### What the widget is, and the two shapes it had to choose between
+
+`ui/src/ui_core/src/widgets/chart.rs` is new — **6 532 lines, 115 unit tests, 23
+doctests**, counted after the fix round. `ChartType` is `Line`, `Bar` or `Area`;
+`data`,
+`x_labels` and `y_labels` are `Property<Vec<…>>`; `chart_type` is a plain field
+behind a setter, the gauge's arrangement. **`Series` is two parallel arrays** —
+`x` as a share of the plot's width beside the values — and that is load-bearing
+rather than tidy: appending re-spaces every existing sample, so a chart that
+animated
+only the values would draw a correct-looking series in the wrong places.
+
+Both fills are per-segment quads, and both reasons are the same reason: the
+renderer's fan is exact for a convex polygon and for nothing else. The line's
+quads are **mitred**, and the mitre is taken only while it stays inside
+`MITRE_LIMIT · half` — a corner is dropped to a disc rather than allowed to
+produce a concave quad. **A first implementation had exactly that defect** (the
+along-axis swing can exceed a segment's own length, so a 201-sample chart at a
+90° turn went concave) and it was found by the on-screen and fuzz work rather
+than by an assertion. It costs nothing on a chart a person would read: the bound
+is 6 px, so no corner is affected while the sample pitch stays above 12 px —
+**50 samples on a 600-pixel plot**, since `600/(n−1) > 12` holds to n = 50 at
+12.245 px and n = 51 is exactly 12. *(Corrected from 49 by the review; this
+document had the wrong figure and the widget's own doc now carries the
+arithmetic that decides it.)*
+
+`ui/src/ui_core/src/widgets/chart.rs` is **6 532 lines with 115 unit tests and 23
+doctests**, and **how each was counted is worth writing down**, because both
+sentences here were wrong once and the fix round moved both numbers again:
+
+- **lines** — `wc -l src/ui_core/src/widgets/chart.rs`.
+- **unit tests** — `cargo test --lib widgets::chart -- --list | grep -c ': test$'`,
+  which counts **registered** tests rather than `#[test]` attributes. It is **115**,
+  and `grep -c '^    #\[test\]'` in the file is also **115**, so the two agree and
+  there is no attribute without a function and no function registered twice.
+- **doctests** — `cargo test --doc -p ui_core -- --list | grep -c 'chart.rs'`,
+  which is **23** and was 23 before the fix round: the round added no example, only
+  prose and tests. The whole crate has 192 registered doctests.
+
+The previous pair of sentences published **5 896 lines and 112 unit tests**, and
+the reviewer's measurement was **6 080 and 113**; all four were stale, because the
+counts had been taken before the last edits of the round that wrote them. **A
+count published in a document about a file that is still being edited is a
+quotation of the past**, and the cheapest guard is to compute it last and put the
+command next to it.
+
+### Two claims this task's own docs got wrong, and what fixed them
+
+**Both were found by measuring, which is the point of the `NEVERAGAIN` entry
+this task is a second instance of.**
+
+1. **"A translucent fill does not seam" was measured in a harness whose
+   surroundings the author had not accounted for.** The claim was true — the
+   quads are a tiling and not an overlay, and 1 distinct colour in 27 900 pixels
+   says so over the whole region — but the first version of the sentence
+   supported "one uniform colour" with nine interior x positions, which is not
+   what nine positions establish. It now says what was measured, names the
+   harness confound, and rests on two tests that assert the **precondition**
+   instead: that consecutive fill quads share exactly one x and that no two
+   interiors ever overlap.
+2. **`Chart::paint` said nothing it records reaches outside `rect`, "with one
+   measured exception, which is the stroke's own half width".** That is false at
+   a turn, and the demo subagent found it by measuring the shipped chart: a
+   mitred corner is up to `MITRE_LIMIT · half` = 6 px long, and a reading at the
+   top of its range puts its data point on the plot's **top** edge — and
+   `plot_rect` insets the left and the bottom only, so `plot.y == rect.y`.
+   Measured 4.3956 px above the node's top edge one frame into an append, and
+   2 px on the settled chart. The passage is now three named overhangs with a
+   bound each, and **three tests** fail if it becomes false again. A fourth
+   overhang was measured while fixing it: the first y label's line box reaches
+   `LABEL_FONT_SIZE / 2` = 6.0 px above the plot's top — **equal to the mitre at
+   the defaults and larger than it for any font size above 12 px.**
+
+**A duplicated constant went with the second one.** The demo had carried
+`CHART_STROKE_REACH = 6.0`, a private copy of the widget's number that would rot
+the moment `MITRE_LIMIT` or `line_width` moved — the shape of the `NEVERAGAIN`
+entry *one sibling got the operator's fix; the other with the same constant did
+not*. The widget now exposes **`Chart::stroke_reach()`** and the demo calls it
+in three places.
+
+### What the list cost, stated rather than left in a diff
+
+The operator's decision removes the demo's **only scrolling viewport**. `Scroll`
+— the widget they reported a 6-pixel bar and a ten-to-one drag lag against — is
+now **driven by nothing in the demo**, and its only remaining coverage is
+`ui_core`'s own tests. `SCROLLBAR_THICKNESS`'s test went with it, and that test
+was the only thing standing between the 2026-10-01 report and a repeat of it.
+The demo also lost its **on-screen proof of virtualisation** (`first 0, live 10,
+free 0`) and the **positional mouse-wheel routing** claim, whose two tests used
+the list as their fixture; a positionless `Scroll` — the steering wheel's axis —
+is still covered, by the slider's test.
+
+The reasoning behind the deleted constants was **not** deleted with them.
+`SCROLLBAR_THICKNESS`'s doc carried the operator's finger complaint verbatim; it
+is preserved, dated and attributed, in `KEY_HEIGHT`'s doc, which already argued
+from the same judgement. `LIST_FONT`'s is carried by `CHART_READOUT_FONT`'s.
+
+### The three keys, and what a still can and cannot prove
+
+`H` cycles `Line` → `Bar` → `Area` and wraps, so the task file's three separate
+rendering criteria are three presses of one key. `A` appends through
+`animate_push`; `S` shifts through `animate_shift`. All three were grepped
+against `handle_event`'s existing arms first — no collision with `T`, `Space`,
+`+`/`-`, `C`, `0`/`1`, `F`, `[`/`]`, `P`, `,`/`.`, `G`, arrows, `Tab`, `Return`.
+
+**Keyboard injection does not reach the window on this host** — the subagent
+built the XTEST injector and the positive control (`T`, which changes the whole
+window when it lands) moved **212 px**. So *"New data animates in smoothly"* is
+covered by **tests through `Demo::handle_event`'s real event path**, asserting
+the mid-flight state and the arrival, and **is not claimed on a capture.**
+
+### What is on screen, and how it was got
+
+One capture of the default state, by the stock method in *Verifying a change
+that draws* — `cargo build --release`, `setsid ./target/release/ui_demo >
+/tmp/demo.log 2>&1 &`, window id `0x100002f` **re-read at the time of the
+capture**, `pgrep -a -x ui_demo` in the same call, `magick import -window`, and
+`stderr` empty. `rg -c "SEED|PROBE|PREVIEW" ui/src/ui_demo/src/main.rs` is
+**0** and `git status` shows no stray file.
+
+Measured, by the demo subagent and re-checked against the pixels:
+
+- **the series lands where its values put it** — every one of the eight readings
+  within **2.00 px** (six of eight within 0.41 px), the stroke **3.034 px**
+  perpendicular against a requested 3.0 (+1.13 %);
+- **the axes and labels** — the y axis a full 433-px column at x=1000, the x axis
+  rows 671–672, four grid lines at 326 / 412 / 498 / 585 against the computed
+  326.4 / 412.8 / 499.2 / 585.6, and seven x labels inside the gutter with **no
+  ink in the node's last two columns** — the newest sample is deliberately
+  unlabelled, because a `DrawCommand::Text` carries no width;
+- **the bar and area captures came from two temporary releases** whose opening
+  shape was the demo's own `CHART_TYPES[1]` and `[2]`, **no new seed variable**,
+  reverted before the final capture with a `diff` and the `rg` count above.
+  Seven bars for eight readings (the eighth is the range's low and has no
+  height), every bar's top within **0.87 px**; **269 of the plot's 270 columns**
+  carry a fill run reaching the bottom edge.
+
+### Deliberate breaks — 52 run, 49 killed, 3 no-ops
+
+| writer | mutations | killed |
+|---|---|---|
+| the chart widget | 19 + 6 + 2 | 27 |
+| MSAA (`render/context.rs`) | 4 | 3 + 1 by capture |
+| the demo wiring | 18 + 5 | 20 + 2 |
+
+**Three survivors were reported rather than hidden, and the reason is worth
+keeping.** Replacing `chart.stroke_reach()` with a hand-written `6.0` passes
+every test, because at the defaults **`stroke_reach()` *is* 6.0** — the
+substitution is not a different number, it is the same number with the coupling
+to `set_line_width` and to a future `MITRE_LIMIT` removed, and no assertion can
+distinguish two equal numbers. Every assertion that reads the bound compares it
+against a clearance of ten pixels or more, so a bound of 1, of 6 and of 12 all
+pass. What the suite *does* police is the **value**: a bound taken from the end
+cap's half width (1.5) fails the containment test on the exact geometry that
+makes the difference, the mitred corner at y 235.67789 against a node top of
+240. **Provenance is a grep, not an assertion** — `grep -c CHART_STROKE_REACH
+main.rs` is 0.
+
+### What is NOT claimed
+
+- **No criterion is verified through injected input.** Pointer injection does
+  not reach the window on this host and keyboard injection did not arrive
+  (`T` moved 212 px). Criteria 1, 2, 3, 4 and 6 are capture-verified and
+  measured; criterion 5 is covered by tests through the real event path and is
+  **not** claimed on a capture.
+- **The animation was not seen mid-flight in a capture** — a still proves what is
+  drawn and never how it moves.
+- **`y_labels` are deliberately empty**, which is requirement 4's auto-scaling
+  default and puts the y axis on the node's own left edge. Criterion 4 is
+  therefore proved by the x labels and the two axes, **not by numbers on the y
+  axis.**
+- **`set_fixed_range` / `clear_fixed_range` are not exercised by the demo.**
+  Auto-scaling is what requirement 4 asks for by default; with a fixed range the
+  y labels would mean something, and the demo writes none. The operator's call.
+- **`cargo audit` was not run** — not installed on this host, the standing tool
+  gate. **No dependency changed**, which is the thing it would have checked.
+  `ui/Cargo.toml` and `ui/Cargo.lock` are untouched, and the **aarch64
+  cross-build passes with no sysroot** — `ELF 64-bit LSB pie executable, ARM
+  aarch64`, with the same **four** dynamic dependencies (`libm`, `libgcc_s`,
+  `libc`, the loader), so this task added no dependency and changed nothing about
+  how the target links.
+- **The one-line MSAA change makes every capture in this file historical.** The
+  gauge's hard edges are gone, and the gauge's own module doc has been
+  superseded in place rather than rewritten.
+
+### The frame rate
+
+`fps-check.sh 12 55`, four release runs across this task: **61.7, 62.1, 62.3**
+(the demo wiring) and **62.0** (the follow-up), against **61.8 fps at `f8ba81e`
+measured before any of this**. A whole new widget, drawn every frame, plus 4x
+multisampling, inside the existing spread. The MSAA author's own interleaved A/B
+put the attribute's absence and presence at 61.9/61.0 and 61.8/61.7 — inside
+each other's spread, so **the rate is not evidence either way** and the honest
+statement is that nothing measurable moved, not that MSAA is free.
+
+### The two review rounds, and the five findings the operator waived
+
+Task 21 went through **`reviewer.md` twice**, in a session separate from the
+author's each time — the first time in this task's history, which is not a
+standard this sequence can keep skipping. Round one returned **Approve with
+required changes**: **1 blocker, 6 minors**. All seven were sent back and fixed.
+Round two, on the integrated fix round, returned **Approve with required
+changes** again: **the blocker is closed and verified**, and **5 minors remain,
+all of which the operator waived on 2026-10-02** after being given the list.
+
+**The blocker, and how it was proved closed.** A non-finite sample erased the
+two real series segments either side of it, because `draw_series` built its
+`joins` across the whole point vector and `normal_of` answers `None` for a `NaN`
+— so both real vertices touching a gap got an undefined join, the segments
+were skipped, and the fallback disc is drawn only for a *flat* join, so nothing
+replaced them. Measured before the fix: `[1,5,9,NaN,3,7]` drew 1 quad where its
+runs hold 3 segments, `[NaN,5,9]` drew 0 of 1, and as an `Area` chart the fill
+drew 3 quads against 1 stroke quad, so the outline was missing exactly where
+the fill was not. **Four doc sites already said the opposite** — that a missing
+sample breaks the run and costs only the segment that spanned it — so the
+behaviour was fixed and the docs were left standing.
+
+Round two verified the fix **by mutation rather than by reading it**: removing
+the two `.filter(is_finite)` calls reproduces all four of round one's
+measurements exactly, so the numbers above are what the fix reverses. It also
+established the fix's **blast radius is exactly two tests** — ordinary run-end
+flat caps are untouched — and that this follows structurally rather than
+empirically: the filter is the identity on all-finite input, and a repeated
+point is finite, so it cannot reach the one case it must not change. **A
+repeated point is not a gap**, and one test now pins that contrast in a single
+assertion.
+
+**The five waived findings.** Each was verified as a real defect before it was
+waived, and each is *verifiable* — none is an unverifiable acceptance criterion,
+which is the only kind `task-sequence.md` lets a waiver cover without a
+struggle. The operator's decision was to stop here rather than run a third
+round, and the reasons are recorded so a later session can revive them:
+
+1. **A stale citation.** This file's operator-decision paragraph cites
+   `render/context.rs:107-111` for the claim that `Context::new` *"set four GL
+   attributes and no multisample attribute"* — and those lines now hold
+   `MULTISAMPLE_SAMPLES` itself. The citation names the constant the sentence
+   says was absent. **Revive by** citing `context.rs:203-206`, and dropping the
+   line number from the "and no multisample attribute" half, which is a claim
+   about the state *before* this change and no current line can evidence it.
+2. **A cross-reference with nothing behind it.** `paint.rs`'s `DrawCommand::Polygon`
+   doc ends by pointing the hairline-seam caveat at `MULTISAMPLE_SAMPLES`'s doc.
+   **That caveat is in neither its doc nor `MULTISAMPLE_BUFFERS`'s** — it exists
+   only in that one sentence. `gauge.rs`'s identical pointer is correct, because
+   both of its claims are in `MULTISAMPLE_SAMPLES`'s doc. **Revive by** moving
+   the seam into `MULTISAMPLE_SAMPLES`'s doc, where the operator was told about
+   it and where the A/B that looked for it lives.
+3. **A coverage claim wider than the assertion.** The nine-row sweep table is
+   introduced as one the test *"asserts every cell of"*, exactly. **Only the
+   denominator column is asserted for all nine heights**; the `join` and
+   `drawn` columns are asserted for 240 and 300 and derived for the other
+   seven. Every cell is correct — round two measured all thirty-six — so this is
+   an over-statement, not a wrong number, and it is the same shape as the round's
+   own new `NEVERAGAIN` entry. **Revive by** hoisting the table into the test's
+   loop and asserting `join` and `drawn` per height.
+4. **The open defect is not in *What is NOT claimed*.** `chart.rs` calls the
+   `Join::Corner((0, 0))` at a small positive `1 + p·q` *"a defect, not a
+   degenerate case"* and hands it to *"the integrator"*, with
+   `a_full_reversal_depends_on_which_way_f32_rounds` as a tripwire. This file's
+   *What is NOT claimed* lists six things task 21 does not establish and does not
+   mention it, while the pre-existing premultiply defect gets a subsection, a
+   history entry and a bullet. **The omission reads as deliberate because the
+   asymmetry is deliberate**, which is why it is recorded here. **Revive by** one
+   dated bullet in *What is NOT claimed* plus one history line.
+5. **A run count that is one behind.** *The frame rate* above publishes *"four
+   release runs across this task"* and lists four. The fix round ran a fifth
+   (**62.5 fps**, reproduced by round two) and did not refresh it — eleven lines
+   below where the fix round itself wrote that a count about a still-being-edited
+   file is a quotation of the past. **Revive by** adding the run and saying
+   "five", or by qualifying the list as the pre-fix-round runs.
+
+**What this waiver is not.** It is not a claim that the widget is sound. It is a
+decision to stop at a reviewed state rather than to spend a third round on five
+citations, one coverage sentence and one history entry — none of which can
+change a pixel. **Nothing in it is fixed, and all five are recorded so that
+"reviewed" here is not read as "finished".**
 
 ## Task 20 — what it decided, and what it found
 
@@ -645,6 +1019,17 @@ one under test.
 |---|---|---|
 | release | 50.2 fps | **61.9 / 62.0 / 62.2 fps** (three runs) |
 | debug | 32.7 fps | unchanged — and **cannot** be rescued |
+
+**Task 21 added a whole widget and 4x multisampling, and the rate did not
+move.** Four release runs across that task read **61.7, 62.1, 62.3, 62.0**,
+against **61.8 fps at `f8ba81e`** measured before any of it — inside the spread,
+and the floor of 55 that these numbers defend still holds. The MSAA author's own
+interleaved A/B — the attribute absent and present, alternating, restoring the
+file between every build — put the two builds at **61.9 / 61.0 without** and
+**61.8 / 61.7 with**, so **the measurement does not separate them** and the
+honest statement is that nothing measurable moved, not that 4x MSAA is free. On a
+fill-rate-bound target it would not be free, which is what the constant's own doc
+says.
 
 **The debug build is the operator's other half of this story**, and it is the
 more misleading number: `ui/target/debug/ui_demo` had been rebuilt on the morning
@@ -1797,6 +2182,20 @@ stands in a transparent 320×192 image rather than taking the window down.
   The reason for the third half of (iii) is measured, not chosen: this host's
   window manager caps the window at 1052 pixels, so a stacked band's keyboard
   would never have reached the screen. See *Task 19 — what it decided*.
+- **Task 21's four gaps are the operator's decisions, 2026-10-02**, each taken
+  after being shown the facts and before any code was written, because the task
+  file requires something this pipeline could not do as written. (i)
+  **Anti-aliasing is a multisampled default framebuffer** — `MULTISAMPLE_SAMPLES
+  = 4`, `MULTISAMPLE_BUFFERS = 1` in `render/context.rs` — chosen over an FBO
+  with a resolve pass after being told that it antialiases the whole app rather
+  than the chart, that two quads sharing an edge may gain a hairline seam, and
+  that it costs measurable frame time. (ii) **The area fill is per-segment
+  convex quads**; ear-clipping triangulation in the renderer was declined.
+  (iii) **The demo gives up the list and its readout** so the chart can have the
+  column — the window cannot grow (a 1280×1320 request comes back 1280×1052,
+  measured) and the operator's words were *"Remove some existing widgets like
+  list or so. (Keep fps label.)"* (iv) **Line joins are mitred per-segment
+  quads** rather than one `Path` per series. See *Task 21 — what it decided*.
 - **aarch64 target libraries are deferred until the target image is decided.**
   The operator's decision, 2026-09-28. Native builds proceed and stay verified;
   aarch64 remains a documented waiver. No sysroot strategy is committed to yet.
@@ -1855,6 +2254,33 @@ sysroot mandatory.
 
 ## Deviations from the spec, and why
 
+- **`Chart::new` takes the arena and returns `Self`, not a `Handle`.** Task 21's
+  requirement 1 writes `Chart::new(chart_type: ChartType) -> Handle`, which is
+  stale about this repository in the same way task 13's requirement 2 was stale
+  about `LayoutMode`: every widget here is constructed against
+  `&mut Arena<WidgetNode>` and hands out its `Handle` separately, because the
+  node has to exist before its properties do. So it is
+  `Chart::new(nodes: &mut Arena<WidgetNode>, chart_type: ChartType) -> Self`
+  plus `Chart::handle() -> Handle`, which is `Gauge`'s shape. `chart_type` is a
+  plain field behind `set_chart_type` rather than a `Property`, following
+  `Gauge`'s `gauge_type`: it is the *shape* rather than the appearance, and
+  nothing animates it. The deviation and its reason are in the widget's own
+  module doc.
+- **Task 21's line and area rendering are per-segment quads, not a strip.**
+  Requirement 6 asks for *"triangle strip or line strip"*; the pipeline is
+  quad-only, and the index buffer's quad-only invariant (4 vertices, 6 indices)
+  is pinned by a test. A line is therefore one convex `DrawCommand::Polygon` per
+  segment with mitred corners, and an area is one convex quad per segment from
+  the line down to the plot's bottom edge. **The fan is exact for a convex
+  polygon and for nothing else**, so a single polygon for the whole series would
+  be a wrong picture rather than a rough one — which is why the requirement's
+  literal *"filled polygon below line"* is not what ships.
+- **Task 21's requirement 6 asks for anti-aliased edges, and this task is what
+  made that true** — 4x MSAA on the default framebuffer, the operator's decision.
+  Before it, the pipeline had no antialiasing on a geometric edge at all: the
+  solid shader's only branch is a hard `discard` on an axis-aligned rounded
+  rectangle, and a polygon or a line takes the plain-colour path because
+  `line_quad` and `polygon_quad` both hardcode `radius: 0.0`.
 - **`input::dispatch_event` is unusable for any handler that reaches the arena,
   and `input::route` was added beside it.** `dispatch_event` holds `&Arena` for
   its whole bubbling walk. This repository reaches widgets through property
@@ -2034,10 +2460,10 @@ verified. A blank cell is unknown, not "none".
 | 16 | Widget — Image | done, **batched** | `d7240c8` | **none** — see *Gates skipped* | **ACs 2, 3, 4, 5, for the picture only.** The *geometry* of all four fits and the opacity are asserted as recorded draw commands, and AC 6's corner clip and AC 7's image on screen were **capture-verified**; only `Contain` has been *seen*, because reaching the other three needs a key |
 | 17 | Widget — Progress | done, **batched** | `d7240c8` | **none** — see *Gates skipped* | **ACs 3, 4** — a value animating and the indeterminate slide both need frames with something moving, and moving them needs a key. ACs 1, 2 and 5 were **capture-verified**, the bar on screen at 50% |
 | 18 | Widget — List/Scroll | done, **batched**, then **fixed on screen** | `d7240c8` | **none** — see *Gates skipped* | **ACs 2, 3**, and the "scrollable" half of **AC 7** — all three need a pointer or a wheel on this host. **AC 2 is not a defect**: dragging *up* scrolls, through the demo's real event path, and dragging *down* at offset 0 cannot move a list past its own start. ACs 1, 4, 5, 6 and AC 7's *100 rows on screen* are **capture-verified and unit-tested**, and the clipping defect the operator reported is fixed — see *A defect the operator found* |
-| 19 | Widget — TextInput + On-screen Keyboard | **implemented, uncommitted** | — | **none yet** | **none waived** — every criterion is covered by the demo's own event path or by a capture. What is *not* claimed is anything about XTEST injection, which was not used; see *Task 19 — what it decided* |
+| 19 | Widget — TextInput + On-screen Keyboard | done | `b4a2db8` | **none** | **none waived** — every criterion is covered by the demo's own event path or by a capture. What is *not* claimed is anything about XTEST injection, which was not used; see *Task 19 — what it decided* |
 | — | Frame-rate readout, stdout report, `fps-check.sh` | done | `3ddf5fa` | none yet | n/a — an operator request, not a task with criteria. Verified: the suite is green, six mutations killed, the readout seen on screen, and both run-end paths measured — see *The frame rate, measured* |
-| 20 | Widget — Gauge | **implemented, uncommitted** | — | **none yet** | **Requirement 5's anti-aliasing half is NOT met and is not waived** — the renderer has no SDF for curves and no MSAA; the widget's module doc says so and the hard edges were seen in a capture. **AC 3's "needle as a triangle"** required a new filled `Polygon` draw command, which the operator approved. The needle's spring is asserted by tests, not seen mid-flight. ACs 1, 2, 4 and 5 are capture-verified and unit-tested — see *Task 20 — what it decided* |
-| 21 | Widget — Chart | pending | | | |
+| 20 | Widget — Gauge | done | `79941cd` | **none — committed without review** | **Requirement 5's anti-aliasing half was NOT met at the time and was not waived** — the renderer had no SDF for curves and no MSAA; the widget's module doc said so and the hard edges were seen in a capture. **That is no longer true**: 4x MSAA landed with task 21 and the gauge's doc has been superseded in place. **AC 3's "needle as a triangle"** required a new filled `Polygon` draw command, which the operator approved. The needle's spring is asserted by tests, not seen mid-flight. ACs 1, 2, 4 and 5 are capture-verified and unit-tested — see *Task 20 — what it decided* |
+| 21 | Widget — Chart | **reviewed, uncommitted — awaiting the operator's commit** | — | **2 passes**, both in a session separate from the author's. Round 1: *approve with required changes*, 1 blocker + 6 minors, all 7 fixed. Round 2: *approve with required changes*, blocker **closed and verified by mutation**, **5 minors waived 2026-10-02 with recorded reasons** — not "fixed"; see *The two review rounds* | **AC 5 is covered by tests through the demo's real event path, not by a capture** — keyboard injection does not reach the window on this host (the positive control `T` moved 212 px) and pointer injection never did. ACs 1, 2, 3, 4 and 6 are capture-verified **and measured**, the bar and area ones through two reverted temporary releases. `y_labels` are empty by design, so AC 4's labels are proved by the x labels and the two axes. **No acceptance criterion is waived**; the 5 waived findings are review findings, not criteria — two stale citations, one coverage claim, one omission and one run count, none of which can change a pixel. See *Task 21 — what it decided* |
 | 22 | Widget — Dialog | pending | | | |
 | 23 | Widget — Toast | pending | | | |
 | 24 | Demo Application | **superseded** | | | |
@@ -2285,6 +2711,23 @@ operator's rule, none of these is treated as satisfied.
 
 ## History
 
+- 2026-10-02 — **task 21 reviewed twice, the first reviewed task in this
+  sequence.** Round 1: *approve with required changes* — **1 blocker** (a
+  non-finite sample erased the two real series segments either side of it,
+  against four doc sites that said it cost only the segment it spanned) and
+  **6 minors**. All seven fixed. Round 2: blocker **closed, and proved closed by
+  mutation** rather than by reading the diff — removing the two
+  `.filter(is_finite)` calls reproduces round 1's four measurements exactly.
+  Round 2 left **5 minors, all waived by the operator on 2026-10-02** with
+  recorded reasons instead of a third round. **Also recorded here:** two
+  self-labelled `THROWAWAY` harnesses (`zz_dot.rs`, `zz_verify.rs`) were found
+  in `ui/src/ui_demo/examples/` from an interrupted investigation into exactly
+  the reversal branch; they were run once to capture their answer, then deleted,
+  because a scratch `examples/` file fails `cargo clippy --all-targets` and they
+  were the only clippy failures in the tree. **The open defect round 2 declined
+  to fix — `Join::Corner((0,0))` at a small positive `1 + p·q`, called "a defect,
+  not a degenerate case" by the widget's own doc — is still open**, with
+  `a_full_reversal_depends_on_which_way_f32_rounds` as its tripwire.
 - 2026-09-28 — file created before the first dispatch, so an interrupted task is
   recoverable. No task started.
 - 2026-09-28 — **task 01 implemented.** Review round 1: `fix first`, 1 blocking
@@ -2924,3 +3367,40 @@ operator's rule, none of these is treated as satisfied.
   `.ai/agents/developer.md` § Phase 3 owns it, `.ai/workflows/task-sequence.md`
   § Gates and `.ai/agents/reviewer.md` § *Performance and idioms* point at it, and
   `.ai/tools/README.md` documents the tool with what it may not be used for.
+- 2026-10-02 — **task 20 committed as `79941cd` without ever being reviewed**, and
+  task 21 implemented in the same working tree, uncommitted. *No unreviewed
+  advance* has now been skipped twice; see *Current position*. Task 21's four
+  operator decisions are in *Ratified by the operator*.
+- 2026-10-02 — **4x MSAA on the default framebuffer**, one line plus a constant
+  in `render/context.rs`, on the operator's decision after being shown the three
+  routes. The driver honoured it (`GL_SAMPLE_BUFFERS=1`, `GL_SAMPLES=4` read
+  back from a live context) and the seam hunt found **no new dark pit anywhere in
+  the window** — 19 before, 19 after, at the same coordinates. Every capture in
+  this file is now historical, because every geometric edge in the application
+  is antialiased. The gauge's *"There is no anti-aliasing"* section is
+  superseded in place rather than rewritten.
+- 2026-10-02 — **the solid pass does not premultiply**, found while measuring
+  task 21 and **not fixed**: `render.rs:1528` blends `GL_ONE,
+  GL_ONE_MINUS_SRC_ALPHA` and `quad_color` at `render.rs:617` normalises without
+  scaling rgb by alpha, so a translucent solid primitive brightens over a lighter
+  destination. **The text pass has the same latent defect** — `text_quad` at
+  `render.rs:459` calls the same `quad_color` and the text shader scales by glyph
+  coverage rather than by alpha — and is correct only because every text colour
+  in the tree is opaque, which is a fact about the callers. The image shader is
+  correct and stays. **The fix is one place, `quad_color`, and covers both.**
+  *(This line first said the text and image shaders were both correct; the review
+  caught it and it is corrected above as well as here.)* Pre-existing,
+  whole-pipeline, and **recorded rather than fixed** because fixing it changes
+  every translucent pixel in the application. See *Task 21*.
+- 2026-10-02 — **the demo gives up the list and its readout** so the chart can
+  have the column; the window cannot grow (1280×1320 requested, 1280×1052
+  returned, measured). The demo loses its only scrolling viewport, its on-screen
+  proof of virtualisation and the positional wheel-routing claim. All three are
+  written into *Task 21 — what it decided* rather than left in a diff.
+- 2026-10-02 — **two documentation claims in `chart.rs` were false and are
+  corrected**, both found by measuring rather than by reading: a translucent
+  fill's "no seam" was measured in a harness that drew a second chart underneath
+  it, and `Chart::paint` claimed nothing reaches outside the node rect "with one
+  measured exception, which is the stroke's own half width" when a mitred corner
+  reaches `MITRE_LIMIT · half`. `Chart::stroke_reach()` now exists so the demo
+  does not keep a private copy of the number.

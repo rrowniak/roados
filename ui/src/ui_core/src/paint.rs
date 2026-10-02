@@ -261,13 +261,21 @@ pub enum DrawCommand {
     /// what it was handed, and a caller whose point list came out empty has
     /// nothing to draw rather than a failure to report.
     ///
-    /// The edges are as hard as the rasterizer makes them. The only
-    /// antialiasing this pipeline has is the solid fragment shader's corner SDF,
-    /// and a polygon is emitted with a radius of `0.0`, which takes the shader's
-    /// plain-colour path instead — so the boundary is the pixel grid, the same as
-    /// a [`Rect`](DrawCommand::Rect)'s. Anti-aliased polygon edges would need a
-    /// distance field over the polygon's own edges, which is a different
-    /// primitive with a different vertex type.
+    /// The edges are antialiased **by the framebuffer, not by this primitive**
+    /// (superseded 2026-10-02, by `render::context`'s `MULTISAMPLE_SAMPLES`).
+    /// This doc said the boundary was "the pixel grid, the same as a
+    /// [`Rect`](DrawCommand::Rect)'s", which was true when the context asked for no
+    /// multisample attribute at all; the default framebuffer is now **4x**
+    /// multisampled, so every geometric edge recorded here — a polygon's boundary,
+    /// a rect's corner, a line's side — is resolved by the hardware from four
+    /// coverage samples. **What is still true** is the shape of the record: a
+    /// polygon carries no radius and reaches none of the solid shader's own
+    /// antialiasing branch, which is a hard `discard` on an *axis-aligned rounded
+    /// rectangle*. **What 4x does not do is make the pipeline
+    /// resolution-independent** — an edge landing on a pixel boundary resolves to
+    /// full coverage on one side and none on the other and still reads hard, and
+    /// two quads that share an edge may gain a hairline seam. Both are in
+    /// `MULTISAMPLE_SAMPLES`'s own doc, with the measurement and the cost.
     Polygon {
         /// The vertices of the polygon, in order around its edge.
         points: Vec<(f32, f32)>,

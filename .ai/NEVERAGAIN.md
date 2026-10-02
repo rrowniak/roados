@@ -649,3 +649,102 @@ smaller number that never reaches the screen. Budget the frame
 constant is fixed rather than read from the display, say which display rate it
 assumes — this one hard-codes 60 Hz and no `GL_SetSwapInterval` is ever called, so
 it is not vsync-locked and a 30 Hz cluster panel would run it at half refresh.
+
+## 2026-10-02 — On a shared tree, the suite you ran is not your suite
+
+Task 21 ran three subagents at once: one writing `chart.rs`, one rewiring the
+demo, one adding MSAA to the GL context. The MSAA agent's `cargo fmt --check`,
+`cargo clippy --all-targets --all-features -- -D warnings` and
+`cargo test --all-features` were run from `ui/` as the rules say, and **all
+three came back red on `chart.rs`** — four clippy `neg_cmp_op_on_partial_ord`
+errors, a `never read` field, forty-odd `cargo fmt` diffs and three to seven
+doctest failures whose *count changed between runs* because the other agent was
+still typing. `ui_core` does not compile while `chart.rs` has those errors, so
+the lints for the file that **was** clean were never emitted: the gate produced
+no information at all about the change under test.
+
+The two wrong answers were both available and both look like compliance. Report
+the red suite as your own failure, or scope `chart.rs` out silently and call the
+green one *the* suite. The second is the expensive one: nothing in the output
+says the tree was different from the one you were told to verify.
+
+**Rule:** when another agent is working in the same tree, **name the tree the
+number came from.** The shape that worked: copy the workspace to `/tmp`, delete
+the other agent's file *and its `mod` line* in the copy, `diff` your own files
+against the copy to prove they are identical, run the gate there with its own
+`CARGO_TARGET_DIR`, and report both — *"green on a copy with `chart.rs` absent,
+your files byte-identical; red in the repo on `chart.rs`, which is not mine"* —
+and then say which of the two the operator should believe about **their**
+tree. Never delete or move another agent's file in the real tree to make your
+own gate pass; the file they are writing is the one they will write next.
+
+## 2026-10-02 — A constant named for an axis is not a deduction about a dimension
+
+Task 21's review produced a should-fix finding that was wrong, and the fix author
+disagreed with it correctly. `Chart::plot_rect` reserves two gutters:
+
+```rust
+let left   = if self.y_labels.get().is_empty() { 0.0 } else { Y_LABEL_GUTTER };
+let bottom = if self.x_labels.get().is_empty() { 0.0 } else { X_LABEL_GUTTER };
+```
+
+**`X_LABEL_GUTTER` is subtracted from the plot's _height_**, because x labels sit
+*below* the plot. The review read it as the gutter that comes off the *width*,
+computed a plot of `270 − 18 = 252` where the plot is 270, and reported that the
+demo's published pitch (24.5) and its sample ceiling (23) were both wrong. They
+were not. Three checks killed it: the constant's own doc ("How far the **bottom**
+gutter is"), the widget's recorded paint (the x axis drawn `1000 → 1270`), and the
+capture (that axis's row spans 270 px).
+
+The demo's own sentence had invited the misreading, and that half was real:
+*"the plot is 270 wide and 432 tall, the difference being the `X_LABEL_GUTTER`'s 18
+pixels"* never said **which dimension** the 18 came off. It now says so, and a
+test measures both edges out of the widget's recorded paint instead of publishing
+a derived number nobody can check in one command.
+
+**Rule:** a name that contains an axis tells you which *labels* a constant is
+about, not which *side of a rect* it is subtracted from — read the line that
+subtracts it, and where a number is derived, publish the derivation. And **when a
+reviewer and an author disagree on arithmetic, settle it by running both** before
+either side is written down: a finding that survives as "the author was wrong"
+costs a round, and one that is quietly fixed costs the next reader the same
+misreading.
+
+## 2026-10-02 — Four documents agreeing is one belief, counted four times
+
+Task 21's chart module stated in **four places** that a non-finite sample only
+breaks a line's run, and all four were right. The code did something else.
+`draw_series` built its joins for *every* point, so the vertex before a `NaN` asked
+`join_at` about a direction of `NaN`, `normal_of` answered `None`, and **a `None`
+join is read by the segments on both sides of it** — so `[1, 5, 9, NaN, 3, 7]`
+drew **1** segment where its two runs hold 3, `[1, 5, NaN, 3]` and `[NaN, 5, 9]`
+drew **0** of 1, `[1, 5, ∞, 3, 7]` drew **0** of 2, and as an `Area` the same data
+recorded 3 fill quads and **1** stroke quad: a body drawn across a gap its own
+outline was missing.
+
+The four documents — `Chart::data`, `Series::values`, `each_run` and `paint`'s
+degenerate-case table — were written from **the same belief about what a gap does**.
+They agreed with each other exactly as far as the belief was right and **could not
+disagree with each other at all**, so their agreement carried no information. Two
+findings in one review round, the second the same shape: `join_at`'s own doc said
+`None` came back "only from a segment of no length", which `normal_of`
+contradicts — it answers `None` when **either** side has no length, and again for
+a full reversal. The file already stated the correct rule three lines away, three
+times, and two tests pinned it.
+
+**And the suite had a test for the gap that could not see it.**
+`a_nan_reading_breaks_the_run_rather_than_dividing_by_it` used `[0.0, NaN, 10.0]`:
+two runs of **one sample**, which contain no segments, so no join arithmetic ran
+at all. It passed before and after, and its name says the property that was never
+under test.
+
+**Rule:** a property asserted in several documents is **one assumption counted
+several times**, not several checks — and when the code behind them shares the
+assumption they pass and fail together. Read what the code does, not how many
+places agree. When a test claims a property of a degenerate case, **check that the
+case is where the property is non-vacuous**: a run of one sample has no segments,
+so nothing about joins is exercised. The cheapest thing that would have caught all
+of it is a **count through the public API with its control beside it** — "3
+polygons where this data holds 3 segments", and the same data without the `NaN` —
+and that is one line per case. A count next to a control is what turns a fixture
+from a smoke test into a measurement.

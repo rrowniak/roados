@@ -174,6 +174,7 @@ impl<T: 'static> Default for Callback<T> {
 }
 
 pub mod button;
+pub mod chart;
 pub mod container;
 pub mod gauge;
 pub mod image;

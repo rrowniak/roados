@@ -560,3 +560,42 @@ not a pair; and when the thing being watched is a number, read the number rather
 than the pixels. This is the `a still proves what is drawn, never how fast it is
 drawn` entry with the other half of the trap: a still cannot tell you a counter
 is frozen either, and a counter's format is what decides the two apart.
+
+## 2026-10-01 — A brief's rationale becomes the widget's doc comment, and nobody re-checks it
+
+Task 20's gauge draws its arc as a band. There were three ways to draw one, and
+the integrator **chose one and wrote the reason into the subagent's brief**:
+
+*"a `Path` shows notches on the outside of the curve, and overlapping circles have
+no notch because every circle is round."*
+
+The subagent implemented it, wrote a module doc repeating the claim as settled
+fact, and shipped 73 green tests. The demo subagent then took a screenshot,
+because that is what the demo sub-agent is for, and **measured the outer edge
+along rays: 100.0 px at every circle centre against 94.4 px at every bisector — a
+5.6 px scallop on a 14 px band.** A visibly beaded dial.
+
+Both halves of the rationale were wrong. Circles tangent on their **centre lines**
+have outer edges that touch only where `R >> r`, and `r/R` was 0.075. And the
+`Path` was worse for a reason the brief never mentioned: `line_quad` offsets each
+segment **perpendicular**, so its outer corner lands at `sqrt(R² + r²)` rather
+than `R + r` — the band is ~6.7 px too thin *everywhere*, before any scalloping.
+The fix was a third option neither had considered, and it used a primitive that
+had landed hours earlier: one convex four-point `Polygon` per segment, corners on
+`R ± thickness/2`. **29x** less error, half the primitives.
+
+The 73 tests could not catch it because **every one of them asserted that a
+command was recorded, and the defect was in where the recorded commands landed** —
+the same trap as the `a draw-command assertion cannot see where a command lands`
+entry above, reached from a new direction. And the module doc made it worse: a
+confident false claim in the one file every future reader opens is worse than no
+claim, because the next agent trusts it and does not measure.
+
+**Rule:** when a brief states *why* an approach was chosen, that rationale is
+**unverified input**, not a decision to pass down — and it must never be laundered
+into a doc comment as fact. Reproduce the number that justifies the choice before
+anyone writes code against it, and if the choice has a visible consequence, put
+the measurement of that consequence in the tests. A geometry claim like "tangent
+circles have no notch" is one line of arithmetic; check it rather than reason
+about it. **And measure a rendered thing in pixels before its doc comment says it
+is smooth** — the doc is the claim, and the capture is the evidence.

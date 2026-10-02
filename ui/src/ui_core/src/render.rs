@@ -672,6 +672,47 @@ fn line_quad(start: (f32, f32), end: (f32, f32), width: f32, color: Color) -> Qu
     }
 }
 
+/// Builds the quad for one triangle of a filled polygon.
+///
+/// A triangle is a quad whose last corner repeats its third: [`quad_indices`]
+/// addresses four corners as `0,1,2 / 0,2,3`, so `[a, b, c, c]` draws the
+/// triangle `(a, b, c)` and the degenerate `(a, c, c)`, which encloses no area
+/// and covers no fragments. That is the whole trick — the pipeline is quad-only,
+/// and a duplicated corner is the one way a triangle fits through it without a
+/// new vertex type, a new shader or a change to the index buffer.
+///
+/// Winding is whatever the fan produced, and nothing depends on it: no pass in
+/// this module enables face culling or a depth test, so `(a, b, c)` and
+/// `(a, c, b)` draw the same pixels. It is left as the caller's order because
+/// that is the order the fan was handed.
+///
+/// `locals` and `size` are **honest but unread**. The solid fragment shader only
+/// consults them inside `if (v_radius > 0.0)`, and this radius is `0.0`, so the
+/// shader takes the `frag_color = v_color` path and never evaluates the corner
+/// SDF — which would be meaningless here anyway, since it models an axis-aligned
+/// rounded rectangle and this quad is a triangle. They are set to the triangle's
+/// bounding box and to `0.0` at the box's origin because those are the values a
+/// rounded-rect quad carries, so a vertex never claims a position that is not
+/// where it is drawn; `[[0.0; 2]; 4]` would have been a lie about the geometry
+/// that costs nothing to make true.
+fn polygon_quad(a: (f32, f32), b: (f32, f32), c: (f32, f32), color: Color) -> Quad {
+    let low_x = a.0.min(b.0).min(c.0);
+    let low_y = a.1.min(b.1).min(c.1);
+    let size = [a.0.max(b.0).max(c.0) - low_x, a.1.max(b.1).max(c.1) - low_y];
+    Quad {
+        corners: [[a.0, a.1], [b.0, b.1], [c.0, c.1], [c.0, c.1]],
+        locals: [
+            [a.0 - low_x, a.1 - low_y],
+            [b.0 - low_x, b.1 - low_y],
+            [c.0 - low_x, c.1 - low_y],
+            [c.0 - low_x, c.1 - low_y],
+        ],
+        color: quad_color(color),
+        radius: 0.0,
+        size,
+    }
+}
+
 /// Expands a draw command into quads.
 ///
 /// Text and image commands expand to nothing **here**, and for a different
@@ -729,6 +770,27 @@ fn command_quads(command: &DrawCommand) -> Vec<Quad> {
                         *color,
                     ));
                 }
+            }
+            quads
+        }
+        DrawCommand::Polygon { points, color } => {
+            let mut quads = Vec::new();
+            // Fewer than three points enclose no area, and the same is true of a
+            // `Path` below two: nothing to draw is an empty result, not an
+            // error. Checked before the fan so a two-point "polygon" does not
+            // index a third point that is not there.
+            if points.len() < 3 {
+                return Vec::new();
+            }
+            quads.reserve(points.len() - 2);
+            // A fan from the first point. This is exact for a convex polygon and
+            // nothing else, which is what `DrawCommand::Polygon`'s docs say it is;
+            // a concave one fans into overlapping and inverted triangles. The
+            // alternative — ear clipping, or a stencil pass — is a rasteriser
+            // with its own vertex type, and neither a gauge needle nor anything
+            // else recorded so far needs one.
+            for point in points[1..].windows(2) {
+                quads.push(polygon_quad(points[0], point[0], point[1], *color));
             }
             quads
         }
@@ -2208,6 +2270,199 @@ mod tests {
             closed: true,
         });
         assert!(degenerate.is_empty());
+    }
+
+    #[test]
+    fn a_triangle_is_one_quad_with_its_third_corner_repeated() {
+        let quads = command_quads(&DrawCommand::Polygon {
+            points: vec![(10.0, 20.0), (30.0, 60.0), (50.0, 20.0)],
+            color: Color::new(255, 128, 0, 255),
+        });
+        assert_eq!(quads.len(), 1, "one triangle, one quad");
+        let quad = quads[0];
+        // Three distinct corners in the order they were given, and the fourth
+        // repeating the third: `quad_indices` addresses 0,1,2 / 0,2,3, so this is
+        // the triangle (a, b, c) plus a degenerate (a, c, c) that covers nothing.
+        assert_eq!(
+            quad.corners,
+            [[10.0, 20.0], [30.0, 60.0], [50.0, 20.0], [50.0, 20.0]],
+            "the points in order, with the last repeated"
+        );
+        assert_eq!(
+            quad.radius, 0.0,
+            "radius 0 takes the shader's plain-colour path: its SDF models a \
+             rounded rectangle, and a triangle has no corner to round"
+        );
+        assert_eq!(quad.color, [1.0, 128.0 / 255.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_convex_quadrilateral_fans_into_two_quads() {
+        // Off the origin: a fixture at (0, 0) cannot see an origin read as an
+        // extent, per `.ai/NEVERAGAIN.md`.
+        let quads = command_quads(&DrawCommand::Polygon {
+            points: vec![(20.0, 20.0), (60.0, 20.0), (60.0, 50.0), (20.0, 50.0)],
+            color: Color::new(10, 20, 30, 255),
+        });
+        assert_eq!(quads.len(), 2, "n - 2 triangles for n points");
+
+        // The fan runs from the first point: (p0, p1, p2) then (p0, p2, p3).
+        assert_eq!(
+            quads[0].corners,
+            [[20.0, 20.0], [60.0, 20.0], [60.0, 50.0], [60.0, 50.0]]
+        );
+        assert_eq!(
+            quads[1].corners,
+            [[20.0, 20.0], [60.0, 50.0], [20.0, 50.0], [20.0, 50.0]],
+            "and the second triangle shares the fan's first corner"
+        );
+
+        // The polygon's own box, measured from the four points: x 20..=60 and
+        // y 20..=50.
+        let polygon_box = [40.0, 30.0];
+        for (index, quad) in quads.iter().enumerate() {
+            assert_eq!(quad.radius, 0.0, "triangle {index}");
+            assert!(
+                quad.size[0] <= polygon_box[0] && quad.size[1] <= polygon_box[1],
+                "triangle {index}'s box {:?} fits inside the polygon's {:?}, as any \
+                 triangle of a fan must",
+                quad.size,
+                polygon_box
+            );
+            // This rectangle's fan happens to reach all four corners from each
+            // of its two triangles, so here the bound is tight rather than
+            // merely true.
+            assert_eq!(quad.size, polygon_box, "triangle {index}, in this fixture");
+        }
+    }
+
+    #[test]
+    fn a_polygon_of_fewer_than_three_points_expands_to_no_quads() {
+        // Not an error and not a panic: a point list that cannot enclose an area
+        // has nothing to draw, which is what `Path` already answers for fewer
+        // than two points. The recorder stored the command either way.
+        for points in [
+            Vec::new(),
+            vec![(10.0, 20.0)],
+            vec![(10.0, 20.0), (30.0, 60.0)],
+        ] {
+            let quads = command_quads(&DrawCommand::Polygon {
+                points: points.clone(),
+                color: Color::new(0, 0, 0, 255),
+            });
+            assert!(
+                quads.is_empty(),
+                "{points:?} is not a polygon and draws nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_polygon_keeps_the_vertex_count_a_whole_number_of_quads() {
+        // The invariant that breaks the whole solid pass silently:
+        // `draw_solid_batch` computes `quads = vertices.len() / 4`, and the index
+        // buffer addresses four vertices per quad. One quad that emitted three
+        // vertices would put the sixth index on the first vertex of the *next*
+        // one, with no error from anything.
+        let shapes: [&[(f32, f32)]; 3] = [
+            &[(10.0, 20.0), (30.0, 60.0), (50.0, 20.0)],
+            &[(10.0, 20.0), (30.0, 60.0), (50.0, 20.0), (70.0, 80.0)],
+            &[
+                (10.0, 20.0),
+                (30.0, 60.0),
+                (50.0, 20.0),
+                (70.0, 80.0),
+                (90.0, 20.0),
+            ],
+        ];
+        for points in shapes {
+            let quads = command_quads(&DrawCommand::Polygon {
+                points: points.to_vec(),
+                color: Color::new(0, 0, 0, 255),
+            });
+            let vertices = batch_vertices(&Batch {
+                key: crate::batch::BatchKey {
+                    texture: None,
+                    blend_mode: crate::batch::BlendMode::Opaque,
+                    shader: ShaderKind::Solid,
+                },
+                clip: None,
+                commands: vec![DrawCommand::Polygon {
+                    points: points.to_vec(),
+                    color: Color::new(0, 0, 0, 255),
+                }],
+            });
+            assert_eq!(
+                vertices.len(),
+                quads.len() * 4,
+                "{:?}: four vertices per quad, as `draw_solid_batch` assumes",
+                points.len()
+            );
+            assert_eq!(vertices.len() % VERTS_PER_QUAD, 0);
+            assert_eq!(vertices.len() / VERTS_PER_QUAD, quads.len());
+        }
+    }
+
+    #[test]
+    fn a_polygons_quads_are_sized_by_their_own_triangle() {
+        // `locals` and `size` are unread while the radius is 0, but they are set
+        // to the truth rather than to zeros: a vertex that claims (0, 0) while it
+        // is drawn at (300, 200) is a trap for whoever reads it next.
+        //
+        // The fan anchor is deliberately **not** the box's top-left — it is the
+        // middle of the left edge — so no corner of this triangle sits at
+        // `(0, 0)` and a `locals` that were left at zero would be wrong on three
+        // of the four entries. A fixture whose first corner *is* the origin
+        // cannot see that, and would pass against a mutation.
+        let anchor = (100.0, 60.0);
+        let quads = command_quads(&DrawCommand::Polygon {
+            points: vec![anchor, (160.0, 30.0), (160.0, 90.0)],
+            color: Color::new(0, 0, 0, 255),
+        });
+        assert_eq!(quads.len(), 1);
+        let low = [100.0, 30.0];
+        assert_eq!(quads[0].size, [60.0, 60.0], "the triangle's own box");
+        assert_eq!(
+            quads[0].locals,
+            [[0.0, 30.0], [60.0, 0.0], [60.0, 60.0], [60.0, 60.0]],
+            "measured from that box's top left, as a rect quad's are"
+        );
+        for (index, local) in quads[0].locals.iter().enumerate() {
+            let corner = quads[0].corners[index];
+            assert_eq!(
+                *local,
+                [corner[0] - low[0], corner[1] - low[1]],
+                "corner {index} sits where it says it does"
+            );
+        }
+    }
+
+    #[test]
+    fn a_polygons_quad_carries_no_corner_radius() {
+        // A radius above zero sends the fragment shader down its rounded-rect
+        // SDF path, and that SDF models an axis-aligned rounded rectangle: on a
+        // triangle it clips fragments off a shape that was never drawn there. So
+        // the radius is zero and the shader takes `frag_color = v_color`.
+        //
+        // Pinned on its own because it is invisible in every other test here —
+        // `locals` and `size` are not read when the radius is 0, so a wrong
+        // radius changes nothing CPU-side that a vertex assertion can see.
+        for points in [
+            vec![(100.0, 40.0), (140.0, 40.0), (140.0, 90.0)],
+            vec![(20.0, 20.0), (60.0, 20.0), (60.0, 50.0), (20.0, 50.0)],
+        ] {
+            let quads = command_quads(&DrawCommand::Polygon {
+                points: points.clone(),
+                color: Color::new(0, 0, 0, 255),
+            });
+            assert!(!quads.is_empty(), "{points:?} is a polygon");
+            for (index, quad) in quads.iter().enumerate() {
+                assert_eq!(
+                    quad.radius, 0.0,
+                    "{points:?}: triangle {index} carries no radius"
+                );
+            }
+        }
     }
 
     #[test]

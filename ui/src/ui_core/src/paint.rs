@@ -237,6 +237,43 @@ pub enum DrawCommand {
         /// Whether a segment joins the last point back to the first.
         closed: bool,
     },
+    /// A filled polygon through `points`, in order around its edge.
+    ///
+    /// The shape [`Path`](DrawCommand::Path) cannot draw: a path *strokes* an
+    /// outline of its own width, so a closed three-point path is a hollow
+    /// triangle. The Gauge's needle is a filled triangle, and the operator
+    /// decided on 2026-10-01 to add this primitive rather than settle for the
+    /// outline.
+    ///
+    /// **Convex only.** The renderer fans the points from the first of them into
+    /// `n - 2` triangles, which is exact for a convex polygon and is not a
+    /// polygon rasteriser: given a **concave** polygon the fan also produces
+    /// triangles that overlap the shape and triangles outside it, so the result
+    /// is a wrong picture rather than a rough one. There is no ear-clipping pass
+    /// and no stencil pass here, and a caller that cannot promise convexity must
+    /// decompose the shape into convex pieces itself before recording it. That is
+    /// the cost of reusing the quad pipeline, and it is what the Gauge needle —
+    /// a triangle — is inside.
+    ///
+    /// Fewer than three points enclose no area and draw nothing, exactly as a
+    /// [`Path`](DrawCommand::Path) of fewer than two points draws nothing. That
+    /// is an ordinary recorded value rather than an error: the recorder stores
+    /// what it was handed, and a caller whose point list came out empty has
+    /// nothing to draw rather than a failure to report.
+    ///
+    /// The edges are as hard as the rasterizer makes them. The only
+    /// antialiasing this pipeline has is the solid fragment shader's corner SDF,
+    /// and a polygon is emitted with a radius of `0.0`, which takes the shader's
+    /// plain-colour path instead — so the boundary is the pixel grid, the same as
+    /// a [`Rect`](DrawCommand::Rect)'s. Anti-aliased polygon edges would need a
+    /// distance field over the polygon's own edges, which is a different
+    /// primitive with a different vertex type.
+    Polygon {
+        /// The vertices of the polygon, in order around its edge.
+        points: Vec<(f32, f32)>,
+        /// Fill color, premultiplied alpha.
+        color: Color,
+    },
 }
 
 /// The cached paint state of one widget node.
@@ -401,6 +438,39 @@ impl Painter {
         });
     }
 
+    /// Records a filled polygon through `points`, in order around its edge.
+    ///
+    /// The counterpart to [`Painter::path`]: where a path strokes an outline of
+    /// its `width`, this fills the shape its points describe, so a needle is a
+    /// triangle here and a hollow one only if a caller asks for a path.
+    ///
+    /// `points` must describe a **convex** polygon, and fewer than three of them
+    /// draw nothing — [`DrawCommand::Polygon`] says what each of those costs, and
+    /// this method only records; it neither measures the points nor rejects them,
+    /// because the recorder's contract is to store what it was handed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ui_core::paint::{Color, Painter};
+    ///
+    /// // The three points of a needle pointing up, off the origin because a
+    /// // geometry fixture at (0, 0) cannot see a coordinate being misread.
+    /// let mut painter = Painter::new();
+    /// painter.polygon(
+    ///     &[(100.0, 20.0), (96.0, 70.0), (104.0, 70.0)],
+    ///     Color::new(255, 255, 255, 255),
+    /// );
+    /// let commands = painter.finish();
+    /// assert_eq!(commands.len(), 1);
+    /// ```
+    pub fn polygon(&mut self, points: &[(f32, f32)], color: Color) {
+        self.commands.push(DrawCommand::Polygon {
+            points: points.to_vec(),
+            color,
+        });
+    }
+
     /// Returns the recorded commands, leaving the painter empty.
     #[must_use]
     pub fn finish(self) -> Vec<DrawCommand> {
@@ -437,9 +507,13 @@ mod tests {
             Color::new(7, 8, 9, 255),
             true,
         );
+        painter.polygon(
+            &[(0.0, 0.0), (1.0, 2.0), (2.0, 0.0)],
+            Color::new(10, 11, 12, 255),
+        );
 
         let commands = painter.finish();
-        assert_eq!(commands.len(), 7);
+        assert_eq!(commands.len(), 8);
         assert!(matches!(&commands[0], DrawCommand::Rect { .. }));
         assert!(matches!(&commands[1], DrawCommand::RoundedRect { .. }));
         assert!(matches!(&commands[2], DrawCommand::Text { .. }));
@@ -447,6 +521,48 @@ mod tests {
         assert!(matches!(&commands[4], DrawCommand::Line { .. }));
         assert!(matches!(&commands[5], DrawCommand::Circle { .. }));
         assert!(matches!(&commands[6], DrawCommand::Path { .. }));
+        assert!(matches!(&commands[7], DrawCommand::Polygon { .. }));
+    }
+
+    #[test]
+    fn a_polygon_records_its_points_and_its_color() {
+        // Destructure rather than match with `..`: `command_quads` and
+        // `command_bounds` both name these fields, so a rename here is a rename
+        // in the renderer and in the clipper.
+        let points = [(100.0, 20.0), (96.0, 70.0), (104.0, 70.0)];
+        let mut painter = Painter::new();
+        painter.polygon(&points, Color::new(3, 4, 5, 255));
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 1);
+        let DrawCommand::Polygon {
+            points: recorded,
+            color,
+        } = &commands[0]
+        else {
+            panic!("the painter recorded something that is not a polygon");
+        };
+        assert_eq!(*recorded, points, "the points reach the command unmoved");
+        assert_eq!(*color, Color::new(3, 4, 5, 255));
+    }
+
+    #[test]
+    fn a_polygon_of_no_points_is_recorded_rather_than_refused() {
+        // An empty point list draws nothing, and that is an ordinary value here:
+        // the recorder stores what it was handed and reports nothing, because a
+        // caller whose point list came out empty has nothing to draw, not a
+        // failure to announce. Refusing it would mean an error type for an
+        // absence, in a layer that has none.
+        let mut painter = Painter::new();
+        painter.polygon(&[], Color::new(0, 0, 0, 255));
+        painter.polygon(&[(10.0, 10.0)], Color::new(0, 0, 0, 255));
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 2, "two recorded, neither rejected");
+        let DrawCommand::Polygon { points, .. } = &commands[0] else {
+            panic!("the painter recorded something that is not a polygon");
+        };
+        assert!(points.is_empty());
     }
 
     #[test]

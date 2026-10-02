@@ -1569,6 +1569,16 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 color: *color,
                 closed: *closed,
             },
+            // Every point, for the reason the path arm above gives: a polygon's
+            // position is all of its points, and moving the first alone would be a
+            // different shape rather than a moved one.
+            DrawCommand::Polygon { points, color } => DrawCommand::Polygon {
+                points: points
+                    .iter()
+                    .map(|point| (point.0 + by.x, point.1 + by.y))
+                    .collect(),
+                color: *color,
+            },
         })
         .collect()
 }
@@ -2471,6 +2481,29 @@ mod tests {
     }
 
     #[test]
+    fn a_polygon_moves_every_point_and_keeps_its_color() {
+        // The path test above, for the filled primitive. A translation that moved
+        // only a polygon's first point would leave a *different shape* on screen
+        // rather than a moved one, and no draw-command assertion that only checks
+        // the variant would see it — so this one reads the points back.
+        let command = DrawCommand::Polygon {
+            points: vec![(18.0, 19.0), (20.0, 21.0), (22.0, 23.0)],
+            color: Color::new(19, 20, 21, 255),
+        };
+        let DrawCommand::Polygon { points, color } =
+            &translate_commands(std::slice::from_ref(&command), Offset::new(664.0, 120.0))[0]
+        else {
+            panic!("a polygon translated into something that is not a polygon");
+        };
+        assert_eq!(
+            *points,
+            vec![(682.0, 139.0), (684.0, 141.0), (686.0, 143.0)],
+            "every point, because a polygon's position is all of its points"
+        );
+        assert_eq!(*color, Color::new(19, 20, 21, 255));
+    }
+
+    #[test]
     fn every_variant_survives_a_translation() {
         let mut painter = Painter::new();
         painter.rect(Rect::new(1.0, 2.0, 10.0, 20.0), Color::new(1, 2, 3, 255));
@@ -2495,11 +2528,15 @@ mod tests {
             Color::new(16, 17, 18, 255),
             false,
         );
+        painter.polygon(
+            &[(25.0, 26.0), (27.0, 28.0), (29.0, 26.0)],
+            Color::new(19, 20, 21, 255),
+        );
         let every = painter.finish();
-        assert_eq!(every.len(), 7, "one of each variant the enum has");
+        assert_eq!(every.len(), 8, "one of each variant the enum has");
 
         let moved = translate_commands(&every, Offset::new(664.0, 120.0));
-        assert_eq!(moved.len(), 7, "and one of each out: none was dropped");
+        assert_eq!(moved.len(), 8, "and one of each out: none was dropped");
         for (before, after) in every.iter().zip(moved.iter()) {
             assert_eq!(
                 std::mem::discriminant(before),

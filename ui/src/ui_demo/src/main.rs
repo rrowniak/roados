@@ -8,10 +8,9 @@
 //!
 //! The three pads sit inside a card: the [`Container`] widget, with a background
 //! bound to the theme's `Surface` and a padding of [`CARD_PADDING`]. It is the
-//! one place the demo draws a container — the other five in the tree, the text
-//! column, the text panel, the button row, the button band and the root, group
-//! children and have no background, which is what a container with no background
-//! looks like.
+//! one place the demo draws a container — the other four in the tree, the text
+//! column, the text panel, the controls layer and the root, group children and
+//! have no background, which is what a container with no background looks like.
 //!
 //! Every colour in the demo comes from the theme: the background from
 //! `Background`, each pad's rest colour from `Error`, `Success` or `Primary`.
@@ -25,29 +24,38 @@
 //! that marks its node dirty — the link from an animation or a theme switch to
 //! the node arena, which the animation and theme modules know nothing about.
 //!
-//! A band of buttons sits to the right of the text panel: click one and the
-//! click counter under the row goes up, or reset it with the third. The middle
-//! button is disabled — it swallows a tap, fires nothing, and focus steps over
-//! it. The row is driven by the input module rather than by raw events: the
-//! gesture recogniser turns an SDL event into the tap or key press it completed,
-//! and dispatch routes it to the node under it, which is what makes a button
-//! consume the events meant for it. `Tab` and `Shift+Tab` move focus and `Enter`
-//! activates the button holding it.
+//! Down the right-hand column the demo carries a **slider**, dragged or driven
+//! by `0` and `1`; a **toggle**, whose click turns it on and off and whose label
+//! says which state it is in; a **gauge**, reading half of its range and moved
+//! by `,` and `.`, cycled between its three shapes by `G` and drawn with a
+//! needle that arrives on a spring; a **progress bar** at half, moved by `[` and
+//! `]` and switched into its sliding mode by `P`; and a **list of a hundred
+//! rows**, which scrolls under a finger, the wheel and the arrow keys, and whose
+//! readout names the first row on screen and the length of the free list so that
+//! the virtualisation is visible rather than merely asserted. The **image** sits
+//! in the top right, loaded from `assets/demo.png` and cycled through its four
+//! fits by `F`.
 //!
-//! Under the slider the band carries the four widgets the primitive tasks added
-//! after the buttons: a **toggle**, whose click turns it on and off and whose
-//! label says which state it is in; a **progress bar** at half, moved by `[` and
-//! `]` and switched into its sliding mode by `P`; a **list of a hundred rows**,
-//! which scrolls under a finger, the wheel and the arrow keys, and whose readout
-//! names the first row on screen and the length of the free list so that the
-//! virtualisation is visible rather than merely asserted; and an **image** in
-//! the top right, loaded from `assets/demo.png` and cycled through its four fits
-//! by `F`.
+//! Every control below the pads is driven by the input module rather than by raw
+//! events: the gesture recogniser turns an SDL event into the tap or key press
+//! it completed, and dispatch routes it to the node under it, which is what lets
+//! a control consume the events meant for it. `Tab` and `Shift+Tab` move focus
+//! and `Enter` activates the control holding it.
+//!
+//! **There is no row of buttons.** Three of them — a counter, a disabled one and
+//! a reset — were here for tasks 11 to 19 to prove that a button animates, and
+//! the operator took them out on 2026-10-01: *"You can remove the first three
+//! buttons that were used for testing animations."* What that costs is written
+//! down where it is paid rather than left for a reader to discover: the press
+//! and release transition, the hover tint, the focus ring and the click callback
+//! are no longer on screen anywhere, and `ui_demo` is the only place in the
+//! repository where any of them was demonstrated. What is left that a pointer
+//! drives is the slider, the toggle and the list.
 //!
 //! The window is 1280 by 720 rather than the 1024 by 600 the first three pads
 //! and the text panel were laid out for, because those two regions are full: the
-//! card of pads ends at x 788 and the text panel's column at x 654, so the four
-//! new widgets had nowhere to go. Enlarging the window is the smallest change
+//! card of pads ends at x 788 and the text panel's column at x 654, so the newer
+//! widgets had nowhere to go. Enlarging the window is the smallest change
 //! that fits them, because every widget's position in it is absolute and
 //! independent of the window's size — only the root's constraint and the
 //! background node's tight constraint read [`WINDOW`] — so nothing that was
@@ -93,8 +101,9 @@ use ui_core::render::context::Context;
 use ui_core::render::Renderer;
 use ui_core::texture::{Pixels, TextureCache, TextureHandle};
 use ui_core::theme::{PropertyValue, Theme, ThemeToken};
-use ui_core::widgets::button::{Button, Callback, Motion, Palette};
+use ui_core::widgets::button::Motion;
 use ui_core::widgets::container::Container;
+use ui_core::widgets::gauge::{Gauge, GaugeType, Palette as GaugePalette};
 use ui_core::widgets::image::{Image, ImageFit, ImageSource};
 use ui_core::widgets::keyboard::{KeyAction, Keyboard, Palette as KeyboardPalette};
 use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapMode};
@@ -104,9 +113,10 @@ use ui_core::widgets::scroll::Palette as ScrollPalette;
 use ui_core::widgets::slider::{Orientation, Palette as SliderPalette, Slider};
 use ui_core::widgets::text_input::{Palette as TextInputPalette, TextInput};
 use ui_core::widgets::toggle::{Palette as TogglePalette, Toggle};
-// The button band's `Callback` is the payload-free alias of this same type, so
-// the demo imports it under a second name: a slider's handler takes the value it
-// moved to, and `Callback::from_fn` on the alias would be `Callback<()>`.
+// `Callback` is the payload-free alias of the same type every other widget's
+// handler is, and the demo imports it under a second name: a slider's handler
+// takes the value it moved to, and `Callback::from_fn` on the alias would be
+// `Callback<()>`.
 use ui_core::widgets::Callback as ValueCallback;
 
 /// The window, and the box the root is laid out in.
@@ -197,12 +207,13 @@ const TEXT_PANEL_ORIGIN: (f32, f32) = (60.0, 170.0);
 
 /// The width the text column's labels are laid out in.
 ///
-/// This is what keeps the column clear of the button band, and it is the reason
+/// This is what keeps the column clear of the control column, and it is the reason
 /// it is not the panel's own width. The panel is [`TEXT_PANEL`] wide, so a
 /// right-aligned label laid out across it ends at 60 + 900 = 960 and runs
-/// underneath the band, which starts at [`BUTTON_ORIGIN`]'s 664 — the kind of
-/// collision no unit test sees, because both labels and both buttons lay out
-/// correctly on their own. Laying the column out at 594 puts its right edge at
+/// underneath the column, which starts at [`CONTROLS_ORIGIN`]'s 664 — the kind of
+/// collision no unit test sees, because both the label and the control to its
+/// right lay out correctly on their own. Laying the column out at 594 puts its
+/// right edge at
 /// 654, and the ten pixels between are the clearance.
 ///
 /// The paragraph wraps at this width and the three alignment rows share it, so
@@ -246,55 +257,47 @@ const RELEASE_SPRING: Easing = Easing::Spring {
     stiffness: 140.0,
 };
 
-/// Where the button band sits in the window.
+/// Where the demo's right-hand control column starts in the window.
 ///
-/// This is the row's position inside the band's `Absolute` box, and a
-/// `Stack` places every one of its children at the origin regardless of the
-/// position they declare — so the offset belongs here, on the row, and not on
-/// the band itself, which a `Stack` would ignore. Putting it on the band is a
-/// mistake that looks right: the band lands on top of the pads, which are a
-/// `Stack` child too and so are laid out from the origin, not centred. (An
-/// earlier version of this comment claimed they were centred and ran from
-/// x = 130 to x = 894; they are not, and the claim came from reading the row's
-/// `MainAxisAlignment::Center` as though it had anything to centre inside.)
+/// **Not a widget's origin but the column's left edge**, and it is the one number
+/// in this file that four widgets are expressed against rather than each
+/// repeating: the gauge's, the slider's, the toggle's and the progress bar's own
+/// origins all say its `x`. Before task 20 this was the origin of the row of
+/// three buttons — the same number, under a name that described a widget — and
+/// the buttons were removed on 2026-10-01, so the number outlived its name and is
+/// now written down for what it actually is.
 ///
-/// The text panel's labels stay left of 660 — the panel is 900 wide from an
-/// origin of 60, but its widest line wraps at 594 — and the pads end at y = 140,
-/// so the band goes right of the text and below the pads rather than under the
-/// text column, which already reaches the bottom of the window.
-const BUTTON_ORIGIN: (f32, f32) = (664.0, 396.0);
+/// Its `y`, 396, is **where the buttons were and where the list still is**
+/// ([`LIST_ORIGIN`] shares it), so it is the top of the column rather than the
+/// top of any one thing in it.
+///
+/// The `x` is 664 because the text panel's labels stay left of 660 — the panel is
+/// 900 wide from an origin of 60, but its widest line wraps at
+/// [`TEXT_COLUMN_WIDTH`] — and the pads end at y = 140, so the column goes right
+/// of the text and below the pads rather than under the text column, which
+/// already reaches the bottom of the window. The four pixels between 660 and 664
+/// are the clearance `no_text_label_reaches_under_the_controls` measures.
+const CONTROLS_ORIGIN: (f32, f32) = (664.0, 396.0);
 
-/// The gap between the buttons in the row.
-const BUTTON_SPACING: f32 = 16.0;
-
-/// The font size the buttons, their click counter and the slider's readout are
-/// drawn at.
+/// The font size every readout below the pads is drawn at.
 ///
 /// The panel's labels are at [`TEXT_SIZE_START`]; everything below the pads is
 /// short strings rather than a column of prose, and `+` and `-` move the panel
 /// alone.
-const BUTTON_FONT: f32 = 20.0;
-
-/// How far below the row the click counter sits.
 ///
-/// A row of buttons is 44 tall, so this clears it with room for the counter's
-/// own line, and the counter is placed rather than stacked: an `Absolute` box
-/// gives each of its children the position it declares, and the row's is
-/// already taken by the buttons.
-const COUNTER_DROP: f32 = 60.0;
+/// **This was `BUTTON_FONT` until the buttons went**, and it is renamed rather
+/// than left under a name describing three widgets the demo no longer has:
+/// eight readouts draw at this size and none of them is a button's.
+const READOUT_FONT: f32 = 20.0;
 
-/// The width the click counter is given, which is wide enough for the text it
-/// ever shows: it counts up, and a label laid out narrower than its text would
-/// wrap it onto a second line.
-const COUNTER_WIDTH: f32 = 320.0;
-
-/// Where the slider sits in the window, below the click counter.
+/// Where the slider sits in the window.
 ///
-/// The same column as the button band and the counter above it — right of the
-/// text panel, whose widest line ends at `TEXT_PANEL_ORIGIN.0 +
-/// TEXT_COLUMN_WIDTH` — and below the counter, whose line ends at
-/// [`BUTTON_ORIGIN`]'s 396 plus [`COUNTER_DROP`]'s 60 and its own 24 pixels.
-const SLIDER_ORIGIN: (f32, f32) = (664.0, 496.0);
+/// The same column as everything else below the pads — right of the text panel,
+/// whose widest line ends at `TEXT_PANEL_ORIGIN.0 + TEXT_COLUMN_WIDTH` — and
+/// 496 is unchanged by the buttons going: it is where the slider has always
+/// been. The space above it that the row of buttons used to hold is now the
+/// gauge's.
+const SLIDER_ORIGIN: (f32, f32) = (CONTROLS_ORIGIN.0, 496.0);
 
 /// How thick the demo's slider track is, in pixels.
 ///
@@ -316,12 +319,18 @@ const SLIDER_TRACK_THICKNESS: f32 = 12.0;
 /// track and 24-pixel knob the widget defaults to.
 ///
 /// **Why not larger.** 22 gave a 44-pixel knob and a 62-tall node, and the node is
-/// what the hit test uses — but the right-hand column then stopped fitting: six
+/// what the hit test uses — but the right-hand column then stopped fitting: five
 /// controls, of which the slider, the toggle and the progress bar are all finger-
-/// sized, need more than the 324 pixels between the button row and the bottom of
-/// the window, and `no_two_placed_rects_overlap` said so. **This is the ceiling for
-/// a bigger slider without moving the progress bar out of this column**, and that
-/// trade is the operator's to make rather than an agent's.
+/// sized, need more than the 324 pixels between the top of the column and the
+/// bottom of the window, and `no_two_placed_rects_overlap` said so. **This is the
+/// ceiling for a bigger slider without moving the progress bar out of this
+/// column**, and that trade is the operator's to make rather than an agent's.
+///
+/// Removing the buttons loosened that constraint rather than tightening it — the
+/// column now starts 156 pixels higher, at the gauge — so 18 is a ceiling that has
+/// not been retested against a 22. **What would reverse it** is a knob a thumb
+/// cannot miss, and that is the same question the operator has already answered
+/// twice about a 6-pixel track.
 const SLIDER_THUMB_RADIUS: f32 = 18.0;
 
 /// How long the demo's slider is, in pixels.
@@ -393,13 +402,152 @@ const IMAGE_FIT_ORIGIN: (f32, f32) = (800.0, 200.0);
 /// a line that is not really too long.
 const IMAGE_FIT_WIDTH: f32 = 360.0;
 
+/// Where the demo's gauge sits, the top of the right-hand control column.
+///
+/// **This is where the row of three buttons was**, and the two agree on the x —
+/// [`CONTROLS_ORIGIN`]'s 664 — because both were the first thing in the column
+/// and the buttons' removal moved nothing: the gauge is above the slider, at the
+/// slider's x, and the slider stayed at [`SLIDER_ORIGIN`].
+///
+/// The **y is not the buttons' 396.** A button row is 44 tall and a gauge is a
+/// dial, and a dial has to be big enough to read its own tick marks and see its
+/// needle move: 200 is the widget's own `DEFAULT_SIZE`, and a 100-tall box in
+/// the space the counter left would put eleven 8-pixel marks on a quarter of the
+/// arc. So the gauge takes the two regions the buttons and the counter used to
+/// hold **and the empty band above them**, 240 down to 440, and its readout sits
+/// in what is left of the freed space at [`GAUGE_READOUT_ORIGIN`].
+///
+/// 240 is above [`IMAGE_FIT_ORIGIN`]'s own 200 plus the height of the fit label's
+/// line, so the gauge is below the image rather than beside its readout, and 440
+/// is 56 above [`SLIDER_ORIGIN`]'s 496 — the arc's outer edge is at the node's own
+/// edge, so nothing this widget draws reaches past the 440. What would reverse
+/// this is a head unit whose dial is a different size, which is the operator's
+/// number and not an agent's.
+const GAUGE_ORIGIN: (f32, f32) = (CONTROLS_ORIGIN.0, 240.0);
+
+/// The box the demo's gauge is given.
+///
+/// **The widget's own `size()`**, which is [`GAUGE_ORIGIN`]'s square: a gauge
+/// has no content to measure, so `Gauge::size()` is the widget saying how big it
+/// wants to be, and the demo asks for exactly that rather than choosing a number
+/// of its own. It is the only square box in the demo — every other control is a
+/// bar or a panel — because a dial inscribed in a non-square box is a dial
+/// inscribed in the *shorter* of the two sides, so a wide box buys nothing and
+/// only leaves empty space the collision tests would have to reason about.
+const GAUGE_SIZE: Size = Size {
+    width: 200.0,
+    height: 200.0,
+};
+
+/// Where the label naming the gauge's value and shape sits, under the dial.
+///
+/// Under rather than beside it, because the region to the right of the dial is
+/// the slider's: the gauge ends at 864 and the slider's own 300-pixel box runs to
+/// 964, and the 100 pixels between them are narrower than this label is. 448 is
+/// in the space the button row and the click counter used to hold — 440 is the
+/// dial's own bottom edge — and it is 48 above [`SLIDER_ORIGIN`]'s 496.
+const GAUGE_READOUT_ORIGIN: (f32, f32) = (CONTROLS_ORIGIN.0, 448.0);
+
+/// The width the gauge's readout is given: the longest string it can show on one
+/// line.
+///
+/// `240 of 240, 100%, circle` is that string — a value, its share of the range
+/// and the shape it is drawn in, in the widget's own enum order so that the third
+/// word can be compared against `GaugeType`'s variants — and the width stops the
+/// label cutting it at the node's own width, which is what would happen to
+/// `240 of 240, 100%, ci…`. 320 is [`SLIDER_READOUT_WIDTH`]'s number for the same
+/// reason and keeps the two readouts the same width, so the column reads as one
+/// column.
+const GAUGE_READOUT_WIDTH: f32 = 320.0;
+
+/// The range the demo's gauge covers, in km/h.
+///
+/// **Zero to 240, which is a speedometer**, and the unit is what the readout
+/// prints rather than something the widget knows: a gauge is told its range and
+/// nothing else, so the demo is the only place that can say what the number is.
+const GAUGE_MIN: f32 = 0.0;
+const GAUGE_MAX: f32 = 240.0;
+
+/// The value the demo's gauge starts at, and the share of its range that is.
+///
+/// **Half, and it is half exactly**: task 20's acceptance criterion is *"Demo
+/// shows a gauge at 50%"*, and 120 of 0 to 240 is 120/240 = 0.5 with no rounding
+/// in it. A tenth of the range is the step the two keys move it by, and it
+/// divides 240 exactly for the reason [`PROGRESS_TENTHS`] gives for the bar's.
+const GAUGE_START: f32 = 120.0;
+const GAUGE_STEP: f32 = 24.0;
+
+/// How finely the gauge's value is snapped, as a count of steps.
+///
+/// It is the reciprocal of [`GAUGE_STEP`], written down as the number it is used
+/// as: the demo rounds `value / GAUGE_STEP` to an integer and multiplies back, so
+/// a value that arrived by repeated addition lands on the grid rather than near
+/// it. A gauge at 119.99999 is a needle a fraction of a pixel off twelve o'clock,
+/// which is the same defect [`PROGRESS_START`] describes for the bar.
+const GAUGE_TENTHS: f32 = 10.0;
+
+/// The shapes the demo's gauge cycles through, in the order `G` walks them.
+///
+/// **`Needle` first**, because it is the shape that shows every part of the
+/// widget at once — the track, the fill, the tick marks *and* the pointer — and a
+/// demo that starts on the plain arc would need a keypress before anything new
+/// appeared. [`Arc`](GaugeType) and [`GaugeType::Circle`] follow, and `Circle` is
+/// last because it is the one that ignores [`end_angle`](Gauge::end_angle)
+/// entirely: a full turn whatever the two angles say, which is worth seeing but
+/// is not a new shape so much as the same sweep closed.
+///
+/// The three are named again in [`GAUGE_TYPE_NAMES`] rather than derived from the
+/// enum, because the readout needs the *word* and `GaugeType`'s `Debug` is not
+/// part of its contract.
+const GAUGE_TYPES: [GaugeType; 3] = [GaugeType::Needle, GaugeType::Arc, GaugeType::Circle];
+
+/// The name of each shape in [`GAUGE_TYPES`], in the same order.
+///
+/// The names are capitalised as the other readouts' words are (`Contain`, not
+/// `contain`) because they are read as labels rather than as code, and because
+/// `GaugeType`'s own variants are capitalised.
+const GAUGE_TYPE_NAMES: [&str; 3] = ["Needle", "Arc", "Circle"];
+
+/// How long the demo's gauge takes to arrive at a new value, on a spring.
+///
+/// **The demo's number, and the reason it is not the theme's**: a gauge needle
+/// that eased from 60 to 120 over [`THEME_TRANSITION`]'s 300 ms reads as a bar
+/// being filled, and the whole of a gauge is that a pointer *swings* and settles.
+/// Every other control in the demo takes [`Motion::from_theme`], and this is the
+/// first that does not, so the two are written out side by side rather than one
+/// being derived from the other: 600 ms is long enough for the spring below to
+/// have most of its travel and short enough that a keypress feels answered
+/// before the next one.
+///
+/// What would reverse it is a head unit whose needle is meant to glide rather than
+/// swing, which is a judgement about a car rather than about this widget.
+const GAUGE_MOTION: Duration = Duration::from_millis(600);
+
+/// The spring the demo's gauge's needle arrives on.
+///
+/// A little underdamped — the damping ratio is `9 / (2 · sqrt(140))` = 0.38, so
+/// it overshoots by about a sixth and comes back — which is what makes a needle
+/// look like a needle. **The widget never picks this**: `Gauge::animate_to_state`
+/// takes the caller's [`Motion`] and honours it, and it is the caller that has to
+/// know that a spring on that call is a springing *needle*, because the needle
+/// points at [`shown`](Gauge::shown) and both it and the fill read that one
+/// property.
+///
+/// These two numbers are [`RELEASE_SPRING`]'s, deliberately: a pad springing
+/// back to rest and a needle springing to a reading are the same movement, and
+/// one pair of coefficients for both is one less number to explain.
+const GAUGE_SPRING: Easing = Easing::Spring {
+    damping: 9.0,
+    stiffness: 140.0,
+};
+
 /// Where the demo's toggle sits, under the slider's readout.
 ///
 /// The readout's own line ends at [`SLIDER_ORIGIN`]'s 496 plus
 /// [`SLIDER_READOUT_DROP`]'s 52 and its own 24 pixels, and the toggle's box is
 /// the widget's own — a 48-wide track in a 44-tall touch target — so this is the
 /// next line that clears it.
-const TOGGLE_ORIGIN: (f32, f32) = (664.0, 592.0);
+const TOGGLE_ORIGIN: (f32, f32) = (CONTROLS_ORIGIN.0, 592.0);
 
 /// Where the label naming the toggle's state sits, beside it.
 ///
@@ -410,7 +558,7 @@ const TOGGLE_ORIGIN: (f32, f32) = (664.0, 592.0);
 /// It follows [`TOGGLE_ORIGIN`] rather than repeating its number: the toggle moved
 /// down 20 when the slider grew above it, and a literal here was still sitting at
 /// the old 592 — clear of nothing, since the slider's readout now ends there.
-const TOGGLE_READOUT_ORIGIN: (f32, f32) = (728.0, TOGGLE_ORIGIN.1 + 20.0);
+const TOGGLE_READOUT_ORIGIN: (f32, f32) = (CONTROLS_ORIGIN.0 + 64.0, TOGGLE_ORIGIN.1 + 20.0);
 
 /// The width the toggle's readout is given: enough for `on, 1 change` and
 /// `off, 0 changes` on one line each.
@@ -421,7 +569,7 @@ const TOGGLE_READOUT_WIDTH: f32 = 240.0;
 ///
 /// 668 plus the bar's own 44 pixels is 712, and the window is 720: eight
 /// pixels of margin, which is the whole of what is left below the band.
-const PROGRESS_ORIGIN: (f32, f32) = (664.0, 668.0);
+const PROGRESS_ORIGIN: (f32, f32) = (CONTROLS_ORIGIN.0, 668.0);
 
 /// The box the progress bar is given.
 ///
@@ -439,7 +587,7 @@ const PROGRESS_SIZE: Size = Size {
 /// where the list is: the bar ends at 904 and the list starts at
 /// [`LIST_ORIGIN`]'s 1000, and 96 pixels is not enough for the longest string
 /// this label shows.
-const PROGRESS_READOUT_ORIGIN: (f32, f32) = (664.0, 640.0);
+const PROGRESS_READOUT_ORIGIN: (f32, f32) = (CONTROLS_ORIGIN.0, 640.0);
 
 /// The width the progress readout is given: the longest string it can show on
 /// one line.
@@ -476,9 +624,9 @@ const PROGRESS_TENTHS: f32 = 10.0;
 /// The list is a hundred rows tall and the point of it is the **viewport**: a
 /// 280-tall box over [`LIST_ITEM_HEIGHT`] rows is ten of them, so ninety of the
 /// hundred are not in the tree at all and the readout says so. It starts at 1000
-/// because the click counter and the slider's readout are both given
-/// [`COUNTER_WIDTH`] and [`SLIDER_READOUT_WIDTH`] and both end at 984, and 16
-/// pixels of clearance is the gap `no_two_placed_rects_overlap` checks for.
+/// because the slider's readout and the gauge's are both given
+/// [`SLIDER_READOUT_WIDTH`] and both end at 984, and 16 pixels of clearance is
+/// the gap `no_two_placed_rects_overlap` checks for.
 const LIST_ORIGIN: (f32, f32) = (1000.0, 396.0);
 
 /// The box the list is given: a viewport, not a content height.
@@ -527,7 +675,7 @@ const LIST_READOUT_WIDTH: f32 = 270.0;
 
 /// The font size the list's readout and its rows are drawn at.
 ///
-/// Smaller than [`BUTTON_FONT`] for the readout because it is four numbers
+/// Smaller than [`READOUT_FONT`] for the readout because it is four numbers
 /// rather than one, and the list is narrower than the column above it; the rows
 /// are at the same size because a row is one short word and 20 pixels of it in a
 /// 28-pixel row leaves four either side.
@@ -551,17 +699,17 @@ const IMAGE_CORNER_RADIUS: f32 = 10.0;
 /// text column and left of the control column.
 ///
 /// Measured rather than guessed, and the two numbers below are what the measuring
-/// found. The text column's last label ends at y 501, the button band's column
-/// starts at x 664 and the list's readout is at x 1000, so the strip from
-/// (0, 505) to (664, 720) is the one region of the window nothing is in. 684 is
-/// the list's readout's own y, so the two lines of numbers at the bottom of the
-/// window are on one baseline.
+/// found. The text column's last label ends at y 501, the control column starts at
+/// x 664 and the list's readout is at x 1000, so the strip from (0, 505) to
+/// (664, 720) is the one region of the window nothing is in. 684 is the list's
+/// readout's own y, so the two lines of numbers at the bottom of the window are on
+/// one baseline.
 const FPS_READOUT_ORIGIN: (f32, f32) = (60.0, 684.0);
 
 /// The width the frame-rate readout is given.
 ///
 /// **Written out rather than measured from its first string**, which is what
-/// every other readout in the band does, because this is the one whose text
+/// every other readout below the pads does, because this is the one whose text
 /// changes on every frame that moves it: a rect measured from `fps 0, avg 0.0,
 /// worst 0 ms` is a rect measured from a number that was true for one frame, and
 /// [`read_only_label`]'s ellipsis would then cut the line at the width of the
@@ -570,8 +718,8 @@ const FPS_READOUT_ORIGIN: (f32, f32) = (60.0, 684.0);
 /// 400 fits the longest line the readout can print — `fps 10000, avg 10000.0,
 /// worst 9999 ms` is 37 characters, and a frame cannot be a hundredth of a
 /// millisecond long, which is what would give the rates six digits — and it ends
-/// at x 460, two hundred pixels clear of the button column at
-/// [`BUTTON_ORIGIN`]'s 664. A box wider than the line in it costs nothing: the
+/// at x 460, two hundred pixels clear of the control column at
+/// [`CONTROLS_ORIGIN`]'s 664. A box wider than the line in it costs nothing: the
 /// text is drawn from the box's own left edge.
 const FPS_READOUT_WIDTH: f32 = 400.0;
 
@@ -635,7 +783,7 @@ const BAND_HEIGHT: f32 = WINDOW.height - BAND_TOP;
 
 /// The font size the text input's own text is drawn at.
 ///
-/// Larger than [`BUTTON_FONT`]'s 20 because this is *the thing being read*, and
+/// Larger than [`READOUT_FONT`]'s 20 because this is *the thing being read*, and
 /// a field whose value is set in 16-pixel type is a field read by leaning in.
 const TEXT_INPUT_FONT: f32 = 24.0;
 
@@ -800,27 +948,6 @@ const ASSET_DIR_VAR: &str = "ROADOS_ASSET_DIR";
 /// source's own width and height, and a stand-in of a different shape would make
 /// `Cover` crop a different amount from the one on screen.
 const ASSET_SIZE: (u32, u32) = (320, 192);
-
-/// What a button in the demo's band does when it is clicked.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ButtonAction {
-    /// Add one to the click counter.
-    Count,
-    /// Put the click counter back to zero.
-    Reset,
-}
-
-/// The buttons in the demo's band: their label, whether they are disabled, and
-/// what they do.
-///
-/// The middle one is disabled on purpose — a control that refuses interaction is
-/// half of what the widget is, and it is what shows a disabled button refusing a
-/// tap and being stepped over by focus.
-const BUTTONS: [(&str, bool, ButtonAction); 3] = [
-    ("Press me", false, ButtonAction::Count),
-    ("Disabled", true, ButtonAction::Count),
-    ("Reset", false, ButtonAction::Reset),
-];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut renderer = Renderer::new(Context::new(
@@ -1350,24 +1477,10 @@ impl DemoLabel {
     }
 }
 
-/// The four state properties a button is written in, kept together so the demo
-/// can tell whether anything about a button has changed.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct ButtonFlags {
-    /// A pointer is over the button.
-    hovered: bool,
-    /// The button is held down.
-    pressed: bool,
-    /// The button refuses interaction.
-    disabled: bool,
-    /// The button holds focus.
-    focused: bool,
-}
-
 /// The two things a toggle's drawn appearance is derived from.
 ///
 /// A record rather than a re-aim every frame, for
-/// [`Demo::sync_button_state`]'s reason: aiming restarts the transition, so
+/// [`Demo::sync_toggle_state`]'s reason: aiming restarts the transition, so
 /// aiming on every frame would leave the thumb creeping toward its target for
 /// ever instead of arriving at it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1379,53 +1492,11 @@ struct ToggleState {
     focused: bool,
 }
 
-/// A button in the demo's band: the widget, and the state the demo last wrote to
-/// it and last aimed it at.
-///
-/// The two records are what stop a frame from doing work: a property write
-/// notifies the node's `on_change` callback and marks the node dirty, and
-/// aiming a button restarts its transition, so both are done only when the state
-/// or the palette has actually moved.
-struct DemoButton {
-    /// The button widget, with its node in the arena.
-    widget: Button,
-    /// The state the demo last wrote to the widget's properties.
-    written: ButtonFlags,
-    /// The state the widget was last aimed at.
-    aimed: ButtonFlags,
-}
-
-impl DemoButton {
-    /// Returns the button's node in the arena.
-    fn node(&self) -> Handle {
-        self.widget.handle()
-    }
-
-    /// Returns the state the widget is in.
-    fn state(&self) -> ButtonFlags {
-        ButtonFlags {
-            hovered: self.widget.hovered.get(),
-            pressed: self.widget.pressed.get(),
-            disabled: self.widget.disabled.get(),
-            focused: self.widget.focused.get(),
-        }
-    }
-
-    /// Returns whether the button can hold focus.
-    ///
-    /// A disabled button cannot: focus belongs to what the user can act on, and
-    /// a control that swallows a tap and fires nothing has nothing to be
-    /// activated by a key.
-    fn is_focusable(&self) -> bool {
-        !self.widget.disabled.get()
-    }
-}
-
 /// Returns a colour property that follows whichever of `tokens` the
 /// `color_token` property names.
 ///
 /// Every piece of text in the demo is bound through this, so `C` moves the text
-/// panel and the click counter together.
+/// panel and the readouts below the pads together.
 fn cycling_color(
     color_token: &Property<ThemeToken>,
     tokens: &[(ThemeToken, Property<PropertyValue>)],
@@ -1454,21 +1525,6 @@ fn themed_color(token: &Property<PropertyValue>, fallback: Color) -> Property<Co
     Property::bind(move || token.get().as_color().unwrap_or(fallback))
 }
 
-/// Returns the click handler for a button in the demo's band, writing to
-/// `clicks`.
-///
-/// The handler holds a clone of the property rather than the demo: a property is
-/// a handle to shared state, so the closure reaches the counter the demo shows
-/// without the demo being captured, and the button outliving the demo cannot
-/// leave a dangling borrow behind it.
-fn button_callback(clicks: &Property<u32>, action: ButtonAction) -> Callback {
-    let clicks = clicks.clone();
-    Callback::new(move || match action {
-        ButtonAction::Count => clicks.set(clicks.get() + 1),
-        ButtonAction::Reset => clicks.set(0),
-    })
-}
-
 /// A row of the demo's list: the node the factory built and the label in it.
 ///
 /// The list's factory is given **no index**, because a row is built once and
@@ -1487,10 +1543,10 @@ struct DemoRow {
 /// A slider in the demo: the widget, and the dragging state the demo last wrote
 /// to it and last aimed it at.
 ///
-/// The two records are the [`DemoButton`] records again, and for the same
-/// reason: a property write notifies the node's `on_change` callback and marks
-/// the node dirty, and aiming restarts the slider's transition, so both are done
-/// only when the state has actually moved.
+/// **The two records are what stop a frame from doing work**: a property write
+/// notifies the node's `on_change` callback and marks the node dirty, and
+/// aiming restarts the slider's transition, so both are done only when the state
+/// has actually moved.
 struct DemoSlider {
     /// The slider widget, with its node in the arena.
     widget: Slider,
@@ -1538,25 +1594,44 @@ struct Demo {
     /// Whether the theme is currently the dark one.
     dark: bool,
     mouse_pressed: Option<usize>,
-    /// The buttons in the band, with the state the demo last wrote to each.
-    buttons: Vec<DemoButton>,
-    /// The label showing the click counter, under the row of buttons.
-    counter: DemoLabel,
-    /// The gesture recogniser the button row's events are built from.
+    /// The gesture recogniser every control's events are built from.
     recognizer: GestureRecognizer,
-    /// The button holding focus, or `None` when nothing does.
+    /// The control holding focus, or `None` when nothing does.
     focused: Option<Handle>,
-    /// The index of the button a pointer is holding down, if any.
-    pressed: Option<usize>,
     /// Every node in the demo that has children, as the widget that owns it.
     ///
     /// The tree is built out of [`Container`]s rather than out of nodes the demo
     /// assembles itself, so a parent is the widget and the demo's frame loop
     /// paints it through [`Container::paint`]. Only the row of pads is given a
     /// background: it is the card that shows what a container with a background
-    /// and padding looks like, and the other five draw nothing.
+    /// and padding looks like, and the other four draw nothing.
     containers: Vec<Container>,
-    /// The slider, under the click counter.
+    /// The gauge, at the head of the right-hand control column.
+    ///
+    /// **A plain field and not a `DemoGauge` wrapper**, for the reason
+    /// [`Demo::progress`] is: nothing in a frame writes to the gauge. A slider
+    /// needs a record of what the demo last wrote to it because a *pointer* can
+    /// change it from outside, and a button needs one for the same reason; a
+    /// gauge has no `on_event` at all — its needle and its tick marks are
+    /// decoration and nothing in it answers a finger — so the only thing that
+    /// changes its value is a keypress, which is the demo's own doing and needs no
+    /// record of what it last did.
+    gauge: Gauge,
+    /// Which of [`GAUGE_TYPES`] the gauge is drawn in, as an index into it.
+    ///
+    /// A property rather than a plain field for the reason
+    /// [`Demo::image_fit`] is: the readout naming the shape is bound to it, and
+    /// [`GaugeType`] is a plain field behind
+    /// [`set_gauge_type`](Gauge::set_gauge_type), so there is no property on the
+    /// widget for the label to follow. It is written **after** the widget's,
+    /// which has the same consequence `progress_indeterminate` documents — a
+    /// frame in which the two disagree draws a dial the label has not caught up
+    /// with rather than the reverse.
+    gauge_type: Property<usize>,
+    /// The label showing the gauge's drawn value, its share of the range and the
+    /// shape it is drawn in.
+    gauge_readout: DemoLabel,
+    /// The slider, under the gauge.
     slider: DemoSlider,
     /// The label showing the slider's value, and how many times it has been
     /// adjusted.
@@ -1824,91 +1899,85 @@ impl Demo {
             return Err("ui_demo: the text column could not be attached");
         }
 
-        // The button band, to the right of the text panel: a row of three
-        // buttons over a click counter. The band is `Absolute` so the row and
-        // the counter each sit at their own position inside it.
-        let clicks = Property::new(0u32);
-        let counter_text = {
-            let clicks = clicks.clone();
-            Property::bind(move || {
-                // "1 click" rather than "1 clicks": this string is on screen in
-                // the demo, and the first count is the one everyone sees.
-                let count = clicks.get();
-                if count == 1 {
-                    "1 click".to_string()
-                } else {
-                    format!("{count} clicks")
-                }
-            })
-        };
-        let mut counter = Label::new(&mut nodes, String::new());
-        counter.text = counter_text;
-        counter.color = cycling_color(&color_token, &token_properties);
-        counter.font_size.set(BUTTON_FONT);
-        let counter = DemoLabel {
-            label: counter,
-            options: LayoutOptions {
-                max_width: COUNTER_WIDTH,
-                ..LayoutOptions::default()
-            },
-        };
-
-        let button_line_height = metrics.line_height(BUTTON_FONT);
-        let mut buttons = Vec::new();
-        for &(text, disabled, action) in &BUTTONS {
-            let mut widget = Button::new(&mut nodes, text);
-            widget.font_size.set(BUTTON_FONT);
-            widget.disabled.set(disabled);
-            widget.set_palette(Palette::from_theme(&theme));
-            // The palette names the colours the states are derived from, and
-            // the properties still hold the neutral defaults `Button::new` wrote,
-            // so the button is snapped onto its theme before it is ever drawn.
-            widget.snap_to_state();
-            widget.on_click = button_callback(&clicks, action);
-            // Every button is given the rect its own label and padding need,
-            // floored at the minimum touch target, so the band lays out from the
-            // widgets' sizes rather than from a size written out here.
-            let size = widget.size(
-                &|ch: char| metrics.advance(ch, BUTTON_FONT),
-                button_line_height,
-            );
+        // The gauge, at the head of the right-hand control column, and the
+        // label naming what it is showing. Three things happen in this order and
+        // the order is the whole of it: the palette names the four colours the
+        // gauge draws with while the properties still hold the neutral greys
+        // `Gauge::new` wrote, `snap_to_state` puts the value *and* the palette on
+        // the gauge before it is ever drawn, and only then is the shape chosen.
+        // A `set_gauge_type` after the snap would write `needle` from the palette
+        // again for the same value, which is harmless, and the reverse order
+        // would leave the tick marks and the needle on the neutral greys for a
+        // frame.
+        let gauge_type = Property::new(0usize);
+        let mut gauge = Gauge::new(&mut nodes, GAUGE_MIN, GAUGE_MAX);
+        gauge.set_gauge_type(GAUGE_TYPES[0]);
+        gauge.set_palette(GaugePalette::from_theme(&theme));
+        gauge.value.set(GAUGE_START);
+        gauge.snap_to_state();
+        {
+            // The box is the widget's own `size()`, written out as
+            // [`GAUGE_SIZE`]. A gauge has no content to measure, so this is the
+            // widget saying how big it wants to be rather than the demo choosing,
+            // and the constant is here so the layout has a number to point at and
+            // a test has something to compare the drawn dial against.
+            let size = GAUGE_SIZE;
             nodes
-                .get_mut(widget.handle())
-                .ok_or("ui_demo: a button node is missing")?
+                .get_mut(gauge.handle())
+                .ok_or("ui_demo: the gauge node is missing")?
                 .layout_mut()
                 .set_constraints(Constraints::tight(size));
-            buttons.push(DemoButton {
-                widget,
-                written: ButtonFlags {
-                    hovered: false,
-                    pressed: false,
-                    disabled,
-                    focused: false,
-                },
-                aimed: ButtonFlags {
-                    hovered: false,
-                    pressed: false,
-                    disabled,
-                    focused: false,
-                },
-            });
         }
-        let button_nodes: Vec<Handle> = buttons.iter().map(DemoButton::node).collect();
-        let button_row = Container::new(&mut nodes, LayoutMode::row());
-        button_row.set_flex_config(
+        let gauge_readout = read_only_label(
             &mut nodes,
-            FlexConfig::new()
-                .with_spacing(BUTTON_SPACING)
-                .with_cross_axis_alignment(CrossAxisAlignment::Center),
-        );
-        for &child in &button_nodes {
-            if !button_row.add_child(&mut nodes, child) {
-                return Err("ui_demo: a button could not be attached to the band");
-            }
-        }
-        // The slider, under the counter, and the readout that shows what it is
-        // at. The slider's colours come from the theme the same way the band's
-        // do, and it is snapped onto them before it is ever drawn for the reason
+            &metrics,
+            READOUT_FONT,
+            GAUGE_READOUT_WIDTH,
+            {
+                // The gauge's own `value` property and not its `shown`, so the
+                // line names the reading rather than where the needle has got to:
+                // the needle's travel is what the dial shows, and a number chasing
+                // it would be a second thing moving for no extra information.
+                //
+                // **The share is the demo's own arithmetic and not
+                // `Gauge::fraction`,** which is public for this exact purpose and
+                // which a caller with the widget in hand should be using. The
+                // reason it cannot be used here is the same one every other
+                // bound readout in the demo has: a `Property::bind` closure
+                // captures properties, not widgets, and the `Gauge` is moved into
+                // [`Demo`] three lines below. Reaching it would mean an `Rc` round
+                // the widget, and `set_palette` takes `&mut self` — which is the
+                // trap `Demo::text_input` documents having already been caught by
+                // once. So the mapping is spelled out, and
+                // `the_readouts_percentage_is_the_widgets_own_fraction` is what
+                // holds the two in step.
+                let value = gauge.value.clone();
+                let shape = gauge_type.clone();
+                Property::bind(move || {
+                    let read = value.get();
+                    let span = GAUGE_MAX - GAUGE_MIN;
+                    let share = if span > 0.0 {
+                        ((read - GAUGE_MIN) / span).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    format!(
+                        "{read:.0} of {GAUGE_MAX:.0}, {:.0}%, {}",
+                        share * 100.0,
+                        GAUGE_TYPE_NAMES
+                            .get(shape.get())
+                            .copied()
+                            .unwrap_or(GAUGE_TYPE_NAMES[0])
+                    )
+                })
+            },
+            &color_token,
+            &token_properties,
+        )?;
+
+        // The slider, under the gauge, and the readout that shows what it is at.
+        // The slider's colours come from the theme the same way the gauge's do,
+        // and it is snapped onto them before it is ever drawn for the reason
         // `snap_to_state` exists.
         let mut widget = Slider::new(&mut nodes, SLIDER_MIN, SLIDER_MAX);
         widget.set_step(Some(SLIDER_STEP));
@@ -1966,7 +2035,7 @@ impl Demo {
         let mut readout = Label::new(&mut nodes, String::new());
         readout.text = readout_text;
         readout.color = cycling_color(&color_token, &token_properties);
-        readout.font_size.set(BUTTON_FONT);
+        readout.font_size.set(READOUT_FONT);
         let slider_readout = DemoLabel {
             label: readout,
             options: LayoutOptions {
@@ -1975,7 +2044,7 @@ impl Demo {
             },
         };
         {
-            let size = slider_readout.size(&metrics, BUTTON_FONT);
+            let size = slider_readout.size(&metrics, READOUT_FONT);
             nodes
                 .get_mut(slider_readout.label.handle())
                 .ok_or("ui_demo: the slider readout is missing")?
@@ -2015,7 +2084,7 @@ impl Demo {
         let toggle_readout = read_only_label(
             &mut nodes,
             &metrics,
-            BUTTON_FONT,
+            READOUT_FONT,
             TOGGLE_READOUT_WIDTH,
             {
                 let checked = toggle.checked.clone();
@@ -2063,7 +2132,7 @@ impl Demo {
         let image_fit_readout = read_only_label(
             &mut nodes,
             &metrics,
-            BUTTON_FONT,
+            READOUT_FONT,
             IMAGE_FIT_WIDTH,
             {
                 let fit = image_fit.clone();
@@ -2109,7 +2178,7 @@ impl Demo {
         let progress_readout = read_only_label(
             &mut nodes,
             &metrics,
-            BUTTON_FONT,
+            READOUT_FONT,
             PROGRESS_READOUT_WIDTH,
             {
                 let value = progress.value.clone();
@@ -2230,7 +2299,7 @@ impl Demo {
         let fps_readout = read_only_label(
             &mut nodes,
             &metrics,
-            BUTTON_FONT,
+            READOUT_FONT,
             FPS_READOUT_WIDTH,
             fps_text.clone(),
             &color_token,
@@ -2239,7 +2308,7 @@ impl Demo {
         {
             let size = Size {
                 width: FPS_READOUT_WIDTH,
-                height: metrics.line_height(BUTTON_FONT),
+                height: metrics.line_height(READOUT_FONT),
             };
             nodes
                 .get_mut(fps_readout.label.handle())
@@ -2393,23 +2462,20 @@ impl Demo {
             }
         }
 
-        // The row, the counter, the slider, its readout and the four newer
-        // widgets are each placed inside the band, which is what `Absolute` is
-        // for: each at its own offset from the band's origin, which is the
-        // window's own top left.
-        nodes
-            .get_mut(button_row.handle())
-            .ok_or("ui_demo: the button row is missing")?
-            .layout_mut()
-            .set_position(Some(Offset::new(BUTTON_ORIGIN.0, BUTTON_ORIGIN.1)));
-        nodes
-            .get_mut(counter.label.handle())
-            .ok_or("ui_demo: the click counter is missing")?
-            .layout_mut()
-            .set_position(Some(Offset::new(
-                BUTTON_ORIGIN.0,
-                BUTTON_ORIGIN.1 + COUNTER_DROP,
-            )));
+        // The gauge, its readout, the slider, its own readout and the four newer
+        // widgets are each placed inside the controls layer, which is what
+        // `Absolute` is for: each at its own offset from the layer's origin, which
+        // is the window's own top left.
+        for (node, origin) in [
+            (gauge.handle(), GAUGE_ORIGIN),
+            (gauge_readout.label.handle(), GAUGE_READOUT_ORIGIN),
+        ] {
+            nodes
+                .get_mut(node)
+                .ok_or("ui_demo: the gauge is missing")?
+                .layout_mut()
+                .set_position(Some(Offset::new(origin.0, origin.1)));
+        }
         nodes
             .get_mut(slider.widget.handle())
             .ok_or("ui_demo: the slider is missing")?
@@ -2444,55 +2510,61 @@ impl Demo {
                 .layout_mut()
                 .set_position(Some(Offset::new(origin.0, origin.1)));
         }
-        // The band is the window, not a box of its own: it is a `Stack` child,
+        // The layer is the window, not a box of its own: it is a `Stack` child,
         // and a `Stack` sizes a child from its own constraints but places it at
         // the origin. Giving it the window's size makes the offsets inside it
         // window coordinates, which is what the positions above assume.
-        let button_area = Container::new(&mut nodes, LayoutMode::Absolute);
+        //
+        // It was called the **button band** while there were buttons in it, and it
+        // is now the controls layer — it holds every control below the pads and
+        // has held four of them that are no longer here. The name is the only
+        // thing about it that changed.
+        let controls = Container::new(&mut nodes, LayoutMode::Absolute);
         {
-            let band = nodes
-                .get_mut(button_area.handle())
-                .ok_or("ui_demo: the button band is missing")?;
-            band.layout_mut()
+            let layer = nodes
+                .get_mut(controls.handle())
+                .ok_or("ui_demo: the controls layer is missing")?;
+            layer
+                .layout_mut()
                 .set_constraints(Constraints::tight(WINDOW));
         }
-        // The order the band holds its children in **is** their paint order and
-        // therefore their `Tab` order, so it is a list and not a set: the four
-        // children of tasks 12 and 14 first, in the order those tasks put them
-        // in, and then the four of tasks 15 to 18 in the order this file
-        // introduces them. The image comes after the slider and before the
-        // toggle because that is where it sits in the window — top right, above
-        // the band — and putting it first would move the first `Tab` off the
-        // first button, which two existing tests are about.
-        if !button_area.add_child(&mut nodes, button_row.handle())
-            || !button_area.add_child(&mut nodes, counter.label.handle())
-            || !button_area.add_child(&mut nodes, slider.widget.handle())
-            || !button_area.add_child(&mut nodes, slider_readout.label.handle())
-            || !button_area.add_child(&mut nodes, image.handle())
-            || !button_area.add_child(&mut nodes, image_fit_readout.label.handle())
-            || !button_area.add_child(&mut nodes, toggle.handle())
-            || !button_area.add_child(&mut nodes, toggle_readout.label.handle())
-            || !button_area.add_child(&mut nodes, progress.handle())
-            || !button_area.add_child(&mut nodes, progress_readout.label.handle())
-            || !button_area.add_child(&mut nodes, list.handle())
-            || !button_area.add_child(&mut nodes, list_readout.label.handle())
-            || !button_area.add_child(&mut nodes, fps_readout.label.handle())
-            || !button_area.add_child(&mut nodes, text_input.handle())
-            || !button_area.add_child(&mut nodes, text_readout.label.handle())
-            || !button_area.add_child(&mut nodes, submit_readout.label.handle())
-            || !button_area.add_child(&mut nodes, keyboard.handle())
+        // The order the layer holds its children in **is** their paint order and
+        // therefore their `Tab` order, so it is a list and not a set. **The gauge
+        // is first**, because it is first in the column it belongs to: it sits
+        // above the slider in the window and it was built before the slider in
+        // this function, and the two agreeing is the whole argument for the
+        // ordering being readable. The image comes after the slider and before
+        // the toggle because that is where it sits in the window — top right,
+        // above everything else here.
+        if !controls.add_child(&mut nodes, gauge.handle())
+            || !controls.add_child(&mut nodes, gauge_readout.label.handle())
+            || !controls.add_child(&mut nodes, slider.widget.handle())
+            || !controls.add_child(&mut nodes, slider_readout.label.handle())
+            || !controls.add_child(&mut nodes, image.handle())
+            || !controls.add_child(&mut nodes, image_fit_readout.label.handle())
+            || !controls.add_child(&mut nodes, toggle.handle())
+            || !controls.add_child(&mut nodes, toggle_readout.label.handle())
+            || !controls.add_child(&mut nodes, progress.handle())
+            || !controls.add_child(&mut nodes, progress_readout.label.handle())
+            || !controls.add_child(&mut nodes, list.handle())
+            || !controls.add_child(&mut nodes, list_readout.label.handle())
+            || !controls.add_child(&mut nodes, fps_readout.label.handle())
+            || !controls.add_child(&mut nodes, text_input.handle())
+            || !controls.add_child(&mut nodes, text_readout.label.handle())
+            || !controls.add_child(&mut nodes, submit_readout.label.handle())
+            || !controls.add_child(&mut nodes, keyboard.handle())
         {
-            return Err("ui_demo: the button band could not be assembled");
+            return Err("ui_demo: the controls layer could not be assembled");
         }
 
         // A stack: the background fills the window behind the row of pads, the
-        // text panel and the button band, and all three are painted over it.
+        // text panel and the controls layer, and all three are painted over it.
         let root = Container::new(&mut nodes, LayoutMode::Stack);
         for &child in &[
             background,
             row.handle(),
             text_panel.handle(),
-            button_area.handle(),
+            controls.handle(),
         ] {
             if !root.add_child(&mut nodes, child) {
                 return Err("ui_demo: a panel could not be attached to the root");
@@ -2557,43 +2629,21 @@ impl Demo {
             });
         }
 
-        // The same link for the buttons: every property a button's transition
-        // writes — its background, label colour, scale and opacity — marks its
-        // own node dirty, so the next pass repaints it. The button is a widget
-        // that owns a clock rather than a property the demo animates, so this is
-        // the only thing standing between a button's transition and the screen.
-        for button in &buttons {
-            let node = button.widget.handle();
-            // The two colours first, then the two numbers: one array cannot hold
-            // both, and the writes all mark the same node dirty anyway.
-            let background = &button.widget.background;
-            let foreground = &button.widget.foreground;
-            for property in [background, foreground] {
-                let nodes = Rc::clone(&nodes);
-                property.on_change(move |_| {
-                    mark_dirty(&mut nodes.borrow_mut(), node);
-                });
-            }
-            let scale = &button.widget.scale;
-            let opacity = &button.widget.opacity;
-            for property in [scale, opacity] {
-                let nodes = Rc::clone(&nodes);
-                property.on_change(move |_| {
-                    mark_dirty(&mut nodes.borrow_mut(), node);
-                });
-            }
-        }
-
-        // And for the click counter: the count is a property, the label's text
-        // is bound to it, and a write to either marks the counter's node dirty.
+        // The same two links for the gauge's readout, whose text is bound to the
+        // gauge's `value` and to the shape the demo last chose. The gauge itself
+        // gets **no** `on_change` link of its own, and that is the same decision
+        // the toggle, the bar, the image and the list get below: every property
+        // the gauge animates is a *paint* property — it draws inside whatever rect
+        // the layout pass gave its node, and none of them is an input to that rect
+        // — so a write reaches the screen without a link.
         {
             let text_nodes = Rc::clone(&nodes);
-            let node = counter.label.handle();
-            counter.label.text.on_change(move |_| {
+            let node = gauge_readout.label.handle();
+            gauge_readout.label.text.on_change(move |_| {
                 mark_dirty(&mut text_nodes.borrow_mut(), node);
             });
             let color_nodes = Rc::clone(&nodes);
-            counter.label.color.on_change(move |_| {
+            gauge_readout.label.color.on_change(move |_| {
                 mark_dirty(&mut color_nodes.borrow_mut(), node);
             });
         }
@@ -2641,14 +2691,14 @@ impl Demo {
             }
         }
 
-        // The same link for each of the four new readouts, whose text is bound
+        // The same link for each of the four newer readouts, whose text is bound
         // to a widget's own properties: a change to the text or to the colour
         // marks that readout's node dirty, so the next pass repaints it. Their
         // **rects** never change — each was given the box of the string it
         // started with, and every string they go on to show is inside that box
         // by the `wrap: None` `read_only_label` set — so the link is a paint
-        // link in effect, and it is kept because it is the pattern the counter
-        // and the slider's readout already follow and because a caller who
+        // link in effect, and it is kept because it is the pattern the gauge's
+        // and the slider's readouts already follow and because a caller who
         // widened one of these labels would need it.
         for readout in [
             &toggle_readout,
@@ -2711,12 +2761,12 @@ impl Demo {
             theme,
             dark: true,
             mouse_pressed: None,
-            buttons,
-            counter,
             recognizer: GestureRecognizer::new(),
             focused: None,
-            pressed: None,
-            containers: vec![row, text_column, text_panel, button_row, button_area, root],
+            containers: vec![row, text_column, text_panel, controls, root],
+            gauge,
+            gauge_type,
+            gauge_readout,
             slider,
             slider_readout,
             slider_dragging: false,
@@ -2804,17 +2854,17 @@ impl Demo {
     /// the token the text takes its colour from, and the left mouse button
     /// presses and releases the pad under the cursor.
     ///
-    /// The button band is driven the other way round, through the input module:
-    /// the event goes to the [`GestureRecognizer`]
-    /// first, and whatever gesture or key it completed is dispatched to the node
-    /// under it, which is what lets a button consume the events meant for it
-    /// rather than letting them reach whatever is behind. `Tab` and `Shift+Tab`
-    /// move focus, and Enter activates the button holding it.
+    /// Every control below the pads is driven the other way round, through the
+    /// input module: the event goes to the [`GestureRecognizer`] first, and
+    /// whatever gesture or key it completed is dispatched to the node under it,
+    /// which is what lets a control consume the events meant for it rather than
+    /// letting them reach whatever is behind. `Tab` and `Shift+Tab` move focus,
+    /// and Enter activates the control holding it.
     ///
-    /// Space is the one key both halves want. It belongs to the button holding
-    /// focus, because that is the control a user has navigated to, and falls
-    /// back to the pads when nothing is focused — so the pads still work with
-    /// `Tab` never pressed, which is how the demo starts.
+    /// Space is the one key two halves want. It belongs to the control holding
+    /// focus, because that is the one a user has navigated to, and falls back to
+    /// the pads when nothing is focused — so the pads still work with `Tab` never
+    /// pressed, which is how the demo starts.
     ///
     /// `0` and `1` put the slider at its two ends without a pointer, which is the
     /// one thing a drag cannot show: the thumb travelling to a value it was not
@@ -2822,9 +2872,27 @@ impl Demo {
     ///
     /// `F` cycles the image's fit, `[` and `]` move the progress bar's value by
     /// [`PROGRESS_STEP`] either way, and `P` switches the bar into its sliding
-    /// mode and back. `0` and `1` and `[` and `]` are the same idea four times
-    /// over — a control a pointer cannot reach, moved by a key — which is the one
-    /// thing the band was missing before these four widgets were in it.
+    /// mode and back. `,` and `.` move the gauge's value by [`GAUGE_STEP`] either
+    /// way and `G` cycles its shape through [`GAUGE_TYPES`].
+    ///
+    /// **The gauge's keys are not an afterthought and they are not arbitrary.**
+    /// They exist because of a fact about this host rather than about the widget:
+    /// **no pointer event can be injected here**, so
+    /// `.ai/NEVERAGAIN.md` § *a still screenshot of a 4 fps application* and
+    /// `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws* both
+    /// record that a capture taken by clicking the demo cannot be reproduced. A
+    /// gauge is a **display** — its needle and its tick marks are decoration and
+    /// nothing in the widget answers a finger — so with no pointer there would be
+    /// **no route to its value at all** and the acceptance criterion *"Demo shows
+    /// a gauge at 50%"* could only be met by a build that was seeded from the
+    /// environment, which is the entry § *a capture whose only route was
+    /// instrumented* is about. The keys are the honest route.
+    ///
+    /// `,` and `.` rather than `[` and `]` because those are the progress bar's,
+    /// and `<` and `>` because they are `,` and `.` under a shift and a demo
+    /// should not need two hands. `G` is the widget's own initial, and the reason
+    /// `F` is not reused for both the image's fit and the gauge's shape is that
+    /// one key doing two things is one thing fewer a reader can check.
     fn handle_event(&mut self, event: Event) {
         let produced = self.recognizer.process(&event);
 
@@ -2851,6 +2919,9 @@ impl Demo {
                 Keycode::LeftBracket => self.step_progress(-PROGRESS_STEP),
                 Keycode::RightBracket => self.step_progress(PROGRESS_STEP),
                 Keycode::P => self.set_progress_indeterminate(!self.progress_indeterminate.get()),
+                Keycode::Comma => self.step_gauge(-GAUGE_STEP),
+                Keycode::Period => self.step_gauge(GAUGE_STEP),
+                Keycode::G => self.cycle_gauge_type(),
                 _ => {}
             },
             Event::KeyUp {
@@ -2874,8 +2945,6 @@ impl Demo {
                 if let Some(index) = self.pad_at(x, y) {
                     self.mouse_pressed = Some(index);
                     self.press_pad(index);
-                } else if let Some(index) = self.button_at(x, y) {
-                    self.pressed = Some(index);
                 } else if self.slider_at(x, y).is_some() {
                     self.slider_dragging = true;
                 } else if self.list_at(x, y).is_some() {
@@ -2903,7 +2972,6 @@ impl Demo {
                 if let Some(index) = self.mouse_pressed.take() {
                     self.release_pad(index);
                 }
-                self.pressed = None;
                 self.slider_dragging = false;
                 self.list_dragging = false;
                 self.list.scroll().release_thumb();
@@ -3027,12 +3095,24 @@ impl Demo {
     /// Offers `event` to the widget at `handle`, and reports whether it took it.
     ///
     /// A handle that belongs to no widget at all is nobody's, which is what lets
-    /// one loop serve six kinds of control without asking what is there.
+    /// one loop serve five kinds of control without asking what is there. **That
+    /// is where the buttons' arm used to be**, and the fall-through they needed is
+    /// gone with it: the last arm is now the keyboard's, which returns explicitly.
     ///
     /// The two that answer a `KeyDown` only while they hold focus are the slider
     /// and the toggle; the list answers through its own
     /// [`Scroll`](ui_core::widgets::scroll::Scroll), which answers the same way.
     /// So a `Tab` reaches all of them and none of them takes it.
+    ///
+    /// **The gauge is not in this function and is not in the `Tab` order**, and
+    /// that is a decision rather than an oversight: it has no `on_event` at all,
+    /// because a gauge is a display — there is no value a drag would set and no
+    /// action a tap would report — and it has no `focused` property either. A
+    /// `Tab` stop on it would move focus to a control that can do nothing with it
+    /// and would draw no ring, so focus would arrive somewhere with no sign of
+    /// having arrived. `.ai/NEVERAGAIN.md` § *a drawn control with nothing behind
+    /// it* is the entry about the other direction of that mistake, and this is
+    /// the same one avoided.
     fn offer_to(&self, handle: Handle, event: &mut InputEvent) -> bool {
         if handle == self.slider.node() {
             return match self.slider_rect() {
@@ -3079,10 +3159,7 @@ impl Demo {
             }
             return consumed;
         }
-        self.buttons
-            .iter()
-            .find(|button| button.node() == handle)
-            .is_some_and(|button| button.widget.on_event(event))
+        false
     }
 
     /// Moves focus if `event` is a navigation key, and reports whether it was.
@@ -3092,14 +3169,19 @@ impl Demo {
     /// this through the same [`Focus`] tracker. A **mouse** wheel is not one of
     /// them: `GestureRecognizer` gives a wheel event the pointer's position, so
     /// it is routed as a positional event and lands on the node under the cursor
-    /// rather than here. The focusable set is rebuilt from the buttons and the
-    /// five other controls each time, which is what makes a disabled button fall
-    /// out of the order rather than sit in it.
+    /// rather than here. The focusable set is rebuilt from the six controls each
+    /// time, which is what kept a disabled button out of the order rather than
+    /// letting it sit in one.
     ///
-    /// The order itself is the tree's paint order, so the band's children are
-    /// what decide it and **the order they were added in is the `Tab` order**:
-    /// the two enabled buttons, the slider, the image, the toggle, the progress
-    /// bar and the list. `tab_steps_over_the_disabled_button` walks it.
+    /// The order itself is the tree's paint order, so the controls layer's
+    /// children are what decide it and **the order they were added in is the
+    /// `Tab` order**: the slider, the image, the toggle, the progress bar, the
+    /// list and the field. `tab_reaches_every_control_and_wraps` walks it.
+    ///
+    /// **The gauge is deliberately not in this list**, for the reason
+    /// [`Demo::offer_to`] gives: it has no `on_event` and no `focused` property,
+    /// so a stop on it would be a stop where focus arrives and nothing shows that
+    /// it did.
     fn focus_navigation(&mut self, event: &InputEvent) -> bool {
         if event.position().is_some() {
             return false;
@@ -3122,14 +3204,11 @@ impl Demo {
         let next = {
             let nodes = self.nodes.borrow();
             let mut focus = Focus::new(&nodes, self.root);
-            for button in &self.buttons {
-                focus.set_focusable(button.node(), button.is_focusable());
-            }
-            // The five that follow the band in the tree's paint order, and so in
-            // the `Tab` order. None of them has a disabled state of its own, so
-            // every one of them is in the order always — which is not the same as
-            // saying every one of them answers every key: `offer_to` is what
-            // decides, and a widget with no key of its own declines.
+            // The six in the tree's paint order, and so in the `Tab` order. None
+            // of them has a disabled state of its own, so every one of them is in
+            // the order always — which is not the same as saying every one of them
+            // answers every key: `offer_to` is what decides, and a widget with no
+            // key of its own declines.
             //
             // The **list's** node is the one registered, not the content node its
             // rows hang from: a row is not a control, and registering the content
@@ -3147,7 +3226,7 @@ impl Demo {
             // Re-entering the order where focus already is. `Focus` starts with
             // nothing focused, so without this a wheel turned twice in a row
             // would walk from the top both times, and Shift+Tab from the first
-            // button would go forward instead of back.
+            // control would go forward instead of back.
             if let Some(current) = self.focused {
                 let _ = focus.focus(current);
             }
@@ -3165,21 +3244,14 @@ impl Demo {
     /// Records which control holds focus, and writes the flag each widget's
     /// `focused` property holds, so the rings move.
     ///
-    /// Three of the five that follow the band have a `focused` property to
-    /// write — the slider, the toggle and the list's embedded scroll — and the
-    /// other two, the progress bar and the image, have none, so their readouts
-    /// say where focus is in words instead. See `progress_focused` and
-    /// `image_focused`.
+    /// Three of the six have a `focused` property to write — the slider, the
+    /// toggle and the list's embedded scroll — and the other two, the progress bar
+    /// and the image, have none, so their readouts say where focus is in words
+    /// instead. See `progress_focused` and `image_focused`. The gauge is not
+    /// named here because it is not in the order; see [`Demo::offer_to`].
     fn set_focus(&mut self, next: Option<Handle>) {
         self.focused = next;
         let focused = self.focused;
-        for button in &mut self.buttons {
-            let wanted = Some(button.node()) == focused;
-            if button.widget.focused.get() != wanted {
-                button.widget.focused.set(wanted);
-                button.written.focused = wanted;
-            }
-        }
         let slider_wanted = Some(self.slider.node()) == focused;
         if self.slider.widget.focused.get() != slider_wanted {
             self.slider.widget.focused.set(slider_wanted);
@@ -3233,19 +3305,12 @@ impl Demo {
     /// own `on_change` link reaches the arena to mark its node dirty — which a
     /// frame already holding the arena refuses, with a `RefCell` panic on the
     /// first frame rather than on anything a test could have found by reading the
-    /// numbers. The same is true of every bound readout in the demo, and the
-    /// reason the counter's is written from a button's callback rather than from
-    /// here.
+    /// numbers. The same is true of every bound readout in the demo.
     fn frame(&mut self, size: Size, delta: Duration) {
         let _ = self.clock.tick(delta);
         let _ = self.theme.tick(delta);
-        self.track_hover();
-        self.sync_button_state();
         self.sync_slider_state();
         self.sync_toggle_state();
-        for button in &self.buttons {
-            let _ = button.widget.tick(delta);
-        }
         let _ = self.slider.widget.tick(delta);
         // The toggle's own thumb slide, the bar's value and — the reason it is
         // worth a line of its own — the *loop*: `Progress::tick` aims the next
@@ -3261,6 +3326,16 @@ impl Demo {
         // phase flip is what makes the caret redraw.
         let _ = self.text_input.tick(delta);
         let _ = self.keyboard.tick(delta);
+        // The gauge's needle and its fill, and the reason this tick is here at
+        // all rather than in the arm above with the others: `Gauge::tick` returns
+        // whether any of its transitions wrote, which is what makes a needle that
+        // is *arriving* a needle that moves rather than one that is redrawn at the
+        // same place. `animate_to_state` is what starts that travel, and it is
+        // called from `step_gauge` and from `toggle_theme` rather than from here —
+        // a per-frame aim would restart the spring on every frame and the needle
+        // would creep toward its target for ever instead of arriving at it, which
+        // is the same argument `sync_toggle_state` makes.
+        let _ = self.gauge.tick(delta);
 
         let list_rect: Option<Rect> = {
             let mut nodes = self.nodes.borrow_mut();
@@ -3309,25 +3384,13 @@ impl Demo {
                 continue;
             }
             // A container paints its own background, and paints nothing at all
-            // when it has none: five of the demo's six draw no commands, and
+            // when it has none: four of the demo's five draw no commands, and
             // the row of pads draws the card the pads sit inside. The walk is
             // parent first, so the card is recorded before the pads and so is
             // drawn behind them.
             if let Some(container) = self.containers.iter().find(|it| it.handle() == handle) {
                 let commands = match node.layout().rect() {
                     Some(rect) => container.paint(rect.into()),
-                    None => Vec::new(),
-                };
-                *node.paint_mut() = PaintState::from_commands(commands);
-                continue;
-            }
-            if let Some(button) = self.buttons.iter().find(|button| button.node() == handle) {
-                let commands = match node.layout().rect() {
-                    Some(rect) => button.widget.paint(
-                        rect.into(),
-                        &|ch: char| self.metrics.advance(ch, BUTTON_FONT),
-                        self.metrics.line_height(BUTTON_FONT),
-                    ),
                     None => Vec::new(),
                 };
                 *node.paint_mut() = PaintState::from_commands(commands);
@@ -3344,16 +3407,24 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
-            // The three widget nodes that paint themselves with nothing but a
+            // The five widget nodes that paint themselves with nothing but a
             // rect. Each is the widget's **own** node, which is the whole of what
             // it takes to put one of them on the screen: `order` reaches it, the
             // commands go on it, and `draw` sends it.
-            if handle == self.toggle.handle()
+            //
+            // **The gauge is in this arm and not beside the slider**, and that is
+            // not tidiness: a slider's `paint` needs an advance closure for its
+            // label, so it has an arm of its own and it is borrowed above. The
+            // gauge's `paint` takes a rect and nothing else — a dial has no text
+            // in it at all — so it joins the four that need nothing but the box.
+            if handle == self.gauge.handle()
+                || handle == self.toggle.handle()
                 || handle == self.image.handle()
                 || handle == self.progress.handle()
                 || handle == self.keyboard.handle()
             {
                 let commands = match node.layout().rect() {
+                    Some(rect) if handle == self.gauge.handle() => self.gauge.paint(rect.into()),
                     Some(rect) if handle == self.toggle.handle() => self.toggle.paint(rect.into()),
                     Some(rect) if handle == self.image.handle() => self.image.paint(rect.into()),
                     Some(rect) if handle == self.progress.handle() => {
@@ -3386,7 +3457,7 @@ impl Demo {
             *node.paint_mut() = PaintState::from_commands(painter.finish());
         }
 
-        // The labels last, so the text is on top of the pads and the buttons:
+        // The labels last, so the text is on top of the pads and the controls:
         // each is painted with the layout it was given, measuring its
         // characters through the demo's font, so what is drawn is the laid-out
         // text and not one raw run. They are painted here rather than in the
@@ -3408,18 +3479,20 @@ impl Demo {
             );
         }
 
-        // The band's own labels, which are reached through the band rather than
-        // as its siblings. They are painted after the widgets they report on, so
-        // a number is on top of the control it is a number about — the slider's
-        // readout over the slider has been the rule since task 14.
+        // The controls layer's own labels, which are reached through the layer
+        // rather than as its siblings. They are painted after the widgets they
+        // report on, so a number is on top of the control it is a number about —
+        // the slider's readout over the slider has been the rule since task 14.
+        // **The gauge's readout leads the list** because the gauge is the layer's
+        // first child, so the two agree about which is first in the column.
         for (readout, font) in [
-            (&self.counter, BUTTON_FONT),
-            (&self.slider_readout, BUTTON_FONT),
-            (&self.toggle_readout, BUTTON_FONT),
-            (&self.image_fit_readout, BUTTON_FONT),
-            (&self.progress_readout, BUTTON_FONT),
+            (&self.gauge_readout, READOUT_FONT),
+            (&self.slider_readout, READOUT_FONT),
+            (&self.toggle_readout, READOUT_FONT),
+            (&self.image_fit_readout, READOUT_FONT),
+            (&self.progress_readout, READOUT_FONT),
             (&self.list_readout, LIST_FONT),
-            (&self.fps_readout, BUTTON_FONT),
+            (&self.fps_readout, READOUT_FONT),
             (&self.text_readout, TEXT_FIELD_READOUT_FONT),
             (&self.submit_readout, TEXT_FIELD_READOUT_FONT),
         ] {
@@ -3512,69 +3585,66 @@ impl Demo {
             .unwrap_or(Color::new(0, 0, 0, 255))
     }
 
-    /// Writes each button's `hovered` flag from where the pointer is.
+    /// Moves the gauge's value by `step` and carries the needle and the fill
+    /// there.
     ///
-    /// Hover is the one state that is not an event: it is a fact about where
-    /// the pointer is, so it is read from the recogniser's last known position
-    /// rather than carried from a motion event, and a touch — which has no
-    /// position to hover with once it is gone — leaves every button unhovered.
-    fn track_hover(&mut self) {
-        let pointer = self.recognizer.mouse_position();
-        let hovered = match pointer {
-            Some(position) => {
-                let nodes = self.nodes.borrow();
-                self.buttons.iter().position(|button| {
-                    nodes
-                        .get(button.node())
-                        .and_then(|node| node.layout().rect())
-                        .is_some_and(|rect| {
-                            position.x >= rect.origin.x
-                                && position.x <= rect.origin.x + rect.size.width
-                                && position.y >= rect.origin.y
-                                && position.y <= rect.origin.y + rect.size.height
-                        })
-                })
-            }
-            None => None,
-        };
-        for (index, button) in self.buttons.iter_mut().enumerate() {
-            let wanted = Some(index) == hovered;
-            if button.widget.hovered.get() != wanted {
-                button.widget.hovered.set(wanted);
-                button.written.hovered = wanted;
-            }
-        }
+    /// The three things in this function are the three the widget needs from a
+    /// caller and picks nothing of itself: the **value** is written directly, the
+    /// way a caller binding a gauge to a speedometer's reading writes it;
+    /// `animate_to_state` is what starts the travel; and the value is snapped to
+    /// [`GAUGE_STEP`]'s grid on the way in, for the reason
+    /// [`PROGRESS_START`] gives for the bar's.
+    ///
+    /// **The spring is the caller's, and that is the point of the call.** The
+    /// widget's own contract is that `animate_to_state` starts the transitions
+    /// toward whatever `value` now says, and that the *needle* points at the
+    /// drawn property rather than at the truth — so a spring here is a springing
+    /// needle, and an ease would be an easing needle. Nothing here reads the
+    /// animation's progress, and nothing could: the widget holds the clock.
+    ///
+    /// Clamped to the range rather than wrapped, which is the widget's own rule
+    /// for a value outside `min..=max` and the demo's too: ten presses of `.` at
+    /// the top of a speedometer stops at the top of the speedometer.
+    fn step_gauge(&mut self, step: f32) {
+        let stepped = (self.gauge.value.get() + step).clamp(GAUGE_MIN, GAUGE_MAX);
+        let steps = (stepped - GAUGE_MIN) / GAUGE_STEP * GAUGE_TENTHS;
+        self.gauge
+            .value
+            .set(GAUGE_MIN + steps.round() / GAUGE_TENTHS * GAUGE_STEP);
+        self.gauge.animate_to_state(Motion {
+            duration: GAUGE_MOTION,
+            easing: GAUGE_SPRING,
+        });
     }
 
-    /// Writes each button's `pressed` flag, and re-aims the buttons whose state
-    /// has moved.
+    /// Moves the gauge to the next shape in [`GAUGE_TYPES`], wrapping round.
     ///
-    /// Aiming restarts a button's transition, so it happens only when the state
-    /// the demo has written has actually changed. Aiming every frame would
-    /// restart the transition on every frame, and the button would creep toward
-    /// its target for ever instead of arriving at it.
-    fn sync_button_state(&mut self) {
-        let pressed = self.pressed;
-        let motion = Motion::from_theme(&self.theme);
-        for (index, button) in self.buttons.iter_mut().enumerate() {
-            let wanted = Some(index) == pressed;
-            if button.widget.pressed.get() != wanted {
-                button.widget.pressed.set(wanted);
-                button.written.pressed = wanted;
-            }
-            let state = button.state();
-            if button.aimed != state {
-                button.aimed = state;
-                button.widget.animate_to_state(motion);
-            }
-        }
+    /// Two properties are written and **the order is the whole of it**: the
+    /// widget's own mode first and the demo's record of it second, so a frame in
+    /// which the two disagree draws a dial the readout has not caught up with
+    /// rather than the reverse. That is `progress_indeterminate`'s argument,
+    /// asked again.
+    ///
+    /// Nothing is animated. A shape is not a value and not a colour, so there is
+    /// nothing to transition *to*: the needle's triangle and the tick marks are
+    /// there on the next frame. Animating it would mean a shape interpolating
+    /// between two shapes, which is not a thing the widget has.
+    ///
+    /// The needle's colour is put on the gauge by `set_gauge_type` itself when the
+    /// new shape *is* the needle, which is why no palette is read here: the widget
+    /// takes the colour from the palette it already holds, and that palette is the
+    /// themed one `toggle_theme` keeps current.
+    fn cycle_gauge_type(&mut self) {
+        let next = (self.gauge_type.get() + 1) % GAUGE_TYPES.len();
+        self.gauge.set_gauge_type(GAUGE_TYPES[next]);
+        self.gauge_type.set(next);
     }
 
     /// Writes the slider's `dragging` flag, and re-aims it when that has moved.
     ///
-    /// The same two records as [`Demo::sync_button_state`] and the same reason:
-    /// aiming restarts the slider's transition, so aiming every frame would leave
-    /// the thumb creeping toward its target for ever. The slider's *value* is not
+    /// The two records are [`Demo::gauge`]'s absence of a counterpart: aiming
+    /// restarts the slider's transition, so aiming every frame would leave the
+    /// thumb creeping toward its target for ever. The slider's *value* is not
     /// re-aimed here, because an interaction writes the thumb itself and a
     /// programmatic write is aimed by whoever made it — see
     /// [`Demo::set_slider_value`].
@@ -3595,7 +3665,7 @@ impl Demo {
     /// Re-aims the toggle when the state its appearance is derived from has
     /// moved.
     ///
-    /// The same two records as [`Demo::sync_button_state`] and the same reason:
+    /// The same one record as [`Demo::sync_slider_state`] and the same reason:
     /// `Toggle::animate_to_state` is what starts the thumb's slide and the pill's
     /// colour transition, and aiming it on every frame would restart those
     /// transitions on every frame. **Nothing else aims it** — a tap and an
@@ -3749,11 +3819,28 @@ impl Demo {
     /// Switches between the dark and light themes, animated over
     /// `THEME_TRANSITION` milliseconds.
     ///
-    /// The buttons are aimed at the *new* theme's palette rather than the one
-    /// the theme is passing through, so each button's transition and the theme's
-    /// own arrive together at the end of the same window. Aiming at the
-    /// theme's current value would instead leave every button chasing a target
-    /// that moves for as long as the switch does.
+    /// Every widget is aimed at the *new* theme's palette rather than the one the
+    /// theme is passing through, so each one's transition and the theme's own
+    /// arrive together at the end of the same window. Aiming at the theme's
+    /// current value would instead leave every widget chasing a target that moves
+    /// for as long as the switch does.
+    ///
+    /// **The gauge is here and its palette is read from `new_theme` with the
+    /// rest**, which is the whole of what the widget needs and the reason the read
+    /// is on this side of `switch_to` rather than after it. It is the defect class
+    /// this repository has already paid for once: a palette read *after* the
+    /// switch is the palette the theme is leaving, which re-aims the widget at
+    /// what it already had and the transition goes nowhere while every test stays
+    /// green — a grey dial on the light theme, indistinguishable from a widget that
+    /// was never themed.
+    ///
+    /// The gauge is aimed on the *theme's* motion rather than on
+    /// [`GAUGE_MOTION`], which is the one place this file uses a second answer to
+    /// "how long". The two are about different things: [`GAUGE_MOTION`] is how
+    /// long a **needle takes to reach a reading**, and the theme's is how long a
+    /// **colour takes to cross between two palettes**. Re-aiming on the spring
+    /// would put a colour transition on a needle's curve, and a ring of circles
+    /// interpolating through an overshoot is not a thing anyone wants to see.
     fn toggle_theme(&mut self) {
         self.dark = !self.dark;
         let new_theme = if self.dark {
@@ -3761,25 +3848,21 @@ impl Demo {
         } else {
             Theme::light()
         };
-        // Read the new theme's palette and motion before it is handed to
-        // `switch_to`, which takes it by value.
-        let palette = Palette::from_theme(&new_theme);
+        // Read every palette from `new_theme`, **before** `switch_to` consumes it.
+        // The switch animates the theme's own tokens, so a palette read after it
+        // is the palette the theme is leaving, which re-aims every widget at what
+        // it already had and the transition goes nowhere.
+        let gauge_palette = GaugePalette::from_theme(&new_theme);
         let slider_palette = SliderPalette::from_theme(&new_theme);
         let toggle_palette = TogglePalette::from_theme(&new_theme);
         let progress_palette = ProgressPalette::from_theme(&new_theme);
         let scroll_palette = ScrollPalette::from_theme(&new_theme);
-        // Read from `new_theme`, **before** `switch_to` consumes it. The switch
-        // animates the theme's own tokens, so a palette read after it is the
-        // palette the theme is leaving, which re-aims every widget at what it
-        // already had and the transition goes nowhere.
         let text_input_palette = TextInputPalette::from_theme(&new_theme);
         let keyboard_palette = KeyboardPalette::from_theme(&new_theme);
         let motion = Motion::from_theme(&new_theme);
         self.theme.switch_to(new_theme, THEME_TRANSITION);
-        for button in &mut self.buttons {
-            button.widget.set_palette(palette);
-            button.widget.animate_to_state(motion);
-        }
+        self.gauge.set_palette(gauge_palette);
+        self.gauge.animate_to_state(motion);
         self.slider.widget.set_palette(slider_palette);
         self.slider.widget.animate_to_state(motion);
         self.toggle.set_palette(toggle_palette);
@@ -3934,32 +4017,12 @@ impl Demo {
         })
     }
 
-    /// Returns the index of the button whose laid-out rect contains `(x, y)`.
-    ///
-    /// A disabled button is still under the point: it is what the tap is aimed
-    /// at, and it is the button that swallows it. Deciding that here would mean
-    /// the tap reached whatever is behind instead.
-    fn button_at(&self, x: f32, y: f32) -> Option<usize> {
-        let nodes = self.nodes.borrow();
-        self.buttons.iter().position(|button| {
-            nodes
-                .get(button.node())
-                .and_then(|node| node.layout().rect())
-                .is_some_and(|rect| {
-                    x >= rect.origin.x
-                        && x <= rect.origin.x + rect.size.width
-                        && y >= rect.origin.y
-                        && y <= rect.origin.y + rect.size.height
-                })
-        })
-    }
-
     /// Returns `Some(())` when the point is over the slider, and `None` when it
     /// is not.
     ///
-    /// The slider is the last thing asked about, so a point over the band or a
-    /// pad never reaches it: those are the controls that are drawn on top of
-    /// that part of the window.
+    /// The slider is asked about after the pads, so a point over the pads never
+    /// reaches it: those are the controls that are drawn on top of that part of
+    /// the window.
     fn slider_at(&self, x: f32, y: f32) -> Option<()> {
         self.slider_rect()
             .is_some_and(|rect| over_rect(rect, x, y))
@@ -4079,14 +4142,21 @@ impl Demo {
     /// prove nothing.
     ///
     /// What a reader can actually see is a set of boxes with names, and this is
-    /// that set: the card the pads sit in, the seven labels of the text panel,
-    /// the three buttons, the counter, the slider and its readout, and then the
-    /// eight things tasks 15 to 18 added. Two tests read it —
+    /// that set: the card the pads sit in, the seven labels of the text panel, the
+    /// gauge and its readout, the slider and its readout, and then the eight things
+    /// tasks 15 to 18 added. Two tests read it —
     /// `every_placed_rect_is_inside_the_window` and
     /// `no_two_placed_rects_overlap` — and the third defect this repository has
     /// found only by looking at the screen was a control placed over the thing
     /// next to it, so this is the pair of tests that would have found the first
     /// two.
+    ///
+    /// **The gauge is in this list**, which is the only way `no_two_placed_rects_
+    /// overlap` could see a dial laid on top of something. It was added in task
+    /// 20 for that reason and not for tidiness: the widget's own 73 unit tests
+    /// know nothing about where the demo put it, and a hand-placed 200-pixel box
+    /// in the one column the buttons just vacated is exactly the kind of claim
+    /// only a reader looking at the arithmetic can check.
     ///
     /// It is `cfg(test)` because nothing in the running demo asks: the demo lays
     /// its widgets out and paints them, and a list of the boxes it placed is
@@ -4113,13 +4183,9 @@ impl Demo {
                 rects.push(found);
             }
         }
-        for index in 0..self.buttons.len() {
-            if let Some(found) = rect("button", self.buttons[index].node()) {
-                rects.push(found);
-            }
-        }
         for (what, handle) in [
-            ("click counter", self.counter.label.handle()),
+            ("gauge", self.gauge.handle()),
+            ("gauge readout", self.gauge_readout.label.handle()),
             ("slider", self.slider.node()),
             ("slider readout", self.slider_readout.label.handle()),
             ("image", self.image.handle()),
@@ -4141,22 +4207,6 @@ impl Demo {
             }
         }
         rects
-    }
-
-    /// Returns the centre of the button at `index` in window coordinates, or
-    /// `None` if it has not been laid out.
-    ///
-    /// This is what a test aims a synthetic event at, so it is the demo's
-    /// statement of where a button is rather than each test working it out.
-    #[cfg(test)]
-    fn button_center(&self, index: usize) -> Option<(f32, f32)> {
-        let button = self.buttons.get(index)?;
-        let nodes = self.nodes.borrow();
-        let rect = nodes.get(button.node())?.layout().rect()?;
-        Some((
-            rect.origin.x + rect.size.width / 2.0,
-            rect.origin.y + rect.size.height / 2.0,
-        ))
     }
 
     /// Returns where the slider's thumb is at `fraction` of its range, in window
@@ -4189,22 +4239,6 @@ impl Demo {
     #[cfg(test)]
     fn card(&self) -> &Container {
         &self.containers[0]
-    }
-
-    /// Returns the text the click counter is showing, as the last frame recorded
-    /// it.
-    #[cfg(test)]
-    fn counter_text(&self) -> Option<String> {
-        let nodes = self.nodes.borrow();
-        nodes
-            .get(self.counter.label.handle())?
-            .paint()
-            .commands()
-            .iter()
-            .find_map(|command| match command {
-                DrawCommand::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
     }
 
     /// Returns the text the slider's readout is showing, as the last frame
@@ -4858,562 +4892,677 @@ mod tests {
         )
     }
 
-    /// Clicks the button at `index` and lays the demo out, which is the whole
-    /// path a click takes: two SDL events, the recogniser's tap, and the
-    /// dispatch that routes it to the button under the pointer.
-    fn click_button(demo: &mut Demo, index: usize) {
-        let (x, y) = demo.button_center(index).expect("a laid-out button");
-        let (down, up) = click_at(x, y);
-        demo.handle_event(down);
-        demo.handle_event(up);
-        demo.frame(WINDOW, Duration::from_millis(16));
-    }
-
-    /// The background the button at `index` was painted with on the last frame.
-    fn button_background(demo: &Demo, index: usize) -> Color {
-        let button = &demo.buttons[index];
-        let nodes = demo.nodes.borrow();
-        nodes
-            .get(button.node())
-            .expect("a button node")
-            .paint()
-            .commands()
-            .iter()
-            .find_map(|command| match command {
-                DrawCommand::RoundedRect { color, .. } => Some(*color),
-                _ => None,
-            })
-            .expect("a button paints a background")
-    }
-
-    /// The text the button at `index` painted on the last frame.
-    fn button_text(demo: &Demo, index: usize) -> Option<String> {
-        let button = &demo.buttons[index];
-        let nodes = demo.nodes.borrow();
-        nodes
-            .get(button.node())
-            .expect("a button node")
-            .paint()
-            .commands()
-            .iter()
-            .find_map(|command| match command {
-                DrawCommand::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-    }
-
-    /// The rect the button at `index` was laid out to, as `(x, y, width, height)`.
-    fn button_rect(demo: &Demo, index: usize) -> (f32, f32, f32, f32) {
-        let button = &demo.buttons[index];
-        let nodes = demo.nodes.borrow();
-        let rect = nodes
-            .get(button.node())
-            .expect("a button node")
-            .layout()
-            .rect()
-            .expect("a laid-out button");
-        (
-            rect.origin.x,
-            rect.origin.y,
-            rect.size.width,
-            rect.size.height,
-        )
-    }
+    // ------------------------------------------------ task 20: the gauge
+    //
+    // Everything below is about the *wiring*, not about the dial: `gauge.rs`'s own
+    // 73 unit tests and 14 doctests are about what the widget draws and what its
+    // setters do, and repeating them here would be a second opinion about someone
+    // else's code rather than a check of this one. What is left that only this
+    // file can know is that the demo built it, snapped it onto the theme, gave it
+    // a rect, ticks it every frame, can move it without a pointer, and put it
+    // where nothing else is.
 
     #[test]
-    fn the_demo_has_a_band_of_three_buttons() {
+    fn the_demo_shows_a_gauge_at_half() {
+        // **Task 20's acceptance criterion, verbatim: "Demo shows a gauge at
+        // 50%".** Half of 0..240 is 120, and that is what the demo builds it at,
+        // so the dial opens on exactly the reading the criterion names rather than
+        // on its minimum.
         let demo = laid_out();
-        assert_eq!(demo.buttons.len(), 3);
-        let labels: Vec<String> = demo
-            .buttons
-            .iter()
-            .map(|button| button.widget.label.get())
-            .collect();
-        assert_eq!(labels, vec!["Press me", "Disabled", "Reset"]);
-    }
-
-    #[test]
-    fn a_button_paints_its_label_centred_inside_its_own_background() {
-        // "Renders with label centred" is two things: there is a background and
-        // there is a label, and the label sits in the middle of the background
-        // rather than at its corner. Both are checked against the numbers the
-        // widget derives them from: a 44-tall button with 4 of vertical padding
-        // leaves 36 for a 24-tall line, so the line's top is 6 below the
-        // padding's, at 10.
-        let demo = laid_out();
-        let button = &demo.buttons[0];
-        let nodes = demo.nodes.borrow();
-        let node = nodes.get(button.node()).expect("a button node");
-        let commands = node.paint().commands();
-
-        let background = commands
-            .iter()
-            .find_map(|command| match command {
-                DrawCommand::RoundedRect { rect, .. } => Some(*rect),
-                _ => None,
-            })
-            .expect("the button paints a background");
-        let (text_x, text_y) = commands
-            .iter()
-            .find_map(|command| match command {
-                DrawCommand::Text { x, y, .. } => Some((*x, *y)),
-                _ => None,
-            })
-            .expect("the button paints its label");
-        assert_eq!(button_text(&demo, 0).as_deref(), Some("Press me"));
         assert_eq!(
-            text_y,
-            background.y + 10.0,
-            "the label's line box is centred vertically: 4 of padding plus half \
-             of the 12 the line does not fill"
+            demo.gauge.value.get(),
+            GAUGE_START,
+            "the gauge's value is the number the demo wrote"
         );
-        assert!(
-            text_x > background.x && text_x < background.x + background.width,
-            "the label starts inside the background: {} against {}",
-            text_x,
-            background.x
+        assert_eq!(
+            demo.gauge.min(),
+            GAUGE_MIN,
+            "and the range is the demo's, so the two cannot drift apart"
+        );
+        assert_eq!(demo.gauge.max(), GAUGE_MAX);
+        // The widget's own mapping, not the demo's arithmetic: 120 of 240 is half.
+        assert_eq!(demo.gauge.fraction(demo.gauge.value.get()), 0.5);
+        // And it is *drawn* there rather than arrived at later, because
+        // `snap_to_state` is what puts the drawn value on the truth at once. A
+        // gauge that sprang to 120 over 600 ms on the first frame would still show
+        // an empty dial in any capture taken before the spring finished.
+        assert_eq!(
+            demo.gauge.shown.get(),
+            GAUGE_START,
+            "the drawn value is on it too: the demo snapped, it did not animate"
+        );
+        assert_eq!(
+            demo.readout_text_of(&demo.gauge_readout).as_deref(),
+            Some("120 of 240, 50%, Needle"),
+            "and the readout says so on screen, in the value, the share and the \
+             shape"
         );
     }
 
     #[test]
-    fn every_button_is_at_least_the_minimum_touch_target() {
-        // 44 by 44 is the floor the widget applies, and the band proves it on
-        // real labels: "Ok" is narrower than 44, so without the floor it would
-        // be a target a finger cannot hit.
-        let demo = laid_out();
-        for (index, _) in demo.buttons.iter().enumerate() {
-            let (_, _, width, height) = button_rect(&demo, index);
-            assert!(
-                width >= 44.0 && height >= 44.0,
-                "button {index} is {width} by {height}"
+    fn the_gauge_readout_says_the_share_the_widgets_own_fraction_gives() {
+        // The demo computes the percentage itself rather than calling
+        // `Gauge::fraction`, because a `Property::bind` closure cannot reach the
+        // widget it is bound to — see the note where the readout is built. Two
+        // copies of one mapping is two things to keep in step, so this is what
+        // holds them in step: every tenth of the range, through the widget.
+        let mut demo = laid_out();
+        for step in 0..=10u8 {
+            let share = f32::from(step) / 10.0;
+            let value = GAUGE_MIN + (GAUGE_MAX - GAUGE_MIN) * share;
+            assert_eq!(
+                demo.gauge.fraction(value),
+                share,
+                "the widget maps {value} to {share}"
             );
         }
-    }
-
-    #[test]
-    fn a_short_label_is_still_floored_at_the_minimum_touch_target() {
-        // The narrowest button in the band is "Reset", five characters, and it
-        // is still floored. The label is 20 pixels at half-width per character,
-        // so 50 plus 16 of padding would pass the floor on width alone; the
-        // height is the one under it, being one line of 24 plus 8 of padding.
-        let demo = laid_out();
-        let (_, _, width, height) = button_rect(&demo, 2);
-        assert_eq!(button_text(&demo, 2).as_deref(), Some("Reset"));
-        assert_eq!(height, 44.0, "a one-line button is floored in height");
-        assert!(width > 44.0, "and is wider than the floor on its own");
-    }
-
-    #[test]
-    fn clicking_a_button_counts_a_click() {
-        let mut demo = laid_out();
-        assert_eq!(demo.counter_text().as_deref(), Some("0 clicks"));
-
-        click_button(&mut demo, 0);
-
-        assert_eq!(
-            demo.counter_text().as_deref(),
-            Some("1 click"),
-            "the button's callback wrote to the counter, and the label followed"
-        );
-    }
-
-    #[test]
-    fn the_reset_button_empties_the_counter() {
-        let mut demo = laid_out();
-        click_button(&mut demo, 0);
-        click_button(&mut demo, 0);
-        assert_eq!(demo.counter_text().as_deref(), Some("2 clicks"));
-
-        click_button(&mut demo, 2);
-
-        assert_eq!(demo.counter_text().as_deref(), Some("0 clicks"));
-    }
-
-    #[test]
-    fn a_disabled_button_swallows_a_tap_and_fires_nothing() {
-        let mut demo = laid_out();
-        let (x, y) = demo.button_center(1).expect("a laid-out button");
-        let (down, up) = click_at(x, y);
-
-        demo.handle_event(down);
-        demo.handle_event(up);
+        // And the string the demo would print for each of them, at the one place
+        // that string is formed: `readout_text_of` is the readout, so this asks the
+        // readout rather than re-deriving the format.
+        demo.gauge.value.set(GAUGE_MAX);
         demo.frame(WINDOW, Duration::from_millis(16));
-
         assert_eq!(
-            demo.counter_text().as_deref(),
-            Some("0 clicks"),
-            "a disabled button does nothing"
+            demo.readout_text_of(&demo.gauge_readout).as_deref(),
+            Some("240 of 240, 100%, Needle"),
+            "and the top of the range reads as a hundred per cent"
+        );
+        demo.gauge.value.set(GAUGE_MIN);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.readout_text_of(&demo.gauge_readout).as_deref(),
+            Some("0 of 240, 0%, Needle"),
+            "and the bottom as none"
         );
     }
 
     #[test]
-    fn one_click_on_a_button_counts_once() {
-        // This is what the demo can actually establish: one click, one count.
-        //
-        // It is **not** a test that a consumed tap stops travelling, and it was
-        // previously named and commented as if it were — the claim was that the
-        // counter would go up by two if the tap fell through to the panel
-        // behind, and nothing behind the band handles a `Tap` at all, so the
-        // counter could not have gone up by two whatever the routing did. The
-        // `break` on `event.consumed()` here is defensive, mirroring
-        // `dispatch_event`.
-        //
-        // The consumption contract is tested where it can fail, against a real
-        // node behind the button:
-        // `ui_core::widgets::button::tests::a_tap_fires_the_click_and_is_consumed`
-        // fails when `event.consume()` is removed, and
-        // `ui_core::input::tests::an_event_bubbles_to_the_parent_until_it_is_consumed`
-        // covers the bubbling.
-        let mut demo = laid_out();
-        click_button(&mut demo, 0);
-        assert_eq!(demo.counter_text().as_deref(), Some("1 click"));
-
-        // And a second click is a second count, so the two are not being folded
-        // into one by the routing.
-        click_button(&mut demo, 0);
-        assert_eq!(demo.counter_text().as_deref(), Some("2 clicks"));
+    fn the_gauge_is_on_its_theme_rather_than_on_the_neutral_greys() {
+        // **A palette read and `set_palette` are not enough**: the four colour
+        // properties still hold the neutral greys `Gauge::new` wrote until
+        // something moves them, and a themed gauge that was never snapped draws
+        // those greys. That is the same trap the button band fell into first, and
+        // the test below the demo's `snap_to_state` calls is the reason it is
+        // written where it is rather than left to a paint pass.
+        let demo = laid_out();
+        let themed = GaugePalette::from_theme(&Theme::dark());
+        assert_eq!(demo.gauge.track.get(), themed.track, "the track");
+        assert_eq!(demo.gauge.fill.get(), themed.fill, "the fill");
+        assert_eq!(demo.gauge.tick.get(), themed.tick, "the marks");
+        assert_eq!(
+            demo.gauge.needle.get(),
+            themed.needle,
+            "and the needle, which is only drawn in the needle shape"
+        );
+        // Every one of them is a palette colour, and the palette's greys are not
+        // the theme's: an assertion that only compared the four to each other
+        // would pass on a palette of the wrong greys.
+        assert_ne!(
+            demo.gauge.fill.get(),
+            ui_core::widgets::gauge::Palette::default().fill,
+            "and the fill is not the neutral default it was constructed with"
+        );
     }
 
     #[test]
-    fn a_pressed_button_moves_through_its_transition_and_arrives() {
-        // "State transitions are animated" has two halves that can be broken
-        // separately: the state change has to start a transition rather than
-        // jumping, and that transition has to finish rather than creeping.
+    fn a_gauge_moved_by_a_key_animates_its_needle_rather_than_jumping() {
+        // Requirement 4's "fill animates when value changes" and "needle
+        // animates with spring physics", as the demo wires them: the value is
+        // written, `animate_to_state` is what starts the travel, and the drawn
+        // value is somewhere **between** the old and the new one on the way.
+        //
+        // The spring matters and is asserted as the spring: an underdamped one
+        // passes its target and comes back, so the needle overshoots. A `set`
+        // instead of an animation would be at the far end on the first frame and
+        // pass a test that only looked at where it ended up.
         let mut demo = laid_out();
-        let (x, y) = demo.button_center(0).expect("a laid-out button");
-        demo.handle_event(Event::MouseButtonDown {
-            timestamp: 0,
-            window_id: 0,
-            which: 0,
-            mouse_btn: MouseButton::Left,
-            clicks: 1,
-            x,
-            y,
-        });
-        demo.frame(WINDOW, Duration::from_millis(10));
-        assert!(demo.buttons[0].widget.pressed.get());
-        let midway = demo.buttons[0].widget.scale.get();
+        let before = demo.gauge.shown.get();
+        demo.handle_event(key(Keycode::Period));
+        assert_eq!(
+            demo.gauge.value.get(),
+            GAUGE_START + GAUGE_STEP,
+            "the key wrote the truth, one step up"
+        );
         assert!(
-            midway < 1.0 && midway > 0.95,
-            "ten milliseconds in, the button is part way to 0.95, not there: {midway}"
+            demo.gauge.is_animating(),
+            "and something is on its way there"
+        );
+        assert_eq!(
+            demo.gauge.shown.get(),
+            before,
+            "the needle has not moved yet: the first frame has not been drawn"
         );
 
-        for _ in 0..20 {
-            demo.frame(WINDOW, Duration::from_millis(10));
+        // A tenth of the way through 600 ms, part way up and **past** where a
+        // linear curve would be, because the spring is quicker than linear early
+        // and then rings.
+        demo.frame(WINDOW, Duration::from_millis(60));
+        let midway = demo.gauge.shown.get();
+        assert!(
+            midway > before && midway < GAUGE_START + GAUGE_STEP,
+            "part way to {GAUGE_STEP}, not there and not here: {midway}"
+        );
+
+        // And it arrives, rather than creeping toward its target for ever.
+        for _ in 0..40 {
+            demo.frame(WINDOW, Duration::from_millis(16));
         }
         assert_eq!(
-            demo.buttons[0].widget.scale.get(),
-            0.95,
-            "and it arrives rather than creeping"
+            demo.gauge.shown.get(),
+            GAUGE_START + GAUGE_STEP,
+            "and it arrives at the value the key wrote"
         );
         assert!(
-            !demo.buttons[0].widget.is_animating(),
+            !demo.gauge.is_animating(),
             "a transition that has arrived has stopped"
         );
     }
 
     #[test]
-    fn releasing_a_button_brings_its_scale_back() {
-        let mut demo = laid_out();
-        let (x, y) = demo.button_center(0).expect("a laid-out button");
-        let (down, up) = click_at(x, y);
-        demo.handle_event(down);
-        for _ in 0..20 {
-            demo.frame(WINDOW, Duration::from_millis(10));
-        }
-        assert_eq!(demo.buttons[0].widget.scale.get(), 0.95);
+    fn the_spring_is_the_callers_and_the_demo_owns_the_curve() {
+        // The widget never picks a curve or a duration: `animate_to_state` takes
+        // the caller's `Motion` and honours it, which is what makes "the needle
+        // animates with spring physics" a statement about the demo rather than
+        // about the widget. This is that statement, held as an assertion: the
+        // demo hands over the spring and the widget arrives on it.
+        //
+        // The shape of the argument is the same one every other motion assertion
+        // in this file uses — a `Motion` built from named constants rather than
+        // inline, so a reader can see the coefficients rather than trust them.
+        let motion = Motion {
+            duration: GAUGE_MOTION,
+            easing: GAUGE_SPRING,
+        };
+        assert_eq!(motion.duration, Duration::from_millis(600), "the span");
+        assert!(
+            matches!(
+                motion.easing,
+                Easing::Spring {
+                    damping: 9.0,
+                    stiffness: 140.0
+                }
+            ),
+            "and the curve is the spring, which is a copy of RELEASE_SPRING: a pad \
+             springing back to rest and a needle springing to a reading are the \
+             same movement"
+        );
+    }
 
-        demo.handle_event(up);
-        for _ in 0..20 {
-            demo.frame(WINDOW, Duration::from_millis(10));
+    #[test]
+    fn the_needle_overshoots_because_the_spring_is_underdamped() {
+        // The distinction between a spring and an ease, on the one number that
+        // tells them apart: a spring goes **past** its target and comes back, an
+        // ease does not. Without this the demo would animate a needle and the
+        // claim "spring physics" would be a name for whatever curve was used.
+        let mut demo = laid_out();
+        demo.handle_event(key(Keycode::Period));
+        let mut peak = 0.0f32;
+        for _ in 0..60 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+            peak = peak.max(demo.gauge.shown.get());
         }
         assert_eq!(
-            demo.buttons[0].widget.scale.get(),
-            1.0,
-            "the release brings it back to its resting size"
+            demo.gauge.shown.get(),
+            GAUGE_START + GAUGE_STEP,
+            "it settles on the value"
+        );
+        assert!(
+            peak > GAUGE_START + GAUGE_STEP,
+            "and it went past it first, at {peak}, which an ease cannot do"
+        );
+        // Bounded, though: a spring that rings for ever is not what a needle
+        // should do either, and the widget pins its endpoints.
+        assert!(
+            peak < GAUGE_START + GAUGE_STEP * 1.5,
+            "and the overshoot is a fraction, not a swing: {peak}"
         );
     }
 
     #[test]
-    fn a_button_under_the_pointer_is_hovered() {
+    fn the_gauge_keys_move_it_by_a_whole_step_and_stop_at_both_ends() {
+        // A key-driven gauge with no clamping would run off the end of its own
+        // range: `,` at the minimum would report −24 km/h, which is a gauge
+        // pointing below its own floor. The demo clamps and the widget clamps, and
+        // this asks the demo's — because the demo is the thing that can produce a
+        // value outside the range in the first place.
         let mut demo = laid_out();
-        let (x, y) = demo.button_center(2).expect("a laid-out button");
-        assert!(
-            demo.buttons
-                .iter()
-                .all(|button| !button.widget.hovered.get()),
-            "nothing is hovered before the pointer has been anywhere"
-        );
-
-        demo.handle_event(Event::MouseMotion {
-            timestamp: 0,
-            window_id: 0,
-            which: 0,
-            mousestate: sdl3::mouse::MouseState::from_sdl_state(0),
-            x,
-            y,
-            xrel: 0.0,
-            yrel: 0.0,
-        });
-        demo.frame(WINDOW, Duration::from_millis(16));
-
-        assert!(
-            demo.buttons[2].widget.hovered.get(),
-            "it is the one under it"
-        );
-        assert!(
-            demo.buttons[0..2]
-                .iter()
-                .all(|button| !button.widget.hovered.get()),
-            "and not the others"
-        );
-    }
-
-    #[test]
-    fn a_hovered_button_paints_a_lighter_background_than_a_resting_one() {
-        let mut demo = laid_out();
-        let resting = button_background(&demo, 0);
-        let (x, y) = demo.button_center(0).expect("a laid-out button");
-        demo.handle_event(Event::MouseMotion {
-            timestamp: 0,
-            window_id: 0,
-            which: 0,
-            mousestate: sdl3::mouse::MouseState::from_sdl_state(0),
-            x,
-            y,
-            xrel: 0.0,
-            yrel: 0.0,
-        });
         for _ in 0..20 {
-            demo.frame(WINDOW, Duration::from_millis(10));
+            demo.handle_event(key(Keycode::Comma));
         }
-
-        let hovered = button_background(&demo, 0);
-        assert_ne!(hovered, resting, "the hover has arrived");
-        assert!(
-            hovered.r > resting.r || hovered.g > resting.g || hovered.b > resting.b,
-            "and it is lighter: {resting:?} then {hovered:?}"
+        assert_eq!(
+            demo.gauge.value.get(),
+            GAUGE_MIN,
+            "twenty steps below the start is the bottom of the range and no lower"
+        );
+        for _ in 0..30 {
+            demo.handle_event(key(Keycode::Period));
+        }
+        assert_eq!(
+            demo.gauge.value.get(),
+            GAUGE_MAX,
+            "and thirty above is the top"
+        );
+        // Ten steps of `GAUGE_STEP` is the whole range, so the two loops above
+        // between them prove the count reaches both ends rather than jumping.
+        assert_eq!(
+            GAUGE_MIN + (GAUGE_MAX - GAUGE_MIN) / GAUGE_STEP,
+            10.0,
+            "the range is ten steps of {GAUGE_STEP}"
         );
     }
 
     #[test]
-    fn a_focused_button_paints_a_ring_the_rest_do_not() {
-        // The focus indicator is a drawing, not a flag: the ring is the extra
-        // rounded rect `Button::paint` puts outside the background.
+    fn a_gauge_value_that_arrived_by_addition_lands_on_the_grid() {
+        // The reason [`GAUGE_TENTHS`] exists, asked of the demo rather than of
+        // the constant: a value accumulated by addition is off the grid by a
+        // fraction of a pixel per press, and a needle a third of a degree off is a
+        // needle that is not on the mark the key name claims it is on.
         let mut demo = laid_out();
-        let rings = |demo: &Demo, index: usize| {
-            let button = &demo.buttons[index];
-            let nodes = demo.nodes.borrow();
-            nodes
-                .get(button.node())
-                .expect("a button node")
-                .paint()
-                .commands()
+        let mut seen: Vec<f32> = Vec::new();
+        for _ in 0..10 {
+            demo.handle_event(key(Keycode::Comma));
+            seen.push(demo.gauge.value.get());
+        }
+        for &value in &seen {
+            assert_eq!(
+                value % GAUGE_STEP,
+                0.0,
+                "{value} is a whole number of {GAUGE_STEP}s"
+            );
+        }
+        assert_eq!(
+            seen,
+            vec![96.0, 72.0, 48.0, 24.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "which is the whole grid down to the floor, and every step after it \
+             is the same number and not a smaller one"
+        );
+    }
+
+    #[test]
+    fn the_g_key_walks_the_gauge_through_its_three_shapes_and_wraps() {
+        // Three shapes and a key to reach them with, and the readout has to
+        // follow: a demo that cycled the dial and left the label naming the shape
+        // it started in would be showing a caption for a different picture.
+        let mut demo = laid_out();
+        assert_eq!(demo.gauge.gauge_type(), GaugeType::Needle, "it starts here");
+        for expected in ["Arc", "Circle", "Needle"] {
+            demo.handle_event(key(Keycode::G));
+            demo.frame(WINDOW, Duration::from_millis(16));
+            assert!(
+                demo.readout_text_of(&demo.gauge_readout)
+                    .as_deref()
+                    .is_some_and(|said| said.ends_with(expected)),
+                "G moved it to {expected}, and the readout says so: {:?}",
+                demo.readout_text_of(&demo.gauge_readout)
+            );
+        }
+        assert_eq!(
+            demo.gauge.gauge_type(),
+            GaugeType::Needle,
+            "and three presses are back where it started, so the cycle closes"
+        );
+    }
+
+    #[test]
+    fn the_dial_draws_a_needle_only_in_the_needle_shape() {
+        // The needle is a filled triangle plus a hub, and it is decoration: a
+        // needle appearing in the other two shapes would be a caller error at
+        // best, so this asks the widget's own rule through the demo's paint.
+        //
+        // **Counted by point count, not by "a polygon".** The arc is drawn as
+        // polygons too — one per band segment — so a filter on the variant alone
+        // would count 51 of them and call them needles. A three-pointed polygon is
+        // the needle and nothing else this widget records.
+        let mut demo = laid_out();
+        let needles = |demo: &Demo| {
+            demo.commands_at(demo.gauge.handle())
                 .iter()
-                .filter(|command| matches!(command, DrawCommand::RoundedRect { .. }))
+                .filter(|command| {
+                    matches!(command, DrawCommand::Polygon { points, .. } if points.len() == 3)
+                })
                 .count()
         };
-        assert_eq!(rings(&demo, 0), 1, "a resting button is one background");
-
-        demo.handle_event(key(Keycode::Tab));
-        demo.frame(WINDOW, Duration::from_millis(16));
-
-        assert_eq!(rings(&demo, 0), 2, "a focused one has a ring as well");
-        assert_eq!(rings(&demo, 1), 1, "and its neighbours do not");
-    }
-
-    #[test]
-    fn tab_moves_focus_to_the_first_button_and_enter_activates_it() {
-        let mut demo = laid_out();
-        assert!(demo.focused.is_none(), "nothing holds focus to begin with");
-
-        demo.handle_event(key(Keycode::Tab));
-        assert_eq!(
-            demo.focused,
-            Some(demo.buttons[0].node()),
-            "Tab lands on the first focusable button"
-        );
-        assert!(demo.buttons[0].widget.focused.get());
-
-        demo.handle_event(key(Keycode::Return));
-        demo.frame(WINDOW, Duration::from_millis(16));
-
-        assert_eq!(
-            demo.counter_text().as_deref(),
-            Some("1 click"),
-            "and Enter activates the button holding focus"
-        );
-    }
-
-    #[test]
-    fn tab_steps_over_the_disabled_button() {
-        // A control that refuses interaction has nothing to be activated by a
-        // key, so it is not in the order focus walks.
-        //
-        // The walk has **eight** stops: the two buttons that can be activated,
-        // and then the six that follow the band in the tree's paint order — the
-        // slider, the image, the toggle, the bar, the list and, since task 19,
-        // the text field. The claim here is still that the disabled one is never
-        // visited, and it is stated over the whole walk rather than over the
-        // band's first three.
-        //
-        // The nine presses are the eight stops and a wrap, which is what says the
-        // order is a cycle rather than a run that stops.
-        let mut demo = laid_out();
-        let enabled: Vec<Handle> = demo
-            .buttons
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| *index != 1)
-            .map(|(_, button)| button.node())
-            .collect();
-        let slider = demo.slider.node();
-        let image = demo.image.handle();
-        let toggle = demo.toggle.handle();
-        let progress = demo.progress.handle();
-        let list = demo.list.handle();
-        let text_input = demo.text_input.handle();
-
-        let mut visited = Vec::new();
-        for _ in 0..9 {
-            demo.handle_event(key(Keycode::Tab));
-            visited.push(demo.focused);
+        assert_eq!(needles(&demo), 1, "a needle shape draws its pointer");
+        for _ in 0..2 {
+            demo.handle_event(key(Keycode::G));
+            demo.frame(WINDOW, Duration::from_millis(16));
+            assert_eq!(
+                needles(&demo),
+                0,
+                "and the other two shapes draw no needle at all"
+            );
         }
+    }
 
-        assert_eq!(
-            visited,
-            vec![
-                Some(enabled[0]),
-                Some(enabled[1]),
-                Some(slider),
-                Some(image),
-                Some(toggle),
-                Some(progress),
-                Some(list),
-                Some(text_input),
-                Some(enabled[0])
-            ],
-            "the walk is press, reset, the slider, the image, the toggle, the \
-             progress bar, the list, the text field, and wraps back to press — \
-             never the disabled one in the middle"
+    #[test]
+    fn the_fill_is_drawn_over_the_track_and_neither_leaves_the_node() {
+        // Two claims the capture settles and the draw commands can also settle,
+        // which is why both are asked. **The order**: the track's band is recorded
+        // first and the fill's second, so the fill is painted over the track — the
+        // alternative would be a fill hidden underneath it, which looks like a
+        // gauge that does not move. **The bounds**: nothing the widget records
+        // reaches outside its own rect, so a 200-pixel node cannot draw into the
+        // slider 56 pixels below it.
+        let demo = laid_out();
+        let rect = demo
+            .node_rect(demo.gauge.handle())
+            .expect("a laid-out gauge");
+        let commands = demo.commands_at(demo.gauge.handle());
+        assert!(
+            commands.len() > 20,
+            "the dial records {} commands, so this is walking the whole set",
+            commands.len()
         );
-    }
-
-    #[test]
-    fn enter_does_nothing_while_no_button_holds_focus() {
-        let mut demo = laid_out();
-        demo.handle_event(key(Keycode::Return));
-        demo.frame(WINDOW, Duration::from_millis(16));
-
+        let palette = demo.gauge.palette();
+        // **The band is polygons**, one four-pointed quad per segment: 33 for the
+        // track's 270 degrees and 17 for the fill's half of it. The counts are the
+        // widget's own arithmetic and are written out because the count *is* the
+        // cost: the band is cut into `ceil(sweep / 8.25°)` segments whatever the
+        // thickness, so 270 needs 33 and 135 needs 17.
+        //
+        // **Asserted exactly rather than "at least"**, because "at least" would pass
+        // on a band twice as long, and a longer band is the failure mode
+        // `.ai/NEVERAGAIN.md` § *a still screenshot of a 4 fps application* warns
+        // about — invisible in a still and expensive every frame.
+        let band: Vec<&DrawCommand> = commands
+            .iter()
+            .filter(|command| {
+                matches!(command, DrawCommand::Polygon { points, .. } if points.len() == 4)
+            })
+            .collect();
         assert_eq!(
-            demo.counter_text().as_deref(),
-            Some("0 clicks"),
-            "an activation key with nothing focused belongs to nobody"
+            band.len(),
+            33 + 17,
+            "33 for the track and 17 for half a sweep"
         );
-    }
-
-    #[test]
-    fn a_focused_button_can_be_activated_by_the_space_bar() {
-        let mut demo = laid_out();
-        demo.handle_event(key(Keycode::Tab));
-        demo.handle_event(key(Keycode::Space));
-        demo.frame(WINDOW, Duration::from_millis(16));
-
-        assert_eq!(demo.counter_text().as_deref(), Some("1 click"));
-    }
-
-    #[test]
-    fn the_buttons_follow_the_theme_switch() {
-        // The band is themed from the Primary and OnPrimary tokens, so a
-        // switch carries the new colours to it: the button is aimed at the new
-        // theme's palette, and its own transition runs alongside the theme's.
-        let mut demo = laid_out();
-        let dark = button_background(&demo, 0);
+        // The two are distinguishable only by their colour, and the first is the
+        // track's because `Gauge::paint` draws the track first.
+        let colors: Vec<Color> = band
+            .iter()
+            .map(|command| match command {
+                DrawCommand::Polygon { color, .. } => *color,
+                _ => Color::new(0, 0, 0, 0),
+            })
+            .collect();
         assert_eq!(
-            dark.r,
-            Theme::dark().get(ThemeToken::Primary).as_color().unwrap().r,
-            "a resting button paints the dark theme's Primary token"
+            colors[0], palette.track,
+            "the band opens on the track's own colour"
+        );
+        let fill_at = colors.iter().position(|color| *color == palette.fill);
+        assert_eq!(
+            fill_at,
+            Some(33),
+            "and the fill's band begins at the 34th quad, immediately after the \
+             track's 33, so it is drawn over the track rather than under it"
+        );
+        // The bounds, from the recorded geometry rather than from the widget's
+        // promise: every corner of the band, and the hub's own circle, is inside
+        // the node's own box. A quad's corners are the whole of its extent, which
+        // is more than a circle's centre and its radius could say.
+        for command in &commands {
+            match command {
+                DrawCommand::Polygon { points, .. } => {
+                    for (x, y) in points {
+                        assert!(
+                            *x >= rect.x && *x <= rect.x + rect.width,
+                            "a band corner at ({x}, {y}) is left of or right of {rect:?}"
+                        );
+                        assert!(
+                            *y >= rect.y && *y <= rect.y + rect.height,
+                            "a band corner at ({x}, {y}) is above or below {rect:?}"
+                        );
+                    }
+                }
+                // The centre is a plain tuple of two `f32`s and not a `Point`,
+                // which is the shape the draw-command record carries so that a
+                // command can be cloned and compared without a layout type in it.
+                DrawCommand::Circle { center, radius, .. } => {
+                    let (x, y, r) = (center.0, center.1, *radius);
+                    assert!(
+                        x - r >= rect.x && x + r <= rect.x + rect.width,
+                        "a circle at ({x}, {y}) of radius {r} reaches outside {rect:?}"
+                    );
+                    assert!(
+                        y - r >= rect.y && y + r <= rect.y + rect.height,
+                        "a circle at ({x}, {y}) of radius {r} reaches outside {rect:?}"
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn the_gauge_is_aimed_at_the_new_theme_rather_than_the_one_it_is_leaving() {
+        // The defect class this repository has already paid for once: a palette
+        // read **after** `switch_to` is the palette the theme is leaving, which
+        // re-aims every widget at what it already had and the transition goes
+        // nowhere while every test stays green. The gauge is aimed like the rest,
+        // and this is the assertion that says so.
+        let mut demo = laid_out();
+        let dark_track = demo.gauge.track.get();
+        assert_eq!(
+            dark_track,
+            GaugePalette::from_theme(&Theme::dark()).track,
+            "it starts on the dark theme\'s own Border"
         );
 
         demo.handle_event(key(Keycode::T));
         for _ in 0..35 {
             demo.frame(WINDOW, Duration::from_millis(10));
         }
-
-        let light = button_background(&demo, 0);
-        assert_ne!(light, dark, "the button's colour moved with the theme");
+        assert_ne!(demo.gauge.track.get(), dark_track, "the track moved");
         assert_eq!(
-            light.r,
-            Theme::light()
-                .get(ThemeToken::Primary)
-                .as_color()
-                .unwrap()
-                .r,
-            "and arrived at the light theme's Primary token"
+            demo.gauge.track.get(),
+            GaugePalette::from_theme(&Theme::light()).track,
+            "and arrived at the light theme\'s own Border"
+        );
+        // The fill is the one a reader would notice, because it is the part of the
+        // dial that says "the value", and the track is the part that says
+        // "the rest of it". Both are checked because a palette with one of them
+        // right and the other wrong is a plausible near-miss.
+        assert_eq!(
+            demo.gauge.fill.get(),
+            GaugePalette::from_theme(&Theme::light()).fill,
+            "and so did the fill, which is the theme\'s Primary"
         );
     }
 
     #[test]
-    fn a_button_in_the_band_does_not_move_the_pads() {
-        // The pads and the buttons are separate controls: a click on the band
-        // must not reach the row above it.
-        let mut demo = laid_out();
-        click_button(&mut demo, 0);
+    fn the_gauge_sits_above_the_slider_and_below_the_image() {
+        // The gauge took the space the buttons and the click counter vacated, and
+        // it **overlapped nothing to get there**. The two collision tests over
+        // `placed_rects` are the general version of this; this one names the
+        // neighbours, so a failure says which box it is on top of rather than
+        // reporting forty pairs — and it is the test that would have caught a
+        // dial laid over the slider, which is what putting a 200-pixel square in
+        // a column of 44-pixel bars invites.
+        let demo = laid_out();
+        let at = |handle: Handle| demo.node_rect(handle).expect("a laid-out node");
+        let gauge = at(demo.gauge.handle());
+        let slider = at(demo.slider.node());
+        let readout = at(demo.gauge_readout.label.handle());
+        let image_fit = at(demo.image_fit_readout.label.handle());
 
+        assert!(
+            gauge.y + gauge.height <= slider.y,
+            "the dial ends at {} and the slider starts at {}",
+            gauge.y + gauge.height,
+            slider.y
+        );
+        assert!(
+            gauge.y + gauge.height <= readout.y,
+            "and the readout is under it, not inside it"
+        );
+        assert!(
+            readout.y + readout.height <= slider.y,
+            "and clear of the slider in turn"
+        );
+        assert!(
+            gauge.y >= image_fit.y + image_fit.height,
+            "the dial starts at {}, below the image\'s own readout which ends at {}",
+            gauge.y,
+            image_fit.y + image_fit.height
+        );
+        let column_right = TEXT_PANEL_ORIGIN.0 + TEXT_COLUMN_WIDTH;
+        assert!(
+            gauge.x > column_right,
+            "and the whole column is right of the text at {column_right}"
+        );
+        // Above the band, which is the constraint that keeps every capture of
+        // tasks 11 to 19 a capture of the same pixels.
+        assert!(
+            readout.y + readout.height <= BAND_TOP,
+            "and nothing it draws is below {BAND_TOP}"
+        );
+
+        // And the general collision test can see it at all. `placed_rects` is the
+        // set `no_two_placed_rects_overlap` walks, so a gauge left out of it is a
+        // gauge the whole-suite collision check is blind to — and this mutation is
+        // the one that survived when the rest of these tests were checked, because
+        // every neighbour claim above names its neighbour by hand and each one
+        // still held. The assertion is deliberately about **membership**: a dial
+        // on top of something the demo has not heard of is exactly what the
+        // general check exists to catch, and it can only catch what it is given.
+        let placed = demo.placed_rects();
+        let named: Vec<&str> = placed.iter().map(|(what, _)| *what).collect();
+        for what in ["gauge", "gauge readout"] {
+            assert!(
+                named.contains(&what),
+                "the {what} is in placed_rects, so the collision tests can see it: \
+                 {named:?}"
+            );
+        }
+        let placed_gauge = placed
+            .iter()
+            .find(|(what, _)| *what == "gauge")
+            .map(|(_, rect)| *rect)
+            .expect("the gauge is named above");
+        assert_eq!(
+            placed_gauge, gauge,
+            "and the box it reports is the box its own node was laid out at"
+        );
+    }
+
+    #[test]
+    fn the_gauge_is_the_only_box_in_the_window_that_is_square() {
+        // A gauge inscribed in a non-square box is a dial inscribed in the
+        // shorter of its two sides, so a wide box buys nothing and leaves empty
+        // space the collision tests would have to reason about. This is the
+        // assertion that the demo asked for [`GAUGE_SIZE`] and not for a rect of
+        // its own, and it is the reason a widened node would be a silent change:
+        // the dial would be the same size and the box twice as wide.
+        let demo = laid_out();
+        let rect = demo
+            .node_rect(demo.gauge.handle())
+            .expect("a laid-out gauge");
+        assert_eq!(
+            (rect.width, rect.height),
+            (GAUGE_SIZE.width, GAUGE_SIZE.height),
+            "the node is the box the demo asked for"
+        );
+        assert_eq!(rect.width, rect.height, "and the box is square");
+        assert_eq!(
+            (rect.width, rect.height),
+            (demo.gauge.size().width, demo.gauge.size().height),
+            "which is the widget\'s own DEFAULT_SIZE: the demo chose nothing"
+        );
+    }
+
+    #[test]
+    fn a_press_on_the_gauge_reaches_nothing() {
+        // A gauge is a display: there is no value a drag would set and no action
+        // a tap would report, so a finger that lands on the needle goes to
+        // whatever is behind the gauge. **The demo has nothing behind it there**,
+        // so the correct outcome of a press over the dial is that nothing at all
+        // happens — and this asserts that, because `.ai/NEVERAGAIN.md` § *a drawn
+        // control with nothing behind it* is the entry about a widget that looks
+        // grabbable and is not, and the mistake it records was made by a test
+        // suite that only asked whether the control could be operated.
+        //
+        // What it also rules out is the opposite defect: a tap that fell through
+        // to the pads, which are the one thing in the window that does answer a
+        // press.
+        let mut demo = laid_out();
+        let gauge = demo
+            .node_rect(demo.gauge.handle())
+            .expect("a laid-out gauge");
+        let (down, up) = click_at(gauge.x + gauge.width / 2.0, gauge.y + gauge.height / 2.0);
+        let before = demo.gauge.value.get();
+
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert_eq!(
+            demo.gauge.value.get(),
+            before,
+            "the dial\'s value is the demo\'s to write, not a tap\'s"
+        );
+        assert_eq!(
+            demo.gauge.gauge_type(),
+            GaugeType::Needle,
+            "and a tap does not change its shape either"
+        );
         for pad in &demo.pads {
-            assert_eq!(pad.press.get(), 0.0, "no pad was pressed");
+            assert_eq!(pad.press.get(), 0.0, "and no pad behind it was pressed");
         }
     }
 
     #[test]
-    fn the_band_sits_clear_of_the_text_panel_and_the_pads() {
-        // The band is placed by hand, so its position is a claim about the
-        // window that has to be checked: a `Stack` places all of its children at
-        // the origin, so an offset on the band itself rather than on the row
-        // inside it would be ignored, and the band would land on the pads.
+    fn the_controls_sit_clear_of_the_text_panel_and_the_pads() {
+        // The controls layer is placed by hand, so its position is a claim about
+        // the window that has to be checked. **The head of the column moved when
+        // the buttons went** — the gauge is at 240 rather than the row\'s 396,
+        // because a dial needs room a button row did not — and this is what
+        // checks that the new head is still below the pads and still right of the
+        // text.
         let demo = laid_out();
-        let (band_x, band_y, _, band_height) = button_rect(&demo, 0);
+        let gauge = demo
+            .node_rect(demo.gauge.handle())
+            .expect("a laid-out gauge");
         let column_right = TEXT_PANEL_ORIGIN.0 + TEXT_COLUMN_WIDTH;
         assert!(
-            band_x > column_right,
-            "the band starts at x = {band_x}, right of the text column's edge \
-             at {column_right}"
+            gauge.x > column_right,
+            "the column starts at x = {}, right of the text column\'s edge at \
+             {column_right}",
+            gauge.x
         );
         assert!(
-            band_y > PAD_SIZE.height,
-            "the band starts at y = {band_y}, below the pads"
-        );
-        assert!(
-            band_y + band_height + COUNTER_DROP < WINDOW.height,
-            "and the counter under it is still inside the window"
+            gauge.y > PAD_SIZE.height,
+            "and at y = {}, below the pads",
+            gauge.y
         );
 
-        // The concrete claim: no pad shares a point with the band. The pads are
-        // centred in the window, so this is the check that a band at the origin
-        // would fail.
+        // The concrete claim, and the one that would fail if the origin were put
+        // on the layer rather than on the gauge: a `Stack` places every child at
+        // the origin regardless of the position it declares, so an offset on the
+        // layer is ignored and everything inside it would land on the pads.
         let nodes = demo.nodes.borrow();
         for pad in &demo.pads {
             let rect = nodes
                 .get(pad.node)
                 .and_then(|node| node.layout().rect())
                 .expect("a laid-out pad");
-            let overlaps = band_x < rect.origin.x + rect.size.width
-                && rect.origin.x < band_x + 400.0
-                && band_y < rect.origin.y + rect.size.height
-                && rect.origin.y < band_y + band_height;
-            assert!(!overlaps, "the band overlaps a pad at {:?}", rect);
+            let overlaps = gauge.x < rect.origin.x + rect.size.width
+                && rect.origin.x < gauge.x + gauge.width
+                && gauge.y < rect.origin.y + rect.size.height
+                && rect.origin.y < gauge.y + gauge.height;
+            assert!(!overlaps, "the controls overlap a pad at {rect:?}");
         }
     }
 
     #[test]
-    fn no_text_label_reaches_under_the_band() {
-        // The collision a screenshot showed: the alignment rows are laid out
-        // across `TEXT_COLUMN_WIDTH`, so a right-aligned one ends at the column's
-        // right edge. If that edge ever moves right of the band, the text runs
-        // under the buttons — and nothing else in the suite would notice, since
-        // both the label and the button are laid out correctly on their own.
+    fn no_text_label_reaches_under_the_controls() {
+        // The collision a screenshot showed, asked again against the column that
+        // is there now: the alignment rows are laid out across
+        // `TEXT_COLUMN_WIDTH`, so a right-aligned one ends at the column\'s right
+        // edge. If that edge ever moves right of the controls, the text runs under
+        // the dial — and nothing else in the suite would notice, since both the
+        // label and the gauge lay out correctly on their own.
         let demo = laid_out();
-        let (band_x, _, _, _) = button_rect(&demo, 0);
+        let gauge = demo
+            .node_rect(demo.gauge.handle())
+            .expect("a laid-out gauge");
         let nodes = demo.nodes.borrow();
         for &handle in &demo.label_nodes {
             let node = nodes.get(handle).expect("a label node");
@@ -5435,28 +5584,9 @@ mod tests {
                 continue;
             }
             assert!(
-                right <= band_x,
-                "a label ends at {right}, which is under the band at {band_x}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_row_of_buttons_does_not_overlap_the_next() {
-        let demo = laid_out();
-        let rects: Vec<(f32, f32, f32)> = (0..demo.buttons.len())
-            .map(|index| {
-                let (x, _, width, _) = button_rect(&demo, index);
-                (x, x + width, width)
-            })
-            .collect();
-        for pair in rects.windows(2) {
-            assert!(
-                pair[0].1 <= pair[1].0,
-                "button {} ends at {} and the next starts at {}",
-                pair[0].2,
-                pair[0].1,
-                pair[1].0
+                right <= gauge.x,
+                "a label ends at {right}, which is under the controls at {}",
+                gauge.x
             );
         }
     }
@@ -5527,9 +5657,10 @@ mod tests {
         );
         assert_eq!(
             containers.len(),
-            6,
-            "the demo still assembles six: the card, the text \
-             column and its panel, the button row and its band, and the root"
+            5,
+            "the demo assembles five: the card, the text column and its panel, the \
+             controls layer and the root. It was six while the button row was a \
+             container of its own"
         );
     }
 
@@ -5997,9 +6128,10 @@ mod tests {
     #[test]
     fn an_arrow_key_moves_the_slider_once_it_holds_focus() {
         let mut demo = laid_out();
-        for _ in 0..3 {
-            demo.handle_event(key(Keycode::Tab));
-        }
+        // **One** `Tab`, where it was three before the buttons went: the slider is
+        // the first control in the order and the two enabled buttons that used to
+        // precede it are not here.
+        demo.handle_event(key(Keycode::Tab));
         assert_eq!(demo.focused, Some(demo.slider.node()));
 
         demo.handle_event(key(Keycode::Right));
@@ -6033,11 +6165,10 @@ mod tests {
         // The one gamepad axis the input module maps is the wheel's scroll, and
         // it arrives as a positionless `Scroll`. The focused control gets it
         // first, and focus navigation only runs for what the control left alone —
-        // so a focused slider is driven by it and a focused button still walks.
+        // so a focused slider is driven by it and whatever is left over still
+        // walks the focus order.
         let mut demo = laid_out();
-        for _ in 0..3 {
-            demo.handle_event(key(Keycode::Tab));
-        }
+        demo.handle_event(key(Keycode::Tab));
         assert_eq!(demo.focused, Some(demo.slider.node()));
         demo.handle_event(wheel(8000));
         demo.frame(WINDOW, Duration::from_millis(16));
@@ -6059,9 +6190,7 @@ mod tests {
         };
         assert_eq!(rects(&demo), 2, "an unfocused slider is a track and a fill");
 
-        for _ in 0..3 {
-            demo.handle_event(key(Keycode::Tab));
-        }
+        demo.handle_event(key(Keycode::Tab));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(rects(&demo), 3, "and a focused one has a ring as well");
     }
@@ -6105,10 +6234,10 @@ mod tests {
             rect.x,
             column_right
         );
-        let counter_top = BUTTON_ORIGIN.1 + COUNTER_DROP;
+        let gauge_bottom = GAUGE_ORIGIN.1 + GAUGE_SIZE.height;
         assert!(
-            rect.y > counter_top + 24.0,
-            "and at y = {}, below the click counter's own line at {counter_top}",
+            rect.y > gauge_bottom,
+            "and at y = {}, below the gauge's own bottom edge at {gauge_bottom}",
             rect.y
         );
         assert!(
@@ -6342,9 +6471,10 @@ mod tests {
             "an unfocused toggle ignores the key, or nothing would ever focus it"
         );
 
-        // The fifth stop: the two enabled buttons, the slider, the image, and
-        // then the toggle — the band's paint order, which is the `Tab` order.
-        for _ in 0..5 {
+        // The third stop: the slider, the image, and then the toggle — the
+        // controls layer's paint order, which is the `Tab` order. It was the fifth
+        // while two enabled buttons preceded it.
+        for _ in 0..3 {
             demo.handle_event(key(Keycode::Tab));
         }
         assert_eq!(demo.focused, Some(demo.toggle.handle()), "Tab reached it");
@@ -7039,7 +7169,7 @@ mod tests {
     #[test]
     fn an_arrow_key_scrolls_the_list_once_it_holds_focus() {
         let mut demo = laid_out();
-        for _ in 0..7 {
+        for _ in 0..5 {
             demo.handle_event(key(Keycode::Tab));
         }
         assert_eq!(
@@ -7271,9 +7401,9 @@ mod tests {
     fn the_new_widgets_sit_clear_of_the_things_already_in_the_window() {
         // The same claim, one at a time, in the words the previous three tasks
         // used: the toggle is below the slider's readout, the image is right of
-        // the card of pads, and the list is right of the click counter. The pair
-        // of tests above says no two boxes touch; this one says which boxes the
-        // new ones are *not* allowed to be near, so a failure names the
+        // the card of pads, and the list is right of the widest control readout.
+        // The pair of tests above says no two boxes touch; this one says which
+        // boxes the new ones are *not* allowed to be near, so a failure names the
         // neighbour rather than reporting forty pairs.
         let demo = laid_out();
         let at = |handle: Handle| demo.node_rect(handle).expect("a laid-out node");
@@ -7293,11 +7423,23 @@ mod tests {
             "the image at {image:?} is right of the card at {card:?}"
         );
 
-        let counter = at(demo.counter.label.handle());
+        // The list starts right of the widest thing in the control column, which
+        // is a readout: the click counter that used to be the widest of them is
+        // gone, and the gauge's readout is given the same width, so the clearance
+        // is the same 16 pixels it always was.
+        let widest = [
+            at(demo.gauge_readout.label.handle()),
+            at(demo.slider_readout.label.handle()),
+        ]
+        .iter()
+        .max_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
+        .copied()
+        .expect("at least one readout");
         let list = at(demo.list.handle());
         assert!(
-            list.x > counter.x + counter.width,
-            "the list at {list:?} is right of the click counter at {counter:?}"
+            list.x > widest.x + widest.width,
+            "the list at {list:?} is right of the widest control readout at \
+             {widest:?}"
         );
 
         let column_right = TEXT_PANEL_ORIGIN.0 + TEXT_COLUMN_WIDTH;
@@ -7722,13 +7864,14 @@ mod tests {
         // so in words, which is the whole of what a widget with no focus state of
         // its own can be given.
         let mut demo = laid_out();
-        for _ in 0..6 {
+        for _ in 0..4 {
             demo.handle_event(key(Keycode::Tab));
         }
         assert_eq!(
             demo.focused,
             Some(demo.progress.handle()),
-            "six Tabs from the top is the progress bar"
+            "four Tabs from the top is the progress bar: the slider, the image, the \
+             toggle and then it"
         );
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(
@@ -7737,11 +7880,11 @@ mod tests {
             "and its readout says so"
         );
 
-        // The other one is the **fourth** stop, so a fresh demo rather than a
-        // walk from the progress bar: the band's order is the buttons, the
-        // slider, the image, the toggle, the bar and the list.
+        // The other one is the **second** stop, so a fresh demo rather than a
+        // walk from the progress bar: the order is the slider, the image, the
+        // toggle, the bar, the list and the field.
         let mut demo = laid_out();
-        for _ in 0..4 {
+        for _ in 0..2 {
             demo.handle_event(key(Keycode::Tab));
         }
         assert_eq!(demo.focused, Some(demo.image.handle()));
@@ -7885,7 +8028,7 @@ mod tests {
         let widest = "fps 10000, avg 10000.0, worst 9999 ms";
         let drawn: f32 = widest
             .chars()
-            .map(|ch| metrics.advance(ch, BUTTON_FONT))
+            .map(|ch| metrics.advance(ch, READOUT_FONT))
             .sum();
         assert!(
             drawn <= FPS_READOUT_WIDTH,
@@ -7897,8 +8040,8 @@ mod tests {
     #[test]
     fn the_readout_sits_below_the_text_column_and_left_of_the_controls() {
         // The bottom left of the window is the one region nothing else is in: the
-        // text column's last label ends at y 501, the button band's column starts
-        // at x 664 and the list's readout is at x 1000. `no_two_placed_rects_overlap`
+        // text column's last label ends at y 501, the controls column starts at
+        // x 664 and the list's readout is at x 1000. `no_two_placed_rects_overlap`
         // says no two boxes touch; this says which boxes this one is clear of, so a
         // failure names the neighbour.
         let demo = laid_out();
@@ -7906,10 +8049,10 @@ mod tests {
         let fps = at(demo.fps_readout.label.handle());
 
         let column = TEXT_PANEL_ORIGIN.0 + TEXT_COLUMN_WIDTH;
-        let band = BUTTON_ORIGIN.0;
+        let controls = CONTROLS_ORIGIN.0;
         assert!(
-            fps.x + fps.width <= band,
-            "the readout at {fps:?} reaches into the button column at x {band}"
+            fps.x + fps.width <= controls,
+            "the readout at {fps:?} reaches into the control column at x {controls}"
         );
         assert!(
             fps.x < column,
@@ -7947,12 +8090,26 @@ mod tests {
 
     /// A key-down event for `keycode`, which is what a `Tab` or an arrow is.
     fn key_event(keycode: Keycode) -> Event {
+        key_event_with(keycode, Mod::empty())
+    }
+
+    /// A key-down event for `keycode` with `keymod` held, which is what a
+    /// `Shift+Tab` is.
+    ///
+    /// The modifier is the *event's* own rather than something the demo's
+    /// recogniser infers: `input.rs`'s `Focus::handle_key` reads
+    /// `InputEventKind::KeyDown`'s own `keymod` field, and the recogniser copies
+    /// SDL's `keymod` straight into it, so a `Shift+Tab` is an SDL event with
+    /// `LSHIFTMOD` set and nothing else. A walk test that built the event
+    /// differently from the one the keyboard builds would be testing the
+    /// recogniser and calling it the focus order.
+    fn key_event_with(keycode: Keycode, keymod: Mod) -> Event {
         Event::KeyDown {
             timestamp: 0,
             window_id: 0,
             keycode: Some(keycode),
             scancode: None,
-            keymod: Mod::empty(),
+            keymod,
             repeat: false,
             which: 0,
             raw: 0,
@@ -8189,6 +8346,211 @@ mod tests {
             demo.text_input.focused.get(),
             "and the field knows it: set_focus calls focus(), not a bare write, \
              so the blink restarts with the caret visible"
+        );
+    }
+
+    /// The focus order the demo offers, in the order `focus_navigation` puts the
+    /// six controls in and the tree then lays out.
+    ///
+    /// Written out rather than read off the walk, because the walk is what is
+    /// under test: a list *derived* from the walk would agree with any order the
+    /// walk produced, which is the whole reason the walk needs a test of its own.
+    /// Each entry names its handle getter, so the failure says which control moved.
+    fn expected_focus_order(demo: &Demo) -> Vec<(&'static str, Handle)> {
+        vec![
+            ("slider", demo.slider.node()),
+            ("image", demo.image.handle()),
+            ("toggle", demo.toggle.handle()),
+            ("progress bar", demo.progress.handle()),
+            ("list", demo.list.handle()),
+            ("text field", demo.text_input.handle()),
+        ]
+    }
+
+    #[test]
+    fn tab_walks_every_focusable_control_in_order_and_wraps() {
+        // **The walk, not the arrival.** `tab_reaches_the_field_and_lights_its_
+        // border` asks whether `Tab` can reach one widget from anywhere in the
+        // order; it cannot tell an order from any other order, because a walk that
+        // visited the controls in the wrong sequence would still reach the field.
+        // This is the test for the sequence itself, and it is here because the
+        // button row's removal took 22 tests with it and this was one of them.
+        //
+        // The order is the tree's paint order, so it is the order the controls
+        // layer's children were added in, and it is asserted against the tree
+        // rather than against `focus_navigation`'s own array: that array only says
+        // which nodes are *focusable*, and the order comes from the walk over the
+        // tree. A control that was added to the layer out of order would pass an
+        // array-order test and fail this one.
+        let mut demo = laid_out();
+        let order = expected_focus_order(&demo);
+        assert_eq!(order.len(), 6, "six controls take focus in this demo");
+
+        // Forward, one `Tab` at a time, and the whole lap twice over: a walk that
+        // visited them in a different order, or stopped early, or cycled two at a
+        // time, is caught by the first pass and the second is what says the last
+        // one wraps to the first.
+        for lap in 0..2 {
+            for (index, (what, handle)) in order.iter().enumerate() {
+                demo.handle_event(key_event(Keycode::Tab));
+                assert_eq!(
+                    demo.focused,
+                    Some(*handle),
+                    "lap {lap}: Tab {index} is the {what}"
+                );
+            }
+        }
+
+        // And every one of them *lights up*, which is a different claim from being
+        // the current node: three of the six have a `focused` property and two say
+        // so in words, and a stop where nothing shows is a stop a reader cannot see.
+        demo.handle_event(key_event(Keycode::Tab));
+        assert!(demo.slider.widget.focused.get(), "the slider's ring");
+        for _ in 0..3 {
+            demo.handle_event(key_event(Keycode::Tab));
+        }
+        assert!(demo.progress_focused.get(), "the bar's readout says so");
+    }
+
+    #[test]
+    fn shift_tab_walks_the_same_order_backwards() {
+        // The other direction, from nothing focused: `Focus::focus_prev` with no
+        // current node takes the **last** control rather than the first, so the
+        // backwards walk starts at the field. That asymmetry is the input module's
+        // rule and it is worth a test of its own, because a `Shift+Tab` that went
+        // forwards would still reach all six.
+        let mut demo = laid_out();
+        let order = expected_focus_order(&demo);
+        let back = |demo: &mut Demo| {
+            demo.handle_event(key_event_with(Keycode::Tab, Mod::LSHIFTMOD));
+        };
+
+        back(&mut demo);
+        assert_eq!(
+            demo.focused,
+            Some(order[5].1),
+            "Shift+Tab from nothing focused is the last control, the field"
+        );
+        for index in (0..5).rev() {
+            back(&mut demo);
+            assert_eq!(
+                demo.focused,
+                Some(order[index].1),
+                "and one more back is the {}",
+                order[index].0
+            );
+        }
+        back(&mut demo);
+        assert_eq!(
+            demo.focused,
+            Some(order[5].1),
+            "which wraps to the field again rather than stopping"
+        );
+    }
+
+    #[test]
+    fn the_gauge_is_not_in_the_focus_order() {
+        // A gauge is a display: `Gauge` has no `on_event` and no `focused`
+        // property, and its own module doc says so. A `Tab` stop on one would be a
+        // stop where focus arrives and nothing shows that it did — which is the
+        // defect `the_two_widgets_with_no_focus_state_say_where_focus_is` exists
+        // for, and the reason the gauge is not in `focus_navigation`'s array.
+        //
+        // **A full lap in both directions**, because "not in the order" is a claim
+        // about six stops and not about the one after the last: a control that was
+        // appended to the tree would be reached on the wrap, which is exactly where
+        // a test that only checks the first six looks away.
+        let mut demo = laid_out();
+        let order = expected_focus_order(&demo);
+        let gauge = demo.gauge.handle();
+        assert!(
+            !order.iter().any(|(_, handle)| *handle == gauge),
+            "and the expected order does not name it either, so this is not the \\
+             walk agreeing with itself"
+        );
+
+        for lap in 0..2 {
+            for _ in 0..(order.len() + 1) {
+                demo.handle_event(key_event(Keycode::Tab));
+                assert_ne!(
+                    demo.focused,
+                    Some(gauge),
+                    "lap {lap}: Tab never lands on the dial"
+                );
+            }
+            for _ in 0..(order.len() + 1) {
+                demo.handle_event(key_event_with(Keycode::Tab, Mod::LSHIFTMOD));
+                assert_ne!(
+                    demo.focused,
+                    Some(gauge),
+                    "lap {lap}: and Shift+Tab never does either"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_sliders_knob_fits_its_column_at_the_top_of_its_range() {
+        // `SLIDER_THUMB_RADIUS` is 18 because 22 stopped the right-hand column
+        // fitting, and removing the buttons loosened that constraint without the
+        // ceiling being retested. This is the retest, and it is cheap: the knob at
+        // the **top** of the range is the one that reaches furthest right, and the
+        // node's own height is what has to clear the toggle below it.
+        let mut demo = laid_out();
+        demo.handle_event(key_event(Keycode::_1));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let rect = demo.slider_rect().expect("a laid-out slider");
+        let thumb = painted_thumb_radius(&demo);
+
+        // Across: the knob's outer edge, not its centre, has to clear the list.
+        assert_eq!(
+            thumb, SLIDER_THUMB_RADIUS,
+            "and it is the demo's own radius"
+        );
+        let right = rect.x + rect.width - SLIDER_THUMB_RADIUS + thumb;
+        assert!(
+            right <= LIST_ORIGIN.0,
+            "the knob's right edge at {right} clears the list's left edge at {}",
+            LIST_ORIGIN.0
+        );
+        // Down: the readout is dropped by `SLIDER_READOUT_DROP` from the slider's
+        // **origin**, not from the node's bottom — the constant's own comment puts
+        // the readout's 24-pixel line at 560..584 and the toggle at 592 — so the
+        // column's budget is the drop plus the line, and it is checked against the
+        // toggle the same way `the_new_widgets_sit_clear_of_the_things_already_in_
+        // the_window` checks the drawn rects.
+        let readout = demo
+            .node_rect(demo.slider_readout.label.handle())
+            .expect("a laid-out readout");
+        let toggle = demo
+            .node_rect(demo.toggle.handle())
+            .expect("a laid-out toggle");
+        assert!(
+            (readout.y - (SLIDER_ORIGIN.1 + SLIDER_READOUT_DROP)).abs() < 0.01,
+            "the readout hangs off the origin at {readout:?}, not off the node's \
+             bottom"
+        );
+        assert!(
+            toggle.y > readout.y + readout.height,
+            "and the toggle at {toggle:?} is still below the readout at {readout:?}"
+        );
+        // The headroom a bigger knob would need, which is what the constant's
+        // comment claims and what nothing was checking. **A 22-pixel knob is a
+        // 62-tall node rather than 52** — two radii and a border — so it takes four
+        // pixels more of the gap, and the gap is four. That is the ceiling, measured
+        // rather than asserted, and it is why `SLIDER_THUMB_RADIUS` is not 22 even
+        // though the buttons that used to be above it are gone.
+        let headroom = toggle.y - (readout.y + readout.height);
+        let taller = rect.height + (22.0 - SLIDER_THUMB_RADIUS) * 2.0;
+        assert_eq!(
+            taller - rect.height,
+            8.0,
+            "a 22-pixel knob is 8 pixels taller"
+        );
+        assert_eq!(
+            headroom, 8.0,
+            "and the clearance under the readout is exactly the same 8 pixels, so \
+             22 would put the node on the toggle"
         );
     }
 

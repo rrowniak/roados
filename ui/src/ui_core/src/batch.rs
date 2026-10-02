@@ -168,7 +168,8 @@ impl DrawCommand {
             | DrawCommand::RoundedRect { color, .. }
             | DrawCommand::Line { color, .. }
             | DrawCommand::Circle { color, .. }
-            | DrawCommand::Path { color, .. } => BatchKey {
+            | DrawCommand::Path { color, .. }
+            | DrawCommand::Polygon { color, .. } => BatchKey {
                 texture: None,
                 blend_mode: BlendMode::from_color(*color),
                 shader: ShaderKind::Solid,
@@ -544,6 +545,65 @@ mod tests {
         let batched = batcher.finish();
         assert!(batched.opaque.is_empty());
         assert!(batched.transparent.is_empty());
+    }
+
+    /// A filled polygon of `points`, in `color`.
+    fn polygon(color: Color) -> DrawCommand {
+        DrawCommand::Polygon {
+            points: vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
+            color,
+        }
+    }
+
+    #[test]
+    fn a_polygon_batches_with_the_other_filled_shapes() {
+        // It is a solid colour with no texture, so it belongs in the same draw
+        // call as a rect — one batch for the panel's background, its border and
+        // the needle on top of it, rather than a batch per primitive.
+        let mut batcher = Batcher::new();
+        batcher.add(polygon(opaque()));
+        batcher.add(rect(opaque()));
+
+        let batched = batcher.finish();
+        assert_eq!(batched.opaque.len(), 1, "one draw call, not two");
+        assert_eq!(batched.opaque[0].key.shader, ShaderKind::Solid);
+        assert_eq!(batched.opaque[0].key.texture, None);
+        assert_eq!(batched.opaque[0].commands.len(), 2);
+    }
+
+    #[test]
+    fn a_translucent_polygon_blends_rather_than_covering() {
+        // The needle at partial opacity, over a filled track: submitted to the
+        // opaque pass it would hide the track instead of showing through it, and
+        // the command's own alpha is the only thing that says so.
+        let mut batcher = Batcher::new();
+        batcher.add(polygon(transparent()));
+
+        let batched = batcher.finish();
+        assert!(batched.opaque.is_empty(), "not the opaque pass");
+        assert_eq!(batched.transparent.len(), 1);
+        assert_eq!(
+            batched.transparent[0].key.blend_mode,
+            BlendMode::Transparent,
+            "a translucent polygon is not Opaque"
+        );
+        assert_eq!(batched.transparent[0].key.shader, ShaderKind::Solid);
+    }
+
+    #[test]
+    fn a_polygon_of_fewer_than_three_points_still_batches_by_its_color() {
+        // It draws nothing, but that is not the batcher's business: it groups
+        // what it was given by key, and refusing or re-routing a command here
+        // would be a second decision about emptiness in a layer that has none.
+        let mut batcher = Batcher::new();
+        batcher.add(DrawCommand::Polygon {
+            points: Vec::new(),
+            color: opaque(),
+        });
+
+        let batched = batcher.finish();
+        assert_eq!(batched.opaque.len(), 1);
+        assert_eq!(batched.opaque[0].key.shader, ShaderKind::Solid);
     }
 
     #[test]

@@ -1507,16 +1507,21 @@ pub fn visible_rect(viewport: Rect, content_height: f32, scroll_offset: f32) -> 
 /// Returns the smallest rectangle containing `command`, or `None` when the
 /// command's extent cannot be bounded from the command itself.
 ///
-/// Only [`Text`](DrawCommand::Text) and an empty
-/// [`Path`](DrawCommand::Path) are `None`. A text run carries the `x` and `y` of
-/// its line's top-left and its font size, but **not its width** — that needs the
-/// font's advance for every character in the run — so bounding one honestly would
-/// mean inventing a width. A caller that wants text clipped measures the run and
+/// Only [`Text`](DrawCommand::Text), an empty
+/// [`Path`](DrawCommand::Path) and a [`Polygon`](DrawCommand::Polygon) of fewer
+/// than three points are `None`. A text run carries the `x` and `y` of its line's
+/// top-left and its font size, but **not its width** — that needs the font's
+/// advance for every character in the run — so bounding one honestly would mean
+/// inventing a width. A caller that wants text clipped measures the run and
 /// clips it itself.
 ///
 /// Everything else is bounded from what it draws: a circle by its centre and
 /// radius, a line by its two ends and half its width, a path by the extent of
-/// its points.
+/// its points, a polygon by the extent of its points.
+///
+/// The second `None` is one rule rather than two that happen to agree: a command
+/// that draws nothing has no bounds, and a path visits nothing without points and
+/// a polygon encloses nothing without three of them.
 ///
 /// # Examples
 ///
@@ -1536,6 +1541,25 @@ pub fn command_bounds(command: &DrawCommand) -> Option<Rect> {
         DrawCommand::Rect { rect, .. }
         | DrawCommand::RoundedRect { rect, .. }
         | DrawCommand::Image { rect, .. } => Some(*rect),
+        // The bounding rect of the point set, by the same rule the `Path` arm
+        // below follows and for the same reason: a polygon of fewer than three
+        // points encloses no area and draws nothing, and a command that draws
+        // nothing has no bounds to clip against. No stroke width is added to the
+        // box, because a polygon is filled and has no half-width.
+        DrawCommand::Polygon { points, .. } => {
+            let mut low = (f32::INFINITY, f32::INFINITY);
+            let mut high = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+            for point in points {
+                low.0 = low.0.min(point.0);
+                low.1 = low.1.min(point.1);
+                high.0 = high.0.max(point.0);
+                high.1 = high.1.max(point.1);
+            }
+            if points.len() < 3 {
+                return None;
+            }
+            Some(Rect::new(low.0, low.1, high.0 - low.0, high.1 - low.1))
+        }
         DrawCommand::Line {
             start, end, width, ..
         } => {
@@ -3401,6 +3425,48 @@ mod tests {
             None,
             "an empty path visits nothing and there is no place to say it is"
         );
+        assert_eq!(
+            command_bounds(&DrawCommand::Polygon {
+                points: vec![(12.0, 40.0), (52.0, 12.0), (34.0, 66.0)],
+                color: Color::new(0, 0, 0, 255),
+            }),
+            Some(Rect::new(12.0, 12.0, 40.0, 54.0)),
+            "the extent of the points, and no stroke width to add to it: a \
+             polygon is filled, so there is no half-stroke to grow the box by"
+        );
+    }
+
+    #[test]
+    fn a_polygon_of_fewer_than_three_points_has_no_bounds_to_clip_against() {
+        // The same rule the empty path follows, and for the same reason: a
+        // command that draws nothing has nowhere on screen to be kept or
+        // dropped at. `command_quads` emits no quads for these, so a rect
+        // invented for one would decide a command's fate arbitrarily.
+        for points in [
+            Vec::new(),
+            vec![(10.0, 40.0)],
+            vec![(10.0, 40.0), (52.0, 12.0)],
+        ] {
+            let polygon = DrawCommand::Polygon {
+                points,
+                color: Color::new(0, 0, 0, 255),
+            };
+            assert_eq!(
+                command_bounds(&polygon),
+                None,
+                "{polygon:?} draws nothing and so has no bounds"
+            );
+            // And the consequence that matters: `clip_commands` keeps what it
+            // cannot bound, rather than dropping it for want of a measurement.
+            assert_eq!(
+                clip_commands(
+                    std::slice::from_ref(&polygon),
+                    Rect::new(0.0, 0.0, 1.0, 1.0)
+                ),
+                vec![polygon],
+                "it is kept, not dropped, on a clip it is nowhere near"
+            );
+        }
     }
 
     #[test]

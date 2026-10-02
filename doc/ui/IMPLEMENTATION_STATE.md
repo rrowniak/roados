@@ -12,12 +12,231 @@ and this file gets corrected.
 
 ## Current position
 
-**Status: task 19 (TextInput + on-screen keyboard) implemented, awaiting review,
-uncommitted.** Tasks 15–18 are committed as `d7240c8`; the frame-rate readout as
-`3ddf5fa`. **Nothing in task 19 has been reviewed by anybody** and it is not
-committed, so `task-sequence.md`'s *No unreviewed advance* gate has not been
-tested. That is recorded rather than glossed, and the *Gates skipped* section
-below still describes tasks 15–18 only.
+**Status: task 20 (Gauge) implemented, awaiting review, uncommitted.** Task 19 is
+committed as `b4a2db8`, tasks 15–18 as `d7240c8`, the frame-rate readout as
+`3ddf5fa`. **Nothing in task 20 has been reviewed by anybody** and it is not
+committed, so `task-sequence.md`'s *No unreviewed advance* gate is untested for
+the second task running. See *Task 20 — what it decided*.
+
+## Task 20 — what it decided, and what it found
+
+Written to be reviewed. Nothing here has been through `reviewer.md`.
+
+### The three operator decisions, taken 2026-10-01 before any code was written
+
+Each was put to the operator with the facts behind it, because the task file
+requires something the codebase cannot do. They are also under *Ratified by the
+operator*.
+
+1. **The arc is not antialiased, and the task file's requirement 5 is not met.**
+   Verified before asking: the solid shader's SDF branch is guarded on
+   `v_radius > 0` and models **only an axis-aligned rounded rect**
+   (`render.rs:154`); `line_quad` hardcodes `radius: 0.0` (`render.rs:670`); the
+   GL context sets no multisample attribute (`render/context.rs:107`); there is
+   no FBO anywhere. Chosen: hard edges, documented in the widget's own module
+   doc, which names the three reasons and what would reverse them. The reviewer
+   should treat that doc as the claim and the capture as the evidence — see
+   *What is on screen*.
+2. **A filled `Polygon` draw command, not a `Line` needle.** Requirement 3 says
+   "needle rendered as a triangle" and `Path` *strokes* an outline, so a
+   three-point closed `Path` is a hollow triangle. The operator chose to add the
+   primitive. It cost one new enum variant and **no shader change**, which was
+   not obvious beforehand and is the most transferable fact in this task — see
+   *The triangle that fits through a quad-only pipeline*.
+3. **The three animation-test buttons are gone**, at the operator's words:
+   *"You can remove the first three buttons that were used for testing
+   animations."* That freed the head of the right-hand column for the gauge,
+   which is the acceptance criterion's only placement — see *Where the gauge
+   went, and what it cost*.
+
+### The triangle that fits through a quad-only pipeline
+
+`DrawCommand::Polygon { points, color }` fans a **convex** polygon into `n - 2`
+triangles, each emitted as one `Quad` whose **fourth corner repeats its third**.
+`quad_indices` addresses four corners as `0,1,2 / 0,2,3` (`render.rs:791`), so
+`[a, b, c, c]` draws the triangle `(a,b,c)` and the degenerate `(a,c,c)`, which
+encloses no area and covers no fragments.
+
+**That is the whole trick, and it cost nothing.** No new vertex type, no shader,
+no change to the index buffer, and the pipeline's quad-only invariant (4
+vertices, 6 indices) is preserved and pinned by a test. There is no face
+culling and no depth test in `render.rs` at all — grep for `cull`, `front_face`
+and `depth_test` returns nothing — so winding does not affect visibility.
+
+Fewer than three points emits no quads, and `command_bounds` returns `None` for
+it, **by the same rule the empty `Path` already followed**: a command that draws
+nothing has no bounds to clip against. One rule, two arms, not two rules that
+happen to agree.
+
+The fan is exact for a **convex** polygon and nothing else; a concave one fans
+into overlapping and inverted triangles. Every `match` on `DrawCommand` got a
+real arm — none was silenced with `_ =>`.
+
+### The defect this task found in its own work, on a screenshot
+
+**The arc was visibly beaded, and the module doc claimed it was not.** The first
+implementation drew the band as a **chain of overlapping filled `Circle`s**, on
+a rationale *this session's integrator supplied in the subagent brief*: "a `Path`
+shows notches on the outside of the curve, and overlapping circles have no notch
+because every circle is round."
+
+**Both halves of that were wrong**, and the demo subagent's capture is what
+proved it: sampling the outer edge along rays read **100.0 px at every circle
+centre against 94.4–95.8 px at every bisector — a 5.6 px scallop on a 14 px
+band.** A chain of circles tangent on their **centre lines** has outer edges
+that touch only where `R >> r`, and the gauge's defaults are `r/R = 0.075`.
+
+The `Path` alternative is worse, and for a **different** reason than the brief
+gave: `line_quad` offsets each segment **perpendicular**, so a segment's outer
+corner lands at `sqrt(R² + r²)`, not `R + r` — a band of the requested thickness
+is drawn about **6.7 px too thin everywhere**, before any scalloping. Both
+numbers were reproduced from the geometry before the fix was written.
+
+**The fix uses the primitive that had just landed, and nothing new.** One convex
+four-point `Polygon` per segment, corners on `R ± thickness/2` at the segment's
+two endpoint angles. The corners sit exactly on the two radii, so the band is
+the requested thickness with **no perpendicular-offset error at all**, and the
+only error left is the chord between corners:
+
+| | outer edge error | cost, track + fill |
+|---|---|---|
+| chain of circles (shipped, then reverted) | **7.26 px** | 132 quads |
+| `Path` quad strip | 6.74 px thin *everywhere*, plus 0.26 px of sag | 66 quads |
+| **annular quad per segment (shipped)** | **0.255 px** | **66 quads** |
+
+About **29x** better than the chain, at half the primitives. Measured on screen,
+not asserted: the band's pixel deficit against the ideal 270° annulus went from
+**1064 px (17.4%) to 17 px (0.28%)**. The beading is gone.
+
+The sagitta is `step²` in the small-angle limit, so the tessellation degrades
+gracefully where the chain's error scaled with `r` — a test asserts the `step²`
+signature by halving the segment count and checking the error quadruples, which
+is the property that makes a coarse tessellation safe.
+
+### Where the gauge went, and what it cost
+
+**At (664, 240) in a 200×200 box**, in the column the removed button row
+occupied, entirely above `BAND_TOP = 720`. Nothing above the band moved, so
+every capture of tasks 11–19 is still a capture of the same pixels.
+
+**The operator should know what the button removal took with it.** The buttons
+were task 12's only on-screen proof, and 22 tests went with them — **accounted
+for exactly**, 22 removed and 17 gauge tests added, so `ui_demo` moved 140 → 139
+only because of the net. What is **no longer demonstrable** is that a click
+reaches a widget and something happens; the demo's remaining pointer-driven
+controls are the slider, the toggle and the list, and `Tab` still reaches the
+field.
+
+**One gap was opened and has been closed.** The removal took the demo's only
+**Tab-order walk test** with it, leaving focus order entirely unasserted — the
+remaining test checks that `Tab` reaches *one* widget, so any order would pass.
+`tab_walks_every_focusable_control_in_order_and_wraps` and its `Shift+Tab`
+mirror now pin the full six-stop order (**slider, image, toggle, progress bar,
+list, text field**), plus `the_gauge_is_not_in_the_focus_order` — a gauge has
+no `on_event` and no `focused` property, so it is a display and not a stop. A
+survivor found this: dropping `("gauge", …)` from `placed_rects` passed every
+test, because each neighbour claim named its neighbour by hand, so the test now
+asserts **membership** as well.
+
+**`SLIDER_THUMB_RADIUS = 18` was left alone**, but a cheap assertion now says
+something its comment did not: the clearance under the slider's readout is
+**exactly 8 px** and a 22-pixel knob is **8 px taller**, so 22 still does not fit
+and the ceiling holds. The looser column after the buttons went is *vertical*
+headroom the removal did not create.
+
+### What is on screen, and how it was got
+
+One capture of the default state, by the stock method, **re-verified by this
+session independently of the subagents' own claims**:
+
+```
+cargo build --release
+setsid ./target/release/ui_demo > /tmp/verify-demo.log 2>&1 &
+pgrep -a -x ui_demo                                  # 3115423, same call as the capture
+xwininfo -root -tree | rg '"roados ui_demo"'         # 0x100002f, 1280x1020
+magick import -window 0x100002f /tmp/verify-gauge.png
+```
+
+Window id re-read at the time of the capture, process confirmed alive in the
+same call, `stderr` empty. **No seed, no environment variable, no rebuilt
+binary**: `rg -c "SEED|PROBE|PREVIEW" ui/src/ui_demo/src/main.rs` is **0**.
+
+Cropped at 250 % and looked at, and then **measured** — the numbers above come
+from sampling the outer edge along 181 rays inside the node rect and from a
+band-area count that cancels pixel quantisation. Measured, because a crop at
+2500 % shows a 5 px scallop and a 2 px one equally well:
+
+- **two distinct bands, fill over track** — the fill is `Primary` on top of the
+  `Border`-coloured track, both in the same annulus, and the fill's segments
+  begin after the track's;
+- **the band is smooth** — 0.28 % area deficit against the ideal annulus;
+- **the needle is a filled triangle** with a hub disc covering its base, and the
+  needle's rows widen linearly from tip to base;
+- **eleven tick marks** sit inside the track's inner edge and clear of the band;
+- **the edges are hard** — stair-stepped, most visibly at nine and three
+  o'clock where the tangent is vertical. This is decision 1 above, **seen**
+  rather than read about;
+- **the readout shows `120 of 240, 50%, Needle`**, so "50 %" is legible without
+  inferring it from the picture.
+
+### Deliberate breaks — 58 run, 56 killed, 2 no-ops
+
+| writer | mutations | killed |
+|---|---|---|
+| `Polygon` primitive | 21 | 21 |
+| the gauge widget | 25 | 25 |
+| the demo wiring | 12 | 12 |
+| the arc-geometry fix | 20 | 18 (+2 aborted as no-ops) |
+
+**Two survivors were real and both were fixed.** Removing `clear()` from
+`animate_to_state` survived because **two aims of the same length arrive on the
+same frame** and race invisibly; the test now makes the first aim longer than
+the second. Removing the `(radius - half).max(0.0)` floor survived because **no
+fixture had a box narrow enough to give a negative inner radius** while the arc
+radius was still positive — the same class as the origin/extent entry below.
+
+### What is NOT claimed
+
+- **No criterion was verified through injected input.** Pointer injection does
+  not reach the window on this host. The gauge is driven by `,` and `.`, and the
+  needle's spring is asserted by tests that measure the overshoot, **not** seen
+  mid-flight in a capture.
+- **`cargo audit` was not run** — not installed on this host, the standing tool
+  gate. **No dependency changed**, which is the thing it would have checked.
+- **The frame rate is one reading.** See below.
+- **`DEMO_APPLICATION.md` is modified in the working tree and was not touched by
+  any of this task's sub-agents** (mtime 18:45, before this task's writes at 19:23
+  and 19:44). It appears to be the operator's own edit from a parallel session.
+  Flagged rather than reconciled.
+
+### The frame rate
+
+`fps-check.sh 12 40`, this session's own run:
+
+```
+fps-check: 587 frames in 12.006s
+fps-check: average 48.9 fps, worst frame 51.6 ms, 1 frame(s) over 33 ms
+fps-check: PASS — 48.9 fps is at or above the 40 fps floor.
+```
+
+**48.9 fps against a recorded baseline of 49.7–54.1**, inside the spread, and it
+should not have risen: the shipped arc draws **fewer** primitives than the chain
+it replaced. The intermediate beaded build measured 50.1 and the button removal
+freed what the gauge cost, so the CPU comparison is confounded in the gauge's
+favour — **the honest statement is that no regression is visible at the floor,
+not that the gauge is free.** The aarch64 cross-build passes with no sysroot,
+`Machine: AArch64`, and the same four dynamic dependencies.
+
+**Two things a reviewer should weigh.** The fill's segments are cut from the
+*fill's* sweep, so a half-value fill has 17 segments where the track has 33 and
+**the two bands' corners do not line up along the fill** — the fill is drawn
+over the track in the same annulus so the seam is between two overlapping bands,
+but that is a judgement and it is the one thing in the geometry a human should
+look at closely. And **a polygon's extreme point is not always a corner**: at a
+step that lands no corner on twelve o'clock, the topmost corner sits one sagitta
+inside the topmost drawn edge.
+
+## Task 19 — what it decided, and what it found
 
 **Three operator decisions shaped this task, taken 2026-10-01 before any code was
 written**, each because the task file did not authorise it:
@@ -1757,7 +1976,7 @@ verified. A blank cell is unknown, not "none".
 | 18 | Widget — List/Scroll | done, **batched**, then **fixed on screen** | `d7240c8` | **none** — see *Gates skipped* | **ACs 2, 3**, and the "scrollable" half of **AC 7** — all three need a pointer or a wheel on this host. **AC 2 is not a defect**: dragging *up* scrolls, through the demo's real event path, and dragging *down* at offset 0 cannot move a list past its own start. ACs 1, 4, 5, 6 and AC 7's *100 rows on screen* are **capture-verified and unit-tested**, and the clipping defect the operator reported is fixed — see *A defect the operator found* |
 | 19 | Widget — TextInput + On-screen Keyboard | **implemented, uncommitted** | — | **none yet** | **none waived** — every criterion is covered by the demo's own event path or by a capture. What is *not* claimed is anything about XTEST injection, which was not used; see *Task 19 — what it decided* |
 | — | Frame-rate readout, stdout report, `fps-check.sh` | done | `3ddf5fa` | none yet | n/a — an operator request, not a task with criteria. Verified: the suite is green, six mutations killed, the readout seen on screen, and both run-end paths measured — see *The frame rate, measured* |
-| 20 | Widget — Gauge | pending | | | |
+| 20 | Widget — Gauge | **implemented, uncommitted** | — | **none yet** | **Requirement 5's anti-aliasing half is NOT met and is not waived** — the renderer has no SDF for curves and no MSAA; the widget's module doc says so and the hard edges were seen in a capture. **AC 3's "needle as a triangle"** required a new filled `Polygon` draw command, which the operator approved. The needle's spring is asserted by tests, not seen mid-flight. ACs 1, 2, 4 and 5 are capture-verified and unit-tested — see *Task 20 — what it decided* |
 | 21 | Widget — Chart | pending | | | |
 | 22 | Widget — Dialog | pending | | | |
 | 23 | Widget — Toast | pending | | | |

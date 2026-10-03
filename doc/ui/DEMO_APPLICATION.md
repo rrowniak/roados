@@ -2,7 +2,7 @@
 
 **Status:** Operator decision, 2026-09-30. *Screens* and *Layout* completed
 2026-10-01 from Tesla's own Owner's Manual and the operator's own photographs
-of a centre display.
+of a centre display. **Revised 2026-10-03** — see § *Relationship to task 24*.
 **Category:** `TASK_UI_DEMO_n` (new)
 **Depends on:** All `TASK_UI_PRIM_n` tasks (12–23) complete
 
@@ -12,6 +12,11 @@ Re-implement `ui_demo` as a Tesla-like infotainment interface after all UI
 primitive tasks are complete. The demo uses mocked data, focuses on visual
 quality, and demonstrates that `ui_core` is fully capable of carrying a real
 automotive infotainment application.
+
+**Revised 2026-10-03.** Not a *re*-implementation: **the operator's decision of
+that date is that this application becomes one more tab of the widget gallery**,
+so the gallery's page shell is built first and this direction is a page inside
+it rather than a replacement for it. See § *Relationship to task 24*.
 
 ## Operator decisions (2026-09-30)
 
@@ -50,10 +55,43 @@ automotive infotainment application.
 
 ## Relationship to task 24
 
-Task 24 (`TASK_UI_PRIM_24.md`) is superseded by this direction. The existing
-task 24 spec describes a widget gallery; the operator has decided to replace it
-with a Tesla-like demo application. Task 24 is not started and will not be
-started in its current form.
+**Revised 2026-10-03. This section superseded itself; both decisions are kept.**
+
+**The 2026-09-30 decision, as recorded then.** Task 24
+(`TASK_UI_PRIM_24.md`) is superseded by this direction. The existing task 24
+spec describes a widget gallery; the operator has decided to replace it with a
+Tesla-like demo application. Task 24 is not started and will not be started in
+its current form.
+
+**The 2026-10-03 decision, which supersedes that one.** Task 24 is **kept**,
+amended, and split into `TASK_UI_PRIM_24.1..3.md`. The reasoning that made the
+first decision sound has not changed — a widget gallery is not a demo
+application — but **the gallery is what tasks 11–23 have been building, widget
+by widget, and it is finished rather than replaced.** So the gallery gets a page
+shell, and:
+
+- **this application becomes one more tab**, not a replacement for the gallery.
+  That is the operator's decision and **the shape of that tab is not settled
+  here** — a `TASK_UI_DEMO_1.md` has not been written, and nothing below has
+  been re-derived against a tabbed shell;
+- **two library gaps stay open by that decision**: gap #3 (*no screen/navigation
+  system*) and gap #7 (*no `TabBar` widget*). The gallery's page shell is built
+  **in `ui_demo`**, out of `Container` + `Button`, which is what gap #7
+  prescribes for the dock. A `ui_core` tab controller is a library task with
+  its own cycle and was declined for now;
+- **`--tab=<name>`** lands on a page without a click, which is the only route to
+  a capture of one page on this host: pointer injection has never delivered an
+  event to the window, and keyboard injection delivered exactly one in this
+  project's history.
+
+**One tension to settle when the `TASK_UI_DEMO_n` tasks are written.** The
+*Controls panel* section below records, from photograph `02`, *"There is no
+underline or tab bar anywhere"*. **That is evidence about Tesla's own interface
+and it remains true of Tesla.** The gallery's tab bar is a demo affordance for
+switching between widget pages and says nothing about how the Tesla screens are
+navigated — so no override is needed here, and none is recorded. **It will need
+one** if a `TASK_UI_DEMO_n` task ever puts a tab bar on a Tesla surface, and that
+is the sentence to amend when it does.
 
 ## Design principles
 
@@ -135,11 +173,11 @@ further down.
 |---|---|---|---|
 | 1 | **Map widget** — no map renderer exists or is planned. The demo's centerpiece. | Critical | Map/navigation screen |
 | 2 | **Grid layout non-functional** — `Grid` mode lays out no children and reports no rects; `wrap` is accepted and not honoured. | High | App launcher screen |
-| 3 | **No screen/navigation system** — no screen stack, tab controller, or transition system in the library. | High | Multi-screen app structure |
+| 3 | **No screen/navigation system** — no screen stack, tab controller, or transition system in the library. **Still open 2026-10-03, and deliberately so**: `TASK_UI_PRIM_24.1` builds a page mechanism **in `ui_demo`** — `enum Page`, a page-membership table, and three gates (paint, hit test, focus) — because the operator chose the demo-level route over a library task. **That is not this gap closed**: the gap is about `ui_core` carrying a screen stack for an application, and what 24.1 delivers is one page switcher inside one binary. | High | Multi-screen app structure |
 | 4 | **No Icon widget** — `Image` (task 16) displays textures but icons need vector rendering, theme tinting, and uniform sizing. **Raised 2026-10-01 from Medium to High**: the completed Layout section needs an icon for every dock item, every top-bar status item, every tab row and every indicator light — and `Polygon` is convex-only with no bezier, so this is the largest unsupported item in the design. | High | Visual quality — "real icons" requirement |
 | 5 | **Clipping has no owner.** The clip rect *is* computed, carried on the batch and set on the GPU as a scissor — but the clip is supplied by the demo's frame loop for the `List` alone, so there is no per-node clipping in the widget system. Two doc comments assert the opposite of the code beside them. **Corrected 2026-10-01; the original "never set on the GPU" claim was false.** | High | Map viewport, scroll view clipping, card page edges |
 | 6 | **No Card widget** — `Container` can be stretched to cover this, but a dedicated card with elevation/shadow matches the Tesla design language better. | Low | Visual polish |
-| 7 | **No TabBar/Dock widget** — the bottom dock can be built from `Button` + `Container`, but a dedicated widget with active-state indication and icon+label layout is the right primitive. | Low | Bottom dock implementation |
+| 7 | **No TabBar/Dock widget** — the bottom dock can be built from `Button` + `Container`, but a dedicated widget with active-state indication and icon+label layout is the right primitive. **Still open 2026-10-03, and this row is the prescription being followed**: `TASK_UI_PRIM_24.3` builds the gallery's top tab bar from exactly `Button` + `Container`. **The "active-state indication" half has no widget behind it either** — `Button` has `hovered`, `pressed`, `focused` and `disabled` and **no `selected`** (checked in `ui_core/src/widgets/button.rs` on 2026-10-03, a file that was being edited at the time), so the selected tab is a `background`/`foreground` swap the demo owns. A dedicated widget is still the right primitive for a dock that wants icon+label layout. | Low | Bottom dock implementation |
 | 8 | **Transform transitions** — screen transitions need translation, scale, and opacity animation support. The animation system handles property interpolation but transforms are not implemented in the render pipeline. **Confirmed 2026-10-01, and worse than stated: `Transform` is `Interpolate`-able, so it can be animated and then never drawn. `DrawCommand` has no transform field and there is no matrix or `u_model` uniform.** | **Critical** | Screen transition animations |
 
 ## Task structure

@@ -1508,6 +1508,7 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 color,
                 font_size,
                 extra_advance,
+                weight,
             } => DrawCommand::Text {
                 x: x + by.x,
                 y: y + by.y,
@@ -1515,6 +1516,7 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 color: *color,
                 font_size: *font_size,
                 extra_advance: *extra_advance,
+                weight: *weight,
             },
             DrawCommand::Image {
                 rect,
@@ -1578,6 +1580,27 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                     .map(|point| (point.0 + by.x, point.1 + by.y))
                     .collect(),
                 color: *color,
+            },
+            // The rect moves; the offset does not. An offset is a displacement
+            // between the shadow and the thing casting it, so adding the move to
+            // it as well would move the shadow twice and leave the pair
+            // together — which is what a translation is for.
+            //
+            // **Added 2026-10-02 for `DrawCommand::Shadow`,** which is an
+            // exhaustive match and could not be taught the new variant without
+            // this arm. See the sub-task A handoff for the wider report.
+            DrawCommand::Shadow {
+                rect,
+                radius,
+                color,
+                blur,
+                offset,
+            } => DrawCommand::Shadow {
+                rect: moved_rect(*rect, by),
+                radius: *radius,
+                color: *color,
+                blur: *blur,
+                offset: *offset,
             },
         })
         .collect()
@@ -1668,7 +1691,7 @@ fn ceil_to_usize(value: f32) -> usize {
 mod tests {
     use super::*;
     use crate::layout::{Layout, LayoutState as State};
-    use crate::paint::{Color, PaintState, Painter, TextureId, UvRect};
+    use crate::paint::{Color, FontWeight, PaintState, Painter, TextureId, UvRect};
     use std::cell::{Cell, RefCell};
 
     /// The list every virtualisation test scrolls: 100 rows 100 tall in a
@@ -2353,7 +2376,7 @@ mod tests {
     }
 
     #[test]
-    fn a_text_run_moves_and_keeps_its_text_colour_size_and_tracking() {
+    fn a_text_run_moves_and_keeps_its_text_colour_size_tracking_and_weight() {
         let command = DrawCommand::Text {
             x: 7.0,
             y: 8.0,
@@ -2361,6 +2384,7 @@ mod tests {
             color: Color::new(7, 8, 9, 255),
             font_size: 16.0,
             extra_advance: 1.5,
+            weight: FontWeight::Bold,
         };
         let moved = translate_commands(std::slice::from_ref(&command), Offset::new(664.0, 120.0));
         let DrawCommand::Text {
@@ -2370,6 +2394,7 @@ mod tests {
             color,
             font_size,
             extra_advance,
+            weight,
         } = &moved[0]
         else {
             panic!("a text run translated into something that is not a text run");
@@ -2379,6 +2404,13 @@ mod tests {
         assert_eq!(*color, Color::new(7, 8, 9, 255));
         assert_eq!(*font_size, 16.0, "a font size is not a position");
         assert_eq!(*extra_advance, 1.5, "and neither is the tracking");
+        assert_eq!(
+            *weight,
+            FontWeight::Bold,
+            "a translated bold run is still a bold run: the face it is drawn \
+             with rides in the command, so a translation that dropped it would \
+             quietly move a heading into the regular weight"
+        );
     }
 
     #[test]

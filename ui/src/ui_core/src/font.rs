@@ -16,6 +16,13 @@
 //! only `unsafe` C calls — and the operator declined `unsafe` (see
 //! `doc/ui/IMPLEMENTATION_STATE.md`). Glyphs are placed left-to-right by their
 //! advance widths, which is correct for Latin text.
+//!
+//! **Weight is a second face, not a second pass.** A run says which weight it
+//! wants ([`FontWeight`]) and the renderer resolves that against the faces it
+//! holds ([`FontSet`]); the two weights of one family are two [`Font`]s, because
+//! the advance cache is keyed by character and size alone and a shared one would
+//! measure bold with regular's widths. Nothing here synthesises weight, blends
+//! two copies of a glyph, or re-rasterizes anything at draw time.
 
 use freetype::face::LoadFlag;
 use freetype::{Face, Library};
@@ -140,6 +147,11 @@ impl AdvanceCache {
 /// label clones it to keep its own handle. The advance cache is shared across
 /// those clones too, so a character is measured once per size however many
 /// labels ask for it.
+///
+/// **One face, not one family.** Two weights of one family are two `Font`s, and
+/// not one `Font` with two faces in it: the advance cache is keyed by character
+/// and pixel size, so a second face sharing this one would be measured with the
+/// *first* face's advances. [`FontSet`] holds one of these per [`FontWeight`].
 #[derive(Clone)]
 pub struct Font {
     face: Face,
@@ -280,6 +292,327 @@ impl Font {
             bearing_y: glyph.bitmap_top(),
             advance: f266_to_pixels(glyph.advance().x),
             pixels,
+        })
+    }
+}
+
+/// The number of weights a [`FontSet`] holds a face for.
+///
+/// A constant rather than a growing map because the set of weights is closed: the
+/// two variants of [`FontWeight`] are the whole of what a draw command can ask
+/// for, and an open set would mean a request that names a face the renderer has
+/// no slot for — which is the case this design does not have to handle at all.
+pub const FACE_COUNT: usize = 2;
+
+/// The slot [`FontWeight::Regular`] lives in, and the slot a request for a
+/// weight with no face of its own falls back to.
+///
+/// It is [`FontWeight::Regular`]'s own slot rather than a second number, so the
+/// fallback cannot drift away from the weight it falls back *to*: there is one
+/// definition and it names the variant.
+const REGULAR_SLOT: usize = FontWeight::Regular.slot();
+
+/// The weight a text run asks for, and the only thing a draw command says about
+/// the face it is drawn with.
+///
+/// Two variants and no more, and that is what makes the whole of the weight
+/// mechanism total: [`FontSet`] holds one face per variant, so every value here
+/// names a slot that exists. There is no string to miss, no integer to range-
+/// check at draw time and therefore nothing to report as an error — see
+/// [`resolve_slot`] for what happens when the weight asked for is not loaded.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum FontWeight {
+    /// The face every ordinary run is drawn with.
+    ///
+    /// The **default**, so a command that says nothing about weight is the run it
+    /// was before there was a second face: a renderer holding one font draws and
+    /// measures exactly what it always did, and `Painter::text` says so by
+    /// construction rather than by a rule somewhere else.
+    #[default]
+    Regular,
+    /// The heavier face a heading is drawn with.
+    ///
+    /// A real second face, rasterized from a second file. Not a synthetic
+    /// double-strike of the regular one: two overlapping copies of a glyph
+    /// thicken it *and* widen it at every join, which is not what bold is, and
+    /// the operator chose the real face over it.
+    Bold,
+}
+
+impl FontWeight {
+    /// Every weight, in slot order.
+    ///
+    /// A public list rather than a private one so a caller that has to iterate
+    /// the weights — a test asserting every one of them resolves, a caller
+    /// pre-loading a face per weight — does not write the list out a second time
+    /// and get it out of step with the enum.
+    pub const ALL: [FontWeight; FACE_COUNT] = [FontWeight::Regular, FontWeight::Bold];
+
+    /// The slot this weight's face lives in, which is the index into a
+    /// [`FontSet`]'s faces and ids.
+    const fn slot(self) -> usize {
+        match self {
+            // 0 rather than `REGULAR_SLOT`, which is defined from this function
+            // and cannot therefore be used inside it.
+            FontWeight::Regular => 0,
+            FontWeight::Bold => 1,
+        }
+    }
+}
+
+/// The slot a run asking for `weight` is drawn with: the weight's own slot when a
+/// face is installed there, and the regular slot otherwise.
+///
+/// **This is the whole of the fallback rule, and it is in one place because two
+/// places would be two rules.** [`FontSet::resolve`] reads it to find a face, and
+/// the renderer's text pass reads the set's answer; neither decides anything of
+/// its own.
+///
+/// The fallback is **the regular face**, and it is deliberate: a heading that
+/// asks for bold on a renderer that was given one font must still be *drawn*,
+/// and drawn in the regular weight is a picture a reader can read, while not
+/// drawn is a hole in the layout. There is no `Result` because there is nothing
+/// to report — a weight with no face installed is an ordinary state, not a
+/// failure, and a caller cannot act on an error except by falling back to exactly
+/// what this does.
+///
+/// "The regular face" and not "some face": a set holding **only** a bold face
+/// draws its bold runs and draws **no regular ones**, because a regular run
+/// quietly set in bold would be a surprise with nothing to point at it, whereas a
+/// regular run that is not drawn is a hole the caller can see. Every application
+/// calls [`crate::render::Renderer::set_font`] — it is the one line a program
+/// needs to draw text at all — so a set without a regular face is a caller that
+/// deliberately has none.
+///
+/// Total: every one of [`FontWeight::ALL`] resolves without panicking whether or
+/// not either slot is filled. `None` means the set has no face for the weight
+/// asked for *and* no regular face to fall back to, which is the one case with
+/// nothing to draw with.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::font::{resolve_slot, FontWeight};
+///
+/// // Nothing installed: no run can be drawn at all.
+/// let empty: [Option<u8>; 2] = [None, None];
+/// assert_eq!(resolve_slot(&empty, FontWeight::Regular), None);
+/// assert_eq!(resolve_slot(&empty, FontWeight::Bold), None);
+///
+/// // Only the regular face, which is what a renderer given one font holds: both
+/// // weights draw with it, and neither is dropped.
+/// let regular_only: [Option<u8>; 2] = [Some(0), None];
+/// assert_eq!(resolve_slot(&regular_only, FontWeight::Regular), Some(0));
+/// assert_eq!(resolve_slot(&regular_only, FontWeight::Bold), Some(0));
+///
+/// // Both installed: each weight gets the face it asked for.
+/// let both: [Option<u8>; 2] = [Some(0), Some(1)];
+/// assert_eq!(resolve_slot(&both, FontWeight::Regular), Some(0));
+/// assert_eq!(resolve_slot(&both, FontWeight::Bold), Some(1));
+/// ```
+#[must_use]
+pub fn resolve_slot<F>(faces: &[Option<F>; FACE_COUNT], weight: FontWeight) -> Option<usize> {
+    if faces[weight.slot()].is_some() {
+        Some(weight.slot())
+    } else if faces[REGULAR_SLOT].is_some() {
+        Some(REGULAR_SLOT)
+    } else {
+        None
+    }
+}
+
+/// One installed face's identity in the glyph atlas.
+///
+/// The atlas is shared by every face the renderer holds, so a glyph's cache key
+/// has to say which face rasterized it — see `GlyphKey`, which is where the
+/// atlas's cache key spells it out. This is that third
+/// part of the key, and it is deliberately **not** the weight: it is handed out by
+/// [`FontSet::set`] every time a face is installed, so a renderer that swaps its
+/// bold file cannot serve the glyphs of the file it no longer holds. A newtype
+/// rather than a bare `u32` because the two are not interchangeable, and this is
+/// the one value whose confusion draws a letter in the wrong weight with no error
+/// anywhere.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct FaceId(u32);
+
+impl FaceId {
+    /// Returns the number this id wraps.
+    ///
+    /// For a caller keeping an id beside its own bookkeeping; nothing in this
+    /// crate needs the number rather than the id.
+    #[must_use]
+    pub fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// One face as the glyph atlas needs it: the [`Font`] to rasterize from, and the
+/// [`FaceId`] its glyphs are cached under.
+///
+/// A pair rather than two arguments to [`GlyphAtlas::get_or_insert`] because the
+/// two must not be able to disagree: the atlas keys on the id and rasterizes from
+/// the font, so a caller that passed one face's id with another face's outlines
+/// would cache a glyph under the wrong key and draw the wrong weight for every
+/// later run — a defect invisible until two weights are on screen at once. There
+/// is exactly one way to make this value, [`FontSet::resolve`].
+#[derive(Clone, Copy)]
+pub struct FaceRef<'a> {
+    font: &'a Font,
+    id: FaceId,
+}
+
+impl std::fmt::Debug for FaceRef<'_> {
+    /// Prints the face's id and nothing else.
+    ///
+    /// Not derived because `Font` is not `Debug` — it holds a FreeType handle,
+    /// which has nothing to print that means anything — and a `Debug` that could
+    /// not be derived would have to leave the field out anyway. The id is the half
+    /// that says which face this is.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FaceRef")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> FaceRef<'a> {
+    /// Returns the face to rasterize from.
+    #[must_use]
+    pub fn font(&self) -> &'a Font {
+        self.font
+    }
+
+    /// Returns the identity this face's glyphs are cached under.
+    #[must_use]
+    pub fn id(&self) -> FaceId {
+        self.id
+    }
+}
+
+/// The identities the faces of a [`FontSet`] are cached under, one per slot.
+///
+/// Separate from `FontSet` for the reason [`AdvanceCache`] is: a `Font` cannot be
+/// made without a font file, which a unit test may not open, and the rule worth
+/// testing here — **every install is a new identity**, so replacing a weight
+/// cannot leave the atlas serving the glyphs of the file that has just been
+/// dropped — is a rule about ids and not about FreeType.
+#[derive(Clone, Debug)]
+struct FaceIds {
+    /// The id the next installed face is given.
+    next: u32,
+    /// The id each slot holds, which is meaningless for a slot nothing has been
+    /// installed in and is never read for one.
+    slots: [FaceId; FACE_COUNT],
+}
+
+impl FaceIds {
+    fn new() -> Self {
+        FaceIds {
+            next: 0,
+            slots: [FaceId(0), FaceId(0)],
+        }
+    }
+
+    /// Returns an identity no face in this set has held.
+    ///
+    /// A counter rather than the slot's index because the slot is not the
+    /// identity: a face installed in one slot may be replaced by a different file
+    /// later, and the glyphs of the first one must not be found for the second.
+    /// It only has to differ from the identities already handed out, so it is
+    /// never read back and wrapping after `u32::MAX` installs is not a hazard any
+    /// process will reach.
+    fn issue(&mut self) -> FaceId {
+        let id = FaceId(self.next);
+        self.next = self.next.wrapping_add(1);
+        id
+    }
+
+    /// Records `id` as the identity of the face in `slot`.
+    fn install(&mut self, slot: usize, id: FaceId) {
+        self.slots[slot] = id;
+    }
+
+    /// Returns the identity of the face installed in `slot`.
+    fn get(&self, slot: usize) -> FaceId {
+        self.slots[slot]
+    }
+}
+
+/// The faces a renderer draws text with: one per [`FontWeight`], and the
+/// identity each is cached under in the glyph atlas.
+///
+/// **One [`Font`] per weight, not one font with two faces inside it.** The
+/// advance cache is keyed by character and pixel size, so a second face sharing
+/// one `Font` would be measured with the *first* face's advances — bold drawn
+/// with regular spacing, which is a defect in the opposite direction from bold
+/// drawn with regular ink, and one that only shows where two runs of different
+/// weight sit side by side. Two `Font`s means two caches, each holding its own
+/// face's measurements, and a face nothing asks for is never measured at all.
+///
+/// The cost of holding a face nothing uses is two handles: a FreeType library
+/// and a face. Neither rasterizes anything until a run asks, so a renderer that
+/// installs only the regular face measures and draws exactly what it did before,
+/// and [`resolve_slot`] never looks at a slot it does not need.
+#[derive(Clone)]
+pub struct FontSet {
+    faces: [Option<Font>; FACE_COUNT],
+    /// The identity each slot's glyphs are cached under, handed out by `set`.
+    ids: FaceIds,
+}
+
+impl Default for FontSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FontSet {
+    /// Creates a set holding no face, which draws no text.
+    #[must_use]
+    pub fn new() -> Self {
+        FontSet {
+            faces: [None, None],
+            ids: FaceIds::new(),
+        }
+    }
+
+    /// Installs `font` as the face for `weight`, replacing whatever was there.
+    ///
+    /// The face is given a **fresh** [`FaceId`] every time it is installed,
+    /// including the first: the id is *this file's* identity in the atlas, not
+    /// the slot's name, so replacing a weight re-rasterizes rather than serving
+    /// glyphs rasterized from the file that has just been dropped. Which number
+    /// that is depends on the order the faces were installed in, and nothing
+    /// depends on the number — the atlas only ever compares ids.
+    pub fn set(&mut self, weight: FontWeight, font: Font) {
+        let id = self.ids.issue();
+        let slot = weight.slot();
+        self.faces[slot] = Some(font);
+        self.ids.install(slot, id);
+    }
+
+    /// Returns whether the set holds no face at all.
+    ///
+    /// The renderer's text pass asks this before it walks a batch, because a
+    /// renderer with no font draws no text — which is what it did before there
+    /// were two weights, and asking here is what keeps that path as free as it
+    /// was rather than free modulo a per-command resolution.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.faces.iter().all(Option::is_none)
+    }
+
+    /// Returns the face a run asking for `weight` is drawn with.
+    ///
+    /// `None` only for a set with no face at all; a weight with no face of its
+    /// own resolves to the regular one, per [`resolve_slot`].
+    #[must_use]
+    pub fn resolve(&self, weight: FontWeight) -> Option<FaceRef<'_>> {
+        let slot = resolve_slot(&self.faces, weight)?;
+        let font = self.faces[slot].as_ref()?;
+        Some(FaceRef {
+            font,
+            id: self.ids.get(slot),
         })
     }
 }
@@ -451,11 +784,23 @@ pub struct GlyphPlacement {
     pub advance: f32,
 }
 
-/// The key identifying a glyph in the atlas: the character and its pixel size.
+/// The key identifying a glyph in the atlas: the character, its pixel size, and
+/// the face that rasterized it.
+///
+/// **The face is part of the key because the atlas is shared by every face the
+/// renderer holds.** Everything the atlas stores about a glyph is that face's own
+/// — the coverage bitmap, the bearings that place it against the pen, and the
+/// advance the next glyph starts after — so a key of character and size alone
+/// would hand a bold run the *regular* glyph's quad: one letter in the wrong
+/// weight, drawn from the right UVs, with no error anywhere. `face` is the
+/// [`FaceId`] rather than the [`FontWeight`] because it is the identity of the
+/// file that was rasterized, which is what changes when a weight is reinstalled
+/// and is not what the run asked for.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 struct GlyphKey {
     ch: char,
     size: u32,
+    face: FaceId,
 }
 
 /// One shelf of the atlas: a horizontal row of glyphs with a shared height.
@@ -474,7 +819,8 @@ struct Row {
 /// `height`.
 type FreeSpan = (u32, u32);
 
-/// The glyph atlas: a square texture of signed distance fields.
+/// The glyph atlas: a square texture of glyph coverage, for every face the
+/// renderer holds.
 ///
 /// Glyphs are packed into shelves (rows). When the atlas fills up, the least
 /// recently used shelf is evicted — its glyphs are dropped, its pixels cleared
@@ -538,20 +884,41 @@ impl GlyphAtlas {
         Some(&self.pixels)
     }
 
-    /// Returns the placement of `ch` at `size`, rasterizing and packing it if
-    /// it is not already in the atlas.
+    /// The key `ch` at `size` is cached under in `face`: the character, the
+    /// pixel count the size rounds to, and the face's identity.
     ///
-    /// Returns `None` if the font has no glyph for `ch`.
-    pub fn get_or_insert(&mut self, ch: char, size: f32, font: &Font) -> Option<GlyphPlacement> {
-        let key = GlyphKey {
+    /// One function builds every key, so a cache that cannot tell two faces apart
+    /// would have to be wrong here rather than in one lookup: the size is the
+    /// rounded pixel count because that is the size the face is actually set to,
+    /// and the face is part of the key because the atlas is shared by all of them.
+    fn key_for(ch: char, size: f32, face: FaceId) -> GlyphKey {
+        GlyphKey {
             ch,
             size: f32_to_u32(size.max(0.0)).max(1),
-        };
+            face,
+        }
+    }
+
+    /// Returns the placement of `ch` at `size` in `face`, rasterizing and
+    /// packing it if it is not already in the atlas.
+    ///
+    /// The same character at the same size in a different face is a **different**
+    /// glyph — different coverage, different bearings, different advance — so it
+    /// is packed separately and looked up separately; see `GlyphKey`.
+    ///
+    /// Returns `None` if the font has no glyph for `ch`.
+    pub fn get_or_insert(
+        &mut self,
+        ch: char,
+        size: f32,
+        face: FaceRef<'_>,
+    ) -> Option<GlyphPlacement> {
+        let key = Self::key_for(ch, size, face.id());
         if let Some(&placement) = self.glyphs.get(&key) {
             self.touch_row(placement.row_y);
             return Some(placement);
         }
-        let bitmap = font.rasterize(ch, size)?;
+        let bitmap = face.font().rasterize(ch, size)?;
         let padded = pad_bitmap(&bitmap, COVERAGE_PAD);
         let glyph = make_coverage(&padded);
         let (x, y) = self.allocate(glyph.width, glyph.height)?;
@@ -929,5 +1296,251 @@ mod atlas_tests {
         clone.set('b', 20, 3.0);
         assert_eq!(cache.get('b', 20), Some(3.0), "and the other way round");
         assert_eq!(cache.len(), 2, "one cache, not two");
+    }
+}
+
+/// The tests below are about the second weight: which face a request resolves
+/// to, and what the atlas then does with the same letter at two weights.
+///
+/// Neither needs a font file, and neither could: rasterizing needs a real face,
+/// and a unit test may not open one. What *can* be tested is everything the
+/// weight decides before FreeType is called — the slot a request lands in, and
+/// the key the atlas files a glyph under — and that is where both mistakes this
+/// feature invites would have to be made.
+#[cfg(test)]
+mod weight_tests {
+    use super::*;
+
+    /// A glyph's placement, off the origin and with a size the assertions can
+    /// tell apart: an atlas placement at `(0, 0)` with the default metrics cannot
+    /// be told from any other, which is the same reason `.ai/NEVERAGAIN.md` § *A
+    /// rect's origin and a rect's extent are different numbers* exists.
+    fn placement(x: f32, advance: f32) -> GlyphPlacement {
+        GlyphPlacement {
+            u0: x / 1024.0,
+            v0: 0.0,
+            u1: (x + 8.0) / 1024.0,
+            v1: 8.0 / 1024.0,
+            row_y: 16,
+            width: 8,
+            height: 8,
+            bearing_x: 1,
+            bearing_y: 7,
+            advance,
+        }
+    }
+
+    /// The two faces a renderer holds once a regular and a bold one are installed,
+    /// as the stand-ins `resolve_slot` reads: the weight's slot is what matters,
+    /// not what the face is.
+    fn both_faces() -> [Option<&'static str>; FACE_COUNT] {
+        [Some("regular"), Some("bold")]
+    }
+
+    #[test]
+    fn the_weight_a_run_asks_for_is_the_slot_it_resolves_to() {
+        let faces = both_faces();
+        assert_eq!(resolve_slot(&faces, FontWeight::Regular), Some(0));
+        assert_eq!(resolve_slot(&faces, FontWeight::Bold), Some(1));
+    }
+
+    #[test]
+    fn a_weight_with_no_face_of_its_own_is_drawn_with_the_regular_one() {
+        // The fallback, stated as a fact rather than as an absence of errors: a
+        // bold run on a renderer given one font is *drawn*, in the regular face.
+        let regular_only: [Option<&'static str>; FACE_COUNT] = [Some("regular"), None];
+        assert_eq!(
+            resolve_slot(&regular_only, FontWeight::Bold),
+            Some(0),
+            "a heading that asked for bold and got the regular face is readable; \
+             one that resolved to nothing is a hole in the layout"
+        );
+    }
+
+    #[test]
+    fn every_weight_resolves_and_none_of_them_panics() {
+        // Total is the whole claim: there is no `Result` to return from a
+        // resolution and nothing for a caller to handle, so every one of the
+        // weights has to answer whatever is installed, including nothing.
+        let empty: [Option<&'static str>; FACE_COUNT] = [None, None];
+        let regular_only: [Option<&'static str>; FACE_COUNT] = [Some("regular"), None];
+        let both = both_faces();
+        for weight in FontWeight::ALL {
+            assert_eq!(
+                resolve_slot(&empty, weight),
+                None,
+                "{weight:?}, nothing held"
+            );
+            assert_eq!(
+                resolve_slot(&regular_only, weight),
+                Some(0),
+                "{weight:?}, only the regular face held"
+            );
+            assert!(
+                resolve_slot(&both, weight).is_some(),
+                "{weight:?}, both faces held"
+            );
+        }
+    }
+
+    #[test]
+    fn a_set_with_only_a_bold_face_draws_its_bold_runs_and_none_of_the_others() {
+        // The one set that answers differently per weight, and the reason the
+        // fallback is the *regular* face rather than any face at all: a regular
+        // run quietly set in bold would be a surprise with nothing to point at,
+        // while a regular run that is not drawn is a hole the caller can see.
+        let bold_only: [Option<&'static str>; FACE_COUNT] = [None, Some("bold")];
+        assert_eq!(resolve_slot(&bold_only, FontWeight::Bold), Some(1));
+        assert_eq!(resolve_slot(&bold_only, FontWeight::Regular), None);
+    }
+
+    #[test]
+    fn a_set_with_no_face_at_all_resolves_to_nothing_rather_than_a_wrong_one() {
+        // The one case that is `None`, and it is the case the renderer had before
+        // there was a second weight: no font, no text.
+        let empty: [Option<&'static str>; FACE_COUNT] = [None, None];
+        for weight in FontWeight::ALL {
+            assert_eq!(resolve_slot(&empty, weight), None);
+        }
+    }
+
+    #[test]
+    fn the_default_weight_is_the_regular_face() {
+        // What keeps "a caller that never asks for bold gets today's behaviour"
+        // true without a rule anywhere: `Default` is what a command built without
+        // a weight gets, and a `Painter::text` names it explicitly.
+        assert_eq!(FontWeight::default(), FontWeight::Regular);
+        assert_eq!(FontWeight::ALL[0], FontWeight::default());
+    }
+
+    #[test]
+    fn the_regular_slot_is_the_slot_the_fallback_lands_on() {
+        // The two are one definition: `REGULAR_SLOT` is written from
+        // `FontWeight::Regular.slot()`, and this says the enum's own numbering
+        // has not moved out from under it.
+        assert_eq!(REGULAR_SLOT, 0);
+        assert_eq!(FontWeight::Regular.slot(), REGULAR_SLOT);
+        assert_ne!(FontWeight::Bold.slot(), REGULAR_SLOT);
+    }
+
+    #[test]
+    fn every_weight_names_a_slot_the_set_has_room_for() {
+        // A weight whose slot was outside the array would be an index panic in the
+        // middle of a frame; the array length and the enum are two numbers that
+        // have to agree, which is what this is.
+        assert_eq!(FontWeight::ALL.len(), FACE_COUNT);
+        for weight in FontWeight::ALL {
+            assert!(weight.slot() < FACE_COUNT, "{weight:?} is addressable");
+        }
+    }
+
+    #[test]
+    fn the_same_letter_in_two_faces_is_two_atlas_entries() {
+        // The feature and its only silent failure: 'a' at 20 pixels, once
+        // rasterized from the regular face and once from the bold one, must be
+        // found separately — a key without the face would hand the bold run the
+        // regular glyph's quad, one letter in the wrong weight with no error.
+        let mut atlas = GlyphAtlas::new(1024);
+        let regular = FaceId(0);
+        let bold = FaceId(1);
+        let key_regular = GlyphAtlas::key_for('a', 20.0, regular);
+        let key_bold = GlyphAtlas::key_for('a', 20.0, bold);
+        assert_ne!(
+            key_regular, key_bold,
+            "'a' at 20 pixels in Lato-Medium and 'a' at 20 pixels in Lato-Bold \
+             are different glyphs and the key has to say which face rasterized it"
+        );
+
+        atlas.glyphs.insert(key_regular, placement(8.0, 10.0));
+        atlas.glyphs.insert(key_bold, placement(64.0, 12.0));
+
+        let found_regular = atlas.glyphs.get(&key_regular).copied();
+        let found_bold = atlas.glyphs.get(&key_bold).copied();
+        assert_eq!(
+            found_regular.map(|p| p.advance),
+            Some(10.0),
+            "the regular one"
+        );
+        assert_eq!(
+            found_bold.map(|p| p.advance),
+            Some(12.0),
+            "and the bold one is the bold one's glyph, not the regular glyph found \
+             under a second key"
+        );
+        assert_eq!(atlas.glyphs.len(), 2, "two entries, not one overwritten");
+        assert_eq!(
+            found_bold.map(|p| p.u0),
+            Some(64.0 / 1024.0),
+            "each face's glyph is packed where it was put"
+        );
+    }
+
+    #[test]
+    fn the_face_is_part_of_the_key_and_the_character_and_size_still_are() {
+        // The other direction: adding the face must not make the key *only* the
+        // face, or every glyph would be one entry per face and the atlas would
+        // hold one letter.
+        let face = FaceId(3);
+        assert_ne!(
+            GlyphAtlas::key_for('a', 20.0, face),
+            GlyphAtlas::key_for('b', 20.0, face)
+        );
+        assert_ne!(
+            GlyphAtlas::key_for('a', 20.0, face),
+            GlyphAtlas::key_for('a', 21.0, face)
+        );
+        assert_eq!(
+            GlyphAtlas::key_for('a', 20.0, face),
+            GlyphAtlas::key_for('a', 20.0, face)
+        );
+    }
+
+    #[test]
+    fn the_size_in_the_key_is_the_pixel_count_the_face_is_set_to() {
+        // Unchanged by the face, and pinned because the atlas's own tests would
+        // not notice: a float key would store the same glyph twice for two sizes
+        // that round to the same pixel count.
+        assert_eq!(GlyphAtlas::key_for('a', 20.4, FaceId(0)).size, 20);
+        assert_eq!(GlyphAtlas::key_for('a', 0.0, FaceId(0)).size, 1);
+    }
+
+    #[test]
+    fn each_installed_face_is_given_an_identity_of_its_own() {
+        let mut ids = FaceIds::new();
+        let first = ids.issue();
+        let second = ids.issue();
+        assert_ne!(
+            first, second,
+            "two faces cached under one identity would share every glyph in the \
+             atlas, whichever weight they were rasterized from"
+        );
+    }
+
+    #[test]
+    fn a_reinstalled_face_gets_an_identity_the_previous_one_never_had() {
+        // The rule the atlas key depends on when a renderer swaps its bold file:
+        // the glyphs of the file that has just been dropped must not be found for
+        // the file that is there now, and the only thing that can separate them is
+        // a new identity.
+        let mut ids = FaceIds::new();
+        let regular = ids.issue();
+        let bold = ids.issue();
+        ids.install(FontWeight::Regular.slot(), regular);
+        ids.install(FontWeight::Bold.slot(), bold);
+
+        let bold_again = ids.issue();
+        ids.install(FontWeight::Bold.slot(), bold_again);
+
+        assert_ne!(bold_again, bold, "the replaced face is a different face");
+        assert_eq!(
+            ids.get(FontWeight::Bold.slot()),
+            bold_again,
+            "and the slot holds the one that is installed now"
+        );
+        assert_eq!(
+            ids.get(FontWeight::Regular.slot()),
+            regular,
+            "while the other slot is untouched by one slot being replaced"
+        );
     }
 }

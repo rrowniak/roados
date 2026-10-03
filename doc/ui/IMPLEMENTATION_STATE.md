@@ -8,14 +8,34 @@ and this file gets corrected.
 **Spec:** `doc/ui/PRIMITIVES.md`, `doc/ui/PRIMITIVES_ARCHITECTURE.md`, and
 `doc/ui/TASK_UI_PRIM_01..32.md`.
 
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-03
 
 ## Current position
 
-**Status: task 21 (Chart) reviewed twice, uncommitted, awaiting the operator's
-commit.** Task 20 is
-committed as `79941cd`, task 19 as `b4a2db8`, tasks 15–18 as `d7240c8`, the
-frame-rate readout as `3ddf5fa`. **Task 21 is the first task in this sequence to
+**Status: task 22 (Dialog) reviewed once, uncommitted, awaiting the operator's
+commit.** Task 21 is committed as `64d2b97`, task 20 as `79941cd`, task 19 as
+`b4a2db8`, tasks 15–18 as `d7240c8`, the frame-rate readout as `3ddf5fa`.
+
+**Task 24 was amended on 2026-10-03 and split into 24.1, 24.2 and 24.3; none of
+them is started.** It had been marked superseded since 2026-09-30. The gallery
+is kept, grouped into six pages behind a tab bar at the **top** of the window,
+with `--tab=<name>` to land on a page without clicking. See § *Task table* for
+the split and the three measured facts behind it. **Task 23 (Toast) is still the
+next task to start.**
+
+**Task 22 was the largest task in this sequence by a wide margin, and it is
+mostly not a widget.** Four **sequential** sub-tasks under
+`.ai/protocols/subagents.md` § *Implementation fan-out*, because the task file
+asked for three things this pipeline did not have — a blurred shadow, a bold
+title, and a cached background — and the operator chose to build two of them.
+The net is **1740 tests** from a baseline of 1592, and **three pipeline changes
+that no acceptance criterion asked for**: a segmented submission order, an
+offscreen blur target, and a second FreeType face. **One acceptance criterion is
+deviated rather than met**, with the reason recorded rather than reinterpreted,
+and **the sentence this file first offered as evidence for it was false** — the
+review caught it. See *Task 22 — what it decided, and what it found*.
+
+**Task 21 was the first task in this sequence to
 go through `reviewer.md` twice** — task 20 was committed without ever being
 reviewed, the operator's decision, and this file recorded it as one. The
 *No unreviewed advance* gate skipped twice running is **closed as of this
@@ -31,6 +51,825 @@ tasks 19 and 20 both read *implemented, uncommitted* while both have been
 committed since 2026-10-02. The rule this file is written under is that it may
 not contradict its artefact, so a state file nobody re-reads is worse than no
 state file.
+
+## Task 22 — what it decided, and what it found
+
+**Four decisions, taken 2026-10-03 before any code was written**, each put to
+the operator with the facts behind it. The first and the fourth are the ones that
+changed the shape of the task by an order of magnitude, and **three of the four
+are the same shape: the task file asks for something this pipeline does not
+have.**
+
+1. **The panel's shadow is a real blur, and the renderer gains one.** Task 22
+   requirement 5 asks for a *"blurred rounded rect behind panel"*, and at the
+   time of asking there was no blur to ask for: no FBO anywhere in `ui_core`
+   (`render/context.rs:43` says so in as many words), the solid shader's only
+   antialiasing branch is a hard `discard` on an axis-aligned rounded rectangle
+   (`render.rs:143`), and `Painter` exposes no shader or filter hook. **The
+   operator chose to add the blur pass** over stacking concentric rounded rects
+   and over dropping the shadow. The cost is stated below and it is large: this
+   is a pipeline change, not a widget.
+2. **"Content behind dialog is not re-rendered (cached)" is read as the paint
+   cache the pipeline has**, not as a cached bitmap. There is no
+   render-to-texture, so a cached *image* is not buildable. **The sentence this
+   file originally offered as the evidence was false, and the review caught it:
+   it said the nodes behind a dialog "keep the draw commands they already
+   recorded in their `PaintState`", and they do not.** `Demo::frame` assigns
+   `*node.paint_mut() = PaintState::from_commands(..)` for **every** node in
+   `self.order` on **every** frame, with no `is_dirty` test anywhere in the paint
+   loop (`main.rs:4361`, and the only `is_dirty` reads in the demo are two *test*
+   assertions about layout). So the gallery is re-recorded every frame **with or
+   without a dialog**, and a dialog costs **no extra recording** — which is a
+   different and much smaller claim than the one this file made. The operator's
+   *reading* stands; the evidence is corrected here, and requirement 5's
+   "not re-rendered" is recorded as **deviated**, not met.
+3. **The demo's dialog is visible at launch and a key toggles it.** Acceptance
+   criterion 7 wants a dialog on screen, and input injection is unreliable on
+   this host — task 21's positive control had `T` moving 212 px, and pointer
+   injection has never delivered anything at all. Starting visible is the only
+   route to the capture that needs no instrument, and § *Verifying a change
+   that draws* is the reason.
+4. **The title is really bold, and the text pipeline gains a second face.**
+   Requirement 2 asks for a *"Title: bold text at top of panel"* and the text
+   pipeline could not draw one: `font.rs` held a single FreeType `Face`, with
+   zero occurrences of `weight`, `bold` or `face_index`, and `DrawCommand::Text`
+   carried no weight at all. **The operator chose real weight over a synthetic
+   double-strike** — a second pipeline change, `Lato-Bold.ttf` being installed
+   on this host.
+
+**The pattern is worth naming, because it is the third time this sequence has
+produced it**: a task file describes a control in terms of the framework that
+would implement it, and this repository's renderer is deliberately smaller than
+that framework. Each time the honest move has been to put the gap in front of the
+operator with the facts and let them choose between *build the missing piece* and
+*record the deviation* — never to quietly reinterpret the requirement.
+
+### The finding that made this four sub-tasks: the batcher cannot stack an
+### opaque widget over a translucent one
+
+**A modal dialog is the first thing in this application that puts an opaque
+primitive on top of a translucent one**, and `Batcher::finish` (`batch.rs:146`)
+cannot express that order at all. It drains the recorded batches into an
+**opaque group in recording order** and a **transparent group reversed**, and
+`Renderer::end_frame` (`render.rs:1521-1537`) draws the opaque group first. So:
+
+- the dialog's overlay — a `Rect` at alpha 128 — lands in the **transparent**
+  group,
+- the dialog's panel — a `RoundedRect` at the theme's `Surface`, which is
+  opaque in both themes — lands in the **opaque** group,
+- and the opaque group is drawn **first**, so the overlay lands **on top of the
+  panel** and dims it.
+
+That is requirement 5's *"Overlay rendered first … Panel rendered on top"*
+inverted, and it is not a defect a draw-command assertion can see: both commands
+are recorded, both in the right order, both with the right colour. It is the
+`.ai/NEVERAGAIN.md` entry § *A draw-command assertion cannot see where a command
+lands*, reached from the batching layer rather than from a widget.
+
+**Nothing in the tree hits it today, and that is why it survived.** The only
+translucent-over-opaque stacks the demo has are a button's press overlay, the
+scrollbar's groove and the gauge's fill — all recorded **after** the opaque
+thing they sit on, which is exactly the order the grouping already gets right.
+The grouping is not wrong; it is *specialised* to that one direction, and a
+dialog is the first caller of the other one.
+
+**The fix is to stop reordering across a boundary.** `finish` must split the
+recorded stream at each shadow command into **segments**, give each segment the
+existing opaque/transparent treatment, and hand `end_frame` the segments **in
+order** — so the dialog arrives as `[overlay]` → shadow composite → `[panel]`.
+This is a change to the submission order of every frame in the application, which
+is exactly the class of change this repository has been bitten by, and it is why
+sub-task A carries an on-screen proof rather than a green suite.
+
+### The four sub-tasks, and why they are sequential
+
+`developer.md` § *Scope check* puts this over the threshold on both counts — more
+than five files, more than three independent components — so it is split per
+`.ai/protocols/subagents.md` § *Implementation fan-out*. They are **sequential,
+not parallel**, and the reason is that each one reads a type the previous one
+creates: a brief that says "use the `Foo` another subagent is writing" gets that
+subagent to invent `Foo`.
+
+| # | Sub-task | Files it owns | Why it needs the one before |
+|---|---|---|---|
+| A | the blurred-shadow layer: a `Shadow` draw command, the segmented submission, an offscreen target and a separable Gaussian | `paint.rs`, `batch.rs`, `render.rs`, `render/target.rs`, `render/blur.rs` | — |
+| B | the Dialog widget | `widgets/dialog.rs`, `widgets/mod.rs` | records the `Shadow` command A adds |
+| D | real font weight: a second FreeType face, `FontWeight` on `DrawCommand::Text`, an atlas keyed by face | `font.rs`, `paint.rs`, `render.rs` | **A and B both hold `paint.rs`**, so D could not run beside either |
+| C | the demo wiring and the bold title | `ui_demo/src/main.rs`, `widgets/dialog.rs` | builds against the Dialog API B settles and the weight D adds |
+
+**A, B and D were each verified on screen, and each had to be** — they change
+what is drawn and how a frame is submitted, and no unit test in this repository
+can see either. A and D proved their feature with a **temporary seed, reverted
+before the subagent returned** — the technique § *Verifying a change that draws*
+records for the slider's focus ring, and named in the record for the same reason.
+**C needed no seed at all**: the operator's decision to have the dialog visible
+at launch makes it the one capture in this task that is unambiguously a capture
+of the real demo.
+
+### Sub-task A — what landed, and the two things it found
+
+**Delivered** 2026-10-03 by a `general` subagent, integrated and re-verified by
+the orchestrator. `DrawCommand::Shadow { rect, radius, color, blur, offset }` and
+`Painter::shadow`, where **`blur` is the Gaussian's standard deviation in
+pixels** and not a "reach": a truncated kernel's last tap sits at a different
+fraction of its peak for every truncation, so two shadows with the same reach
+and different sharpness are not expressible as a reach. `Batcher::submit_order`
+returns `Vec<Segment>`; `Segment { opaque, transparent, shadow: Option<Batch> }`
+carries the shadow **as a `Batch`** so its clip rides along. The offscreen
+target is **window-sized, single-channel `GL_R8`** and ping-ponged through three
+swaps; the composite **tints at the end** rather than carrying colour through
+the blur, which is algebraically identical because `blur(rgb·a) = rgb·blur(a)`
+for a constant colour, at a quarter of the bandwidth.
+
+Suite after: **1307 + 139 + 199 = 1645**, from a baseline of 1592. `cargo fmt
+--check` and `cargo clippy -- -D warnings` clean, `cargo doc` without warnings.
+Two deliberate breaks, both killed: the segmentation (10 failures) and the
+kernel normalisation (1 failure, and the raw sum it prints is **4.90** at σ=2,
+which is what makes that test able to fail).
+
+#### Finding 1 — splitting the stream is necessary but not sufficient
+
+**The brief this sub-task worked from was wrong**, and the subagent said so
+rather than building what it was told. Splitting the recorded stream at each
+shadow is **not** enough, because **merging happens at record time** in
+`Batcher::add_clipped`: two commands on opposite sides of a shadow that share a
+key and a clip become **one batch**, and one batch has one position in the
+stream. For a modal dialog that is precisely the defect the segmentation exists
+to fix — the window background and the panel are both solid, opaque and
+unclipped, so they would merge, and the panel would be submitted **before** the
+translucent overlay it is supposed to sit on top of, and dimmed.
+
+**The fix is that a shadow key [`BatchKey::is_singleton`] both starts its own
+batch and _seals_ the open one**, so nothing recorded after it can merge into
+anything recorded before it. The test that would have caught the brief's version
+is `nothing_recorded_after_a_shadow_shares_a_batch_with_nothing_before_it`.
+
+#### Finding 2 — three GL defects, and `gl.get_error()` read zero for all of them
+
+Found by the on-screen capture, and **none of the three is a unit-test failure**:
+
+1. `glFramebufferTexture2D` raises **`GL_INVALID_OPERATION` when the framebuffer
+   is not currently bound** on Mesa 26.0.8. The attachment silently does not take
+   effect and the first frame's mask draw returns
+   `GL_INVALID_FRAMEBUFFER_OPERATION`. Fixed by binding before attaching.
+2. The mask wrote coverage into `.a`, which an **`GL_RED`** attachment discards —
+   **a window with no shadow on it at all**, which is why the demo looked
+   unchanged and the fps was unchanged.
+3. **`u_resolution` and `u_size` were set before `use_program`**, so they went to
+   whichever program the previous pass left bound, and the composite drew
+   `a_pos / vec2(0.0)` — no fragments.
+
+**`gl.get_error()` read `0x0` at all 1240 probe points and the frame rate never
+moved from 62 fps** throughout. That is the sharpest statement of
+`.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad* this repository
+has: a GL error flag is not a witness, a flat frame rate is not a witness, and
+only the pixels are.
+
+#### The blur, measured rather than asserted
+
+A **temporary seed in `Demo::new`** — reverted, and `git diff` on the demo file
+shows only the one match arm described below — recorded one shadow with
+`blur 2.0` beside a solid panel. Window `0x100002f`, `pgrep` confirming the
+process alive in the same call as every capture.
+
+**Ramp width: 8 pixels of intermediate values**, monotonically decreasing with no
+repeated value, against a **panel edge that steps in 1 pixel**. The coverage
+sequence across the edge is `0.7451 0.7245 0.6751 0.5829 0.4486 0.2965 0.1622
+0.0700 0.0206 0.0000` — its 50% crossing falls **between the two samples
+straddling the geometric edge**, which is what a symmetric kernel of σ=2 centred
+on that edge does.
+
+**The orchestrator recomputed all ten composited values** from
+`colour·cov + dst·(1−cov)` with `colour = (40, 24, 72)` and `dst = (18, 18, 18)`:
+**every one lands on its measured 8-bit value within one level.** The
+non-premultiplied form would predict `r = 45` at the first sample where the
+measurement reads `34`, so the measurement discriminates the two forms rather
+than merely being consistent with one.
+
+#### The cost: not measurable on this host, and the constant does not rest on it
+
+`.ai/tools/fps-check.sh`, **release**: `620 frames in 10.004s`, **62.0 fps**
+against a baseline of 61.9 / 62.0 / 62.2 — indistinguishable. **That number
+covers no shadow**, since the seed is reverted. Three interleaved six-second CPU
+windows from `/proc/<pid>/stat`, at 9 taps and at 17, **overlap completely**
+with the no-shadow set. **A full-window offscreen target and two blur passes are
+not measurable at 1280×1020 on this host, and neither is twice that.**
+
+So `blur::MAX_TAPS = 9` **rests on the kernel's width argument and the measured
+8-pixel ramp, not on a frame-rate difference**, and both the module and the
+handoff say so rather than claiming a measurement that does not discriminate.
+**What would settle it** is the same interleaved comparison on a
+fill-rate-bound target — a 1080p head-unit panel rather than this machine's
+Intel HD 530 — which is the host this project actually ships to.
+
+#### Forced scope expansion: three exhaustive matches outside the brief
+
+Adding a variant to a public enum breaks every **exhaustive** `match` over it,
+and three exist outside the files the brief allocated. `#[non_exhaustive]` does
+not help **within the defining crate**, and there is no variant that needs no
+arm, so this was not avoidable:
+
+- `widgets/list.rs` `translate_commands` — the shadow's `rect` moves, its
+  `offset` does **not**: an offset is the displacement between a shadow and its
+  caster, so translating it too would move the shadow twice.
+- `widgets/scroll.rs` `command_bounds` — the bounds are the `rect` **grown by
+  `blur::reach`**, not the `rect`, because the blur spreads the shape past every
+  edge and bounds from the `rect` would let a scissor cut the soft edge off.
+- `ui_demo/src/main.rs` `command_box`, a **`#[cfg(test)]` helper**: one arm on
+  the existing `panic!` arm. **This is why the demo file is not byte-identical** —
+  the alternative was a tree that does not compile, which breaks the suite gate,
+  the capture and the fps run at once. Sub-task C owns that file and may drop
+  the arm once it builds against the Dialog API.
+
+### Sub-task B — the Dialog widget, and the third pipeline gap it hit
+
+`widgets/dialog.rs`, 2707 lines, 34 unit tests and 8 doctests. Suite after:
+**1341 + 139 + 207 = 1687**, nothing down from sub-task A's 1645. `fmt` and
+`clippy -D warnings` clean, `cargo doc` warning-free.
+
+**The structure**: one dialog node with each action's `Button` node attached to
+it — a root with children, so `input::route` reaches a button from inside the
+panel and the buttons can go in the `Focus` order. **`add_action` wraps each
+button's `on_click` in the dialog's own dismissal**, so the dismissal lives in
+the callback rather than in the tap handler. That is deliberate: `Focus` hands an
+activation key to the *button node itself*, so a dismissal written in
+`on_event` would be routed around and **OK would close nothing**. The cost is
+three `Rc`s per action and the fact that rewriting `button.on_click` after
+`add_action` replaces the wrapper — documented on `DialogAction`.
+
+**Hit testing and drawing read one `Geometry`**, recomputed per frame including
+the live scale, so a tap lands where the button is painted on every frame of the
+animation rather than only at rest. That is `.ai/NEVERAGAIN.md` § *A drawn
+control with nothing behind it* applied in advance: the buttons are real
+`Button` widgets with their own nodes, not shapes the dialog's `paint` draws.
+
+Paint order is **overlay → shadow → panel → text → buttons**, asserted on
+**indices** rather than counts — a count passes in three wrong orderings, which
+is the same correction sub-task A had to make to its segmentation test.
+
+#### The finding: a bold title is not drawable, and the operator chose the fix
+
+Task 22 requirement 2 asks for a *"Title: bold text at top of panel"*, and the
+text pipeline cannot draw one. Verified rather than taken on report:
+`font.rs` contains **zero** occurrences of `weight`, `bold` or `face_index`, and
+`Font` (`font.rs:144`) holds a single FreeType `Face`. `DrawCommand::Text`
+(`paint.rs:195`) carries x, y, string, colour, font size and tracking — **no
+weight**. One face, one set of advances, one glyph atlas.
+
+**The operator chose real weight over a synthetic double-strike** — which means a
+**fourth pipeline change**, `Lato-Bold.ttf` being installed on this host and
+FreeType able to load it. Sub-tasks D and E below.
+
+#### One file outside sub-task B's brief: `Painter::extend`
+
+`paint.rs`, 14 lines, additive. Without it the dialog's action buttons could not
+be placed **after** the panel at all — `Painter::commands` is private, so
+`Vec::extend` on a painter is unreachable — and requirement 5's order is
+unbuildable. It is the smallest thing that unblocks the requirement, and it is
+the fourth file a public enum's match has now forced.
+
+#### Numbers nobody has measured yet
+
+Every one of these is a judgement with a doc naming what would reverse it, and
+the review should treat them as unverified: `PANEL_MAX_WIDTH = 420.0` ("roughly
+two thirds of a head unit's landscape width"), `PANEL_MAX_HEIGHT_FRACTION = 0.8`,
+`SHADOW_BLUR = 8.0`, `SHADOW_ALPHA = 0.5`, `SHADOW_OFFSET_Y = 8.0`. **The
+shadow's blur and alpha in particular are guesses until a capture measures the
+panel's edge in pixels**, which sub-task C does.
+
+The panel's **width is not a function of its content**: it is
+`min(rect.width, 420) - 48`, because a content-measured width would make the
+wrap width depend on the measured width. A short title still gets a 420-wide
+panel, and a box narrower than its own buttons makes the panel **wider than the
+box** rather than drawing the buttons outside it — deliberate, pinned by
+`a_panel_narrower_than_its_own_buttons_grows_to_hold_them`, and a knob that does
+not exist.
+
+### Sub-task D — real weight in the text pipeline, and one honest gap
+
+`DrawCommand::Text` gained `weight: FontWeight` (two variants, `Regular`
+default). `Painter` gained **`text_bold` with the same six arguments as `text`**,
+both delegating to one private helper so the weight cannot be a field a painter
+forgets. The renderer holds a `FontSet` — one `Font` per weight — and
+`draw_text_batch` takes the baseline, the advances, the bearings **and** the atlas
+entry from a single resolved face, so a run cannot be laid out with one face's
+metrics and drawn with another's.
+
+**The design: the weight rides on the command, resolved by the renderer.** Two
+alternatives rejected. A `Font` parameter threaded through `Painter::text` and
+every widget `paint` is ~30 call sites, makes every widget carry a font it does
+not use, and changes `dialog.rs`'s call shape — a dependency its owner cannot
+see. A second `DrawCommand::BoldText` variant keeps every literal compiling but
+**escapes every `matches!(DrawCommand::Text { .. })`** — six in the demo's suite
+alone — so a bold title would silently vanish from those tests.
+
+**One `Font` per weight, not one font with two faces**, because the advance cache
+is keyed by `(char, size)` and a shared one would measure bold with regular's
+advances. `Renderer::set_font` keeps its exact old signature; `set_bold_font`
+sits beside it. The atlas key went from `{ch, size}` to `{ch, size, face}`,
+minted **per install** so replacing a weight cannot leave the atlas serving the
+previous file's glyphs.
+
+**The brief was wrong about where the glyph atlas is.** It said `texture.rs`;
+`texture.rs` owns **image** textures, and the glyph atlas is `GlyphAtlas` at
+`font.rs:754`. `texture.rs` needed no change, and the module's own doc already
+cross-references `GlyphAtlas` for exactly this distinction.
+
+#### The gap: a mutation that survives, verified by the orchestrator
+
+**Making `draw_text_batch` resolve `FontWeight::Regular` instead of `*weight` —
+that is, drawing every run from the regular face — passes the entire suite.**
+**The orchestrator ran this mutation and confirmed it: 1360 / 139 / 209, all
+green, zero failures.**
+
+Both reasons are structural rather than a weak test. The resolution sits inside a
+function that needs a live GL context, and rasterizing needs real font files,
+which `AGENTS.md` forbids a test to open. `FontSet::set`, `FontSet::resolve` and
+`FaceRef` therefore have **no direct unit test at all** — the behaviour is
+covered one level down (`resolve_slot`, `FaceIds`) and on screen.
+
+**What does kill it** is the capture, and that is the only thing: two runs of
+`"Handgloves 42"` at 28 px, one per face, in **the same image** so there is no
+two-captures question. **Ink ratio 1.25–1.26 by four independent measures** —
+raw mean above background 0.047046 against 0.059368, thresholded at 20 % white
+0.0612903 against 0.0768602, and a thresholded pixel count of **1425 against
+1787** of 23250 — with `compare -metric AE` at **1652 differing pixels**. A
+mutated renderer would put that ratio at 1.00. **The background pedestal was
+measured in-box at 18/255 = 0.0705882 rather than assumed black**, which is what
+would otherwise have made the ratio read 1.12.
+
+#### Two doc claims walked back after measuring
+
+The subagent had written that a bold run "is wider, which a caller laying text
+out has to know", and that two runs "do not end at the same `x`". **Measured, both
+are wrong for this face pair.** Bold is **1 px wider over 13 characters at 28 px**
+and **identical** for `"Settings"`; ascent (28) and line height (34) are identical
+between the two faces. FreeType rounds each advance to a whole pixel at the size
+the face is set to, and Lato Medium and Lato Bold differ by less than that. On
+screen both runs trim to offset +12 and the bold ends **1 px** later (184 against
+183). The docs now say a caller **must measure** and must assume neither the same
+`x` nor a different one. `.ai/NEVERAGAIN.md` § *A brief's rationale becomes the
+widget's doc comment, and nobody re-checks it* is the entry, and this is the
+second time this sequence has produced it — a claim written first and corrected
+by a measurement.
+
+#### A methodological correction worth keeping
+
+The **first** pair of crops was 40 px tall and cut both runs' descenders off at the
+crop edge. **It read a ratio of 1.12.** Widening the boxes to 50 px so nothing was
+clipped moved it to 1.26 — and the per-glyph coverage sums the pipeline itself
+rasterizes agree (`'a'` 22689 → 27413 = 1.208, `'g'` 32170 → 42260 = 1.314, `'S'`
+28448 → 35470 = 1.247). **A crop that clips the subject produces a number, and
+the number is wrong.**
+
+#### Frame rate: 62.3 fps, and what it does not cover
+
+Release, `.ai/tools/fps-check.sh`: `623 frames in 10.003s`, **62.3 fps**, at the
+top of the recorded release band (61.9 / 62.0 / 62.2) — no regression. **With one
+font installed a bold run costs nothing at all**: no second face is rasterized and
+no glyph enters the atlas twice, so the number says nothing about drawing bold.
+The seeded runs, which did draw two extra runs of 12 glyphs a frame, read 61.6
+and 61.7 — inside the spread, so the measurement does not separate them, and that
+is the honest reading rather than evidence that bold is free.
+
+#### Forced scope expansion again: eight call sites in four files it did not own
+
+A new field on the variant breaks every **literal construction** of
+`DrawCommand::Text`. Two of the eight are **production**, and one of them is a
+trap: `list.rs::translate_commands` rebuilds every variant, so **omitting
+`weight: *weight` would make a translated bold run silently revert to regular** —
+bold text inside a scrolled list would quietly lose its weight, no error and no
+failing test. `a_translated_bold_run_is_still_bold` is the test for it.
+
+### Sub-task C — the wiring, the bold title, and what the capture measured
+
+Suite after: **1364 + 158 + 210 = 1732**, nothing down from 1708. `fmt`,
+`clippy -D warnings` and `cargo doc` all clean. Two deliberate breaks, both
+killed: the key guard (1 failure — `T` moved the theme with the dialog up) and
+the pointer guard (1 failure — a pad was pressing).
+
+**The dialog is a second root**, not a child of the gallery: `Dialog::new` gives
+its node no parent, so `input::route` from the gallery's root cannot reach it,
+and the paint order is `paint_order` concatenated with a second walk over the
+dialog's subtree. That is what puts it on top, and it is why the widget's own
+test asserts the node has no parent.
+
+**Modality is one branch per event kind.** A `modal_chain` returns the single
+node a positional event may be offered to, and `route_input_event` returns
+without walking the gallery's chain — **a decline is not a licence to carry on**,
+so a `Drag` over the scrim is dropped rather than reaching the slider being
+dragged. Positionless events go to the dialog **first**, before the focused
+control: `Button::on_event` declines `Escape`, so offering the button first would
+leave the dialog with no key that closes it. The `Tab` order while it is open is
+**`OK`, `Cancel`, and nothing else**, both directions, three laps — and
+`focus_navigation`'s **walk root** becomes the dialog's as well as its focusable
+set, because `Focus` recomputes order from its own root and the dialog's actions
+are nowhere in the gallery's tree.
+
+**The operator's fourth-round decision: the demo's own shortcuts are suppressed
+too.** The subagent stopped at the input router and flagged the rest rather than
+deciding it, which was the right call; on being told to go further it found the
+leak was **in the other input device as well** — the `MouseButtonDown` and
+`FingerDown` arms reach the pads, the slider and the keyboard *directly* and never
+reach the router's filter, so a press lit a pad under the scrim. The guard wraps
+the whole key table rather than sitting inside each arm, because a per-arm check
+is a per-arm thing to forget and there are seventeen arms.
+
+**And it found a defect that was already there, which the autofocus exposed**: the
+`Space` **release** asked `self.focused.is_none()` — the right question for the
+press, since `Space` is a focused button's activation key, and the wrong one for
+the release, because autofocus moves focus into the dialog between the two. **The
+pads stayed at 1.0 for ever.** Fixed with a `space_pressed` flag written by
+`press_all` and cleared by `release_all`, so the flag and the animation are one
+fact. **The releases are deliberately not gated**, and the asymmetry is
+load-bearing: gate a release and a pad held at full press behind the scrim has no
+gesture left to bring it back.
+
+#### The capture: no seed, no instrument, and every criterion measured
+
+**This is the one capture in task 22 that needed nothing** — the dialog is
+visible at launch by the operator's decision, so it is a real capture of the real
+demo. Window `0x100002f`, `pgrep -a ui_demo` confirming the process alive in the
+same call as every observation.
+
+- **The panel, in pixels: `(430, 423, 420 × 174)`**, against the code's
+  `(430.0, 423.6, 420.0, 172.8)`. Inside the window with 430 px and 424 px of
+  slack either side.
+- **Both buttons inside it**: `OK` at x 704…747, `Cancel` at x 756…825, both
+  y 529…572, an **8 px gap**. 704 > 430, 825 < 850, 529 > 423, 572 < 597. The
+  focused `OK` shows its ring at 702…749 — the background grown by 2, drawn
+  before it.
+- **The content behind is dimmed, as numbers**: `Surface` (30,30,30) reads **15**
+  under the scrim and 30 at the panel; `Background` (18,18,18) reads **9**;
+  `Error`, `Success` and `Primary` all read **exactly half** their token values.
+  **Three independent opaque colours at ×0.5**, which is what a correct overlay
+  looks like and what the premultiplied-alpha defect above would *not* have
+  produced. It does not bite here for a reason worth stating: the overlay is
+  **black**, and `0 + dst·(1 − a)` is correct compositing of black at coverage
+  *a* whichever blend convention is in force. The first widget in the application
+  to put translucency over content, and the one colour that defect cannot show.
+- **The shadow is blurred, and further than σ = 8 suggests**: **11 px** below the
+  panel, **3 px** left, **3 px** right, **0 px** above — monotone outward in each
+  case. Nothing above is correct, the shadow being offset 8 px *down*. **The left
+  figure was first written as 2 px and the review measured 3.** It is 2 px at
+  y = 440 and nowhere else, and y = 440 is **inside the shadow's 16 px corner
+  radius** — so the "asymmetry" was the corner, not the edge. The shape is `rect`
+  moved by `(0, +8)` and the kernel is symmetric, so **a left/right asymmetry is
+  not possible in the straight part of an edge**, and the measurement confirms it.
+  That is this file's own lesson applied to this file: a number written into a
+  capture record that the capture does not support.
+
+#### The claim the capture killed, in a file the subagent owned
+
+Sub-task B had documented `SHADOW_BLUR = 8.0` as *"a 16-tap kernel either side,
+holding 99.7% of the distribution's mass"*. **`blur::MAX_TAPS` is 9 in total**, so
+σ=8 is capped at **4 taps either side** and the claim was simply false. Measured
+against the pixels — a four-tap kernel around the shadow's own bottom edge at
+`596.4 + 8 = 604.4` predicts a ramp over 600–608, which is what the capture
+reads — the doc now states the cap, the four measured ramps, the monotonicity,
+and the real reason for 8 rather than 2: with the same four taps, σ8's outermost
+tap is **10.3 %** of its centre against σ2's **2.8 %**, so it is the softest edge
+the cap allows and widening σ further would buy nothing.
+
+**That is the third time this sequence a subagent wrote a number into a doc
+comment and a measurement contradicted it** — task 21's `X_LABEL_GUTTER` and
+task 20's "tangent circles have no notch" were the first two. `.ai/NEVERAGAIN.md`
+§ *A brief's rationale becomes the widget's doc comment, and nobody re-checks it*
+now has three instances in this repository.
+
+#### The bold title, measured against a control rather than inferred
+
+An **A/B against a temporary control build** — the same source with
+`set_bold_font` removed, restored and md5-verified after — with the threshold at
+24 above the panel's own measured background of 30:
+
+| run | bold face | regular face | ratio |
+|---|---|---|---|
+| title `"Switch"` | **693 ink px** | 541 | **1.2810** |
+| body line 1 | 1056 | 1056 | **1.0000** |
+| body line 2 | 829 | 829 | **1.0000** |
+
+**711 differing pixels in the title band, 0 in the body band.** Stems at y=458 run
+**3–4 px** in the bold face against **2–3 px** in the regular one. The A/B control
+is what makes this a measurement rather than an inference: the body is the control,
+and it did not move at all.
+
+#### Frame rate: 61.6–61.9 fps across five runs, and what it covers
+
+Release, `.ai/tools/fps-check.sh`: **61.7 / 61.9 / 61.6 / 61.9 / 61.8 fps** — at
+the bottom of the recorded band (61.9 / 62.0 / 62.2), a spread of 0.3 fps, **with
+the dialog showing**: the scrim over the whole window, a blurred shadow, two
+buttons and a bold title. Two previous sub-tasks found a blurred shadow is not
+measurable on this host, and a flat number came back anyway. **So the shadow is
+not claimed to be free**; a 16.67 ms budget with a ~4 ms workload does not
+separate it. After the shortcut guard, three runs read **61.6 / 61.7 / 61.6** —
+and **that number says nothing about the guard**, which is evaluated once per key
+press in a ten-second run that presses none.
+
+#### Open items this sub-task left, on the record rather than closed quietly
+
+- **`Space` is not in the "does not act" list, and that is deliberate.** Its arm
+  is `Space if self.focused.is_none()`, and a showing dialog holds focus inside
+  itself, so the focus condition alone already stops it — a test could not tell
+  the guard from that, and asserting it would be a test that passes for the wrong
+  reason. The arm is still inside the guard.
+- **`the_gallery_shortcut_list_holds_every_key_the_table_has` is a hand-written
+  list of the 17 keys**, so a shortcut added to the table and not to the list is
+  **untested rather than failing**. That is the inverse of the usual duplication
+  hazard and it is the price of not deriving the list from the `match`. The
+  constant's doc tells the next reader to add to both.
+- **A press-and-release pair on the scrim is a dismissal** — the documented
+  behaviour, found when a test that pressed three controls on one demo found the
+  first release had dismissed the dialog.
+- **`SHADOW_BLUR` stays at 8.0.** The capture contradicts the number's
+  documentation, not its intent, and a wider σ cannot be honoured at this
+  `MAX_TAPS`. Tuning it is the operator's call.
+- **`D` was never pressed on screen.** No `xdotool` on this host and no XTEST
+  client was built, so the toggle is verified by unit tests through
+  `handle_event` in both directions and by the launch-state capture — **not** by a
+  key reaching the window. What that leaves unverified is stated here rather than
+  left to be discovered.
+
+### The operator's blink report, and what it was
+
+**The operator, watching the running demo:** *"when the dialog shows up, the
+buttons (Ok/Cancel) blinks for a moment… The same when the dialog disappears. I
+would expect that whole dialog is being rendered as a one object without blinking
+buttons."*
+
+**The dialog faded itself and then handed its buttons to a widget that does not
+know a transition is running.** `Dialog::paint` fades the panel, the title, the
+body and the shadow with `shown_fraction(scale)`, and then calls
+`painter.extend(action.paint(...))`, which forwards to `Button::paint` — and
+`Button::paint` takes its opacity from **the button's own `opacity` property**,
+documented as *"animated for the disabled state"*. **Nothing in `dialog.rs`
+writes it**: `rg '\.opacity\.set|\.background\.set|opacity\.animate'` over the
+module returns nothing.
+
+**Proven by printing the numbers, not by reading the diff.** A throwaway probe in
+the module's test module painted at two scales and printed every command's alpha:
+
+| | at `shown 1.0` | at `shown 0.5` |
+|---|---|---|
+| panel | 255 | **128** |
+| title, body | 255 | **128** |
+| **OK background, OK label** | 255 | **255** |
+| **Cancel background, Cancel label** | 255 | **255** |
+
+So the buttons were at full strength on frame one, over an invisible panel; they
+held full strength through the whole 300 ms fade-out; and then they were gone in a
+single frame. **That is the blink, in both directions, and it is one number.**
+
+**And 38 unit tests could not see it**, because every one of them asserts *which
+commands are recorded* — and the buttons' commands are recorded correctly on
+every frame. The defect is **the alpha on a command that is present**, which is
+`.ai/NEVERAGAIN.md` § *A strength clamped to 0..=1, used directly as an effect's
+size* exactly: *"a shape assertion will not"* catch it.
+
+**Fixed by making the fade reach the buttons.** `Button::paint` gained
+`paint_faded(rect, advance, line_height, multiplier)`, and `paint` is now a
+one-line delegation to it with `1.0` — one implementation, no duplication, and the
+public signature unchanged. **The parameter is a multiplier and not a
+replacement**, so a disabled button inside a fading dialog fades rather than
+having its disabled opacity overwritten: `(self.opacity.get() * multiplier)`. That
+distinction is invisible while the button is enabled and is the whole reason the
+argument is a multiplier; a test asserts the **product**, with both factors alone
+beside it.
+
+`Button::paint` had **exactly one caller outside `button.rs`** in the tree —
+`dialog.rs` — which is why this was a one-call-site change.
+
+**The author's own doc was false and the fix corrected it.** The new method's first
+draft said *"every colour the button draws goes through it — the focus ring, the
+background, the pressed overlay and the label"*, and the pressed overlay **never
+did**: its alpha was `press * PRESS_SHADOW_ALPHA` with no opacity factor, so a
+button that was **both disabled and pressed** showed a full-strength tint. That
+gap was pre-existing; it is fixed rather than documented as a wart, because a
+press held through a dismissal is this same defect one primitive in.
+
+**Re-measured after the fix** with the same probe: at `shown 0.5`, panel 128,
+title 128, body 128, **OK 128, Cancel 128**. Suite **1370 + 164 + 211 = 1745**.
+
+### The focus ring, and a flag that was answering two questions
+
+**The operator decided the ring should fade with the panel too**, rather than pop.
+It did pop: `Demo::sync_dialog_focus` computed `drawn && self.focused == Some(...)`,
+so the **first** conjunct already asked `is_drawn()` and the pop came entirely from
+the second — **the focus record is retired on `visible`, and the panel keeps
+drawing for the whole 300 ms.**
+
+**The fix separates two questions that one flag was answering.** *May this control
+be activated?* stays keyed on `visible` and lives in `Demo::focused`. *Is this
+control's ring on screen?* moved to `Dialog::is_drawn()` and lives in a new
+`Demo::dialog_ring_owner`. **They have different answers for exactly 300 ms**, and
+that is the whole reason they cannot be one flag.
+
+Measured one 16 ms frame into the 300 ms bounce, before the fix: panel radius 16.0
+at alpha **250**, `OK` radius 8.0 at **250**, and the ring at radius 10.0
+**absent** — a ring vanishing over an opaque panel. After: the ring is recorded at
+alpha 250, fading with the panel, and is gone once the fade ends. Suite **1370 +
+165 + 211 = 1746**.
+
+#### The finding underneath both fixes: `Button::focused` answers two questions
+
+**One `Property<bool>` is read at five production sites, and two of them are
+activation** — `button.rs:699` (`on_event`: `focused.get() && is_activation_key`),
+`dialog.rs:971` (routes a `KeyDown` to whichever action has `focused` set),
+`button.rs:503` (`style`'s ring width), `button.rs:897` (the ring itself) and
+`button.rs:463` (`state()`). So the widget's single flag conflates **"draw the
+ring"** with **"may be activated"**, and the demo can only disambiguate it from the
+outside, with two guards of its own (`dialog_is_modal() && offer_to(...)` and
+`focus_is_live()`).
+
+**The safety of this fix rests on those two demo guards, not on the widget.** If a
+later change routes a key by reading `action.button.focused` outside the modal
+guard — which `dialog.rs:971` is already shaped to invite — the `Enter` regression
+returns *with the ring visible*, which is the worst combination: a control that
+looks live and is not. **The durable fix is a second property on `Button`** and is a
+widget change this round did not make. Recorded as an open item, not closed.
+
+**One pre-existing test was changed, deliberately and on the record.** It asserted
+by name and with a rationale that *"the ring goes with the record rather than
+outliving it on a button nobody can reach"*, and `sync_dialog_focus`'s own doc
+argued the reverse of what this change decides. Leaving them would have been a
+false claim in the codebase. Its real subject — the record is retired, so the
+button is still unreachable — was kept and only the ring assertion replaced, and
+**the deleted rationale is quoted in the sub-task's handoff so the reversal is
+auditable.**
+
+#### Closed: `Button::focused` no longer answers two questions
+
+**The operator authorised taking the open item**, and it is now a widget change
+rather than a demo workaround. `Button` gained **`activatable: Property<bool>`,
+defaulting to `true`**, with `Button::may_activate() -> bool` (`#[must_use]`) as
+the single predicate both `on_event` arms consult.
+
+**`focused` keeps exactly the meaning it has in every other widget here** — *this
+control has keyboard focus* — and still drives `state()`, `style()`'s
+`ring_width` and `paint()`'s ring, **none of which changed**. The new property
+answers *may this control be activated*, and the two differ for exactly the 300 ms
+of a dismissal: on screen, so its ring belongs in the picture; already withdrawn,
+so `Enter` must not fire it.
+
+**The default is the load-bearing decision and it is `true`**, so a caller that
+writes only `focused` gets ring **and** activation, unchanged. A test for that was
+**written before the property existed and passed on the unmodified tree** — it is
+the only evidence that would have caught a wrong default, and a deliberate break
+flipping the default to `false` was killed by it plus 7 library tests and 3
+doctests. **Note what that break showed: the demo target stayed green at 167.**
+`sync_dialog_focus` writes the property every frame, so the demo is insulated from
+a wrong default and only the library's own tests and doctests caught it.
+
+**The four-quadrant matrix**, ring read off the commands and activation off a
+counter, both routes:
+
+| `focused` | `activatable` | rounded rects | ring alpha | Enter | tap |
+|---|---|---|---|---|---|
+| yes | yes | 2 | 255 | 1 | 1 |
+| **yes** | **no** | **2** | **255** | **0** | **0** |
+| no | yes | 1 | — | 0 | 1 |
+| no | no | 1 | — | 0 | 0 |
+
+**`Demo::dialog_ring_owner` is deleted.** It existed only because the widget could
+not carry the second answer, and the point of this change is that it now can. The
+dismissal **withdraws activation and leaves the focus record alone**, because the
+record is what the ring is read from and the panel outlives the dismissal.
+
+#### The proof that the demo's guards are now redundant — and it is stronger than asked
+
+The brief asked whether one dismissal test survives removing the demo's two
+outside guards. **The whole 167-test demo suite survives each removal, in turn.**
+
+Verified by reading, not inferred: `Dialog::on_event` opens with
+`if !self.visible.get() { return false; }` (`dialog.rs:927`), so **the widget
+already refused everything during the fade** and the demo's `dialog_is_modal()`
+conjunct was doubly redundant. That single line is what this whole change was
+for. **The guards were left in place** — `focus_is_live` is the demo's documented
+reachability contract with its own review history, and redefining a predicate to
+prove it is unnecessary is not a change to make inside an API task. **Removing
+them changed no outcome; that is what was measured, and it is not the same claim
+as "they are dead code".**
+
+#### Two more defects found on the way, both outside the literal brief
+
+- **`Dialog::on_event`'s tap arm called `button.activate()` directly**, bypassing
+  `on_event`, so it consulted `disabled` alone and **a withdrawn button would have
+  stayed live to a finger**. It now asks `may_activate`. Unflagged by the review
+  that found the keyboard half.
+- **The `D` route had its own ring pop that nobody reported and yesterday's fix
+  did not reach**: `toggle_dialog`'s dismiss branch called `set_focus(None)` on the
+  event, dropping the record immediately, while Escape, an action's own click and
+  a scrim tap left it to `sync_dialog_focus`. **Four routes, four behaviours.**
+  Found by asking which tests broke when the record stopped being retired rather
+  than by reading for it, and pinned by `a_dismissed_dialog_withdraws_activation_on_every_route`.
+
+**A test was renamed because its name became a lie**:
+`a_dismissed_dialogs_stale_focus_is_retired_on_the_next_frame` →
+`a_dismissed_dialog_withdraws_activation_without_retiring_the_focus_record`. The
+record is no longer retired on the next frame, and a test whose name contradicts
+what it asserts is a defect rather than a stale label.
+
+**One gap the author side named against itself**: there is no dialog-level test
+that sets `activatable = false` on an action and taps it. The tap arm's use of
+`may_activate` is covered by the matrix's tap column and by the default-false
+break killing four dialog tests, but not directly.
+
+Suite **1372 + 167 + 211 = 1750**.
+
+## The one review round, and the six findings it returned
+
+**Reviewed 2026-10-03**, in a session separate from all four subagents and from
+the integration. Verdict: **approve with required changes** — 3 majors, 3 minors,
+plus **five disagreements**, two of which are corrections to this file.
+
+**The reviewer reproduced the author side's measurements rather than trusting
+them**, and they held: the panel at `(430, 423, 420 × 174)`, both button rects and
+the 8 px gap, three theme colours at **exactly half** their tokens under the
+scrim, the bold title at **693 ink px against 541** with the body at
+**1056 / 1056** and **711 / 0** differing pixels, the shadow's 11 px ramp, and
+**61.8 fps** release. It also **independently reproduced the surviving mutation**
+the author side had reported, at 1732 / 0.
+
+**One author-side number could not be reproduced**: body line 2's **829 / 829**,
+where the reviewer measures **816 / 816** for the row band alone. **The property
+the figure is there for reproduced exactly** — the body did not move between the
+two builds — so this is a transcription of one number, not a defect.
+
+### The three majors, all fixed
+
+1. **`scroll::command_bounds`'s `Shadow` arm ignored `offset`** — the renderer
+   draws the shape at `rect` moved by the offset and *then* blurs it, so the
+   reported bounds were short by the offset on every side it pointed at, and
+   `clip_commands` **drops** a command whose bounds miss the clip. **There was no
+   `Shadow` case in the test that covers every shape that carries bounds**, which
+   is why a mutation inflating the bounds by 100 px in every direction left the
+   library suite green.
+2. **A blurred shadow's clip was never applied.** `bind_for_write` disables the
+   scissor and nothing re-enabled it, so **the composite — the pass that puts the
+   shadow on screen — ran unclipped**, while the `blur <= 0` path was correctly
+   clipped. The two paths disagreed and only the unused one was right. The repair
+   has an ordering to it, and the one chosen writes the scissor **through
+   `apply_clip`, after invalidating the cache**, because the alternative leaves
+   `apply_clip`'s early-return able to skip a later write as "unchanged".
+3. **A dismissed dialog's button still answered Enter for the whole 300 ms
+   fade-out.** `dialog_is_modal()` is keyed on `visible`, the ring on `is_drawn()`,
+   and **nothing cleared `Demo::focused`** on a dismissal that does not go through
+   the toggle — so Escape, an action tap and a scrim tap all left the button live
+   and firing. Fixed at **both** readers rather than one: the routing fix covers
+   the window *before the next frame*, which is the window the bug is visible in.
+
+**Finding 3 also uncovered a second defect the review did not report**, from the
+same root cause: `Space` stopped pressing the pads after any in-widget dismissal,
+because its arm reads a focus condition and the stale `Some` is not `None`.
+`space_presses_the_pads_again_after_every_dismissal_route` is the test, and the
+fix retires the record on the next frame rather than only re-deriving the ring
+from it.
+
+### What the reviewer got wrong, and recorded rather than passed over
+
+**It declared a survivor it had manufactured**: the `is_drawn` mutation was run
+with `--lib`, which excluded the one binary that kills it. That is now a
+`NEVERAGAIN.md` entry of its own. **It states so itself, before anyone else
+could**, and that is the behaviour the whole file is for.
+
+### Three things the reviewer settled that the author side had left open
+
+- **The surviving `FontWeight::Regular` mutation**: the explanation is
+  structural and correct, and **"the pixels" is a substitute rather than a
+  consolation prize — but only because the A/B discriminates.** Bold at 693
+  against 541, and 711 differing pixels in the title band against **0** in the
+  body, means a mutated renderer reads exactly 1.00 and 541. A capture that could
+  not tell them apart would be worthless; this one can. **The honest gap is
+  narrower than the record claimed**: `FontSet::resolve` is three lines and could
+  be tested directly, and today is not.
+- **`is_drawn() = visible || is_animating()` needs no changing** — the author side
+  offered it as an open item and the reviewer judged it covered, by exactly one
+  assertion, in the demo rather than in the widget.
+- **Three of the operator's four decisions are sound on the evidence; the fourth's
+  *evidence* was wrong** — `paint.rs` documented a 25-tap kernel for σ = 6 that
+  `MAX_TAPS = 9` cannot produce. The decision stands; the doc that justifies it
+  did not, and the next agent to open `paint.rs` rather than this file would have
+  learned otherwise.
+
+### The fixes, verified on the final tree
+
+`cargo fmt --check` clean, `clippy -D warnings` clean, `cargo doc` **zero
+warnings**, **`1366 + 164 + 210 = 1740`** tests, nothing down from 1732. Each of
+the three majors has a mutation that now fails: the offset dropped from the
+bounds (2 failures), the `#[repr(C)]` removed from `BlurVertex` (1), and the
+doctest's tap count put back to the false claim (1). **The clip fix has no test
+and none is owed** — it is GL state, and the mutation removing it survives, which
+is the correct outcome rather than a gap papered over.
+
+### One host fact that cost two sub-tasks an hour
+
+**`/tmp` is a 16 GB tmpfs at 80 % full**, and `rustdoc` writes its temporaries
+there. Two sessions independently lost a doctest run to it — **140 and 201
+doctests "failing"** while the unit tests passed, which reads exactly like a code
+failure. Both diagnosed it correctly, **neither deleted the other's working
+directory** to reclaim the space, and both re-ran with `TMPDIR` pointed at `/`
+and got the full count back. **The operator may want that space reclaimed between
+sessions**; 11 GB of it is a reviewer's copy under `/tmp/ctl`.
 
 ## Task 21 — what it decided, and what it found
 
@@ -2463,19 +3302,68 @@ verified. A blank cell is unknown, not "none".
 | 19 | Widget — TextInput + On-screen Keyboard | done | `b4a2db8` | **none** | **none waived** — every criterion is covered by the demo's own event path or by a capture. What is *not* claimed is anything about XTEST injection, which was not used; see *Task 19 — what it decided* |
 | — | Frame-rate readout, stdout report, `fps-check.sh` | done | `3ddf5fa` | none yet | n/a — an operator request, not a task with criteria. Verified: the suite is green, six mutations killed, the readout seen on screen, and both run-end paths measured — see *The frame rate, measured* |
 | 20 | Widget — Gauge | done | `79941cd` | **none — committed without review** | **Requirement 5's anti-aliasing half was NOT met at the time and was not waived** — the renderer had no SDF for curves and no MSAA; the widget's module doc said so and the hard edges were seen in a capture. **That is no longer true**: 4x MSAA landed with task 21 and the gauge's doc has been superseded in place. **AC 3's "needle as a triangle"** required a new filled `Polygon` draw command, which the operator approved. The needle's spring is asserted by tests, not seen mid-flight. ACs 1, 2, 4 and 5 are capture-verified and unit-tested — see *Task 20 — what it decided* |
-| 21 | Widget — Chart | **reviewed, uncommitted — awaiting the operator's commit** | — | **2 passes**, both in a session separate from the author's. Round 1: *approve with required changes*, 1 blocker + 6 minors, all 7 fixed. Round 2: *approve with required changes*, blocker **closed and verified by mutation**, **5 minors waived 2026-10-02 with recorded reasons** — not "fixed"; see *The two review rounds* | **AC 5 is covered by tests through the demo's real event path, not by a capture** — keyboard injection does not reach the window on this host (the positive control `T` moved 212 px) and pointer injection never did. ACs 1, 2, 3, 4 and 6 are capture-verified **and measured**, the bar and area ones through two reverted temporary releases. `y_labels` are empty by design, so AC 4's labels are proved by the x labels and the two axes. **No acceptance criterion is waived**; the 5 waived findings are review findings, not criteria — two stale citations, one coverage claim, one omission and one run count, none of which can change a pixel. See *Task 21 — what it decided* |
+| 21 | Widget — Chart | done | `64d2b97` | **2 passes**, both in a session separate from the author's. Round 1: *approve with required changes*, 1 blocker + 6 minors, all 7 fixed. Round 2: *approve with required changes*, blocker **closed and verified by mutation**, **5 minors waived 2026-10-02 with recorded reasons** — not "fixed"; see *The two review rounds* | **AC 5 is covered by tests through the demo's real event path, not by a capture** — keyboard injection does not reach the window on this host (the positive control `T` moved 212 px) and pointer injection never did. ACs 1, 2, 3, 4 and 6 are capture-verified **and measured**, the bar and area ones through two reverted temporary releases. `y_labels` are empty by design, so AC 4's labels are proved by the x labels and the two axes. **No acceptance criterion is waived**; the 5 waived findings are review findings, not criteria — two stale citations, one coverage claim, one omission and one run count, none of which can change a pixel. See *Task 21 — what it decided* |
+| 22 | Widget — Dialog | **reviewed, uncommitted — awaiting the operator's commit** | — | **1 pass**, in a session separate from all four subagents and from the integration. *Approve with required changes*: **3 majors + 3 minors, all six fixed**, plus 5 disagreements of which 2 corrected this file. The reviewer **reproduced the author side's pixel measurements independently** (panel, both button rects, three colours at exactly half, 693 vs 541 ink, 711/0 differing, 11 px ramp, 61.8 fps) and **independently reproduced the surviving mutation**. See *The one review round* | **Four ACs are capture-verified and measured** (1, 2, 6, 7) — AC 7 by a capture that **needed no seed and no instrument**, the only one in this task. **ACs 3, 4 and 5 are covered by tests through the demo's own event path, not by a capture**: the action buttons, the dismissal, Escape and modality all need a key or a pointer, and injection does not reach the window on this host. **Requirement 5's "content behind dialog is not re-rendered" is DEVIATED, not met** — the operator decided it should be read as the paint cache, and the sentence this file first offered as evidence was **false** and is corrected above. **Requirements 2 and 5 needed pipeline work first** — a second FreeType face and an FBO blur — both operator decisions. **No acceptance criterion is waived; one is deviated with the reason recorded** |
 | 22 | Widget — Dialog | pending | | | |
 | 23 | Widget — Toast | pending | | | |
-| 24 | Demo Application | **superseded** | | | |
+| 24 | Demo Application | **amended 2026-10-03, split into 24.1–24.3, none started** | — | — | — |
+| 24.1 | `Page`, `--tab=`, and the three gates | pending | | | |
+| 24.2 | `CONTENT_TOP`, and the band goes page-local | pending | | | |
+| 24.3 | The tab bar | pending | | | |
 | — | Tesla-like demo application | pending | | | see `doc/ui/DEMO_APPLICATION.md` |
 
-**Task 24 is superseded and will not be started in its current form.** The
-operator's decision of 2026-09-30 replaces the widget-gallery demo with a
-Tesla-like infotainment application, in a new `TASK_UI_DEMO_n` task category
-begun after task 23. That document owns the decision, the scope and the open
-questions; nothing about it is restated here. The line is in this table so a
-fresh session resuming from this file does not start task 24, and so the last
-task of the `PRIM` sequence is 23 rather than 24.
+**Task 24 was superseded on 2026-09-30 and un-superseded on 2026-10-03.** The
+first decision replaced the widget-gallery demo with a Tesla-like infotainment
+application in a new `TASK_UI_DEMO_n` category, and it was sound — a widget
+gallery is not a demo application. **What changed is that the gallery is what
+tasks 11–23 have been building, widget by widget, and it is finished rather than
+replaced.** The 2026-10-03 amendment keeps the gallery, groups it into six
+pages behind a tab bar at the **top** of the window — requirement 3 said
+*bottom*, and the text-entry band already owns the bottom 300 pixels — and adds
+`--tab=<name>`, which did not exist before.
+
+**The amendment is a split, because `ui_demo/src/main.rs` measured 12,820 lines
+and 157 `#[test]` functions** at 2026-10-03 16:36 — over `developer.md` § *Scope
+check* on files touched, on independent components and on test migration alike.
+**Both figures were moving while this was written and must be re-measured**; the
+scope-check trip does not depend on the exact numbers. The sub-tasks are
+**sequential, not parallel**, and the order puts the pixel-moving one last:
+
+| # | Sub-task | Why this order |
+|---|---|---|
+| 24.1 | `enum Page`, `--tab=`, and the three gates. **No rect moves.** | Behaviour only, so every capture from tasks 11–22 stays a capture of the same pixels — and `--tab=` is what makes them addressable afterwards |
+| 24.2 | `CONTENT_TOP`; the text-entry band becomes page-local | Needs 24.1's page set to know which band belongs to which page |
+| 24.3 | The tab bar | Needs 24.2's 64 pixels to draw in |
+
+**Three facts, measured, that decide the shape rather than the taste:**
+
+- **`LayoutState::set_visible` is hit-testing only** — its own doc says so
+  ("only hit testing consults the flag"), and `hit_test_from` skips an invisible
+  subtree. The demo's frame loop paints **every** handle in `self.order` with no
+  `is_dirty` test, `Demo::draw` sends all of `order`, and
+  `Demo::focus_navigation`'s focusable set is a hardcoded five-element array. So
+  hiding a page is **three gates**, and one of them — the hit test — is the only
+  one the library gives for free.
+- **The window cannot grow and the canvas is full.** `WINDOW` is 1280 × 1020; a
+  1280 × 1160 request came back 1280 × 1052, the window manager's cap, and the
+  list was removed on 2026-10-02 to make room for the chart. A `+64` shift puts
+  the keyboard at y 1060 — forty pixels off the window — so the band has to
+  become page-local rather than shift with everything else.
+- **A pointer cannot be injected on this host**, so `--tab=` is the **verification
+  route and not a convenience**: keyboard injection has delivered one event in
+  this project's history (task 21's positive control, `T` moving 212 px of
+  needle) and pointer injection never has. A page reachable only by clicking
+  could not be captured at all.
+
+**The Tesla direction is unaffected, and the operator's decision of 2026-10-03
+is that it becomes one more tab rather than a replacement.** That question is
+not settled here; `doc/ui/DEMO_APPLICATION.md` owns its scope, and its §
+*Relationship to task 24* carries the correction. **Two library gaps stay open
+by this decision**: `DEMO_APPLICATION.md` gap #3 (*no screen/navigation
+system*, High) and gap #7 (*no `TabBar` widget*, Low). The page mechanism is
+built **in the demo**, out of `Container` + `Button`, which is what gap #7
+prescribes for the dock; a `ui_core` tab controller is a library task with its
+own cycle and was declined for now.
 
 Status values: `pending` · `in progress` · `implemented` (developer done,
 awaiting review) · `in review` (reviewer running) · `changes requested` ·
@@ -2711,6 +3599,31 @@ operator's rule, none of these is treated as satisfied.
 
 ## History
 
+- 2026-10-03 — **task 22 (Dialog) implemented, reviewed once, uncommitted.** The
+  largest task in the sequence, and **four sequential sub-tasks** rather than one
+  agent: the task file asks for a blurred shadow, a bold title and a cached
+  background, **none of which this pipeline had**. The operator chose to build the
+  blur and the weight and to read "cached" as the paint cache. Three pipeline
+  changes fell out: **`Batcher::submit_order` segments the frame at every shadow**,
+  because `finish`'s opaque-first grouping cannot express an opaque panel over a
+  translucent overlay; an **offscreen `GL_R8` target and a separable Gaussian**; and
+  **`FontWeight` on `DrawCommand::Text`** with a second FreeType face and an atlas
+  keyed by face. `1364 → 1740` tests from a 1592 baseline.
+  **Reviewed once, *approve with required changes* — 3 majors, 3 minors, all six
+  fixed.** The majors were a `command_bounds` that ignored the shadow's `offset`,
+  **a blurred shadow whose composite ran with the scissor test off**, and **a
+  dismissed dialog whose button kept answering Enter for the whole fade**.
+  **Three things worth carrying forward.** The reviewer's own process caught
+  itself concluding a survivor it had manufactured by running a mutation with
+  `--lib`. The author side's explanation for the one surviving mutation is
+  structural and correct, and the mitigation is a capture that **discriminates** —
+  bold at 693 ink pixels against a control's 541. And **this file's evidence for
+  "the content behind is cached" was false** and is corrected above: the gallery
+  is re-recorded every frame with or without a dialog, so the true claim is that a
+  dialog costs no *extra* recording, and the criterion is **deviated, not met**.
+  `.ai/NEVERAGAIN.md` gained **three entries**: a filtered mutation run, a cache
+  invalidated in the wrong order, and `open(path, "w")` truncating before its
+  argument is evaluated.
 - 2026-10-02 — **task 21 reviewed twice, the first reviewed task in this
   sequence.** Round 1: *approve with required changes* — **1 blocker** (a
   non-finite sample erased the two real series segments either side of it,
@@ -3404,3 +4317,45 @@ operator's rule, none of these is treated as satisfied.
   measured exception, which is the stroke's own half width" when a mitred corner
   reaches `MITRE_LIMIT · half`. `Chart::stroke_reach()` now exists so the demo
   does not keep a private copy of the number.
+- 2026-10-03 — **task 24 was un-superseded, amended, and split into three
+  sub-tasks; none is started.** The 2026-09-30 entry above records task 24 as
+  superseded by `DEMO_APPLICATION.md`; **that is no longer the case**, and the
+  entry is left as it was written rather than rewritten. The gallery is what
+  tasks 11–23 have been building, widget by widget, so it is finished rather
+  than replaced. What the amendment adds: six named **pages**, a **tab bar at
+  the top** (requirement 3 said *bottom*, and the text-entry band already owns
+  the bottom 300 pixels), and **`--tab=<name>`** — which did not exist before,
+  and is the only route to a capture of one page on this host, because pointer
+  injection has never reached the window and keyboard injection delivered one
+  event in this project's history. The operator's decision is that the Tesla
+  direction becomes **one more tab**; `DEMO_APPLICATION.md` § *Relationship to
+  task 24* carries the correction and keeps both decisions.
+  **Three library gaps stay open by that decision** — `DEMO_APPLICATION.md`
+  gaps #3 and #7 among them — because the page mechanism is built in `ui_demo`
+  out of `Container` + `Button` rather than in `ui_core`. Four facts measured
+  while writing it, each of which changed the shape: `set_visible` is
+  hit-testing only, so a page switch is **three gates** and not one; the window
+  cannot grow past 1052 and a 64-pixel bar pushes the keyboard off the bottom,
+  so the band becomes **page-local** and the collision tests become **per page**;
+  `Button` has **no `selected` property**, so the selected tab is a
+  `background`/`foreground` swap the demo owns; and ≈100 of the demo's **157**
+  `#[test]` functions need a page activated before their first frame, which is
+  why the split exists at all. No code was written and no test was run for this
+  entry: it records a decision and three task files.
+- 2026-10-03 — **the tree was under concurrent edit while task 24's amendment was
+  written, and the citations moved under the pen.** `ui_core/src/widgets/
+  button.rs` was modified twice inside the session that wrote
+  `TASK_UI_PRIM_24.md` and its three sub-tasks — several hundred lines against
+  `HEAD`, including a new `pub activatable: Property<bool>`, which moved
+  `Button::content_size` from line 727 to 777. A `file:line` citation written
+  against that tree was stale before the file it named was finished being
+  written. **So the amendment's citations are anchored to symbols** —
+  `LayoutState::set_visible`, `hit_test_from`, `Demo::focus_navigation`,
+  `GALLERY_SHORTCUTS`, `PaintState::new` — with the convention stated once in
+  `TASK_UI_PRIM_24.md`'s Context rather than repeated in each sub-task. **The
+  rule this instance earns: in this repository a `file:line` citation is only
+  safe against a file nobody is editing**, and `git status` says which those
+  are. A symbol survives an unrelated edit to the same file; a line number does
+  not. Recorded here rather than in `.ai/NEVERAGAIN.md` because that file's
+  entries are observed *failures of a fix*, and this one is a hazard identified
+  while writing prose — though it belongs there if it ever bites.

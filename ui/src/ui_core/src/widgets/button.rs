@@ -360,6 +360,36 @@ pub struct Button {
     /// Whether the button holds focus. Written by the caller, from
     /// [`input::Focus`](crate::input::Focus).
     pub focused: Property<bool>,
+    /// Whether the button may be **activated** — fired by a tap or by an
+    /// activation key. Written by the caller. **Defaults to `true`.**
+    ///
+    /// **A second flag rather than a mode of [`Button::focused`], because the two
+    /// answers come apart.** `focused` means "this control has keyboard focus" —
+    /// the meaning it has in every other widget in this tree — and it is what
+    /// draws the ring and answers the keyboard. Those are the same answer right up
+    /// until a control that is *leaving* needs to say otherwise: a dialog's action
+    /// button is still on screen for the whole 300 ms of a dismissal, so its ring
+    /// belongs in the picture, and it is already unreachable from the first frame,
+    /// so an activation key must not fire it. One bit cannot answer both, and
+    /// before this property existed a caller had to carry the distinction in
+    /// guards of its own around the widget.
+    ///
+    /// **`true` by default, and that is the load-bearing choice.** A caller that
+    /// writes only `focused` — which is every caller in this repository, and the
+    /// only production writer of a button's `focused` anywhere in it is
+    /// `ui_demo`'s `Demo::sync_dialog_focus` — must get exactly the behaviour it
+    /// got before this field existed: ring and activation both. A `false` default
+    /// looks the more conservative choice and is a trap, because it would strip
+    /// the ring and the key handling off every button a caller builds without
+    /// saying so, and **absence of a blocker is permission** for a control that
+    /// holds focus.
+    /// `a_button_written_only_with_focused_still_activates_and_still_draws_its_ring`
+    /// is the test that holds the default in place.
+    ///
+    /// **An adjective like the rest, and not a near miss for
+    /// [`Button::focus_ring`]**, which is the ring's *width* in pixels and shares
+    /// no question with this one.
+    pub activatable: Property<bool>,
     /// The scale the button is drawn at, animated on press.
     pub scale: Property<f32>,
     /// The opacity the button is drawn at, animated for the disabled state.
@@ -398,6 +428,9 @@ impl Button {
             pressed: Property::new(false),
             disabled: Property::new(false),
             focused: Property::new(false),
+            // `true`, and the field's doc is the argument: every existing caller
+            // writes only `focused` and must keep both behaviours.
+            activatable: Property::new(true),
             scale: Property::new(1.0),
             opacity: Property::new(1.0),
             palette,
@@ -638,9 +671,14 @@ impl Button {
     /// Handles `event` as this button would, and reports whether it consumed it.
     ///
     /// A [`Tap`](InputEventKind::Tap) is always consumed, and fires the click
-    /// unless the button is disabled. A disabled button still swallows the tap:
-    /// the event was aimed at it, and letting it through would make a tap on an
-    /// inert control reach the panel behind it.
+    /// unless the button is [disabled](Button::disabled) or
+    /// [not activatable](Button::activatable). A button in either state still
+    /// swallows the tap: the event was aimed at it, and letting it through would
+    /// make a tap on an inert control reach the panel behind it. **Consumed
+    /// rather than declined, and the same as `disabled`'s rule on purpose** — a
+    /// control that is on screen and refusing to act is still a wall, and a
+    /// caller whose dialog is fading wants the key to stop here rather than reach
+    /// whatever is behind it.
     ///
     /// An activation key — Enter, the keypad's Enter, Space, or the gamepad's
     /// south button — fires the click and is consumed, but only while the button
@@ -690,7 +728,7 @@ impl Button {
         match event.kind() {
             InputEventKind::Tap => {
                 event.consume();
-                if !self.disabled.get() {
+                if self.may_activate() {
                     let _ = self.activate();
                 }
                 true
@@ -699,13 +737,34 @@ impl Button {
                 if self.focused.get() && is_activation_key(&key) =>
             {
                 event.consume();
-                if !self.disabled.get() {
+                if self.may_activate() {
                     let _ = self.activate();
                 }
                 true
             }
             _ => false,
         }
+    }
+
+    /// Returns whether a click would actually fire: the button is neither
+    /// [`disabled`](Button::disabled) nor [withdrawn](Button::activatable).
+    ///
+    /// **Public because a caller can activate a button without going through
+    /// [`Button::on_event`]**, and [`Dialog`](crate::widgets::dialog::Dialog)'s
+    /// own tap arm does exactly that: it measures which action a tap landed on
+    /// and activates it, because a positional hit test is its business rather
+    /// than the button's. That arm used to ask `disabled` alone, so it would have
+    /// kept firing a withdrawn button while the button's own key arm refused it —
+    /// one property, two answers. Exposing the rule is what makes the two agree by
+    /// construction rather than by both being edited.
+    ///
+    /// **The one definition of "does not act"**, for [`disabled`](Button::disabled)
+    /// and [`activatable`](Button::activatable) together: a disabled button and a
+    /// withdrawn one differ in *why* and in what a caller has to remember, not in
+    /// what the button does when it is asked.
+    #[must_use]
+    pub fn may_activate(&self) -> bool {
+        !self.disabled.get() && self.activatable.get()
     }
 
     /// Returns the size the button's label and padding need, with no minimum
@@ -763,7 +822,13 @@ impl Button {
         )
     }
 
-    /// Returns the draw commands that paint the button within `rect`.
+    /// Returns the draw commands that paint the button within `rect`, at the
+    /// button's own [`opacity`](Button::opacity).
+    ///
+    /// **This is [`Button::paint_faded`] with a multiplier of one**, and it is
+    /// written as that call rather than as a second copy of the body so the two
+    /// cannot drift: a caller fading a button and a caller not fading one are then
+    /// the same code path, differing by one number.
     ///
     /// The commands are, in order: the focus ring, if the button is focused and
     /// the ring is not zero wide; the background, at the button's current scale;
@@ -801,9 +866,89 @@ impl Button {
         advance: &dyn Fn(char) -> f32,
         line_height: f32,
     ) -> Vec<DrawCommand> {
+        self.paint_faded(rect, advance, line_height, 1.0)
+    }
+
+    /// Returns the draw commands that paint the button within `rect`, with every
+    /// colour scaled by `multiplier` on top of the button's own
+    /// [`opacity`](Button::opacity).
+    ///
+    /// **`multiplier` is a multiplier and not a replacement**, and that is the one
+    /// thing a caller has to be sure of: what reaches the screen is
+    /// `self.opacity * multiplier`, **not** whichever of the two is smaller. For
+    /// an enabled button — `opacity` at 1.0 — the two readings are identical, and
+    /// they part company the moment the button is not enabled: a disabled button
+    /// at `opacity` 0.5 painted with a multiplier of 0.5 comes out at **0.25**,
+    /// where a replacement would have given 0.5. A caller that means "draw this
+    /// button at half strength" wants the product; a caller that means "ignore the
+    /// button's own opacity" wants [`Button::paint`].
+    ///
+    /// **It exists because [`Button::opacity`] is documented as the *disabled*
+    /// state's opacity, and a button inside something that is itself fading is a
+    /// second, unrelated reason for it to be drawn translucent.**
+    /// [`Dialog`](crate::widgets::dialog::Dialog) is the case in point: it fades
+    /// its own panel, title and body with its transition's progress, and before
+    /// this method existed it handed its action buttons to
+    /// [`Button::paint`] — so the buttons stayed at full strength for the whole
+    /// 300 ms of the fade and then vanished in one frame. That is what an operator
+    /// reported as *"the buttons blink for a moment"*.
+    ///
+    /// `multiplier` is clamped with the product into `0.0..=1.0`, so a negative
+    /// value draws nothing rather than wrapping. A value **above** one brightens
+    /// toward opaque instead of overflowing, which is a misuse rather than a
+    /// feature: the one caller in this repository passes a transition's progress,
+    /// which is `0.0..=1.0` by construction.
+    ///
+    /// **Every colour the button draws goes through it** — the focus ring, the
+    /// background, the pressed overlay and the label — because each is computed
+    /// from the one `opacity` local below rather than from `self.opacity` where it
+    /// is used. `a_focus_ring_fades_with_the_multiplier_and_not_only_the_label`
+    /// is the test for the ring specifically, since a ring that stayed solid while
+    /// the button faded would be the same defect one primitive in.
+    ///
+    /// `advance` and `line_height` are the measurements
+    /// [`Button::content_size`] takes, and the commands are the ones
+    /// [`Button::paint`] lists.
+    ///
+    /// # Examples
+    ///
+    /// The multiplier is visible on the numbers, which is what a caller fading a
+    /// button actually needs to check:
+    ///
+    /// ```
+    /// use ui_core::arena::Arena;
+    /// use ui_core::node::WidgetNode;
+    /// use ui_core::paint::{DrawCommand, Rect};
+    /// use ui_core::widgets::button::Button;
+    ///
+    /// let mut nodes = Arena::new();
+    /// let button = Button::new(&mut nodes, "OK");
+    /// let rect = Rect::new(0.0, 0.0, 44.0, 44.0);
+    ///
+    /// let alpha_of = |commands: &[DrawCommand]| commands.iter().find_map(|command| match command {
+    ///     DrawCommand::RoundedRect { color, .. } => Some(color.a),
+    ///     _ => None,
+    /// }).expect("a background");
+    ///
+    /// let full = button.paint_faded(rect, &|_: char| 5.0, 14.0, 1.0);
+    /// let half = button.paint_faded(rect, &|_: char| 5.0, 14.0, 0.5);
+    /// assert_eq!(alpha_of(&full), 255, "an unfaded button is opaque");
+    /// assert_eq!(alpha_of(&half), 128, "and half of one is half of the alpha");
+    /// ```
+    #[must_use]
+    pub fn paint_faded(
+        &self,
+        rect: Rect,
+        advance: &dyn Fn(char) -> f32,
+        line_height: f32,
+        multiplier: f32,
+    ) -> Vec<DrawCommand> {
         let mut painter = Painter::new();
         let scale = self.scale.get();
-        let opacity = self.opacity.get().clamp(0.0, 1.0);
+        // **The product, not `self.opacity` alone**, and the doc above is the whole
+        // of why: the button's own opacity is the disabled state's and the
+        // multiplier is whatever the button is drawn inside.
+        let opacity = (self.opacity.get() * multiplier).clamp(0.0, 1.0);
         let background = scaled(rect, scale);
         let radius = self.border_radius.get();
         let ring = self.focus_ring.get();
@@ -826,7 +971,14 @@ impl Button {
             painter.rounded_rect(
                 inset(background, PRESS_SHADOW_INSET),
                 (radius - PRESS_SHADOW_INSET).max(0.0),
-                with_opacity(Color::new(0, 0, 0, 255), press * PRESS_SHADOW_ALPHA),
+                // The overlay is the one colour that never went through `opacity`
+                // before this method existed, so it is the one that would have
+                // popped: a press held while its dialog faded would leave a
+                // full-strength black rectangle over a half-transparent panel.
+                with_opacity(
+                    Color::new(0, 0, 0, 255),
+                    press * PRESS_SHADOW_ALPHA * opacity,
+                ),
             );
         }
 
@@ -1095,6 +1247,42 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The alpha of the first rounded rectangle in `commands` and of the label.
+    ///
+    /// **The first rounded rectangle is the focus ring when the button is focused
+    /// and the background otherwise**, which is exactly the pair this module's
+    /// multiplier tests need to read: a ring that stayed solid while the button
+    /// faded would be the same defect one primitive in, and only a helper that
+    /// reports both can say whether it does.
+    fn alphas(commands: &[DrawCommand]) -> (u8, u8) {
+        let shape = commands
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::RoundedRect { color, .. } => Some(color.a),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no rounded rectangle among {commands:?}"));
+        let label = commands
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::Text { color, .. } => Some(color.a),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no text among {commands:?}"));
+        (shape, label)
+    }
+
+    /// The alpha `with_opacity` gives a fully opaque colour at `opacity`.
+    ///
+    /// **The module's own rounding**, through the same `channel` the pipeline uses,
+    /// because `255 * 0.5` is 127.5 and the two ways of writing "half of 255" —
+    /// `127` from integer division and `128` from the renderer — differ by one, so
+    /// an expected value written by hand is a claim about the rounding rather than
+    /// about the multiplier.
+    fn alpha_at(opacity: f32) -> u8 {
+        with_opacity(Color::new(255, 255, 255, 255), opacity).a
     }
 
     /// A short name for each recorded command, in the order they were recorded.
@@ -1985,6 +2173,117 @@ mod tests {
     }
 
     #[test]
+    fn the_ring_follows_focused_and_the_activation_follows_activatable() {
+        // **The two-flag matrix, all four quadrants, each with its controls.**
+        // `focused` and `activatable` are independent, so the claim is not "the
+        // property works" but "the ring and the key answer to different bits" —
+        // and the quadrant that proves it is `focused` and not `activatable`,
+        // which is a dialog's action button for the whole 300 ms of a dismissal.
+        // A test of the other three quadrants could not tell one bit wearing two
+        // hats from two bits.
+        //
+        // The ring is read off the recorded commands and the activation off a
+        // counter, so neither half is asserted through the flag that drives it.
+        for (focused, activatable) in [(true, true), (true, false), (false, true), (false, false)] {
+            let case = format!("focused {focused}, activatable {activatable}");
+            let (_nodes, mut button) = button();
+            let clicks = counter(&mut button);
+            button.focused.set(focused);
+            button.activatable.set(activatable);
+
+            // **The ring**, and its alpha.
+            let shapes = rounded(&button.paint(Rect::new(0.0, 0.0, 44.0, 44.0), &mono, LINE));
+            if focused {
+                assert_eq!(shapes.len(), 2, "{case}: the ring and the background");
+                assert_eq!(
+                    shapes[0].1,
+                    THEME_RADIUS_MD + 2.0,
+                    "{case}: the ring is the wider of the two"
+                );
+                assert_eq!(shapes[0].2.a, 255, "{case}: and it is opaque");
+            } else {
+                assert_eq!(
+                    shapes.len(),
+                    1,
+                    "{case}: no ring at all, only the background — whatever \
+                     `activatable` says"
+                );
+            }
+
+            // **Activation by an activation key**, which is the route a dismissed
+            // dialog has to refuse.
+            let mut event = key_down(Key::Keyboard(sdl3::keyboard::Keycode::Return));
+            let consumed = button.on_event(&mut event);
+            let after_key = clicks.get();
+            assert_eq!(
+                consumed, focused,
+                "{case}: the key is consumed by a focused button"
+            );
+            assert_eq!(
+                after_key,
+                u32::from(focused && activatable),
+                "{case}: and fires the click only when it may also be activated"
+            );
+
+            // **Activation by a tap**, which is the other arm and the reason the
+            // property gates it too: an unfocused button is still tappable, so a
+            // `focused`-only gate would leave a withdrawn button live to a finger.
+            let mut tap = tap();
+            button.on_event(&mut tap);
+            assert_eq!(
+                clicks.get() - after_key,
+                u32::from(activatable),
+                "{case}: a tap fires it exactly when it may be activated"
+            );
+        }
+    }
+
+    #[test]
+    fn a_button_written_only_with_focused_still_activates_and_still_draws_its_ring() {
+        // **The backwards-compatibility guard, written before the property it
+        // guards exists.** `activatable` is a new public field, and the one way
+        // to add one without breaking every caller is a default of `true` — so
+        // this test is the whole of the argument, and it is deliberately written
+        // against a button whose *only* written state is `focused`, which is what
+        // every caller in this tree does today.
+        //
+        // If it fails, the default is wrong. A default of `false` would pass this
+        // file's other activation tests (they set `focused` and nothing else, but
+        // they would be asserting the new behaviour) and silently strip the ring
+        // and the activation from every button a caller builds, because absence of
+        // a blocker is permission.
+        let (_nodes, mut button) = button();
+        let clicks = counter(&mut button);
+        button.focused.set(true);
+
+        // **Activation**, by a counter rather than by a flag.
+        let mut event = key_down(Key::Keyboard(sdl3::keyboard::Keycode::Return));
+        assert!(
+            button.on_event(&mut event),
+            "a fresh button answers Enter, as it did before the property existed"
+        );
+        assert_eq!(
+            clicks.get(),
+            1,
+            "and fires its click exactly once: absence of a blocker is permission"
+        );
+
+        // **The ring**, on the recorded commands. It is the first rounded
+        // rectangle and it is the wider one: `focus_ring`'s default of 2.0 grown
+        // onto `THEME_RADIUS_MD`, so 10.0 where the background is 8.0.
+        let commands = button.paint(Rect::new(0.0, 0.0, 44.0, 44.0), &mono, LINE);
+        let shapes = rounded(&commands);
+        assert_eq!(shapes.len(), 2, "the ring and the background");
+        assert_eq!(
+            shapes[0].1,
+            THEME_RADIUS_MD + 2.0,
+            "the ring is the outer of the two, its radius grown by the focus ring's \
+             thickness"
+        );
+        assert_eq!(shapes[0].2.a, 255, "and it is opaque");
+    }
+
+    #[test]
     fn an_activation_key_does_nothing_to_an_unfocused_button() {
         // A key press is not routed by position, so it reaches the button only
         // because the caller sent it to the focused node. Every button would
@@ -2100,5 +2399,169 @@ mod tests {
             Color::new(0, 0, 0, 255)
         );
         assert_eq!(Motion::from_theme(&theme).duration, ms(150));
+    }
+
+    /// **`multiplier` is a multiplier and not a replacement.** A button whose own
+    /// [`opacity`](Button::opacity) is below one, painted through
+    /// [`Button::paint_faded`], must come out at the **product** — and the two
+    /// readings are identical whenever the button is enabled, so this is the only
+    /// test that can tell them apart.
+    ///
+    /// The button's own opacity is set directly rather than by
+    /// [`Button::snap_to_state`] on a `disabled` flag, so the two factors are
+    /// chosen here and the arithmetic is the claim: 0.4 by 0.5 is 0.2, and
+    /// `alpha_at(0.2)` is a number neither `alpha_at(0.4)` nor `alpha_at(0.5)` is.
+    #[test]
+    fn the_pressed_overlay_fades_with_the_multiplier_too() {
+        // The doc on `paint_faded` claims every colour goes through the opacity,
+        // and the pressed overlay is the one that did not: its alpha came straight
+        // from `press`. A test that only reads the background and the label cannot
+        // see that, because it never looks at the second rounded rect.
+        let (_nodes, button) = button();
+        let rect = Rect::new(0.0, 0.0, 100.0, 40.0);
+        button.scale.set(PRESSED_SCALE);
+
+        let overlay_alpha = |multiplier: f32| {
+            let commands = button.paint_faded(rect, &mono, LINE, multiplier);
+            let overlays: Vec<u8> = rounded(&commands)
+                .into_iter()
+                .map(|(_, _, color)| color.a)
+                .collect();
+            assert_eq!(
+                overlays.len(),
+                2,
+                "the background and the overlay, at multiplier {multiplier}"
+            );
+            overlays[1]
+        };
+
+        let full = overlay_alpha(1.0);
+        let half = overlay_alpha(0.5);
+        assert!(
+            half < full,
+            "the overlay fades with what it is drawn inside: {full} at full \
+             strength, {half} at half"
+        );
+        // Not `half == full / 2`: both numbers are *computed* from that product,
+        // so such an assertion is true by construction and survives dropping the
+        // `* opacity` term entirely -- the 2026-09-29 entry in
+        // `.ai/NEVERAGAIN.md`. The numbers are written out instead, so that a
+        // change to the constant or to the path producing the alpha has to move
+        // one of them.
+        assert_eq!(
+            full, 71,
+            "a fully pressed button at full strength: 0.28 * 255 = 71.4"
+        );
+        assert_eq!(
+            half, 36,
+            "and at half strength the multiplier halves the product: \
+             0.28 * 0.5 * 255 = 35.7, which the channel rounding puts at 36 -- \
+             the same number a half-*pressed* button gets at full strength, \
+             because the press and the multiplier enter as one product"
+        );
+    }
+
+    #[test]
+    fn the_multiplier_scales_the_buttons_own_opacity_rather_than_replacing_it() {
+        let mut nodes = Arena::new();
+        let button = Button::new(&mut nodes, "OK");
+        button.opacity.set(0.4);
+        let rect = Rect::new(0.0, 0.0, 44.0, 44.0);
+
+        let product = alphas(&button.paint_faded(rect, &mono, LINE, 0.5));
+        let own_alone = button.paint(rect, &mono, LINE);
+
+        assert_eq!(
+            product,
+            (alpha_at(0.2), alpha_at(0.2)),
+            "0.4 by 0.5 is 0.2, and both the background and the label are there"
+        );
+        assert_eq!(
+            product.0,
+            alpha_at(0.2),
+            "which is neither factor alone: the button's own 0.4 would give {} and \
+             the multiplier's 0.5 would give {}",
+            alpha_at(0.4),
+            alpha_at(0.5)
+        );
+        // **Neither factor alone**, on the numbers. The three cases are three
+        // different alphas, which is what makes the product assertion a measurement
+        // rather than a tautology: a *replacement* implementation would answer
+        // `alpha_at(0.5)` here and a *pass-through* one `alpha_at(0.4)`, and only
+        // the product answers `alpha_at(0.2)`.
+        //
+        // **Both the button's own and the multiplier are read through the same two
+        // factors rather than through two widgets**, because `multiplier_alone` is
+        // the very call `product` was measured from — an earlier version of this
+        // line compared the two and would have compared a value with itself.
+        assert_eq!(
+            (alphas(&own_alone).0, product.0),
+            (alpha_at(0.4), alpha_at(0.2)),
+            "the button's own opacity alone would be the first of those"
+        );
+        assert_ne!(
+            product.0,
+            alpha_at(0.5),
+            "and the multiplier alone is not it"
+        );
+        assert_ne!(
+            product.0,
+            alpha_at(0.4),
+            "nor is the button's own — which is what a replacement would give"
+        );
+
+        // `paint` is `paint_faded` with a multiplier of one, so an unfaded button
+        // through the new path is the same commands — asserted rather than assumed,
+        // because "it delegates" is a claim about the body and this is about the
+        // bytes it produces.
+        assert_eq!(
+            button.paint_faded(rect, &mono, LINE, 1.0),
+            own_alone,
+            "a multiplier of one is `paint`, command for command"
+        );
+    }
+
+    /// **The focus ring fades with the multiplier, verified and not assumed.**
+    ///
+    /// [`Button::paint`] computes the ring's colour from the same `opacity` local as
+    /// every other colour, so it should follow for free — and "should follow for
+    /// free" is exactly the kind of claim `.ai/NEVERAGAIN.md` says nobody re-checks.
+    /// A ring left solid on a button that is fading is the same defect the dialog
+    /// had, one primitive in and with no other test to catch it.
+    #[test]
+    fn a_focus_ring_fades_with_the_multiplier_and_not_only_the_label() {
+        let mut nodes = Arena::new();
+        let button = Button::new(&mut nodes, "OK");
+        button.focused.set(true);
+        button.focus_ring.set(2.0);
+        let rect = Rect::new(0.0, 0.0, 44.0, 44.0);
+
+        // With the button focused the first rounded rectangle **is** the ring, so
+        // `alphas` is reading the ring rather than the background. Asserted, because
+        // a helper that silently read the background would make this test pass for
+        // the wrong reason.
+        let painted = button.paint_faded(rect, &mono, LINE, 0.5);
+        assert_eq!(
+            rounded(&painted).len(),
+            2,
+            "a focused button draws a ring and then its background"
+        );
+        assert!(
+            rounded(&painted)[0].1 > rounded(&painted)[1].1,
+            "and the ring is the wider of the two, so it is the one read first"
+        );
+
+        assert_eq!(
+            alphas(&painted),
+            (alpha_at(0.5), alpha_at(0.5)),
+            "the ring and the label are both at half"
+        );
+        assert_eq!(
+            alphas(&button.paint(rect, &mono, LINE)),
+            (alpha_at(1.0), alpha_at(1.0)),
+            "and both at full strength with a multiplier of one, which is the \
+             control: a ring that ignored the multiplier would pass the half \
+             assertion and fail this one"
+        );
     }
 }

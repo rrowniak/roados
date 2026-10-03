@@ -3,6 +3,7 @@
 //! Owns the cached paint state of a node, and the recording of the draw
 //! commands a frame is made of.
 
+pub use crate::font::FontWeight;
 pub use crate::property::Color;
 
 /// An axis-aligned rectangle in window coordinates, origin at the top left.
@@ -140,6 +141,60 @@ pub enum DrawCommand {
         /// Fill color, premultiplied alpha.
         color: Color,
     },
+    /// A blurred drop shadow of a rounded rectangle.
+    ///
+    /// The shape is drawn offscreen, blurred, and composited where it was
+    /// recorded — [`crate::render::blur`] owns the kernel and
+    /// [`crate::render::target`] the target. It is a command of its own rather
+    /// than a flag on a [`RoundedRect`](DrawCommand::RoundedRect) because of
+    /// **when** it draws: it is composited at the boundary between the batches
+    /// recorded before it and the batches recorded after it
+    /// ([`crate::batch::Segment`]), which is what lets an opaque panel sit on
+    /// top of a translucent overlay with a shadow between them.
+    ///
+    /// `blur` is the Gaussian's **standard deviation in pixels**, and the kernel
+    /// runs `min(ceil(2 * blur), (MAX_TAPS - 1) / 2)` taps either side of each
+    /// sample, which holds 95.4% of the distribution's mass while the cap holds.
+    /// A `blur` at or below [`SOLID_BLUR`](crate::render::blur::SOLID_BLUR)
+    /// draws the shape directly, and touches no offscreen target at all.
+    ///
+    /// **The cap is not a detail.** With [`MAX_TAPS`](crate::render::blur::MAX_TAPS)
+    /// at 9 it is four taps either side, so every `blur` above **2.0** produces
+    /// the same nine-tap kernel and differs only in the weights its sigma gives
+    /// it — a `blur` of 6.0 is four taps either side, not twelve. A blur asking
+    /// for more is **capped rather than refused**, which is what
+    /// [`taps_for`](crate::render::blur::taps_for) computes.
+    ///
+    /// `offset` moves the shadow relative to the rect it is the shadow **of**.
+    /// It is a separate number rather than a pre-offset `rect` because the two
+    /// are two decisions: a caller that knows where the panel goes does not have
+    /// to know how far below it the shadow falls, and a theme that moves the
+    /// shadow does not move the panel.
+    ///
+    /// **The shadow does not carry its own alpha into the blend.** The offscreen
+    /// target holds one channel — the blurred coverage — and the composite
+    /// shader premultiplies `color` by it before the pipeline's premultiplied
+    /// blend func reads it. Every other primitive here relies on the blend func
+    /// alone, which `doc/ui/IMPLEMENTATION_STATE.md` records as a defect in
+    /// the solid pass; the shadow path does not inherit it, and the difference
+    /// is deliberate.
+    Shadow {
+        /// The rectangle the shadow is the shadow of, before `offset`.
+        rect: Rect,
+        /// Corner radius in pixels, clamped to half the smaller side exactly as
+        /// [`RoundedRect`](DrawCommand::RoundedRect)'s is.
+        radius: f32,
+        /// The shadow's colour as given. The composite multiplies it by the
+        /// blurred coverage and by nothing else, so at full coverage this is
+        /// the colour the shadow reaches and not one to be pre-multiplied.
+        color: Color,
+        /// The blur's standard deviation in pixels. Zero or less draws the
+        /// shape directly, with no blur.
+        blur: f32,
+        /// The shadow's offset from `rect`, `(x, y)` in pixels. A light source
+        /// above and to the left puts both components positive.
+        offset: (f32, f32),
+    },
     /// A text run.
     ///
     /// The run is drawn with the text shader, from the glyph atlas the
@@ -162,6 +217,24 @@ pub enum DrawCommand {
         /// letter spacing. A run that is justified is recorded word by word
         /// instead, so its extra gap is carried by the word positions.
         extra_advance: f32,
+        /// Which face the run is drawn with.
+        ///
+        /// **The weight is on the command and nowhere else**, so that a widget
+        /// that wants a bold title says so in one word rather than growing a
+        /// `Font` parameter that every other call site — every label, every
+        /// button, every key of the on-screen keyboard — would then have to be
+        /// given. The renderer resolves it against the faces it holds, and
+        /// everything the run is drawn *with* comes from that one face: its
+        /// rasterized glyphs, their bearings and their advances. There is no
+        /// synthetic weight, so a bold run carries a bold face's own ink at a
+        /// bold face's own width.
+        ///
+        /// A renderer with no face for the weight asked for draws the run with
+        /// its regular face rather than dropping it, so this is a request and
+        /// not a promise — see `ui_core::font`'s
+        /// [`resolve_slot`](crate::font::resolve_slot), which is
+        /// where that rule lives.
+        weight: FontWeight,
     },
     /// A textured rectangle.
     ///
@@ -381,6 +454,10 @@ impl Painter {
 
     /// Records a text run at `font_size` pixels, on a line whose top edge is at
     /// `y`, with `extra_advance` pixels of tracking after each glyph.
+    ///
+    /// Drawn in the renderer's regular face — [`Painter::text_bold`] is this
+    /// method with one word changed, and every argument means the same thing in
+    /// both.
     pub fn text(
         &mut self,
         x: f32,
@@ -390,6 +467,99 @@ impl Painter {
         font_size: f32,
         extra_advance: f32,
     ) {
+        self.text_in_weight(
+            x,
+            y,
+            text,
+            color,
+            font_size,
+            extra_advance,
+            FontWeight::Regular,
+        );
+    }
+
+    /// Records a text run in the renderer's **bold** face: every argument as
+    /// [`Painter::text`], one weight different.
+    ///
+    /// A bold run is a *real* second face rather than the regular glyph drawn
+    /// twice, so it carries the second face's own coverage, bearings and
+    /// advances — and it is laid out with the **second face's** advance widths,
+    /// which are its own and not the regular face's reused. How much wider that
+    /// is in practice depends on the pair of faces, and for the pair this
+    /// repository's demo loads (Lato Medium against Lato Bold) it is very little:
+    /// measured through [`crate::font::Font::measure`] at 20 and 28 pixels, the
+    /// bold run is 1.5% and 0.5% wider for `"Handgloves 42"` and **identical** at
+    /// 28 pixels for `"Settings"`, because FreeType rounds each advance to a
+    /// whole pixel at the size the face is set to. **So a caller cannot assume a
+    /// bold run ends at a different `x` — and must not assume it ends at the same
+    /// one either.** Measure the width in the weight being drawn; the
+    /// `doc/ui/IMPLEMENTATION_STATE.md` font-size notes are where this
+    /// repository measures text.
+    ///
+    /// On a renderer that was given no bold face this draws the run with the
+    /// regular one, because a heading that is not bold is readable and a heading
+    /// that is not *drawn* is a hole — see [`Painter::text`]'s note on
+    /// `DrawCommand::Text`'s `weight`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ui_core::paint::{Color, DrawCommand, FontWeight, Painter};
+    ///
+    /// // A heading and its body: same string, same size, one word apart.
+    /// let mut painter = Painter::new();
+    /// painter.text_bold(120.0, 48.0, "Settings", Color::new(255, 255, 255, 255), 20.0, 0.0);
+    /// painter.text(120.0, 80.0, "Settings", Color::new(180, 180, 180, 255), 20.0, 0.0);
+    ///
+    /// let commands = painter.finish();
+    /// let weights: Vec<FontWeight> = commands
+    ///     .iter()
+    ///     .filter_map(|command| match command {
+    ///         DrawCommand::Text { weight, .. } => Some(*weight),
+    ///         _ => None,
+    ///     })
+    ///     .collect();
+    /// assert_eq!(weights, vec![FontWeight::Bold, FontWeight::Regular]);
+    /// ```
+    pub fn text_bold(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: &str,
+        color: Color,
+        font_size: f32,
+        extra_advance: f32,
+    ) {
+        self.text_in_weight(
+            x,
+            y,
+            text,
+            color,
+            font_size,
+            extra_advance,
+            FontWeight::Bold,
+        );
+    }
+
+    /// The one place a text command is recorded, so the weight cannot be a field
+    /// some of the painters forget.
+    ///
+    /// Eight arguments is the command's seven fields plus the weight, and
+    /// grouping them into a struct would be a public API change to every call
+    /// site in the tree for nothing a caller could see — so the lint is answered
+    /// here rather than by inventing a type whose only purpose is to be
+    /// destructured again inside the function.
+    #[allow(clippy::too_many_arguments)]
+    fn text_in_weight(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: &str,
+        color: Color,
+        font_size: f32,
+        extra_advance: f32,
+        weight: FontWeight,
+    ) {
         self.commands.push(DrawCommand::Text {
             x,
             y,
@@ -397,6 +567,7 @@ impl Painter {
             color,
             font_size,
             extra_advance,
+            weight,
         });
     }
 
@@ -479,6 +650,77 @@ impl Painter {
         });
     }
 
+    /// Records a blurred drop shadow of the rounded rectangle `rect`, offset by
+    /// `offset` pixels and blurred with a standard deviation of `blur` pixels.
+    ///
+    /// Record it **before** the thing casting the shadow and after whatever the
+    /// shadow falls on: the renderer composites it between the two, so a panel
+    /// drawn after its shadow covers it and an overlay drawn before it does not.
+    ///
+    /// `blur` is a standard deviation rather than a reach because a reach has no
+    /// single number: a kernel truncated at three sigma and one truncated at two
+    /// put their last tap at different fractions of their peak, so two shadows
+    /// with the same "blur radius" and different sharpness are not expressible.
+    /// At or below [`SOLID_BLUR`](crate::render::blur::SOLID_BLUR) the shape is
+    /// drawn with no blur at all and no offscreen target is touched.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ui_core::paint::{Color, DrawCommand, Painter, Rect};
+    ///
+    /// let panel = Rect::new(300.0, 180.0, 420.0, 260.0);
+    ///
+    /// // A card: the shadow first, then the panel that casts it.
+    /// let mut painter = Painter::new();
+    /// painter.shadow(panel, 12.0, Color::new(0, 0, 0, 128), 6.0, (0.0, 8.0));
+    /// painter.rounded_rect(panel, 12.0, Color::new(245, 245, 245, 255));
+    ///
+    /// let commands = painter.finish();
+    /// assert_eq!(commands.len(), 2);
+    /// assert!(matches!(commands[0], DrawCommand::Shadow { .. }));
+    ///
+    /// // The blur is a standard deviation, and the kernel runs up to 2σ either
+    /// // side — **capped** at `MAX_TAPS`, which with nine taps is four. So a
+    /// // 6-pixel sigma is four taps either side and nine in all, not the twelve
+    /// // and twenty-five an uncapped kernel would be, and not twenty-five
+    /// // anything can draw. Asserted against the real function so this comment
+    /// // and the pipeline cannot drift apart again.
+    /// let DrawCommand::Shadow { blur, offset, .. } = commands[0] else {
+    ///     panic!("the shadow is recorded first");
+    /// };
+    /// assert_eq!(blur, 6.0);
+    /// assert_eq!(offset, (0.0, 8.0));
+    /// assert_eq!(ui_core::render::blur::taps_for(blur), 4);
+    /// assert_eq!(
+    ///     2 * ui_core::render::blur::taps_for(blur) + 1,
+    ///     ui_core::render::blur::MAX_TAPS,
+    /// );
+    /// ```
+    pub fn shadow(&mut self, rect: Rect, radius: f32, color: Color, blur: f32, offset: (f32, f32)) {
+        self.commands.push(DrawCommand::Shadow {
+            rect,
+            radius,
+            color,
+            blur,
+            offset,
+        });
+    }
+
+    /// Appends every command in `commands`, in order, to what this painter has
+    /// already recorded.
+    ///
+    /// This is how a composite widget stitches a child widget's own output into
+    /// its own paint — the [`Dialog`](crate::widgets::dialog::Dialog) draws its
+    /// overlay, its shadow, its panel and its two blocks of text, then appends
+    /// each [`Button`](crate::widgets::button::Button) in its action row, and the
+    /// row has to land *after* the panel for the dialog's command order to mean
+    /// anything. `extend(commands.finish())` is the same thing and allocates; this
+    /// takes the `Vec` it would throw away.
+    pub fn extend(&mut self, commands: Vec<DrawCommand>) {
+        self.commands.extend(commands);
+    }
+
     /// Returns the recorded commands, leaving the painter empty.
     #[must_use]
     pub fn finish(self) -> Vec<DrawCommand> {
@@ -498,6 +740,13 @@ mod tests {
             Rect::new(1.0, 1.0, 10.0, 10.0),
             4.0,
             Color::new(0, 255, 0, 255),
+        );
+        painter.shadow(
+            Rect::new(40.0, 40.0, 30.0, 20.0),
+            4.0,
+            Color::new(0, 0, 0, 128),
+            5.0,
+            (0.0, 6.0),
         );
         painter.text(2.0, 3.0, "hi", Color::new(0, 0, 255, 255), 16.0, 0.0);
         painter.image(
@@ -521,15 +770,78 @@ mod tests {
         );
 
         let commands = painter.finish();
-        assert_eq!(commands.len(), 8);
+        assert_eq!(commands.len(), 9);
         assert!(matches!(&commands[0], DrawCommand::Rect { .. }));
         assert!(matches!(&commands[1], DrawCommand::RoundedRect { .. }));
-        assert!(matches!(&commands[2], DrawCommand::Text { .. }));
-        assert!(matches!(&commands[3], DrawCommand::Image { .. }));
-        assert!(matches!(&commands[4], DrawCommand::Line { .. }));
-        assert!(matches!(&commands[5], DrawCommand::Circle { .. }));
-        assert!(matches!(&commands[6], DrawCommand::Path { .. }));
-        assert!(matches!(&commands[7], DrawCommand::Polygon { .. }));
+        assert!(matches!(&commands[2], DrawCommand::Shadow { .. }));
+        assert!(matches!(&commands[3], DrawCommand::Text { .. }));
+        assert!(matches!(&commands[4], DrawCommand::Image { .. }));
+        assert!(matches!(&commands[5], DrawCommand::Line { .. }));
+        assert!(matches!(&commands[6], DrawCommand::Circle { .. }));
+        assert!(matches!(&commands[7], DrawCommand::Path { .. }));
+        assert!(matches!(&commands[8], DrawCommand::Polygon { .. }));
+    }
+
+    #[test]
+    fn a_shadow_records_its_rect_its_radius_its_blur_and_its_offset() {
+        // Destructure rather than match with `..`, for the reason the polygon
+        // and image tests give: `command_quads` names every one of these fields,
+        // so a rename here is a rename in the renderer.
+        //
+        // The fixture is off the origin on purpose. `.ai/NEVERAGAIN.md` § *A
+        // rect's origin and a rect's extent are different numbers* — an origin
+        // of `(0, 0)` cannot see an origin read as an extent, and the offset is
+        // exactly the number that would be lost.
+        let rect = Rect::new(240.0, 160.0, 420.0, 260.0);
+        let mut painter = Painter::new();
+        painter.shadow(rect, 12.0, Color::new(0, 0, 0, 128), 6.0, (3.0, 9.0));
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 1);
+        let DrawCommand::Shadow {
+            rect: recorded_rect,
+            radius,
+            color,
+            blur,
+            offset,
+        } = &commands[0]
+        else {
+            panic!("the painter recorded something that is not a shadow");
+        };
+        assert_eq!(*recorded_rect, rect);
+        assert_eq!(*radius, 12.0);
+        assert_eq!(*color, Color::new(0, 0, 0, 128));
+        assert_eq!(*blur, 6.0);
+        assert_eq!(
+            *offset,
+            (3.0, 9.0),
+            "an offset is a pair of non-zero numbers, so this fixture can see one \
+             read as the other, or as the rect's own origin"
+        );
+    }
+
+    #[test]
+    fn a_shadow_at_zero_blur_is_recorded_rather_than_dropped() {
+        // The zero-blur shadow is a real shape — a hard-edged rounded rect drawn
+        // straight to the screen — and the recorder's contract is to store what
+        // it was handed. Whether the renderer blurs it is the renderer's
+        // decision; a recorder that dropped it would make "no blur" and "no
+        // shadow" the same value, and they are different pictures.
+        let mut painter = Painter::new();
+        painter.shadow(
+            Rect::new(80.0, 60.0, 100.0, 40.0),
+            4.0,
+            Color::new(10, 20, 30, 255),
+            0.0,
+            (0.0, 0.0),
+        );
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 1, "a shadow with no blur is still a shadow");
+        let DrawCommand::Shadow { blur, .. } = &commands[0] else {
+            panic!("the painter recorded something that is not a shadow");
+        };
+        assert_eq!(*blur, 0.0);
     }
 
     #[test]
@@ -778,5 +1090,130 @@ mod tests {
         };
         assert_eq!(*over, 1.5, "above the range survives recording");
         assert_eq!(*under, -0.5, "and so does below it");
+    }
+    #[test]
+    fn a_text_run_records_the_regular_weight_and_text_bold_the_bold_one() {
+        // The one word that separates the two painters, and the whole of what a
+        // widget has to say to get a bold title.
+        //
+        // Off the origin, as every geometry fixture here is: `.ai/NEVERAGAIN.md` §
+        // *A rect's origin and a rect's extent are different numbers*, and the
+        // positions below are part of what the two commands are compared on.
+        let mut painter = Painter::new();
+        painter.text(
+            120.0,
+            48.0,
+            "Settings",
+            Color::new(255, 255, 255, 255),
+            20.0,
+            0.0,
+        );
+        painter.text_bold(
+            120.0,
+            80.0,
+            "Settings",
+            Color::new(180, 180, 180, 255),
+            20.0,
+            0.0,
+        );
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 2);
+        let DrawCommand::Text {
+            x,
+            y,
+            text,
+            font_size,
+            extra_advance,
+            weight,
+            ..
+        } = &commands[0]
+        else {
+            panic!("a regular run recorded as something that is not text");
+        };
+        assert_eq!(*x, 120.0);
+        assert_eq!(*y, 48.0);
+        assert_eq!(text, "Settings");
+        assert_eq!(*font_size, 20.0);
+        assert_eq!(*extra_advance, 0.0);
+        assert_eq!(
+            *weight,
+            FontWeight::Regular,
+            "`text` names the regular face, so a caller that has never heard of \
+             weight records exactly the run it recorded before there was a second \
+             face"
+        );
+
+        let DrawCommand::Text { weight, .. } = &commands[1] else {
+            panic!("a bold run recorded as something that is not text");
+        };
+        assert_eq!(*weight, FontWeight::Bold, "and `text_bold` the bold one");
+    }
+
+    #[test]
+    fn text_bold_differs_from_text_in_the_weight_and_in_nothing_else() {
+        // The claim [`Painter::text_bold`]'s doc makes — that a bold title costs
+        // the caller one word — is a claim about the *record*, and a record is
+        // exactly what a test can compare. Field by field rather than with
+        // `assert_eq!` on the two commands, because the weight is the one field
+        // that is *meant* to differ and comparing the records whole would fail on
+        // it rather than on everything else. If a second field ever rides along
+        // with the weight, this is what catches it.
+        let color = Color::new(255, 255, 255, 255);
+        let mut painter = Painter::new();
+        painter.text(200.0, 120.0, "Handgloves 42", color, 18.0, 0.5);
+        painter.text_bold(200.0, 120.0, "Handgloves 42", color, 18.0, 0.5);
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 2, "two runs of the same string");
+        let DrawCommand::Text {
+            x: regular_x,
+            y: regular_y,
+            text: regular_text,
+            color: regular_color,
+            font_size: regular_size,
+            extra_advance: regular_tracking,
+            weight: regular,
+        } = &commands[0]
+        else {
+            panic!("not text");
+        };
+        let DrawCommand::Text {
+            x: bold_x,
+            y: bold_y,
+            text: bold_text,
+            color: bold_color,
+            font_size: bold_size,
+            extra_advance: bold_tracking,
+            weight: bold,
+        } = &commands[1]
+        else {
+            panic!("not text");
+        };
+        assert_eq!(
+            (
+                regular_x,
+                regular_y,
+                regular_text,
+                regular_color,
+                regular_size,
+                regular_tracking
+            ),
+            (
+                bold_x,
+                bold_y,
+                bold_text,
+                bold_color,
+                bold_size,
+                bold_tracking
+            ),
+            "same position, same string, same colour, same size, same tracking"
+        );
+        assert_eq!(*regular, FontWeight::Regular);
+        assert_eq!(
+            *bold,
+            FontWeight::Bold,
+            "and the two are not the same request"
+        );
     }
 }

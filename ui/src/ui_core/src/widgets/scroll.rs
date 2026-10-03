@@ -1603,6 +1603,42 @@ pub fn command_bounds(command: &DrawCommand) -> Option<Rect> {
             ))
         }
         DrawCommand::Text { .. } => None,
+        // A shadow is **not** bounded by its own rect, and **not** by its rect
+        // moved by its offset either — although both of those are inside the
+        // answer. The renderer draws the shadow's shape at `rect` **moved by
+        // `offset`** (`Renderer::draw_shadow_batch`) and the blur then spreads it
+        // past every edge of *that* by the kernel's reach, so the bounds are
+        //
+        //     grow(translate(rect, offset), reach(blur))
+        //
+        // and the offset is a displacement, not a size: it can be negative, and
+        // `grow` is symmetric, so `grow(rect, reach)` alone is short by the offset
+        // on every side the offset points at.
+        //
+        // **This is not a defensive extra.** `clip_commands` *drops* a command
+        // whose bounds do not intersect the clip, so a bounds that is short by
+        // the offset is a shadow that disappears from the bottom of a viewport it
+        // is still inside — silently, with the batch, the batch key and the
+        // recorded command all correct.
+        //
+        // **Added 2026-10-02 for `DrawCommand::Shadow`,** which is an exhaustive
+        // match and could not be taught the new variant without this arm, and
+        // **corrected 2026-10-03** — see the sub-task A review round 1, finding 1.
+        DrawCommand::Shadow {
+            rect, blur, offset, ..
+        } => Some(grow(
+            // Written out rather than borrowed from `list::translate_commands`'s
+            // private `moved_rect`: the two must agree, and a shared private
+            // helper in a third module is a larger change to this one than three
+            // numbers. `Rect::new` is what that helper does.
+            Rect::new(
+                rect.x + offset.0,
+                rect.y + offset.1,
+                rect.width,
+                rect.height,
+            ),
+            crate::render::blur::reach(*blur),
+        )),
     }
 }
 
@@ -1737,6 +1773,7 @@ mod tests {
     use super::*;
     use crate::animation::Easing;
     use crate::layout::{Layout, LayoutState as State};
+    use crate::paint::FontWeight;
     use crate::theme::ThemeToken;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -3347,6 +3384,7 @@ mod tests {
             color: Color::new(255, 255, 255, 255),
             font_size: 16.0,
             extra_advance: 0.0,
+            weight: FontWeight::Regular,
         };
         assert_eq!(
             command_bounds(&text),
@@ -3434,8 +3472,134 @@ mod tests {
             "the extent of the points, and no stroke width to add to it: a \
              polygon is filled, so there is no half-stroke to grow the box by"
         );
+        // The shadow, in **numbers**, and every one of them derived rather than
+        // copied: the panel rect, the offset it is drawn at, and the blur's reach.
+        //
+        // The fixture is off the origin on purpose — `.ai/NEVERAGAIN.md` § *A
+        // rect's origin and a rect's extent are different numbers* — because this
+        // arm's arithmetic reads three same-typed numbers as if they were
+        // different ones, and a rect at `(0, 0)` cannot see that.
+        //
+        // `reach(2.0)` is four taps either side, and `taps_for(8.0)` is four too
+        // (the kernel is nine taps in total), so the two sigmas below give the
+        // same reach and the third differs from the second by the offset alone.
+        let panel = Rect::new(240.0, 160.0, 320.0, 200.0);
+        assert_eq!(
+            crate::render::blur::reach(2.0),
+            4.0,
+            "σ 2 is two sigma, which is four taps either side"
+        );
+        assert_eq!(
+            crate::render::blur::reach(8.0),
+            4.0,
+            "and σ 8 is capped at the same four, because MAX_TAPS is nine"
+        );
+        assert_eq!(
+            crate::render::blur::reach(0.0),
+            0.0,
+            "and σ 0 spreads by nothing, which is the control for the grow"
+        );
+        assert_eq!(
+            command_bounds(&DrawCommand::Shadow {
+                rect: panel,
+                radius: 12.0,
+                color: Color::new(0, 0, 0, 190),
+                blur: 2.0,
+                offset: (0.0, 8.0),
+            }),
+            Some(Rect::new(236.0, 164.0, 328.0, 208.0)),
+            "the rect **moved by the offset** — y 160+8 .. 360+8 — and then \
+             grown by the reach: y 168-4 .. 368+4 = 164..372. Growing the \
+             unmoved rect instead would put the bottom at 364 rather than 372, \
+             which is eight pixels short of where the shadow actually reaches."
+        );
+        assert_eq!(
+            command_bounds(&DrawCommand::Shadow {
+                rect: panel,
+                radius: 12.0,
+                color: Color::new(0, 0, 0, 190),
+                blur: 2.0,
+                offset: (0.0, 0.0),
+            }),
+            Some(Rect::new(236.0, 156.0, 328.0, 208.0)),
+            "the same command with no offset: y 156..364, the same 208 tall and \
+             exactly 8 higher. The offset is the **only** difference between the \
+             two, so a bounds that ignored it would return the first answer for \
+             both and this line could not tell them apart."
+        );
+        // A negative offset, because `Offset` is a signed displacement and a
+        // shadow cast upwards is the same operation with the sign flipped. A
+        // `grow` that treated the offset as a magnitude would get this wrong.
+        assert_eq!(
+            command_bounds(&DrawCommand::Shadow {
+                rect: panel,
+                radius: 12.0,
+                color: Color::new(0, 0, 0, 190),
+                blur: 0.0,
+                offset: (-6.0, -3.0),
+            }),
+            Some(Rect::new(234.0, 157.0, 320.0, 200.0)),
+            "an offset of (-6, -3) with no blur: the moved rect alone, since \
+             reach(0) is zero"
+        );
     }
 
+    #[test]
+    fn a_shadow_whose_falloff_crosses_a_clip_edge_is_kept() {
+        // **The consequence of the bounds above, asserted at the place it
+        // happens.** `clip_commands` *drops* a command whose bounds miss the clip,
+        // so a bounds short by the offset drops a shadow whose pixels are on
+        // screen — and a shorter command list is indistinguishable from a shadow
+        // that was never recorded.
+        //
+        // The clip has to be **below the shadow's body and inside its falloff**,
+        // which is why this fixture's clip starts at 366 rather than ending there.
+        // A clip that *contains* the shadow's body intersects the bounds whether
+        // or not the offset is in them, so it cannot tell the two apart; this is
+        // the window between the two answers, 364 (the bottom with the offset
+        // dropped) and 372 (the bottom with it applied), and 366 sits in it.
+        let shadow = DrawCommand::Shadow {
+            rect: Rect::new(240.0, 160.0, 320.0, 200.0),
+            radius: 12.0,
+            color: Color::new(0, 0, 0, 190),
+            blur: 2.0,
+            offset: (0.0, 8.0),
+        };
+        // The rect's own bottom is 360, the shadow's shape reaches 368, and the
+        // bounds reach 372. The clip covers 366..400: it overlaps the last two
+        // rows of the shadow and nothing above them.
+        let clip = Rect::new(0.0, 366.0, 1000.0, 34.0);
+        assert_eq!(
+            command_bounds(&shadow).map(|bounds| bounds.y + bounds.height),
+            Some(372.0),
+            "the fixture's own arithmetic, so a failure below is about the clip \
+             and not about a number that moved"
+        );
+        assert_eq!(
+            clip_commands(std::slice::from_ref(&shadow), clip).len(),
+            1,
+            "a clip that reaches six pixels into the shadow's falloff is still \
+             partly inside it, and dropping it would lose pixels that are on screen"
+        );
+
+        // **The two controls beside it**, without which the case above would also
+        // pass against bounds that are far too large: one above the shadow, and
+        // one below its falloff. Both are dropped, and both must be — the first
+        // says the bounds are not the whole window, the second that they are not
+        // unbounded.
+        assert!(
+            clip_commands(
+                std::slice::from_ref(&shadow),
+                Rect::new(0.0, 0.0, 1000.0, 100.0)
+            )
+            .is_empty(),
+            "a clip ending at 100 is above the shadow's top of 164"
+        );
+        assert!(
+            clip_commands(&[shadow], Rect::new(0.0, 380.0, 1000.0, 40.0)).is_empty(),
+            "and one starting at 380 is below its falloff's 372"
+        );
+    }
     #[test]
     fn a_polygon_of_fewer_than_three_points_has_no_bounds_to_clip_against() {
         // The same rule the empty path follows, and for the same reason: a

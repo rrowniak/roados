@@ -86,6 +86,54 @@
 //! between two builds is made of. `ROADOS_RUN_SECONDS` bounds the run, because
 //! the demo otherwise only stops when its window is closed and a measurement
 //! nobody can end is not a measurement.
+//!
+//! **And a dialog is over the whole of it, showing.** `D` opens and closes it,
+//! `Escape` closes it, and while it is up it is modal: it takes every tap and
+//! every key aimed at a widget, the five controls behind it come out of the `Tab`
+//! order, and its own two buttons come into it. `OK` switches the theme and
+//! `Cancel` does nothing, which is the only way two buttons in a dialog can mean
+//! different things without a second widget in it.
+//!
+//! It **opens showing rather than waiting to be opened**, and that is a decision
+//! about evidence rather than about the demo. Input injection does not work on
+//! this host — task 21's positive control had `T` move 212 pixels of gauge needle
+//! from an injected press, and pointer injection has never delivered anything at
+//! all — so a dialog that began hidden could only ever be photographed through an
+//! instrument, and three of the captures in this task's history already rested on
+//! instrumented routes. Starting visible means the capture in
+//! `doc/ui/TASK_UI_PRIM_22.md` needs no seed, no rebuild and no environment
+//! variable, and it is a capture of the real demo.
+//!
+//! **It covers the middle of the gallery while it is up**, which the operator
+//! accepted rather than a reader having to discover: a centred panel over a full
+//! window hides whatever is behind it, and the window cannot grow (a 1280 by 1320
+//! request comes back 1280 by 1052 on this host), so the alternatives were a
+//! dialog that hid part of itself or a window that could not be shown. Nothing was
+//! moved to make room.
+//!
+//! **What "modal" covers here, and it is everything.** While the dialog is visible
+//! the demo offers every event to the dialog's subtree and to nothing else, the
+//! `Tab` order is the dialog's two buttons alone, and **the demo's own shortcuts
+//! are suppressed as well** — the whole of [`GALLERY_SHORTCUTS`] and the three
+//! pointer arms that reach the pads, the slider and the keyboard without routing
+//! at all. One guard covers the key table and one covers the pointer presses; see
+//! [`Demo::handle_event`].
+//!
+//! **That last half was not in the first version of this paragraph, and the gap was
+//! deliberate rather than overlooked**: `input::route` walks nodes, so *the input
+//! module's* half of modality is about nodes, and a shortcut the demo binds itself
+//! is not an event offered to one. The operator decided on 2026-10-03, having been
+//! shown that closing the gap silently changes the preconditions of 38
+//! pre-existing tests and choosing it anyway, that a modal which leaves the host
+//! application's shortcuts live is not modal. The 38 tests changed **fixture**, and
+//! not one assertion.
+//!
+//! **The releases are the one thing not guarded**, and the asymmetry is
+//! load-bearing: hold `Space`, press `D`, release `Space`, and a gated release
+//! would leave three pads at full press behind the scrim with no gesture left that
+//! could bring them back. [`Demo::space_pressed`] is what answers "was there a
+//! press" instead of asking about the current focus, which by then is inside the
+//! dialog.
 
 mod fps;
 
@@ -111,7 +159,7 @@ use ui_core::layout::{
 use ui_core::node::{self, WidgetNode};
 use ui_core::paint::{Color, PaintState, Painter, Rect};
 #[cfg(test)]
-use ui_core::paint::{DrawCommand, UvRect};
+use ui_core::paint::{DrawCommand, FontWeight, UvRect};
 use ui_core::property::Property;
 use ui_core::render::context::Context;
 use ui_core::render::Renderer;
@@ -120,6 +168,7 @@ use ui_core::theme::{PropertyValue, Theme, ThemeToken};
 use ui_core::widgets::button::Motion;
 use ui_core::widgets::chart::{Chart, ChartType, Palette as ChartPalette};
 use ui_core::widgets::container::Container;
+use ui_core::widgets::dialog::{Dialog, DialogAction, Palette as DialogPalette};
 use ui_core::widgets::gauge::{Gauge, GaugeType, Palette as GaugePalette};
 use ui_core::widgets::image::{Image, ImageFit, ImageSource};
 use ui_core::widgets::keyboard::{KeyAction, Keyboard, Palette as KeyboardPalette};
@@ -132,6 +181,7 @@ use ui_core::widgets::toggle::{Palette as TogglePalette, Toggle};
 // handler is, and the demo imports it under a second name: a slider's handler
 // takes the value it moved to, and `Callback::from_fn` on the alias would be
 // `Callback<()>`.
+use ui_core::widgets::Callback;
 use ui_core::widgets::Callback as ValueCallback;
 
 /// The window, and the box the root is laid out in.
@@ -224,7 +274,36 @@ const HELD_LIGHTEN: f32 = 0.4;
 const PAD_TOKENS: [ThemeToken; 3] = [ThemeToken::Error, ThemeToken::Success, ThemeToken::Primary];
 
 /// The font file the demo's labels are drawn with.
+///
+/// **Lato Medium, not Regular**, and the choice is the operator's to revisit
+/// rather than the demo's: it is the face every advance in the gallery was
+/// measured with, and changing it moves every label's rect.
 const FONT_PATH: &str = "/usr/share/fonts/truetype/lato/Lato-Medium.ttf";
+
+/// The font file the demo's **bold** runs are drawn with.
+///
+/// The partner of [`FONT_PATH`] out of the same family and the same foundry's
+/// weight axis: [`ui_core::render::Renderer::set_bold_font`] takes a second face
+/// and resolves [`ui_core::paint::FontWeight::Bold`] against it, so a bold run
+/// carries that face's own glyphs, bearings and advances. Lato-Bold beside
+/// Lato-Medium is the pairing the two neighbouring weights of one design give,
+/// which is what makes the pair look like one typeface at two weights rather than
+/// like two typefaces.
+///
+/// **Measured, and the measurement is a warning rather than a reassurance:** at
+/// 20 and 28 pixels the bold run is 1.5% and 0.5% wider than the regular one for
+/// `"Handgloves 42"` and **identical** at 28 pixels for `"Settings"`, because
+/// FreeType rounds each advance to a whole pixel at the size the face is set to.
+/// So a caller cannot assume a bold run ends at a different `x`, and must not
+/// assume it ends at the same one. That sentence is
+/// [`ui_core::paint::Painter::text_bold`]'s own doc, and this constant is where
+/// the pair it was measured on lives.
+///
+/// What would reverse it: a font the operator picks. Nothing else in the demo
+/// depends on this file existing — [`ui_core::font::Font::from_path`] returns a
+/// `Result`, and `main` propagates it, so a missing file is a failed run rather
+/// than a silently regular title.
+const BOLD_FONT_PATH: &str = "/usr/share/fonts/truetype/lato/Lato-Bold.ttf";
 
 /// The panel the text is laid out in: the width its wrapping label wraps at,
 /// and the height the text column is given.
@@ -1115,6 +1194,96 @@ const NOTHING_ENTERED: &str = "-";
 /// comparing.
 const RUN_SECONDS_VAR: &str = "ROADOS_RUN_SECONDS";
 
+// ------------------------------------------------------------------ task 22
+//
+// The dialog's five numbers and its two strings. They are constants for the same
+// reason every other constant in this file is: a test asserts against them, a
+// capture is read against them, and a reader who wants to know what is on screen
+// has one place to look. Each carries what it is, what it was measured or chosen
+// against, and what would reverse it.
+
+/// The title of the dialog the demo opens with.
+///
+/// **It is a question with a consequence rather than a notice**, because a dialog
+/// whose two buttons do the same thing is a dialog that demonstrates nothing: `OK`
+/// switches the theme over, exactly as `T` does, and `Cancel` closes it having
+/// changed nothing. The title names what will happen rather than what the widget
+/// is, so a reader of a capture knows what pressing `OK` would have done.
+///
+/// What would reverse it: a second dialog, which the task file puts out of scope.
+const DIALOG_TITLE: &str = "Switch theme";
+
+/// The body of the dialog the demo opens with.
+///
+/// **It names the key as well as the effect**, because the effect is one the
+/// gallery has had since task 11 and a reader who has never seen this demo cannot
+/// tell a new behaviour from an old one. It is long enough to **wrap** to a second
+/// line at [`DIALOG_FONT`] inside the panel's own inner width, which is the point:
+/// a one-line body would leave the wrapping untested on screen, and the widget's
+/// 34 unit tests cannot tell whether a real face wraps where a fixture's advance
+/// closure says it does.
+///
+/// What would reverse it: a shorter or longer sentence; there is no measurement
+/// behind the length, only the wish to see two lines and to fit inside 420.
+const DIALOG_BODY: &str =
+    "Turn the gallery's colours over to the other theme, exactly as the T key does.";
+
+/// The dialog's action labels, in the order they are added and therefore in the
+/// order they are drawn and walked by `Tab`.
+///
+/// **`OK` first**, which is the order [`ui_core::widgets::dialog`]'s own fixtures
+/// use and so the order its `Tab` order is documented in; the row is laid out left
+/// to right and right-aligned against the panel's inner edge, so this is the order
+/// a reader sees them in. Acceptance criterion 7 asks for exactly these two.
+///
+/// What would reverse it: platform convention, which usually puts `Cancel` on the
+/// left, and which the operator may prefer.
+const DIALOG_ACTIONS: [&str; 2] = ["OK", "Cancel"];
+
+/// The font size the dialog's own text is **measured** at, and the size its one
+/// `line_height` is taken from.
+///
+/// **The theme's `FontSizeLg`, which is the largest of the three sizes the panel
+/// draws at** — the title is drawn at it, the body at `FontSizeMd` and each
+/// button's label at the button's own 14. Measuring both blocks at the largest of
+/// the three is the *conservative* direction, and the choice between the two ends
+/// is not a coin toss: a run measured at 18 pixels is never narrower than the same
+/// run drawn at 14, so nothing can overflow the panel's padding, and the cost of
+/// being wrong in this direction is a body that wraps a word early. The other way
+/// round would let the title run past the panel's own 24-pixel padding, which is
+/// visible.
+///
+/// **It is a weight-blind measurement and that is deliberate, not an oversight:**
+/// the widget measures its title with the one `advance` closure its caller gives
+/// it, so there is no way to measure a bold run with this seam — a bold run's
+/// advances are the *bold face's*, and this closure is the regular face's. The
+/// consequence is measured rather than assumed: at 18 pixels on this pair of faces
+/// a bold title is a hair wider or the same, and the panel is a pixel or two of
+/// slack wider than its text needs either way. See
+/// [`ui_core::widgets::dialog`]'s module doc and
+/// [`ui_core::paint::Painter::text_bold`].
+///
+/// `the_dialog_measure_size_is_the_themes_largest` reads the tokens and holds the
+/// number to them, so a theme that grew `FontSizeLg` would fail there rather than
+/// being noticed on screen.
+///
+/// What would reverse it: a seam that takes a weight, which is a change to
+/// `Painter` and to every widget that measures text — not this task's.
+const DIALOG_FONT: f32 = 18.0;
+
+/// The key that opens and closes the dialog.
+///
+/// **`D`, for dialog**, and it is the only key the dialog owns: `Escape` closes it
+/// and is consumed by the widget rather than by this arm, so a dismissal is one
+/// thing whether it came from the row, the scrim, the keyboard or the toggling
+/// key. Every other key in the demo is a single letter already spoken for — `T`,
+/// `C`, `F`, `G`, `H`, `A`, `S`, `P` — and `D` was the nearest unused one, because
+/// a key a reader has to look up is a key that does not get pressed.
+///
+/// What would reverse it: anything the operator prefers, or a key that is already
+/// free on the target's keyboard; `D` is free in a QWERTY, a QWERTZ and an AZERTY.
+const DIALOG_KEY: Keycode = Keycode::D;
+
 /// The image the demo shows: a texture and the window of it the fit needs.
 ///
 /// The two together, because [`ImageSource::of`] is what turns a handle into
@@ -1175,6 +1344,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?)?;
     let font = Font::from_path(FONT_PATH)?;
     renderer.set_font(font.clone());
+    // **The second face, and the reason the dialog's title is bold on screen.**
+    // `DrawCommand::Text` carries a weight and the renderer resolves it against
+    // the faces it holds; with no face for the weight asked for it falls back to
+    // the regular one, which is a deliberate rule and also the way a bold title
+    // silently arrives as a plain one. There is nothing else to call here — this
+    // is the only bold run in the demo.
+    renderer.set_bold_font(Font::from_path(BOLD_FONT_PATH)?);
     // The image is loaded before the demo is built and before the window has
     // been shown anything, because `Demo::new` needs a texture and a source to
     // build its `Image` at all. A failure is not a failure of the demo: the
@@ -1849,6 +2025,29 @@ struct Demo {
     /// Whether the theme is currently the dark one.
     dark: bool,
     mouse_pressed: Option<usize>,
+    /// Whether the pads are down because the **space bar** is held.
+    ///
+    /// **The counterpart of `mouse_pressed`, and it exists because a release has
+    /// to be able to ask whether there was a press.** The key-up arm used to ask
+    /// `self.focused.is_none()` instead, which was the right question for the
+    /// *press* — `Space` is the activation key of a focused button, so a held
+    /// control must keep it — and the wrong question for the release for a reason
+    /// that only exists because focus can move between the two:
+    ///
+    /// 1. hold `Space`, so the three pads go down;
+    /// 2. press `D`, so the dialog opens and **takes focus**, because a modal
+    ///    opens with focus inside it;
+    /// 3. release `Space` — and `focused.is_none()` is now false, so the release
+    ///    declined, and the three pads sat at 1.0 behind the scrim with **no
+    ///    gesture left that could bring them back**: every other key is either
+    ///    guarded by the modal or does not touch the pads.
+    ///
+    /// That is `.ai/NEVERAGAIN.md` § *A drawn control with nothing behind it*
+    /// reached through the keyboard rather than through a missing event handler,
+    /// and `a_release_is_never_gated_so_nothing_can_be_stranded_mid_press` is the
+    /// test that found it. Written by [`Demo::press_all`] and cleared by
+    /// [`Demo::release_all`], so the flag and the animation are one fact.
+    space_pressed: bool,
     /// The gesture recogniser every control's events are built from.
     recognizer: GestureRecognizer,
     /// The control holding focus, or `None` when nothing does.
@@ -2021,6 +2220,21 @@ struct Demo {
     text_readout: DemoLabel,
     /// What the field last reported through `on_submit`, for the readout.
     submit_readout: DemoLabel,
+    /// The modal dialog, over the whole window.
+    ///
+    /// **A plain owned field, for the reason [`Demo::text_input`] is.** Its `OK`
+    /// writes [`pending_theme`](Demo::pending_theme) and the demo drains it, which
+    /// is the same two-hop the keyboard's `on_key` uses and the reason there is
+    /// no `Rc` round it: `set_palette` takes `&mut self`, and an `Rc` with a live
+    /// clone in a callback can never be re-themed — which is the trap
+    /// `Demo::text_input` documents having been caught by once.
+    dialog: Dialog,
+    /// That the dialog's `OK` was pressed, waiting for the demo to act on it.
+    ///
+    /// The mechanism [`Demo::pending_key`] names, asked again: `Callback` is `Fn`,
+    /// so an action's click cannot write a `&mut self` it was not lent, and a
+    /// property is the only thing it can be given that reaches the demo.
+    pending_theme: Property<bool>,
 }
 
 impl Demo {
@@ -2735,6 +2949,82 @@ impl Demo {
             }
         }
 
+        // ------------------------------------------------ task 22: the dialog
+        //
+        // **Built last and attached to nothing**, and both of those are the
+        // widget's own design rather than tidiness: `Dialog::new` gives the
+        // dialog a node with no parent, because a dialog overlays everything and
+        // is not laid out inside the content it covers, and it paints its actions
+        // into its own painter rather than onto their nodes. So the dialog is a
+        // **second root** in the arena, and `paint_order` walks it after the
+        // gallery's own — which is the whole of how it gets on top.
+        //
+        // Three things are wired here and each is a decision:
+        //
+        // - **the palette**, read from the theme before anything is drawn, for
+        //   the reason every other palette in this function is;
+        // - **two real actions**, `OK` and `Cancel` in that order, so the row is
+        //   the acceptance criterion's pair and `Tab` order is the row left to
+        //   right;
+        // - **`OK`'s callback written before `add_action`**, because that is the
+        //   one moment at which the widget wraps it in the dismissal. A callback
+        //   written afterwards replaces the wrapper and the dialog stops closing,
+        //   which is the failure `DialogAction` documents in as many words.
+
+        // What the dialog's `OK` asked for, waiting to be acted on. Declared
+        // before the dialog because the action's callback is wired into it.
+        let pending_theme = Property::new(false);
+        let mut dialog = Dialog::new(&mut nodes, DIALOG_TITLE, DIALOG_BODY);
+        dialog.set_palette(DialogPalette::from_theme(&theme));
+        // **No `set_motion` here, where every other widget in this function has
+        // one, and the omission is the point.** `Dialog::motion`'s default is the
+        // theme's `DurationNormal` with its `EasingStandard`, and
+        // `Motion::from_theme` reads the *fast* duration — 150 ms, which is the
+        // length of a press. A four-arc bounce in 150 ms gives each arc 54 ms,
+        // which the widget's own doc calls a twitch rather than an arrival, so
+        // the default is a deliberate answer and copying it here would be the
+        // bug.
+        for (index, label) in DIALOG_ACTIONS.iter().enumerate() {
+            let mut action = DialogAction::new(&mut nodes, *label);
+            if index == 0 {
+                // `OK` asks for the theme switch the `T` key already does, and
+                // `Cancel` asks for nothing at all — a dialog whose two buttons
+                // did the same thing would be demonstrating a shape rather than
+                // a choice. Written **before** `add_action`, which is when the
+                // dismissal is wrapped around it.
+                let asked = pending_theme.clone();
+                action.button.on_click = Callback::new(move || asked.set(true));
+            }
+            dialog.add_action(&mut nodes, action);
+        }
+        // The overlay is the whole window, and the node is given the window tight
+        // so that **the layout pass and the paint pass read one number**: both go
+        // through the node's own laid-out rect, and `Dialog::on_event` is given
+        // the same one as `Dialog::paint` — which is what the widget asks its
+        // caller for in three words and what a tap landing in the wrong place
+        // would come from getting wrong.
+        {
+            let handle = dialog.handle();
+            nodes
+                .get_mut(handle)
+                .ok_or("ui_demo: the dialog node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(WINDOW));
+        }
+        // **Presented here, at construction**, so the demo opens with it up. See
+        // the module doc for why that is a decision about evidence and not about
+        // the demo: input injection does not work on this host, so a dialog that
+        // began hidden could only ever be photographed through an instrument.
+        let _ = dialog.present();
+        // Focus starts **inside** the dialog, on its first action. Two things
+        // need it and neither can do without: `Focus` hands an activation key to
+        // the button node itself, so a dialog with nothing focused inside it has
+        // an `Enter` that reaches no button; and `Space` is the demo's
+        // *press-all-pads* gesture only `while self.focused.is_none()`, so with
+        // focus outside the dialog a bare space would press the three pads
+        // underneath the scrim.
+        let first_action: Option<Handle> = dialog.actions.first().map(|action| action.handle());
+
         // The chart's stroke reaches [`Chart::stroke_reach`] past its own node,
         // and a node's rect is not what its pixels are — so the neighbours that
         // box is close to are checked here rather than only in a test, for the
@@ -3093,7 +3383,16 @@ impl Demo {
         // a paragraph, and the list is gone as of 2026-10-02: no node in the
         // demo is built by something the order cannot see, so what is left is
         // that the order is computed once because the tree never changes shape.
-        let order = paint_order(&nodes.borrow(), root.handle());
+        //
+        // **Two roots, walked in that order.** The dialog's node has no parent,
+        // because a dialog is an overlay and the widget says so in its own tests,
+        // so `paint_order` over the gallery's root cannot reach it; appending the
+        // dialog's own walk is what puts it on top of the whole gallery rather
+        // than under it, and it is a *concatenation* rather than a merge because
+        // `Demo::draw` sends nodes in this order and there is no other order to
+        // send them in.
+        let mut order = paint_order(&nodes.borrow(), root.handle());
+        order.extend(paint_order(&nodes.borrow(), dialog.handle()));
         Ok(Demo {
             nodes,
             root: root.handle(),
@@ -3111,8 +3410,12 @@ impl Demo {
             theme,
             dark: true,
             mouse_pressed: None,
+            space_pressed: false,
             recognizer: GestureRecognizer::new(),
-            focused: None,
+            // The dialog's first action, for the reason it is read at the end of
+            // this function: a modal opens with focus inside it. `sync_dialog_focus`
+            // is what turns this into the property the button draws a ring from.
+            focused: first_action,
             containers: vec![row, text_column, text_panel, controls, root],
             gauge,
             gauge_type,
@@ -3148,6 +3451,8 @@ impl Demo {
             keyboard_pressed: false,
             text_readout,
             submit_readout,
+            dialog,
+            pending_theme,
         })
     }
 
@@ -3264,40 +3569,74 @@ impl Demo {
 
         match event {
             Event::KeyDown {
-                keycode: Some(Keycode::T),
-                repeat: false,
-                ..
-            } => self.toggle_theme(),
-            Event::KeyDown {
                 keycode: Some(keycode),
                 repeat: false,
                 ..
-            } => match keycode {
-                Keycode::Space if self.focused.is_none() => self.press_all(),
-                Keycode::Equals | Keycode::Plus => {
-                    self.set_text_size(self.text_size + TEXT_SIZE_STEP);
+            } => {
+                // **The dialog's own key is matched above the guard**, because the
+                // guard is what it is guarding against: `D` is the one key that
+                // must work while the dialog is showing, since it is how a dialog
+                // that opened itself is closed again. Written as an `if` above
+                // rather than as an arm of the table below for that reason alone.
+                if keycode == DIALOG_KEY {
+                    self.toggle_dialog();
+                } else if !self.dialog_is_modal() {
+                    // **One guard for the whole table**, and the operator's decision
+                    // of 2026-10-03: a modal that leaves the host application's own
+                    // shortcuts live is not modal. It was this file's own module doc
+                    // that first said so, while also recording that it did *not* do
+                    // it — the gap is closed and the sentence is now true of the
+                    // code rather than aspirational.
+                    //
+                    //
+                    // **The table rather than a `match`, and that is the fix for the
+                    // hazard a review named on 2026-10-03**: a `match` and a list of
+                    // its keys are two objects that can disagree, and they did — the
+                    // arm read `Keycode::Equals | Keycode::Plus` while the test's
+                    // list named only `Plus`, so one real key went unchecked by the
+                    // suppression test. Making the table *be* the dispatch means
+                    // **there is no second place to put a key**: a shortcut the demo
+                    // binds is a row in [`GALLERY_SHORTCUTS`], a row there is wrapped
+                    // by the guard above, and the suppression tests iterate the rows.
+                    //
+                    // Deriving the rows from the `match` was the second option and it
+                    // is not available in Rust; keeping the `match` and *testing* that
+                    // the two agree was the third, and the only test that could say so
+                    // would have been a second list — the hazard again. Enumerating
+                    // the platform's keycodes was the fourth, and it is not available
+                    // either: SDL3's keycode space is `SDLK_SCANCODE_MASK | scancode`,
+                    // a billion values wide with 250 values in it, and the two
+                    // functions that bridge it (`Keycode::from_scancode`,
+                    // `Scancode::from_keycode`) are **`unsafe`**, which this file does
+                    // not add.
+                    if let Some((_, _, act)) =
+                        GALLERY_SHORTCUTS.iter().find(|(_, key, _)| *key == keycode)
+                    {
+                        act(self);
+                    }
                 }
-                Keycode::Minus => self.set_text_size(self.text_size - TEXT_SIZE_STEP),
-                Keycode::C => self.cycle_text_color(),
-                Keycode::_0 => self.set_slider_value(SLIDER_MIN),
-                Keycode::_1 => self.set_slider_value(SLIDER_MAX),
-                Keycode::F => self.cycle_image_fit(),
-                Keycode::LeftBracket => self.step_progress(-PROGRESS_STEP),
-                Keycode::RightBracket => self.step_progress(PROGRESS_STEP),
-                Keycode::P => self.set_progress_indeterminate(!self.progress_indeterminate.get()),
-                Keycode::Comma => self.step_gauge(-GAUGE_STEP),
-                Keycode::Period => self.step_gauge(GAUGE_STEP),
-                Keycode::G => self.cycle_gauge_type(),
-                Keycode::H => self.cycle_chart_type(),
-                Keycode::A => self.append_chart_sample(),
-                Keycode::S => self.shift_chart_sample(),
-                _ => {}
-            },
+            }
+            // **The releases are deliberately not guarded**, and the asymmetry is
+            // the point rather than an oversight. Every arm above that *starts*
+            // something is guarded; every arm that *ends* one is not, because a
+            // release that a dialog could suppress is how a control gets stranded
+            // mid-press: hold `Space`, press `D` so the dialog opens, release
+            // `Space` — and with the release guarded the three pads stay at 1.0
+            // behind the scrim with nothing left to bring them back. A release has
+            // no effect on anything a guarded press did not start, and
+            // `release_all` on a press that never happened animates three
+            // properties from 0.0 to 0.0, which is a write and not a picture.
             Event::KeyUp {
                 keycode: Some(Keycode::Space),
                 ..
             } => {
-                if self.focused.is_none() {
+                // **`space_pressed` and not `focused.is_none()`**, and the field's
+                // doc gives the sequence that is the reason: focus can move between
+                // a press and its release — `D` opens the dialog and takes focus —
+                // and a condition on the *current* focus then declines a release
+                // that has a press behind it. The press still asks about focus,
+                // because `Space` is a focused button's activation key and must be.
+                if self.space_pressed {
                     self.release_all();
                 }
             }
@@ -3311,7 +3650,22 @@ impl Demo {
                 // because a recogniser reports a tap on the *release*: the
                 // pressed appearance has to be on screen for the whole time the
                 // pointer is down, which is before any tap exists.
-                if let Some(index) = self.pad_at(x, y) {
+                //
+                // **Guarded, and this arm is the reason modality needed saying
+                // twice.** These three checks reach the gallery *directly*, without
+                // going through [`Demo::route_input_event`], so the tap-side filter
+                // in that function cannot see them: a press on a pad with the
+                // dialog showing lit the pad, because the press is answered here
+                // and only the *tap* on the release was ever routed. All three
+                // targets are outside the panel — the pads are in the top left, the
+                // slider at 664 by 496 and the keyboard below the band — so a press
+                // on any of them lands on the scrim, and a scrim that dims
+                // something which then lights up is not modal.
+                if self.dialog_is_modal() {
+                    // Nothing to do, and **nothing to undo either**: the releases
+                    // below are unguarded, so a pointer that goes down on the scrim
+                    // and up over a pad still releases cleanly.
+                } else if let Some(index) = self.pad_at(x, y) {
                     self.mouse_pressed = Some(index);
                     self.press_pad(index);
                 } else if self.slider_at(x, y).is_some() {
@@ -3345,8 +3699,14 @@ impl Demo {
             // and release the left button gets, from the touch events SDL delivers
             // for the same gesture. A canceled touch drops the slider as well as
             // the pointer, because a canceled finger is one that is gone.
+            //
+            // **The press is guarded and the releases are not**, on the mouse arm's
+            // argument above: a finger down on the scrim must not start a drag or
+            // light a key, and a finger lifted afterwards must still tidy up.
             Event::FingerDown { x, y, .. } => {
-                if self.slider_at(x, y).is_some() {
+                if self.dialog_is_modal() {
+                    // Nothing to do, and nothing to undo: the arms below are not.
+                } else if self.slider_at(x, y).is_some() {
                     self.slider_dragging = true;
                 } else if self.keyboard_at(x, y) {
                     self.grab_key(Offset::new(x, y));
@@ -3363,6 +3723,16 @@ impl Demo {
 
         for mut input_event in produced {
             self.route_input_event(&mut input_event);
+        }
+
+        // The dialog's `OK`, drained **after** the event that fired it rather
+        // than inside the handler, for the reason `offer_to` gives for the
+        // keyboard's key: a `Callback` is `Fn` and cannot reach a `&mut self`, so
+        // the click could only write a property — and reading it at the end of the
+        // event keeps a theme switch out of the middle of a dispatch.
+        if self.pending_theme.get() {
+            self.pending_theme.set(false);
+            self.toggle_theme();
         }
     }
 
@@ -3383,6 +3753,23 @@ impl Demo {
     /// click rather than on anything a test could have caught by reading the code.
     fn route_input_event(&mut self, event: &mut InputEvent) {
         if event.position().is_none() {
+            // **The modal dialog first, on a key as much as on a tap.** It is the
+            // only thing a key may reach while it is showing, and
+            // [`Dialog::on_event`] is the whole of that answer: it consumes
+            // `Escape` and dismisses, and it forwards every other key to its own
+            // focused action — so an `Enter` still reaches the button node, by the
+            // widget's route rather than the demo's. It declines `Tab`, which is
+            // then the navigation arm's to move, and the five controls behind it
+            // are out of the order while the dialog is up.
+            //
+            // Offering the *button* first would be the alternative and it is
+            // wrong in a way only the acceptance test finds: a `Button` declines
+            // `Escape` and nothing else in the demo would then handle it, so a
+            // dialog no key could close would be the one control in the window
+            // with no way out.
+            if self.dialog_is_modal() && self.offer_to(self.dialog.handle(), event) {
+                return;
+            }
             // The focused control has the first claim on a positionless event, and
             // focus navigation runs only for whatever it left alone. A button takes
             // its activation keys and leaves Tab; a slider takes its arrows and
@@ -3394,6 +3781,29 @@ impl Demo {
                 && self.focus_navigation(event)
             {
                 event.consume();
+            }
+            return;
+        }
+
+        // **The modal dialog's own subtree, and nothing else, while it is
+        // showing.** This is before the slider's dragged arm below, and that is
+        // the order that matters: a drag is a positional event, and a finger that
+        // went down on the slider before the dialog appeared and then moved must
+        // not keep driving it underneath the scrim.
+        //
+        // **The decline is not a licence to carry on down the chain.**
+        // `Dialog::on_event` handles a tap and a key and leaves everything else
+        // alone — a `Drag` among them — and "leaves it alone" here means *drops
+        // it*, because the alternative is the content behind the overlay being
+        // reachable one event kind at a time. That is the caller's half of the
+        // contract `Dialog::on_event` states and `ui_core::input` cannot enforce,
+        // because nothing in the input module knows what a modal is.
+        if self.dialog_is_modal() {
+            for handle in self.modal_chain(event) {
+                self.offer_to(handle, event);
+                if event.consumed() {
+                    break;
+                }
             }
             return;
         }
@@ -3430,10 +3840,135 @@ impl Demo {
         }
     }
 
+    /// Returns the nodes a positional event may be offered to while the dialog is
+    /// showing: the one action whose **drawn** rect holds it, or the dialog's own
+    /// node, and **nothing outside the dialog's subtree**.
+    ///
+    /// **Built from [`Dialog::action_rect`] and not from the nodes' own laid-out
+    /// rects**, and that is the whole reason the action buttons' nodes are laid
+    /// out nowhere in particular: the widget draws its actions into its own
+    /// painter at `action_rect` and hit-tests the same numbers, so the nodes
+    /// exist for the two things a *node* is for — the paint order and the `Tab`
+    /// order — and nothing declares where they go. Asking the layout where a
+    /// button is would answer the dialog's origin and route every tap in the
+    /// window to the first button.
+    ///
+    /// A one-element chain, and that is the modality: `ui_core::input` walks from
+    /// the node under the pointer up to the root, so the content behind the
+    /// overlay is reachable by construction unless the caller declines to walk
+    /// there. `a_tap_outside_the_panel_does_not_reach_the_gallery_behind_it` is
+    /// what holds that down, and `the_demo_never_offers_an_event_outside_the_
+    /// dialog_while_it_is_showing` walks the whole set of positions rather than
+    /// one of them.
+    fn modal_chain(&self, event: &InputEvent) -> Vec<Handle> {
+        let mut chain = Vec::with_capacity(2);
+        let Some(position) = event.position() else {
+            return chain;
+        };
+        let rect = self.dialog_rect();
+        for index in 0..self.dialog.actions.len() {
+            let held = self
+                .dialog
+                .action_rect(
+                    index,
+                    rect,
+                    &self.dialog_advance(),
+                    self.dialog_line_height(),
+                )
+                .is_some_and(|drawn| over_rect(drawn, position.x, position.y));
+            if held {
+                chain.push(self.dialog.actions[index].handle());
+                return chain;
+            }
+        }
+        chain.push(self.dialog.handle());
+        chain
+    }
+
+    /// Whether the dialog is **modal** right now: showing, rather than merely on
+    /// screen.
+    ///
+    /// **Not [`Dialog::is_drawn`], and the difference is the fade-out.** `is_drawn`
+    /// answers *"would `paint` record anything this frame"*, which a dismissed
+    /// dialog answers `true` for another 300 ms while its scrim fades; modality is
+    /// a question about **where events go**, and a dialog that has been dismissed
+    /// owns nothing. Keyed on `visible` for that reason — a pointer pressed
+    /// through a half-transparent scrim is aimed at the gallery, not at a panel
+    /// that is on its way out — and **all three readers are this one function**
+    /// (`route_input_event`'s two branches, `focus_navigation` and
+    /// `toggle_dialog`), so there is no second place to answer it differently.
+    ///
+    /// The **rings** are the exception and deliberately so: they answer "is this
+    /// control's ring **on screen**?", which is [`Dialog::is_drawn`] and not this,
+    /// so a button keeps its ring for as long as the dialog is still being painted.
+    /// [`Demo::sync_dialog_focus`] is where the two are told apart, and its doc
+    /// has the table of which flag drives which.
+    fn dialog_is_modal(&self) -> bool {
+        self.dialog.visible.get()
+    }
+
+    /// Returns whether `handle` is the dialog's own node or anything under it.
+    ///
+    /// **Walked up the parent chain rather than matched against the actions the
+    /// demo knows about**, because "the dialog's subtree" is a property of the tree
+    /// and the demo should not have to be told what the widget put in it: a dialog
+    /// that grew a third kind of child would be inside this answer without anything
+    /// here changing.
+    ///
+    /// The walk cannot leave the dialog's root, because that root has no parent
+    /// (see [`Demo::new`]) and so the chain ends at it.
+    fn in_dialog_subtree(&self, handle: Handle) -> bool {
+        let nodes = self.nodes.borrow();
+        let mut current = Some(handle);
+        while let Some(node) = current {
+            if node == self.dialog.handle() {
+                return true;
+            }
+            current = nodes.get(node).and_then(WidgetNode::parent);
+        }
+        false
+    }
+
+    /// Returns whether a control that can still be **activated** holds focus.
+    ///
+    /// **One predicate for the two code paths that both mean "is there somebody
+    /// there"**, and the reason it is not `self.focused.is_some()` is the finding a
+    /// review returned against this file on 2026-10-03: a dialog dismissed from
+    /// **inside** the widget — `Escape`, a tap on an action, a tap on the scrim —
+    /// does not go through [`Demo::toggle_dialog`], so nothing retired
+    /// [`Demo::focused`], and a stale `Some` is a handle to a control that has gone.
+    /// Two readers were affected and only one of them was visible:
+    ///
+    /// - [`Demo::offer_to_focused`] offered the key to that button, so `Enter` kept
+    ///   firing `OK` from a dialog dismissed a frame earlier;
+    /// - the `Space` row in [`GALLERY_SHORTCUTS`] reads a focus condition, so a
+    ///   stale `Some` stopped the pads being pressed at all. Measured before the
+    ///   fix: `Space` after an `Escape` dismissal left the pads at
+    ///   `[0.0, 0.0, 0.0]` where a `D` dismissal left them at `[1.0, 0.84, 0.36]`.
+    ///   Two dismissal routes, two behaviours, and nothing on screen to say which.
+    ///
+    /// [`Demo::in_dialog_subtree`] is how a stale handle is recognised: by walking
+    /// parents, not by listing the actions, so a dialog that gained a child would be
+    /// covered without anything here changing.
+    ///
+    /// [`Demo::sync_dialog_focus`] is still what makes the *state* converge — it
+    /// retires the record on the next frame — and this predicate is what makes the
+    /// *routing* right in the window before that, which is the window a reader
+    /// reproduces by pressing two keys with no frame between them.
+    fn focus_is_live(&self) -> bool {
+        self.focused
+            .is_some_and(|handle| self.dialog_is_modal() || !self.in_dialog_subtree(handle))
+    }
+
     /// Offers a positionless event to the control holding focus, and reports
     /// whether it took it.
     fn offer_to_focused(&self, event: &mut InputEvent) -> bool {
-        let Some(handle) = self.focused else {
+        // **`focus_is_live` and not `focused.is_some()`**, and that predicate's doc
+        // is the whole of the finding: a dialog dismissed from inside the widget
+        // leaves the record naming a button that has gone, and this was the last
+        // place in the file that offered a key without asking whether there was
+        // still somebody there.
+        let Some(handle) = self.focused.filter(|_| self.focus_is_live()) else {
             return false;
         };
         self.offer_to(handle, event)
@@ -3465,6 +4000,12 @@ impl Demo {
     /// that a drawn series, a grid and a cursor's worth of hairlines all look
     /// grabbable and **nothing in it reads a pointer over any of them**. It has
     /// no `on_event` to call, so there is nothing here to add.
+    ///
+    /// **The dialog and its two actions are the sixth and seventh arms**, and
+    /// they are here for the reason [`Demo::modal_chain`] gives: the action
+    /// buttons are real `Button` widgets with nodes of their own, and a tap that
+    /// lands on one is offered to the button rather than to the dialog, so the
+    /// button's own press state is the thing a finger sees.
     fn offer_to(&self, handle: Handle, event: &mut InputEvent) -> bool {
         if handle == self.slider.node() {
             return match self.slider_rect() {
@@ -3505,7 +4046,71 @@ impl Demo {
             }
             return consumed;
         }
+        // The dialog, and each of its actions, in the one place that turns a
+        // handle into a widget. **The three numbers handed to `on_event` are the
+        // three `paint` is handed, through the same three accessors** — that is
+        // the widget's own contract ("you must pass the same `advance` and
+        // `line_height`") and the reason they are functions rather than values
+        // spelled at each site.
+        if handle == self.dialog.handle() {
+            return self.dialog.on_event(
+                event,
+                self.dialog_rect(),
+                &self.dialog_advance(),
+                self.dialog_line_height(),
+            );
+        }
+        for action in &self.dialog.actions {
+            if handle == action.handle() {
+                // The button's own handler, which is what an **activation key**
+                // needs: `Focus` hands `Enter` to the button node itself, and
+                // `Button::on_event` refuses it unless that button is focused.
+                // The dismissal is already wrapped around the click, so this route
+                // closes the dialog exactly as the tap route does.
+                return action.button.on_event(event);
+            }
+        }
         false
+    }
+
+    /// Returns the box the dialog is drawn in and hit-tested against: the node's
+    /// own laid-out rect, which is the whole window.    ///
+    /// **The node's rect and not [`WINDOW`]**, for the reason every other widget
+    /// in this file takes its rect from the node: `Dialog::on_event` says its
+    /// caller must pass the *same* `advance` and `line_height` as to `paint`, and
+    /// the rect is the third of the three numbers. A tap judged against a
+    /// different box than the panel was drawn in is a tap that lands somewhere
+    /// else, and both readers go through here, so there is one number.
+    ///
+    /// The fallback is [`WINDOW`] rather than nothing, because the demo has one
+    /// window and a node that has not been placed is a node the layout pass has
+    /// not run over yet — not a condition a caller should have to handle.
+    fn dialog_rect(&self) -> Rect {
+        self.node_rect(self.dialog.handle())
+            .unwrap_or_else(|| Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height))
+    }
+
+    /// Returns the advance the dialog's text is measured with, at
+    /// [`DIALOG_FONT`].
+    ///
+    /// **A function and not a closure written at each site**, because there are
+    /// two sites — the paint pass and the hit test — and they must be handed the
+    /// same one. The widget says so in its own contract, and a caller that
+    /// spelled the closure twice would have two places to be wrong with nothing
+    /// to say so.
+    fn dialog_advance(&self) -> impl Fn(char) -> f32 + '_ {
+        move |ch: char| self.metrics.advance(ch, DIALOG_FONT)
+    }
+
+    /// Returns the line box the dialog's title, body and button labels are all
+    /// measured at.
+    ///
+    /// One number for three sizes, because that is the seam the widget offers:
+    /// [`DIALOG_FONT`]'s doc says why the *measurement* is at the panel's largest
+    /// size, and the widget's own doc says what would reverse it — a second
+    /// parameter, or a font metric per size.
+    fn dialog_line_height(&self) -> f32 {
+        self.metrics.line_height(DIALOG_FONT)
     }
 
     /// Moves focus if `event` is a navigation key, and reports whether it was.
@@ -3529,6 +4134,22 @@ impl Demo {
     /// so a stop on it would be a stop where focus arrives and nothing shows that
     /// it did. **The chart is not in it either**, for the chart's own reason, and
     /// `the_chart_is_not_in_the_focus_order` is that decision's test.
+    ///
+    /// **The dialog replaces the whole list while it is showing**, and it is a
+    /// replacement rather than an addition: a modal's background controls are not
+    /// focusable, because a `Tab` that walked out of the dialog into the gallery
+    /// would put focus somewhere the dialog's overlay covers and that nothing can
+    /// be seen through. The five come back the moment the dialog closes, and
+    /// `the_dialog_replaces_the_tab_order_while_it_is_showing` is that claim with
+    /// the control beside it.
+    ///
+    /// **The walk's root changes with the set**, and that is not tidiness:
+    /// [`Focus`] recomputes the order by walking the tree from its own root, and
+    /// the dialog's node is a root of its own because it is an overlay. Walking
+    /// the gallery's root with the two actions marked focusable would find them —
+    /// they are nowhere in that tree — and so would find nothing, which would make
+    /// `Tab` a key that does nothing at all rather than one that moves between the
+    /// two buttons.
     fn focus_navigation(&mut self, event: &InputEvent) -> bool {
         if event.position().is_some() {
             return false;
@@ -3550,26 +4171,45 @@ impl Demo {
 
         let next = {
             let nodes = self.nodes.borrow();
-            let mut focus = Focus::new(&nodes, self.root);
+            let modal = self.dialog_is_modal();
             // The five in the tree's paint order, and so in the `Tab` order. None
             // of them has a disabled state of its own, so every one of them is in
             // the order always — which is not the same as saying every one of them
             // answers every key: `offer_to` is what decides, and a widget with no
             // key of its own declines.
-            for handle in [
+            let background = [
                 self.slider.node(),
                 self.image.handle(),
                 self.toggle.handle(),
                 self.progress.handle(),
                 self.text_input.handle(),
-            ] {
-                focus.set_focusable(handle, true);
+            ];
+            let actions: Vec<Handle> = self
+                .dialog
+                .actions
+                .iter()
+                .map(|action| action.handle())
+                .collect();
+            let mut focus = Focus::new(
+                &nodes,
+                if modal {
+                    self.dialog.handle()
+                } else {
+                    self.root
+                },
+            );
+            for handle in if modal { &actions[..] } else { &background[..] } {
+                focus.set_focusable(*handle, true);
             }
             // Re-entering the order where focus already is. `Focus` starts with
             // nothing focused, so without this a wheel turned twice in a row
             // would walk from the top both times, and Shift+Tab from the first
             // control would go forward instead of back.
             if let Some(current) = self.focused {
+                // **Deliberately left to fail while the dialog is up**: the
+                // buttons are its own, and the five behind it are not in this
+                // walk, so `focus` refuses and `Tab` starts from the first button
+                // rather than from a stale node the walk cannot see.
                 let _ = focus.focus(current);
             }
             if let Some(delta) = scroll {
@@ -3591,6 +4231,13 @@ impl Demo {
     /// have none, so their readouts say where focus is in words instead. See
     /// `progress_focused` and `image_focused`. Neither the gauge nor the chart is
     /// named here because neither is in the order; see [`Demo::offer_to`].
+    ///
+    /// **The dialog's actions are not written here**, and that is deliberate:
+    /// a dismissal takes the focus away without going through this function — `OK`
+    /// and `Cancel` fire and close, `Escape` closes, a tap on the scrim closes —
+    /// and this is only called when a *navigation key* moved focus.
+    /// [`Demo::sync_dialog_focus`] is the one place that writes them, every frame,
+    /// and it asks the dialog whether it is still there.
     fn set_focus(&mut self, next: Option<Handle>) {
         self.focused = next;
         let focused = self.focused;
@@ -3675,6 +4322,12 @@ impl Demo {
         // argument `sync_toggle_state` makes and the reason this comment exists
         // twice.
         let _ = self.chart.tick(delta);
+        // The dialog's show and hide transition, on the gauge's argument exactly:
+        // the tick is here, the **aim** is not. `present` and `dismiss` are what
+        // start the fade and the bounce, and they are called from the toggling key
+        // and from the widget's own dismissal — a per-frame aim would restart both
+        // on every frame, which is the argument `sync_toggle_state` makes.
+        let _ = self.dialog.tick(delta);
         // The one number the readout below the chart names that the demo has to
         // write rather than bind, for the reason `Demo::chart_moving` gives:
         // `Chart::is_animating` is a method over the widget's own clock. Guarded
@@ -3688,12 +4341,22 @@ impl Demo {
 
         {
             let mut nodes = self.nodes.borrow_mut();
-            Layout::new(&mut nodes).layout(self.root, Constraints::tight(size));
+            let mut layout = Layout::new(&mut nodes);
+            layout.layout(self.root, Constraints::tight(size));
+            // **The dialog's own pass, because the dialog is a second root.** Its
+            // node has no parent — a dialog overlays everything — so the walk
+            // above cannot reach it, and the one number that both the paint pass
+            // and the hit test read is its laid-out rect.
+            layout.layout(self.dialog.handle(), Constraints::tight(size));
         }
 
         // Where it is in the order above that the frame rate goes: after the
         // clocks and the chart's own numbers, and **before** the arena is borrowed.
         self.tick_fps(delta);
+        // The dialog's focus rings, on the same argument: they are read by the
+        // paint arm below and by `Dialog::on_event`, and a button inside a dialog
+        // that has closed must not still be holding one.
+        self.sync_dialog_focus();
 
         let mut nodes = self.nodes.borrow_mut();
 
@@ -3728,6 +4391,28 @@ impl Demo {
                 // borrowed mutably already.
                 let commands = match node.layout().rect() {
                     Some(rect) => self.slider.widget.paint(rect.into()),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The dialog, in the walk and **last in it**, which is the whole of how
+            // an overlay gets on top: `Demo::draw` sends the nodes in `order`, and
+            // the dialog's subtree was appended to that order rather than attached
+            // to the gallery's root. It has an arm of its own because its `paint`
+            // takes an advance closure **and** a line height — the seam the widget
+            // asks its caller for — and the walk has no such parameter, the same
+            // reason the field below is painted outside it.
+            //
+            // The rect is the node's own laid-out one rather than `WINDOW`, because
+            // `offer_to` reads the same number for `on_event` and a tap judged
+            // against a different box from the one the panel was drawn in is a tap
+            // that lands somewhere else.
+            if handle == self.dialog.handle() {
+                let advance = self.dialog_advance();
+                let line_height = self.dialog_line_height();
+                let commands = match node.layout().rect() {
+                    Some(rect) => self.dialog.paint(rect.into(), &advance, line_height),
                     None => Vec::new(),
                 };
                 *node.paint_mut() = PaintState::from_commands(commands);
@@ -3842,6 +4527,148 @@ impl Demo {
             };
             if let Some(node) = nodes.get_mut(handle) {
                 *node.paint_mut() = PaintState::from_commands(commands);
+            }
+        }
+    }
+
+    /// Opens the dialog if it is closed and closes it if it is up.
+    ///
+    /// **One function for both directions**, and the reason is that two arms
+    /// doing one direction each are two places to be right: a key that opened a
+    /// dialog nothing could close would be one of them, and nothing in the suite
+    /// would say so. The two directions are asserted separately anyway —
+    /// `the_dialog_key_opens_a_closed_dialog` and `the_dialog_key_closes_an_open
+    /// _one` — because "one key toggles" is the claim and each direction is half
+    /// of it.
+    ///
+    /// **Armed on `visible` and not on `is_drawn`**, so a key pressed while the
+    /// fade-out is still running presents the dialog again rather than doing
+    /// nothing. `present` and `dismiss` also return whether they changed
+    /// anything, and that is deliberately not what this arms on: they would both
+    /// answer `false` for a press during the fade.
+    ///
+    /// Focus moves with it in both directions, and the reason is in the module doc
+    /// and in `Demo::sync_dialog_focus`: a dialog that opens with nothing focused
+    /// inside it has an `Enter` that reaches no button and a `Space` that reaches
+    /// the three pads behind the scrim.
+    fn toggle_dialog(&mut self) {
+        if self.dialog_is_modal() {
+            let _ = self.dialog.dismiss();
+            // **No `set_focus(None)` here, and its removal is not a simplification
+            // but a fix.** This used to drop the record on the spot, which left
+            // the `D` route as the one dismissal whose ring popped: the other
+            // three routes (Escape, an action's own click, a tap on the scrim)
+            // leave the record to `sync_dialog_focus`, which kept it for the fade.
+            // Clearing it eagerly made `D` the odd route out, and
+            // `a_dismissed_dialog_withdraws_activation_on_every_route` is the
+            // test that says all four now behave alike. The record is retired
+            // when the dialog stops being drawn, which is the same frame the ring
+            // goes.
+        } else {
+            let _ = self.dialog.present();
+            self.set_focus(self.dialog.actions.first().map(|action| action.handle()));
+        }
+    }
+
+    /// Writes **three** things from **one** record and **two** predicates: it
+    /// retires [`Demo::focused`] when the dialog stops being drawn, and it writes
+    /// each action's `focused` and `activatable` from the answers the two
+    /// predicates give. **The only thing in the file that writes any of the three.**
+    ///
+    /// **The two questions, and why they are two properties:**
+    ///
+    /// | question | predicate | widget property |
+    /// |---|---|---|
+    /// | is this control's ring **on screen**? | [`Dialog::is_drawn`] | `Button::focused` |
+    /// | may this control be **activated**? | [`Demo::dialog_is_modal`] — `visible` | `Button::activatable` |
+    ///
+    /// They are not the same question, and for exactly 300 ms they have different
+    /// answers. A dismissed dialog stops owning its buttons immediately, so
+    /// *activation* must be withdrawn at once or an activation key fires a button
+    /// nobody can see — that is the review's finding. But the panel, its text, its
+    /// buttons and its scrim keep drawing until the transition ends, so the *ring*
+    /// must stay until then or it vanishes in one frame over an opaque panel.
+    ///
+    /// **One record for both, because the ring is read off it.** The record is
+    /// retired on `is_drawn` and **not** on `visible`, which is the reversal of
+    /// 2026-10-03: a dismissal withdraws activation and leaves the record alone,
+    /// because the record is what the ring is read from. Before
+    /// `Button::activatable` existed the record *was* the activation gate, so
+    /// retiring it was the only way to stop the key — and that is what made the
+    /// ring pop. With the widget carrying the second answer, the record can go
+    /// back to meaning one thing: *a control the demo still has focus on, and is
+    /// still drawing*.
+    ///
+    /// **A ring is a statement about where focus is, not about what can be
+    /// activated.** That is the operator's decision of 2026-10-03, and it reverses
+    /// what this file's own comment used to argue here — that the ring going with
+    /// the record "is the truth rather than a pop", on the grounds that after a
+    /// dismissal the control cannot be activated. Activation is now refused by the
+    /// widget, and asserted by
+    /// `a_dismissed_dialog_does_not_answer_enter_during_its_fade` and
+    /// `a_dismissed_dialog_withdraws_activation_on_every_route`; the ring is left
+    /// free to answer the other question, and is asserted on the recorded commands
+    /// by `the_focus_ring_fades_out_with_the_panel_instead_of_popping`.
+    ///
+    /// **Its own function rather than an arm of `set_focus`**, because a dismissal
+    /// takes the focus away without going through `set_focus`: `OK` and `Cancel`
+    /// fire their clicks and close, `Escape` closes, a tap on the scrim closes,
+    /// and each of those is the widget's own code rather than the demo's. The
+    /// `.ai/NEVERAGAIN.md` § *a drawn control with nothing behind it* concern is
+    /// still real and is now answered by `activatable` rather than by the ring: a
+    /// ring on a control that cannot be reached is a ring whose *meaning* is wrong,
+    /// and the fix for that is to stop implying it can be reached.
+    ///
+    /// **The record is retired, not just the ring, and that is the half this
+    /// function did not do until a review pointed at it.** The `is_drawn` test on
+    /// the ring was right and still left [`Demo::focused`] naming a button of a
+    /// dialog that was on its way out, which had **two** consequences and only one
+    /// of them was visible: `Enter` kept firing that button (the reported defect),
+    /// and `Space` stopped pressing the pads, because its condition reads a stale
+    /// `Some` as "something holds focus".
+    ///
+    /// The retirement's condition is [`Demo::dialog_is_modal`] and **not**
+    /// `is_drawn`, for the reason the routing's is: a dismissed dialog owns
+    /// nothing from the instant it is dismissed, and holding a control for the
+    /// 300 ms its scrim takes to fade is not ownership. The ring's condition is
+    /// the other one, for the other reason, and the two are not redundant.
+    ///
+    /// [`Demo::focus_is_live`] asks the same question as the retirement, and both
+    /// are wanted: this one makes the *state* right from the next frame on, and
+    /// that one makes the *routing* right in the window before it.
+    fn sync_dialog_focus(&mut self) {
+        // **Retired on `is_drawn` and not on `dialog_is_modal`, and that reversal
+        // is the whole of this change.** The record used to be retired the moment
+        // the dialog stopped being *interactive*, because the record was the only
+        // thing that could stop the key. It is no longer: the widget carries that
+        // answer in `Button::activatable`, so a dismissal **withdraws activation
+        // and leaves the record alone** — and the record has to survive, because
+        // the ring is read off it and the panel is still drawn for 300 ms after
+        // the dismissal.
+        //
+        // So the record is retired on the predicate that matches what it now
+        // means — *a control the demo still has focus on, and is still drawing* —
+        // which is `is_drawn`. One record, one meaning, and no second field to
+        // keep in step with it.
+        let drawn = self.dialog.is_drawn();
+        let stale = self
+            .focused
+            .is_some_and(|handle| !drawn && self.in_dialog_subtree(handle));
+        if stale {
+            self.focused = None;
+        }
+
+        // **Two answers, two properties, one predicate each.** The ring is a
+        // question about the screen and the key is a question about ownership,
+        // and for the length of a fade-out they disagree.
+        let modal = self.dialog_is_modal();
+        for action in &self.dialog.actions {
+            let ring = drawn && self.focused == Some(action.handle());
+            if action.button.focused.get() != ring {
+                action.button.focused.set(ring);
+            }
+            if action.button.activatable.get() != modal {
+                action.button.activatable.set(modal);
             }
         }
     }
@@ -4169,6 +4996,7 @@ impl Demo {
         // is the palette the theme is leaving, which re-aims every widget at what
         // it already had and the transition goes nowhere.
         let gauge_palette = GaugePalette::from_theme(&new_theme);
+        let dialog_palette = DialogPalette::from_theme(&new_theme);
         let slider_palette = SliderPalette::from_theme(&new_theme);
         let toggle_palette = TogglePalette::from_theme(&new_theme);
         let progress_palette = ProgressPalette::from_theme(&new_theme);
@@ -4179,6 +5007,15 @@ impl Demo {
         self.theme.switch_to(new_theme, THEME_TRANSITION);
         self.gauge.set_palette(gauge_palette);
         self.gauge.animate_to_state(motion);
+        // The dialog carries a palette too, and it is the **one** palette in this
+        // function that is set and not animated: `Dialog::set_palette` says the
+        // change is immediate on purpose, because a dialog's three colours change
+        // only when the theme does and a crossfade would be a second pair of
+        // transitions on a clock that already carries the appearance and the
+        // dismissal. A dialog left on the dark palette over a light gallery would
+        // be a dark panel floating in a white window, which is why this line is
+        // here at all rather than left to the panel's first paint.
+        self.dialog.set_palette(dialog_palette);
         self.slider.widget.set_palette(slider_palette);
         self.slider.widget.animate_to_state(motion);
         self.toggle.set_palette(toggle_palette);
@@ -4265,7 +5102,12 @@ impl Demo {
     }
 
     /// Presses every pad, cascading across them one `STAGGER_STEP` apart.
+    ///
+    /// **Records that it did**, for the reason [`Demo::space_pressed`] gives: the
+    /// release has to be able to find out whether there was a press, and a
+    /// condition on the *current* focus cannot answer that.
     fn press_all(&mut self) {
+        self.space_pressed = true;
         self.clock.clear();
         let animations: Vec<AnyAnimation> = self
             .pads
@@ -4279,8 +5121,72 @@ impl Demo {
         Stagger::new(animations, STAGGER_STEP).play(&mut self.clock);
     }
 
+    /// Presses every pad, but only while no **live** control holds focus.
+    ///
+    /// **`focus_is_live` and not `focused.is_none()`** — that predicate's doc gives
+    /// the sequence: a dismissal from inside the widget leaves the record stale, and
+    /// a stale `Some` is not `None`, so the one key that presses the pads stopped
+    /// pressing them after an `Escape`. This is `Space`'s whole body, and it is a
+    /// method rather than a pattern guard on a `match` arm because a row of
+    /// [`GALLERY_SHORTCUTS`] is a **function** and a function is not a pattern.
+    fn press_pads_if_unfocused(&mut self) {
+        if !self.focus_is_live() {
+            self.press_all();
+        }
+    }
+
+    /// Moves the text size up one [`TEXT_SIZE_STEP`].
+    fn text_size_up(&mut self) {
+        self.set_text_size(self.text_size + TEXT_SIZE_STEP);
+    }
+
+    /// Moves the text size down one [`TEXT_SIZE_STEP`].
+    fn text_size_down(&mut self) {
+        self.set_text_size(self.text_size - TEXT_SIZE_STEP);
+    }
+
+    /// Sends the slider to [`SLIDER_MIN`].
+    fn slider_to_min(&mut self) {
+        self.set_slider_value(SLIDER_MIN);
+    }
+
+    /// Sends the slider to [`SLIDER_MAX`].
+    fn slider_to_max(&mut self) {
+        self.set_slider_value(SLIDER_MAX);
+    }
+
+    /// Winds the progress bar back one [`PROGRESS_STEP`].
+    fn progress_back(&mut self) {
+        self.step_progress(-PROGRESS_STEP);
+    }
+
+    /// Winds the progress bar on one [`PROGRESS_STEP`].
+    fn progress_on(&mut self) {
+        self.step_progress(PROGRESS_STEP);
+    }
+
+    /// Switches the progress bar between its two modes.
+    fn toggle_progress_mode(&mut self) {
+        self.set_progress_indeterminate(!self.progress_indeterminate.get());
+    }
+
+    /// Turns the gauge back one [`GAUGE_STEP`].
+    fn gauge_back(&mut self) {
+        self.step_gauge(-GAUGE_STEP);
+    }
+
+    /// Turns the gauge on one [`GAUGE_STEP`].
+    fn gauge_on(&mut self) {
+        self.step_gauge(GAUGE_STEP);
+    }
+
     /// Releases every pad at once, on the release spring.
+    ///
+    /// **Clears the record of the press**, for [`Demo::press_all`]'s reason: the
+    /// two are one fact written in two places, and the flag is not the animation's
+    /// to own.
     fn release_all(&mut self) {
+        self.space_pressed = false;
         self.clock.clear();
         for pad in &self.pads {
             self.clock
@@ -4466,6 +5372,14 @@ impl Demo {
     /// the one column the list just vacated is exactly the kind of claim only a
     /// reader looking at the arithmetic can check.
     ///
+    /// **The dialog is deliberately not in it**, and that is the whole of the
+    /// omission: an overlay is *meant* to be drawn on top of the gallery, so
+    /// `no_two_placed_rects_overlap` would fail on the first pair it compared and
+    /// the failure would be the design working. Its panel is placed by the widget
+    /// from the window and is measured against the window's own edges in
+    /// `the_demo_opens_with_a_dialog_showing_and_its_panel_inside_the_window`
+    /// instead, which is the question an overlay's geometry actually raises.
+    ///
     /// It is `cfg(test)` because nothing in the running demo asks: the demo lays
     /// its widgets out and paints them, and a list of the boxes it placed is
     /// something only a reader checking the arithmetic wants.
@@ -4601,6 +5515,136 @@ impl Demo {
     }
 }
 
+/// The gallery's own keyboard shortcuts: what each key is called and what it does.
+///
+/// **This table *is* the dispatch**, and [`Demo::handle_event`] looks a key up in
+/// it rather than matching on one. That is not a style preference and it is the
+/// answer to a hazard a review named on 2026-10-03: with a `match` beside a list of
+/// the keys under test, the two are separate objects and they drift. They had
+/// drifted — the `match` read `Keycode::Equals | Keycode::Plus` and the list named
+/// only `Plus`, so `Equals` was a key the demo acted on and nothing checked that
+/// it was suppressed while the dialog was showing.
+///
+/// **Three properties follow from the table being the only route, and each is a
+/// thing a `match` cannot promise:**
+///
+/// - a shortcut the demo binds **is** a row here, so there is nowhere else to put
+///   one — the guard in `handle_event` wraps this table, so a row cannot be left
+///   unsuppressed;
+/// - the suppression tests iterate the rows, so they cannot miss a key that exists;
+/// - `Space`'s focus condition, which was a pattern guard on a `match` arm, is a
+///   method — [`Demo::press_pads_if_unfocused`] — because a row here is a function
+///   and a function is not a pattern.
+///
+/// **The two `+` rows are aliases and not a duplication mistake**: `Plus` is the
+/// shifted key and `Equals` the unshifted one, and both grow the text. Naming
+/// both is the whole of what finding 2 was about.
+///
+/// What would reverse it: a shortcut that needs its key's *held* state — a chord, or
+/// a binding that reads the modifiers — which a `fn(&mut Demo)` cannot express and
+/// which would want the `match` back with a coverage test beside it.
+/// One row of [`GALLERY_SHORTCUTS`]: what the key is called, which key it is, and
+/// what it does.
+///
+/// A named alias because `clippy::type_complexity` reads the spelled-out type as
+/// three things to factor and because the third field is the whole point of the
+/// table — a reader should not have to count `fn(&mut Demo)`s to see that the rows
+/// carry behaviour and not only names.
+type GalleryShortcut = (&'static str, Keycode, fn(&mut Demo));
+
+const GALLERY_SHORTCUTS: [GalleryShortcut; 18] = [
+    (
+        "Space, which presses every pad",
+        Keycode::Space,
+        Demo::press_pads_if_unfocused,
+    ),
+    (
+        "T, which switches the theme",
+        Keycode::T,
+        Demo::toggle_theme,
+    ),
+    (
+        "+, which grows the text with the shift held",
+        Keycode::Plus,
+        Demo::text_size_up,
+    ),
+    (
+        "=, which grows the text without it",
+        Keycode::Equals,
+        Demo::text_size_up,
+    ),
+    (
+        "-, which shrinks the text",
+        Keycode::Minus,
+        Demo::text_size_down,
+    ),
+    (
+        "C, which moves the text's colour token",
+        Keycode::C,
+        Demo::cycle_text_color,
+    ),
+    (
+        "0, which sends the slider to its minimum",
+        Keycode::_0,
+        Demo::slider_to_min,
+    ),
+    (
+        "1, which sends the slider to its maximum",
+        Keycode::_1,
+        Demo::slider_to_max,
+    ),
+    (
+        "F, which cycles the image's fit",
+        Keycode::F,
+        Demo::cycle_image_fit,
+    ),
+    (
+        "[, which winds the progress bar back",
+        Keycode::LeftBracket,
+        Demo::progress_back,
+    ),
+    (
+        "], which winds the progress bar on",
+        Keycode::RightBracket,
+        Demo::progress_on,
+    ),
+    (
+        "P, which switches the bar's mode",
+        Keycode::P,
+        Demo::toggle_progress_mode,
+    ),
+    (
+        ", which turns the gauge back",
+        Keycode::Comma,
+        Demo::gauge_back,
+    ),
+    (
+        ". which turns the gauge on",
+        Keycode::Period,
+        Demo::gauge_on,
+    ),
+    (
+        "G, which changes the gauge's shape",
+        Keycode::G,
+        Demo::cycle_gauge_type,
+    ),
+    (
+        "H, which changes the chart's shape",
+        Keycode::H,
+        Demo::cycle_chart_type,
+    ),
+    (
+        "A, which appends a chart reading",
+        Keycode::A,
+        Demo::append_chart_sample,
+    ),
+    (
+        "S, which drops the oldest chart reading",
+        Keycode::S,
+        Demo::shift_chart_sample,
+    ),
+];
+
 /// Returns the labels in the demo's text panel, in the order they are shown,
 /// each with the layout it is drawn with.
 ///
@@ -4709,6 +5753,44 @@ mod tests {
         demo
     }
 
+    /// Returns a demo whose dialog has been **closed and whose fade has run out**,
+    /// so a test about the gallery is not also a test about the modal over it.
+    ///
+    /// **This is the single most consequential fixture change task 22 made**, and
+    /// it is a change of *precondition* rather than of assertion: the demo now
+    /// opens with the dialog showing — input injection does not work on this host,
+    /// so a dialog that began hidden could only be photographed through an
+    /// instrument — and twenty-odd tests drive a control **behind** the overlay. A
+    /// tap on the slider with the dialog up is correctly swallowed by the modal, so
+    /// those tests have to say that the modal is not there. **Not one of their
+    /// assertions is changed.**
+    ///
+    /// Closed through the **demo's own key** and then left to finish, so the state
+    /// it produces is the state a reader produces by pressing `D` — and the
+    /// assertion is `is_drawn()` rather than `visible`, because a dialog that is
+    /// hidden but still fading is still on the screen.
+    fn dialog_closed() -> Demo {
+        let mut demo = laid_out();
+        demo.handle_event(key_event(DIALOG_KEY));
+        // The widget's own transition is 300 ms — its `motion`'s default, which the
+        // demo deliberately does not override — so three whole spans is two spans
+        // of slack over it.
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(300));
+        }
+        assert!(
+            !demo.dialog.is_drawn(),
+            "so the overlay is gone rather than merely invisible: a dialog still \
+             fading would be `visible` false and `is_drawn` true"
+        );
+        assert_eq!(
+            demo.dialog.overlay_alpha.get(),
+            0.0,
+            "and its scrim has faded all the way out"
+        );
+        demo
+    }
+
     /// Returns the `T` key-down event that switches the theme.
     fn toggle_theme_event() -> Event {
         Event::KeyDown {
@@ -4795,7 +5877,7 @@ mod tests {
         // Pressing T switches to the light theme over THEME_TRANSITION
         // milliseconds: the background holds its start value, moves half way
         // through, and arrives at the light theme's background.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let dark_background = demo.background_color.get();
         demo.handle_event(toggle_theme_event());
         assert!(!demo.dark, "the demo is now on the light theme");
@@ -4829,7 +5911,7 @@ mod tests {
         // The pads' rest colours come from the theme, so a switch carries the
         // new colours to them through the property graph: after the switch,
         // each pad paints the light theme's token.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let dark_color = demo.pads[0].color.get();
         demo.handle_event(toggle_theme_event());
         for _ in 0..35 {
@@ -4855,7 +5937,7 @@ mod tests {
         // repaints it. The demo is laid out first, because a node is born
         // dirty and only a pass clears the flag — without that, the assertion
         // would hold whatever the callback did.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.handle_event(toggle_theme_event());
         let nodes = demo.nodes.borrow();
         assert!(
@@ -4929,7 +6011,7 @@ mod tests {
 
     #[test]
     fn pressing_the_mouse_presses_the_pad_under_the_cursor() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let rect = {
             let nodes = demo.nodes.borrow();
             nodes
@@ -5082,7 +6164,7 @@ mod tests {
 
     #[test]
     fn the_plus_and_minus_keys_move_the_text_size() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let start = demo.labels[0].label.font_size.get();
         demo.handle_event(key(Keycode::Equals));
         assert_eq!(
@@ -5096,7 +6178,7 @@ mod tests {
 
     #[test]
     fn the_text_size_stays_inside_its_bounds() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         for _ in 0..100 {
             demo.handle_event(key(Keycode::Minus));
         }
@@ -5112,7 +6194,7 @@ mod tests {
         // The size is a plain field rather than a property because it changes
         // the labels' rects, not only their glyphs: the panel lays them out by
         // the rects it is given.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let first = demo.label_nodes[0];
         let before = {
             let nodes = demo.nodes.borrow();
@@ -5134,7 +6216,7 @@ mod tests {
 
     #[test]
     fn the_c_key_moves_the_token_the_text_takes_its_colour_from() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let first = first_label_color(&demo);
         assert_eq!(
             first,
@@ -5152,8 +6234,8 @@ mod tests {
 
     #[test]
     fn the_text_follows_the_theme_switch() {
-        let dark = first_label_color(&laid_out());
-        let mut demo = laid_out();
+        let dark = first_label_color(&dialog_closed());
+        let mut demo = dialog_closed();
         demo.handle_event(key(Keycode::T));
         for _ in 0..35 {
             demo.frame(WINDOW, Duration::from_millis(10));
@@ -5322,7 +6404,7 @@ mod tests {
         // passes its target and comes back, so the needle overshoots. A `set`
         // instead of an animation would be at the far end on the first frame and
         // pass a test that only looked at where it ended up.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let before = demo.gauge.shown.get();
         demo.handle_event(key(Keycode::Period));
         assert_eq!(
@@ -5401,7 +6483,7 @@ mod tests {
         // tells them apart: a spring goes **past** its target and comes back, an
         // ease does not. Without this the demo would animate a needle and the
         // claim "spring physics" would be a name for whatever curve was used.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.handle_event(key(Keycode::Period));
         let mut peak = 0.0f32;
         for _ in 0..60 {
@@ -5432,7 +6514,7 @@ mod tests {
         // pointing below its own floor. The demo clamps and the widget clamps, and
         // this asks the demo's — because the demo is the thing that can produce a
         // value outside the range in the first place.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         for _ in 0..20 {
             demo.handle_event(key(Keycode::Comma));
         }
@@ -5464,7 +6546,7 @@ mod tests {
         // the constant: a value accumulated by addition is off the grid by a
         // fraction of a pixel per press, and a needle a third of a degree off is a
         // needle that is not on the mark the key name claims it is on.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let mut seen: Vec<f32> = Vec::new();
         for _ in 0..10 {
             demo.handle_event(key(Keycode::Comma));
@@ -5490,7 +6572,7 @@ mod tests {
         // Three shapes and a key to reach them with, and the readout has to
         // follow: a demo that cycled the dial and left the label naming the shape
         // it started in would be showing a caption for a different picture.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         assert_eq!(demo.gauge.gauge_type(), GaugeType::Needle, "it starts here");
         for expected in ["Arc", "Circle", "Needle"] {
             demo.handle_event(key(Keycode::G));
@@ -5520,7 +6602,7 @@ mod tests {
         // polygons too — one per band segment — so a filter on the variant alone
         // would count 51 of them and call them needles. A three-pointed polygon is
         // the needle and nothing else this widget records.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let needles = |demo: &Demo| {
             demo.commands_at(demo.gauge.handle())
                 .iter()
@@ -5646,7 +6728,7 @@ mod tests {
         // re-aims every widget at what it already had and the transition goes
         // nowhere while every test stays green. The gauge is aimed like the rest,
         // and this is the assertion that says so.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let dark_track = demo.gauge.track.get();
         assert_eq!(
             dark_track,
@@ -5918,6 +7000,25 @@ mod tests {
             .collect()
     }
 
+    /// The parents in the demo's tree that a **widget** owns rather than the
+    /// demo assembling them.
+    ///
+    /// **One again, and it came back with the dialog on 2026-10-03.** There were
+    /// two such parents from task 18 — the node a `List` scrolls in and the
+    /// content node it hangs its rows from, both owned by the `Scroll` — and this
+    /// list held them until the operator had the list taken out on 2026-10-02. It
+    /// is back for the same shape of reason: a `Dialog`'s action buttons are real
+    /// [`Button`](ui_core::widgets::button::Button) widgets with nodes of their
+    /// own, and [`Dialog::add_action`] attaches them to the dialog's own node,
+    /// which the demo did not build and cannot.
+    ///
+    /// Named here rather than papered over, which is what the previous two
+    /// entries in this history were for, and the count asserted below is what
+    /// stops the list from quietly growing.
+    fn widget_owned_parents(demo: &Demo) -> Vec<Handle> {
+        vec![demo.dialog.handle()]
+    }
+
     #[test]
     fn every_parent_the_demo_assembles_is_a_container_widget() {
         // The demo used to assemble its own parent nodes, which meant two
@@ -5926,19 +7027,17 @@ mod tests {
         // have noticed a new one appearing, so this is the check that a parent
         // the *demo* built is a `Container` and not a node the demo wired up.
         //
-        // **There is no exception any more, and that is a change of fact rather
-        // than of rule.** Since task 18 there were two parents in the tree that
-        // the demo did not build and could not — the node a `List` scrolls in and
-        // the content node it hangs its rows from, both owned by the `Scroll`
-        // inside the list — and they were named here rather than papered over.
-        // The list went on 2026-10-02, so the names have gone with it: **every
-        // parent in the demo's tree is one the demo assembled**, and a sixth
-        // parent the demo did not build would fail this test where two used to
-        // pass. That is the whole of the check, and it is now a check with no
-        // carve-out in it.
+        // **One exception, and it is a widget's rather than a relaxation.** See
+        // `widget_owned_parents`: the list was empty for one day between task 21
+        // and task 22 and it is not empty now, because a dialog's actions are
+        // real buttons in real nodes under the dialog's own node. The claim
+        // being tested is unchanged — **the demo assembles its own parents as
+        // `Container` widgets and never as nodes it wired up by hand** — and this
+        // is the check that a *new* hand-wired parent fails.
         let demo = laid_out();
         let nodes = demo.nodes.borrow();
         let containers: Vec<Handle> = demo.containers.iter().map(Container::handle).collect();
+        let widget_owned = widget_owned_parents(&demo);
         let mut parents = 0;
         for &handle in &demo.order {
             let node = nodes.get(handle).expect("a node in the demo's tree");
@@ -5947,14 +7046,16 @@ mod tests {
             }
             parents += 1;
             assert!(
-                containers.contains(&handle),
-                "node {handle:?} has children but is not a Container of the demo's"
+                containers.contains(&handle) || widget_owned.contains(&handle),
+                "node {handle:?} has children but is neither a Container of the \
+                 demo's nor one of the widget-owned parents {:?}",
+                widget_owned
             );
         }
         assert_eq!(
             parents,
-            containers.len(),
-            "and every parent in the tree is one of those five"
+            containers.len() + widget_owned.len(),
+            "and every parent in the tree is one of those five or the dialog"
         );
         assert_eq!(
             containers.len(),
@@ -5962,6 +7063,13 @@ mod tests {
             "the demo assembles five: the card, the text column and its panel, the \
              controls layer and the root. It was six while the button row was a \
              container of its own"
+        );
+        assert_eq!(
+            widget_owned.len(),
+            1,
+            "and exactly one parent is a widget's: the dialog's own node, with its \
+             two action buttons under it. A second would be a new exception and \
+             would have to be named and counted here"
         );
     }
 
@@ -6049,7 +7157,7 @@ mod tests {
 
     #[test]
     fn the_card_follows_a_theme_switch() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let before = card_rects(&demo).first().map(|(_, color)| *color);
 
         demo.handle_event(toggle_theme_event());
@@ -6236,7 +7344,7 @@ mod tests {
     fn a_drag_on_the_slider_moves_its_value_and_its_thumb() {
         // The whole path a finger takes: down, motion, up, and a frame between
         // each so the widget's properties reach the screen.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let (x, y) = demo.slider_at_fraction(0.5).expect("a laid-out slider");
         for event in drag_on(x, y, x + 80.0, y) {
             demo.handle_event(event);
@@ -6270,7 +7378,7 @@ mod tests {
         // why the demo offers the drag to the slider being dragged rather than
         // only to whatever is under the pointer. Without that the value would
         // stop at the edge of the node instead of at the end of the range.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let (x, y) = demo.slider_at_fraction(0.25).expect("a laid-out slider");
         for event in drag_on(x, y, x + 900.0, y) {
             demo.handle_event(event);
@@ -6292,7 +7400,7 @@ mod tests {
 
     #[test]
     fn a_tap_on_the_sliders_track_jumps_the_value_there() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let (x, y) = demo.slider_at_fraction(0.75).expect("a laid-out slider");
         let (down, up) = click_at(x, y);
         demo.handle_event(down);
@@ -6308,7 +7416,7 @@ mod tests {
 
     #[test]
     fn the_sliders_readout_follows_the_value_and_counts_its_adjustments() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         assert_eq!(
             demo.readout_text().as_deref(),
             Some("0 of 100, 0 adjustments")
@@ -6354,7 +7462,7 @@ mod tests {
         // binding a slider to a model does. The readout follows because it is
         // bound to the value; the count does not, because the widget did not
         // adjust anything.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.handle_event(key(Keycode::_1));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(demo.slider.widget.value.get(), SLIDER_MAX);
@@ -6369,7 +7477,7 @@ mod tests {
         // starts where it was, is part way after one frame's worth of the
         // transition, and arrives. A `set` instead of an animation would be at
         // the value on the first frame and pass an end-only assertion.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         assert_eq!(
             painted_thumb_x(&demo),
             demo.slider_at_fraction(0.0).unwrap().0
@@ -6405,7 +7513,7 @@ mod tests {
 
     #[test]
     fn the_thumb_grows_while_a_pointer_is_holding_the_slider() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let (x, y) = demo.slider_at_fraction(0.5).expect("a laid-out slider");
         let resting = painted_thumb_radius(&demo);
 
@@ -6428,7 +7536,7 @@ mod tests {
 
     #[test]
     fn an_arrow_key_moves_the_slider_once_it_holds_focus() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         // **One** `Tab`, where it was three before the buttons went: the slider is
         // the first control in the order and the two enabled buttons that used to
         // precede it are not here.
@@ -6454,7 +7562,7 @@ mod tests {
         // A key is not routed by position, so an arrow would otherwise move every
         // slider on screen. The widget's own test says this too; what the demo
         // adds is that nothing focuses the slider by accident.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.handle_event(key(Keycode::Right));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(demo.slider.widget.value.get(), SLIDER_MIN);
@@ -6468,7 +7576,7 @@ mod tests {
         // first, and focus navigation only runs for what the control left alone —
         // so a focused slider is driven by it and whatever is left over still
         // walks the focus order.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.handle_event(key(Keycode::Tab));
         assert_eq!(demo.focused, Some(demo.slider.node()));
         demo.handle_event(wheel(8000));
@@ -6482,7 +7590,7 @@ mod tests {
 
     #[test]
     fn the_slider_paints_a_focus_ring_once_it_is_focused() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let rects = |demo: &Demo| {
             demo.slider_commands()
                 .iter()
@@ -6502,7 +7610,7 @@ mod tests {
         // a switch carries the new colours to the slider through the property
         // graph: the widget is aimed at the new palette and its own transition
         // runs alongside the theme's.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let dark = demo.slider.widget.track.get();
         assert_eq!(
             dark,
@@ -6751,7 +7859,7 @@ mod tests {
         // demo showing one of them does not show three. This is the key that
         // makes all three reachable on screen rather than in three builds, and
         // the readout is what says which one is on the glass.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         for lap in 0..2 {
             for press in 0..CHART_TYPES.len() {
                 // **The press comes first and the assertion names what it arrived
@@ -6804,7 +7912,7 @@ mod tests {
     /// file does not own.
     #[test]
     fn each_chart_shape_records_its_own_primitive_in_its_own_place() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let mut seen: Vec<(usize, usize, usize)> = Vec::new();
         for shape in 0..CHART_TYPES.len() {
             // **One press per pass, not `shape` presses**: the demo opens on the
@@ -6906,7 +8014,7 @@ mod tests {
         // event path: an SDL key-down, the recogniser, and the arm in
         // `handle_event`, which is the only route a key takes. A test that called
         // `animate_push` on the widget would prove the widget and not the wiring.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let opening = CHART_SERIES[..CHART_OPENING_COUNT].to_vec();
         assert_eq!(demo.chart.data.get(), opening);
 
@@ -6982,7 +8090,7 @@ mod tests {
         // same event path. **The length is the claim**, because a shift that
         // appended without dropping is an append: the window would grow on every
         // press, and the plot's pitch would shrink under the labels.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let opening = CHART_SERIES[..CHART_OPENING_COUNT].to_vec();
         let dropped = opening[0];
         let arriving = CHART_SERIES[CHART_OPENING_COUNT];
@@ -7048,7 +8156,7 @@ mod tests {
     /// the oldest reading is the one that went.
     #[test]
     fn the_append_key_slides_the_window_once_the_series_is_full() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let full = CHART_SERIES.len();
         let presses = full - CHART_OPENING_COUNT + 2;
         for _ in 0..presses {
@@ -7093,7 +8201,7 @@ mod tests {
     /// the rectangle it recorded is what a reader sees.
     #[test]
     fn a_new_bar_rises_from_its_baseline_rather_than_appearing() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.handle_event(key(Keycode::H));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(
@@ -7216,7 +8324,7 @@ mod tests {
     #[test]
     fn a_theme_switch_reaches_the_chart_and_its_readout_in_every_shape() {
         for presses in 0..CHART_TYPES.len() {
-            let mut demo = laid_out();
+            let mut demo = dialog_closed();
             for _ in 0..presses {
                 demo.handle_event(key(Keycode::H));
             }
@@ -7364,7 +8472,7 @@ mod tests {
         // rather than an oversight: one label fewer than samples is the widget's
         // own documented case — a sample with no label at its index is drawn
         // without one.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let runs = |demo: &Demo| {
             demo.commands_at(demo.chart.handle())
                 .iter()
@@ -7700,7 +8808,7 @@ mod tests {
     /// this window that answers a press, and the chart sits nowhere near them.
     #[test]
     fn a_press_on_the_chart_reaches_nothing() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let chart = demo
             .node_rect(demo.chart.handle())
             .expect("a laid-out chart");
@@ -7782,7 +8890,7 @@ mod tests {
         // "A click turns it on and off, with a readout showing its state": the
         // readout is checked after each of two clicks, so a toggle that stuck on
         // would pass a test that only looked at the first.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         assert!(!demo.toggle.checked.get(), "it starts off");
 
         click_toggle(&mut demo);
@@ -7812,7 +8920,7 @@ mod tests {
         // Requirement 4 is a transition, not an end state: a `set` instead of an
         // animation would be at the far end on the first frame and pass a test
         // that only looked at where it ended up.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let rect = demo.toggle_rect().expect("a laid-out toggle");
         let off_end = demo.toggle.thumb_center(rect).0;
 
@@ -7847,7 +8955,7 @@ mod tests {
         // the colour: two rounded rects of the same size and the same place with
         // the same shape are the same drawing, and only one of the two numbers
         // distinguishes them.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let before = demo.toggle.style().track;
         assert_eq!(
             before,
@@ -7891,7 +8999,7 @@ mod tests {
     fn a_key_switches_the_toggle_once_it_holds_focus() {
         // A key is not routed by position, so the toggle has to be the focused
         // node to hear one — and the demo is what has to put it there.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.handle_event(key(Keycode::Return));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert!(
@@ -7921,7 +9029,7 @@ mod tests {
         // image node, and pressing `F` changes what that one draws. Four copies
         // would be a gallery, and a test that counted four images would pass on
         // one.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let image_node = demo.image.handle();
         let images = |demo: &Demo| {
             demo.commands_at(image_node)
@@ -7957,7 +9065,7 @@ mod tests {
     fn the_image_says_which_fit_it_is_showing() {
         // The label is bound to the same property the key writes, so a cycle
         // that changed the fit without changing the label would show here.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let mut said = Vec::new();
         for _ in 0..4 {
             said.push(
@@ -7985,7 +9093,7 @@ mod tests {
         // claims about geometry, and the numbers that tell them apart are the
         // drawn rect and the sampled window. A test that only checked "an image
         // was drawn" would pass on four copies of the same call.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let bounds = demo.image_rect().expect("a laid-out image");
         let mut drawn: Vec<(Rect, UvRect)> = Vec::new();
         for _ in 0..4 {
@@ -8129,7 +9237,7 @@ mod tests {
         // The step is a tenth and the ends are 0 and 1, and the readout names the
         // **value** rather than the drawn one — which on the frame after a press
         // is a claim, because the two are not the same number then.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         assert_eq!(demo.progress.value.get(), PROGRESS_START);
 
         demo.handle_event(key(Keycode::RightBracket));
@@ -8190,7 +9298,7 @@ mod tests {
         // "Value changes animate smoothly" is two halves, and a `set` instead of
         // an animation would be at the value on the first frame and pass an
         // end-only assertion. So the test reads the drawn fill half way.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         // The **second** rounded rect, which is the fill: the track is drawn
         // first and is the whole width, so the widest of the two is the track and
         // asking for it would report a fill that never moves.
@@ -8240,7 +9348,7 @@ mod tests {
         // "Indeterminate mode shows sliding animation": the two halves are the
         // mode and the *movement*, and a bar that said it was sliding while its
         // slide sat still would pass a test on the label alone.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         assert!(!demo.progress.indeterminate(), "it starts determinate");
         assert_eq!(
             demo.readout_text_of(&demo.progress_readout).as_deref(),
@@ -8442,7 +9550,7 @@ mod tests {
     /// — task 12's blocker was a unit mistake in exactly this field.
     #[test]
     fn a_mouse_drag_moves_the_slider_through_its_real_event_path() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let rect = demo.slider_rect().expect("the slider is placed");
         let y = rect.y + rect.height / 2.0;
 
@@ -8511,7 +9619,7 @@ mod tests {
     /// move while the pointer is still, and moves on the first motion after it.
     #[test]
     fn a_mouse_press_held_still_before_draging_still_drags() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let rect = demo.slider_rect().expect("the slider is placed");
         let y = rect.y + rect.height / 2.0;
         demo.handle_event(mouse_down_at(rect.x + 10.0, y, 0));
@@ -8742,7 +9850,10 @@ mod tests {
             }
             DrawCommand::Polygon { points, .. } => Some(box_of(points)),
             DrawCommand::Text { .. } => None,
-            DrawCommand::Image { .. } | DrawCommand::Path { .. } => {
+            // Added 2026-10-02 for `DrawCommand::Shadow`, an exhaustive match that
+            // could not be taught the new variant without an arm. The chart
+            // records no shadow and none is placed through this helper.
+            DrawCommand::Shadow { .. } | DrawCommand::Image { .. } | DrawCommand::Path { .. } => {
                 panic!(
                     "the chart records no {command:?}, and this test does not know \
                         how to place one"
@@ -8761,7 +9872,7 @@ mod tests {
         // below — `a_theme_switch_reaches_the_chart_and_its_readout_in_every_shape`
         // — because it has a *series* to animate as well as five colours, and a
         // test that only watched the colours would be watching half of it.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         // It starts on the **dark** theme, which is the half of the claim that is
         // easy to leave out: a widget built with the neutral defaults
         // `Toggle::new` and `Progress::new` write is aimed at nothing, and it
@@ -8805,7 +9916,7 @@ mod tests {
         // the reader a control is selected with no mark on it. Their readouts say
         // so in words, which is the whole of what a widget with no focus state of
         // its own can be given.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         for _ in 0..4 {
             demo.handle_event(key(Keycode::Tab));
         }
@@ -8825,7 +9936,7 @@ mod tests {
         // The other one is the **second** stop, so a fresh demo rather than a
         // walk from the progress bar: the order is the slider, the image, the
         // toggle, the bar and the field.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         for _ in 0..2 {
             demo.handle_event(key(Keycode::Tab));
         }
@@ -9058,6 +10169,26 @@ mod tests {
         }
     }
 
+    /// The key-**up** event for `keycode`.
+    ///
+    /// Its own helper rather than a variant of `key_event_with`, because the two
+    /// are different variants of `Event` and a flag on one of them would be a
+    /// boolean that means "which half of the press" — and because only the pads'
+    /// `press_all`/`release_all` pair reads a key-up at all, so there is exactly
+    /// one caller and it is a test about releases.
+    fn key_up(keycode: Keycode) -> Event {
+        Event::KeyUp {
+            timestamp: 0,
+            window_id: 0,
+            keycode: Some(keycode),
+            scancode: None,
+            keymod: Mod::empty(),
+            repeat: false,
+            which: 0,
+            raw: 0,
+        }
+    }
+
     /// Returns the centre of the key that would report `wanted`, in window
     /// coordinates.
     ///
@@ -9091,7 +10222,7 @@ mod tests {
     /// `input::route`, and back — rather than by calling the widget directly.
     #[test]
     fn a_key_on_the_keyboard_inserts_its_character_into_the_field() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let (x, y) = key_center(&demo, KeyAction::Char('q'));
 
         demo.handle_event(mouse_down_at(x, y, 0));
@@ -9118,7 +10249,7 @@ mod tests {
 
     #[test]
     fn a_run_of_keys_accumulates_in_order_and_the_field_starts_empty() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         assert_eq!(
             demo.text_input.text.get(),
             "",
@@ -9143,7 +10274,7 @@ mod tests {
 
     #[test]
     fn backspace_on_the_keyboard_deletes_the_character_before_the_caret() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.text_input.insert_text("road");
         demo.text_input.move_caret(4);
 
@@ -9160,7 +10291,7 @@ mod tests {
 
     #[test]
     fn enter_on_the_keyboard_submits_and_the_readout_says_so() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.text_input.insert_text("hamburg");
 
         demo.frame(WINDOW, Duration::from_millis(16));
@@ -9185,7 +10316,7 @@ mod tests {
 
     #[test]
     fn a_tap_on_the_field_focuses_it_and_puts_the_caret_where_the_pointer_was() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         demo.text_input.insert_text("hamburg");
         let field = demo.text_input_rect().expect("the field has been laid out");
 
@@ -9209,7 +10340,7 @@ mod tests {
 
     #[test]
     fn a_key_lights_on_the_press_and_goes_out_on_the_release() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let (x, y) = key_center(&demo, KeyAction::Char('a'));
 
         // Before any press, nothing is lit.
@@ -9274,7 +10405,7 @@ mod tests {
 
     #[test]
     fn tab_reaches_the_field_and_lights_its_border() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let field = demo.text_input.handle();
 
         for _ in 0..40 {
@@ -9327,7 +10458,7 @@ mod tests {
         // which nodes are *focusable*, and the order comes from the walk over the
         // tree. A control that was added to the layer out of order would pass an
         // array-order test and fail this one.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let order = expected_focus_order(&demo);
         assert_eq!(order.len(), 5, "five controls take focus in this demo");
 
@@ -9364,7 +10495,7 @@ mod tests {
         // backwards walk starts at the field. That asymmetry is the input module's
         // rule and it is worth a test of its own, because a `Shift+Tab` that went
         // forwards would still reach all five.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let order = expected_focus_order(&demo);
         let back = |demo: &mut Demo| {
             demo.handle_event(key_event_with(Keycode::Tab, Mod::LSHIFTMOD));
@@ -9405,7 +10536,7 @@ mod tests {
         // about every stop and not about the one after the last: a control that was
         // appended to the tree would be reached on the wrap, which is exactly where
         // a test that only checks the first five looks away.
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let order = expected_focus_order(&demo);
         let gauge = demo.gauge.handle();
         assert!(
@@ -9451,7 +10582,7 @@ mod tests {
     /// where a control appended to the tree would be reached.
     #[test]
     fn the_chart_is_not_in_the_focus_order() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let order = expected_focus_order(&demo);
         let chart = demo.chart.handle();
         assert!(
@@ -9670,7 +10801,7 @@ mod tests {
 
     #[test]
     fn a_theme_switch_reaches_the_field_and_the_keyboard() {
-        let mut demo = laid_out();
+        let mut demo = dialog_closed();
         let field_before = demo.text_input.background.get();
         let key_before = demo
             .commands_at(demo.keyboard.handle())
@@ -9881,5 +11012,1817 @@ mod tests {
                  anything"
             );
         }
+    }
+
+    // -------------------------------------------------- task 22: the dialog
+    //
+    // Everything below is about the **wiring**, for the reason the gauge's and the
+    // chart's sections give: `dialog.rs` owns the widget's own contract — where
+    // the panel is, what it records, when it is hidden — and 34 of its unit tests
+    // plus 9 doctests are about that. What is left is what only *this* file can
+    // know, and it is a short list: the dialog is in the tree, it is showing, its
+    // panel is inside the window, its nodes go through the frame loop, a tap on a
+    // button fires the button that was drawn there, a tap behind the overlay
+    // reaches nothing, `Escape` and `D` close it, the title is bold, and the
+    // `Tab` order is the dialog's own.
+
+    /// The panel the dialog is drawn in, written out from the arithmetic rather
+    /// than read back from the widget.
+    ///
+    /// `1280 - 420` of slack either side of a 420-wide panel — the widget's own
+    /// `PANEL_MAX_WIDTH`, because the window is wider than that — so 430 and 850.
+    /// The height is the 48 of padding, the title's one line box of 21.6
+    /// (`DIALOG_FONT`'s 18 times the stand-in's 1.2), the 8 gap, the body's two
+    /// line boxes of 43.2, the 8 gap and the 44 of the action row: 172.8, and
+    /// `1020 - 172.8` of slack either side of it, so 423.6.
+    ///
+    /// **Written out and not read back**, because a test that compares the panel
+    /// with `dialog.panel_rect(..)` proves the accessor agrees with itself, and
+    /// every number here is arithmetic a reader can do in their head.
+    const PANEL: Rect = Rect {
+        x: 430.0,
+        y: 423.6,
+        width: 420.0,
+        height: 172.8,
+    };
+
+    /// The `OK` button's rect: right-aligned against the panel's inner right edge
+    /// at `430 + 420 - 24 = 826`, and the row of 44 plus 70 plus an 8-pixel gap is
+    /// 122 wide, so it starts at 704. On the panel's bottom line box, one padding
+    /// above its edge: `423.6 + 172.8 - 24 - 44 = 528.4`.
+    const OK_BUTTON: Rect = Rect {
+        x: 704.0,
+        y: 528.4,
+        width: 44.0,
+        height: 44.0,
+    };
+
+    /// The `Cancel` button's: 8 pixels right of `OK`'s edge and 70 wide, because
+    /// "Cancel" is six characters of 9 plus 16 of padding over the 44-pixel touch
+    /// floor.
+    const CANCEL_BUTTON: Rect = Rect {
+        x: 756.0,
+        y: 528.4,
+        width: 70.0,
+        height: 44.0,
+    };
+
+    /// The corner radius the dialog's action buttons draw their **background**
+    /// with.
+    ///
+    /// **Read off the recorded paint on 2026-10-03**, and the reason a test names
+    /// it rather than describing it in prose: the dialog's own panel is drawn with
+    /// the widget's `BorderRadiusLg` of 16 and a *focused* button is drawn with
+    /// its background grown by 2 on each side and its radius grown by 2 with it,
+    /// so the three radii on a panel with a focused button are 16, 10 and 8 — and a
+    /// filter written as "the rounded rectangles after the panel" picks up the
+    /// focus ring as well as the two buttons. This is `Button`'s own default and
+    /// it is the demo's business only for the length of this line.
+    const ACTION_BACKGROUND_RADIUS: f32 = 8.0;
+
+    /// The corner radius the dialog's **focus ring** is drawn with: the focused
+    /// action's background radius grown by `Button`'s default `focus_ring`.
+    ///
+    /// The measurement, and the reason a test has to name a radius at all, are
+    /// [`ACTION_BACKGROUND_RADIUS`]'s, where the three radii of a panel with one
+    /// focused action are written out; this is the middle one. **What would
+    /// reverse it:** `Button`'s `focus_ring` default of 2.0, which is a widget
+    /// decision the demo has no vote in.
+    const RING_RADIUS: f32 = ACTION_BACKGROUND_RADIUS + 2.0;
+
+    /// The corner radius the dialog's **own panel** is drawn with, the widget's
+    /// `BorderRadiusLg`, and the largest of the three.
+    ///
+    /// [`ACTION_BACKGROUND_RADIUS`]'s doc carries the measurement. **What would
+    /// reverse it:** the widget's `BorderRadiusLg` token.
+    const PANEL_RADIUS: f32 = 16.0;
+
+    /// Returns a demo whose dialog has **finished appearing**, so a fixture is in
+    /// the state the tests are about rather than 16 ms into a 300 ms transition.
+    ///
+    /// The twin of [`dialog_closed`], and the same argument: three whole spans of
+    /// the widget's 300 ms, which is two spans of slack, and the assertions below
+    /// are about a panel at rest rather than about a bounce in flight.
+    fn shown_dialog() -> Demo {
+        let mut demo = laid_out();
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(300));
+        }
+        assert!(demo.dialog.visible.get(), "the dialog opens showing");
+        assert_eq!(
+            demo.dialog.scale.get(),
+            1.0,
+            "and it has arrived, so the rects below are the panel's own and not a \
+             scaled copy of them"
+        );
+        demo
+    }
+
+    /// Returns the rects the dialog's node recorded for its **action buttons**:
+    /// each button's background, in the order the actions were added.
+    ///
+    /// **Read back from the recorded paint**, and that is the whole point of it:
+    /// the acceptance test asks for a press *where the button is painted*, and a
+    /// test that asks the widget where it draws a button and then presses there is
+    /// asking the widget twice and checking nothing. The filter is the radius,
+    /// named by [`ACTION_BACKGROUND_RADIUS`].
+    fn painted_action_rects(demo: &Demo) -> Vec<Rect> {
+        demo.commands_at(demo.dialog.handle())
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::RoundedRect { rect, radius, .. }
+                    if *radius == ACTION_BACKGROUND_RADIUS =>
+                {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Returns the alpha of every rounded rectangle the dialog recorded with
+    /// `radius`, in the order it recorded them.
+    ///
+    /// **Filtered on the radius and not on the position or the count**, because a
+    /// dialog with one focused action records four rounded rectangles — the panel,
+    /// the ring, and the two action backgrounds — and only the radius tells them
+    /// apart. That is not tidiness: the bug this helper exists for showed up as a
+    /// *radius* disappearing rather than as a count changing, so a test written
+    /// against the count would have seen the same four shapes before and after.
+    fn dialog_shape_alphas(demo: &Demo, radius: f32) -> Vec<u8> {
+        demo.commands_at(demo.dialog.handle())
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::RoundedRect {
+                    radius: drawn,
+                    color,
+                    ..
+                } if *drawn == radius => Some(color.a),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Returns the face each text run the dialog recorded asks for, in order.
+    ///
+    /// **The weights and not a count**, because a title and a body are the same
+    /// two commands either way and what changed between them is one field on the
+    /// first: a count of runs cannot tell a bold title from a regular one.
+    fn dialog_run_weights(demo: &Demo) -> Vec<FontWeight> {
+        demo.commands_at(demo.dialog.handle())
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Text { weight, .. } => Some(*weight),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Returns the strings each text run the dialog recorded carries, in order.
+    fn dialog_run_texts(demo: &Demo) -> Vec<String> {
+        demo.commands_at(demo.dialog.handle())
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// What [`gallery_state`] reports for a chart with no readings at all.
+    ///
+    /// **Minus one, and the number is the point.** The demo's own series is
+    /// [`CHART_SERIES`] — 8 to 24 — so `0.0` would be a reading this could be
+    /// confused with, and `f32::NAN` would compare unequal to *itself*, which
+    /// would make the "nothing moved" assertion pass for a chart that emptied and
+    /// refilled with the same values. A value no reading can hold is the only one
+    /// that cannot lie in either direction.
+    ///
+    /// **Unreachable from the demo**, whose window is between
+    /// [`CHART_OPENING_COUNT`] and [`CHART_SERIES`]'s length at every point a key
+    /// can reach — which is why it is written down rather than unwrapped.
+    ///
+    /// What would reverse it: a series with negative readings, at which point this
+    /// should be a value below the smallest of them.
+    const NO_READING_VALUE: f32 = -1.0;
+
+    /// Everything the demo's **own** shortcut keys can move, as one comparable
+    /// value.
+    ///
+    /// It is a struct rather than a list of assertions because the claim under test
+    /// is *"nothing the gallery can see changed"*, and eleven separate `assert_eq!`
+    /// calls would each name one field: a shortcut that moved a field this struct
+    /// forgot to hold would pass. **Every arm of `handle_event`'s key table writes
+    /// something in here**, and that is what makes it a whole-gallery instrument
+    /// rather than a list of examples — the `Space` row is the one to check first
+    /// when a field is added.
+    ///
+    /// `PartialEq` and nothing else: a test comparing two of these wants to know
+    /// whether anything moved, and a test that wants to know *what* reads the
+    /// fields.
+    #[derive(Debug, PartialEq)]
+    struct GalleryState {
+        /// `T`: which theme the demo is on.
+        dark: bool,
+        /// `+` and `-`: the text size.
+        text_size: f32,
+        /// `C`: the token the text takes its colour from.
+        color_token: ThemeToken,
+        /// `0` and `1`: the slider's value.
+        slider: f32,
+        /// `F`: the image's fit.
+        image_fit: usize,
+        /// `[` and `]`: the progress bar's value.
+        progress: f32,
+        /// `P`: the bar's mode.
+        progress_indeterminate: bool,
+        /// `,` and `.`: the gauge's value.
+        gauge: f32,
+        /// `G`: the gauge's shape.
+        gauge_type: usize,
+        /// `H`: the chart's shape.
+        chart_type: usize,
+        /// `A` and `S`: the chart's length.
+        chart_len: usize,
+        /// `S`: the chart's newest reading, which moves while its length does not.
+        ///
+        /// **`shift_chart_sample` drops the oldest reading and appends a new one,
+        /// so the length is unchanged** — the length is `S`'s *documented* effect
+        /// ("keep the length", `the_shift_key_drops_the_oldest_sample_and_keeps_
+        /// the_length`) and is therefore no way at all to see that it acted. The
+        /// newest reading is what moves, and it is here because that test exists.
+        chart_last: f32,
+        /// `Space`: each pad's press.
+        pads: Vec<f32>,
+    }
+
+    fn gallery_state(demo: &Demo) -> GalleryState {
+        GalleryState {
+            dark: demo.dark,
+            text_size: demo.text_size,
+            color_token: demo.color_token.get(),
+            slider: demo.slider.widget.value.get(),
+            image_fit: demo.image_fit.get(),
+            progress: demo.progress.value.get(),
+            progress_indeterminate: demo.progress_indeterminate.get(),
+            gauge: demo.gauge.value.get(),
+            gauge_type: demo.gauge_type.get(),
+            chart_type: demo.chart_type.get(),
+            chart_len: demo.chart.data.get().len(),
+            chart_last: demo
+                .chart
+                .data
+                .get()
+                .last()
+                .copied()
+                .unwrap_or(NO_READING_VALUE),
+            pads: demo.pads.iter().map(|pad| pad.press.get()).collect(),
+        }
+    }
+
+    /// A demo in the state the shortcut table is measured from: the dialog showing
+    /// or closed, and **the slider moved off the end it started on**.
+    ///
+    /// **The slider priming is not tidiness, it is what makes two rows testable.**
+    /// `0` sends the slider to [`SLIDER_MIN`] and the demo *starts* at
+    /// [`SLIDER_MIN`], so `0` is a no-op from the launch state — and priming it to
+    /// the top would make `1` the no-op instead. A shortcut that cannot move the
+    /// thing it names cannot be shown to act, and the whole value of the table
+    /// below is that each row moves something.
+    ///
+    /// Written through the demo's own [`Demo::set_slider_value`], which is what a
+    /// keypress calls, so the fixture and the gesture under test are one code path
+    /// rather than two.
+    fn shortcut_fixture(dialog_up: bool) -> Demo {
+        let mut demo = if dialog_up {
+            shown_dialog()
+        } else {
+            dialog_closed()
+        };
+        demo.set_slider_value(SLIDER_MIN + SLIDER_STEP);
+        demo
+    }
+
+    /// Runs three 50 ms frames, so a shortcut that writes through an **animation**
+    /// has written.
+    ///
+    /// **Sixteen of the seventeen shortcuts write their property synchronously** —
+    /// `Property::set` fires at once — and only `Space` goes through
+    /// [`Demo::press_all`]'s stagger, so without a frame here `Space` reads as
+    /// having done nothing in *both* directions and the table's most interesting
+    /// row is the one that proves nothing. 150 ms is past
+    /// [`STAGGER_STEP`]'s 60 twice, so all three pads have arrived rather than the
+    /// first having started.
+    fn settle(demo: &mut Demo) {
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(50));
+        }
+    }
+
+    /// The lowest `SDL_Keycode` this build of SDL maps, through
+    /// [`Keycode::from_u32`], that no row of [`GALLERY_SHORTCUTS`] names.
+    ///
+    /// **A spot-check and not an enumeration, and the difference is worth
+    /// recording.** The obvious way to close the gap finding 2 named — press every
+    /// key the platform can deliver and fail on any the demo acts on and the table
+    /// omits — is **not available in this crate**. SDL3's keycode space is
+    /// `SDLK_SCANCODE_MASK | scancode`: measured on 2026-10-03, `from_u32` maps 250
+    /// distinct values, the highest of the printable ones is 177, and the
+    /// non-printable ones sit at `1 << 30` and above — a billion values wide with
+    /// 250 in it. Enumerating that range is not a test, and the two functions that
+    /// bridge scancode to keycode (`Keycode::from_scancode`,
+    /// `Scancode::from_keycode`) are **`unsafe`**, which this file does not add.
+    ///
+    /// So the guarantee is **structural** instead, and this constant is the residue:
+    /// [`GALLERY_SHORTCUTS`] is in production code, `handle_event` looks every key
+    /// up in it, and there is no second object for the two to disagree about — which
+    /// is what went wrong before.
+    ///
+    /// What would reverse it: a safe keycode enumeration in `sdl3`, which is an
+    /// upstream change and not this task's.
+    const KEYCODE_PRINTABLE_END: u32 = 1023;
+
+    #[test]
+    fn the_two_plus_keys_are_both_rows_and_do_the_same_thing() {
+        // **Finding 2's instance, pinned by name rather than by the row count.**
+        //
+        // Making the table the dispatch closed the *drift* — there is no second
+        // object to disagree — but it opened a quieter hole of its own: a row
+        // **deleted** from the table is a key that silently stops working, and every
+        // test that iterates the rows is blind to a missing one. The row count in
+        // `the_gallery_shortcut_list_holds_every_key_the_table_has` is the only
+        // thing that would notice, and it says "eighteen" rather than "Equals".
+        //
+        // So the alias is asserted by name and by **effect**, which is the only
+        // thing that survives the row being edited rather than counted.
+        let mut effects = Vec::new();
+        for keycode in [Keycode::Plus, Keycode::Equals] {
+            assert!(
+                GALLERY_SHORTCUTS.iter().any(|(_, key, _)| *key == keycode),
+                "{keycode:?} has a row in the table, which is the object the modal \
+                 guard wraps"
+            );
+            let mut demo = shortcut_fixture(false);
+            let before = demo.text_size;
+            demo.handle_event(key_event(keycode));
+            settle(&mut demo);
+            assert_eq!(
+                demo.text_size,
+                before + TEXT_SIZE_STEP,
+                "{keycode:?} grows the text by one step, as its name says"
+            );
+            effects.push(demo.text_size);
+        }
+        assert_eq!(
+            effects[0], effects[1],
+            "and the shifted and unshifted keys land on the same size, which is \
+             what makes them aliases rather than two different bindings"
+        );
+    }
+
+    #[test]
+    fn a_dismissed_dialog_does_not_answer_enter_during_its_fade() {
+        // **Review finding 1, MAJOR**, and all three dismissal routes rather than
+        // the `D` toggle: `Escape`, a tap on an action and a tap on the scrim all
+        // dismiss from **inside** the widget, so none of them goes through
+        // [`Demo::toggle_dialog`] and none of them retired [`Demo::focused`]. The
+        // record still named a button of a dialog on its way out, and `Enter` fired
+        // it.
+        //
+        // **Asserted on `demo.dark`, and that is the reviewer's own lesson
+        // recorded.** A first version of this assertion read `demo.pending_theme`,
+        // which is *always* false after `handle_event` because `handle_event`
+        // drains it — so it would have passed whether or not `OK` fired, and for
+        // the wrong reason. `dark` survives the call.
+        //
+        // **No frame between the dismissal and the `Enter`**, because that is the
+        // window [`Demo::focus_is_live`] exists for: the loop calls `frame` between
+        // events so on screen there is not one, and a reader reproducing it with two
+        // `handle_event` calls has exactly one. A frame here would test
+        // [`Demo::sync_dialog_focus`] alone and let the routing half rot.
+        let shown = shown_dialog();
+        assert!(
+            shown.dialog.actions[0].button.focused.get(),
+            "`OK` holds focus and shows its ring while the dialog is up, which is \
+             what makes the next line a change"
+        );
+        let ok = painted_action_rects(&shown)[0];
+        assert_eq!(
+            ok, OK_BUTTON,
+            "and it is where the fixture says it is drawn"
+        );
+
+        // **The route, the button pressed, and whether that press should have
+        // moved the theme** — all three in one row, because the third is what makes
+        // the first assertion readable: `OK` is the one action whose callback asks
+        // for the theme switch, so on its route the theme has *already* moved by the
+        // time `Enter` arrives, and "the theme did not move" would be the wrong
+        // thing to assert there. What must hold on every route is the weaker and
+        // actual claim: **`Enter` moved nothing.**
+        for (route, button, theme_moved_by_the_dismissal) in [
+            ("Escape", None, false),
+            ("a tap on OK", Some(OK_BUTTON), true),
+            ("a tap on Cancel", Some(CANCEL_BUTTON), false),
+        ] {
+            let mut demo = shown_dialog();
+            let dark_before = demo.dark;
+            match button {
+                None => demo.handle_event(key_event(Keycode::Escape)),
+                Some(button) => {
+                    let (down, up) = click_at(button.x + 4.0, button.y + 4.0);
+                    demo.handle_event(down);
+                    demo.handle_event(up);
+                }
+            }
+            assert!(
+                !demo.dialog.visible.get(),
+                "{route} dismissed it, which is the precondition of the next line"
+            );
+            let dark_after_dismissal = demo.dark;
+
+            demo.handle_event(key_event(Keycode::Return));
+            assert_eq!(
+                demo.dark, dark_after_dismissal,
+                "{route} then Enter: the theme is where the dismissal left it, so \
+                 the dismissed dialog's button did not fire"
+            );
+            assert_eq!(
+                dark_after_dismissal,
+                if theme_moved_by_the_dismissal {
+                    !dark_before
+                } else {
+                    dark_before
+                },
+                "and the dismissal itself moved the theme on exactly the `OK` route, \
+                 whose callback is the one that asks for it"
+            );
+        }
+    }
+
+    #[test]
+    fn the_control_enter_reaches_ok_while_the_dialog_is_showing() {
+        // **The control beside the test above, and it has to be its own function**
+        // because the claim is about a *pair* of states: `Enter` must reach `OK`
+        // while the dialog is up and must not reach it one dismissal later. A test
+        // with both halves would also do, but a failure would then not say which
+        // half moved — and this half is the one that can pass by `Enter` being
+        // broken everywhere.
+        let mut demo = shown_dialog();
+        assert!(
+            demo.dialog.actions[0].button.focused.get(),
+            "the demo opens with focus on its first action"
+        );
+
+        demo.handle_event(key_event(Keycode::Return));
+
+        assert!(
+            !demo.dark,
+            "`Enter` reached `OK`: its callback asked for the theme switch, which is \
+             the one thing only `OK` does"
+        );
+        assert!(
+            !demo.dialog.visible.get(),
+            "and the dismissal wrapped around the callback closed the dialog"
+        );
+        assert_eq!(
+            demo.focused,
+            Some(demo.dialog.actions[0].handle()),
+            "with the record still stale — which is the state the test above starts \
+             from, and the reason it needs no frame to reproduce"
+        );
+    }
+
+    /// **Renamed 2026-10-03, and the old name was a lie by then.** It read
+    /// `a_dismissed_dialogs_stale_focus_is_retired_on_the_next_frame`, and it is
+    /// now `a_dismissed_dialog_withdraws_activation_without_retiring_the_focus_record`.
+    /// The record is **not** retired on the next frame any more: `Button` grew an
+    /// `activatable` property, so a dismissal withdraws activation and leaves the
+    /// record alone, because the record is what the ring is read from and the
+    /// panel outlives the dismissal by 300 ms. A test whose name contradicts what
+    /// it asserts is worse than no test, because the next reader trusts the name.
+    #[test]
+    fn a_dismissed_dialog_withdraws_activation_without_retiring_the_focus_record() {
+        // **The half of the fix with a visible consequence.** The record is no
+        // longer what stops the key — `Button::activatable` is — and that is what
+        // lets the record survive long enough for the ring to fade with the panel.
+        let mut demo = shown_dialog();
+        demo.handle_event(key_event(Keycode::Escape));
+        assert_eq!(
+            demo.focused,
+            Some(demo.dialog.actions[0].handle()),
+            "the record is untouched the instant the dismissal happens — the frame \
+             has not run yet, and nothing in the event path writes it"
+        );
+
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert!(
+            demo.dialog.is_drawn(),
+            "the panel is still being drawn, which is the whole of the `is_drawn` \
+             against `dialog_is_modal` distinction"
+        );
+        assert_eq!(
+            demo.focused,
+            Some(demo.dialog.actions[0].handle()),
+            "**and the record survives it**, which is the reversal: the thing that \
+             used to be retired here is now kept, so the ring below has something \
+             to be read from"
+        );
+        assert!(
+            !demo.dialog.actions[0].button.activatable.get(),
+            "while activation is withdrawn — the answer that used to be the \
+             record's job, now asked of the widget"
+        );
+        assert!(
+            !demo.focus_is_live(),
+            "so nothing inside the dismissed dialog can be reached. **This is the \
+             claim this test still keeps**, and it is kept by `activatable` rather \
+             than by hiding the ring"
+        );
+        assert!(
+            demo.dialog.actions[0].button.focused.get(),
+            "while the ring stays on for the length of the fade: a ring says *where \
+             focus is*, not *that this can be activated*, so it leaves with the \
+             panel instead of one frame ahead of it. \
+             `the_focus_ring_fades_out_with_the_panel_instead_of_popping` asserts \
+             the same fact on the recorded commands rather than on this flag"
+        );
+
+        // **And it is retired when the drawing stops**, which is what the record
+        // means now: a control the demo still has focus on and is still drawing.
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(300));
+        }
+        assert!(!demo.dialog.is_drawn(), "the fade runs out");
+        assert_eq!(
+            demo.focused, None,
+            "and only then is the record retired, on the frame the ring goes"
+        );
+    }
+
+    /// **All four dismissal routes, and the gap this found.** `toggle_dialog`'s
+    /// dismiss branch used to call `set_focus(None)`, so the `D` route dropped the
+    /// focus record on the spot while the other three routes left it to
+    /// `sync_dialog_focus` — which made `D` the one route whose ring popped, a
+    /// defect the operator did not report and yesterday's fix did not reach.
+    /// Found by asking which tests broke when the record stopped being retired.
+    #[test]
+    fn a_dismissed_dialog_withdraws_activation_on_every_route() {
+        // **One frame**, not zero and not the whole fade: the record used to go on
+        // the first frame for three routes and on the event for the fourth, and a
+        // test that ran no frame would see all four agreeing for the wrong reason.
+        for route in ["Escape", "a tap on the scrim", "a tap on Cancel", "D"] {
+            let mut demo = shown_dialog();
+            match route {
+                "Escape" => demo.handle_event(key_event(Keycode::Escape)),
+                "D" => demo.handle_event(key_event(DIALOG_KEY)),
+                "a tap on Cancel" => {
+                    let (down, up) = click_at(CANCEL_BUTTON.x + 4.0, CANCEL_BUTTON.y + 4.0);
+                    demo.handle_event(down);
+                    demo.handle_event(up);
+                }
+                _ => {
+                    let (down, up) = click_at(60.0, 60.0);
+                    demo.handle_event(down);
+                    demo.handle_event(up);
+                }
+            }
+            assert!(!demo.dialog.visible.get(), "{route} dismissed it");
+            assert!(demo.dialog.is_drawn(), "{route} and the fade is running");
+
+            demo.frame(WINDOW, Duration::from_millis(16));
+
+            assert_eq!(
+                dialog_shape_alphas(&demo, RING_RADIUS),
+                vec![250],
+                "{route}: the ring is still drawn, fading with the panel"
+            );
+            assert_eq!(
+                dialog_shape_alphas(&demo, PANEL_RADIUS),
+                vec![250],
+                "{route}: at the panel's own alpha, so the same fade"
+            );
+            assert!(
+                demo.dialog
+                    .actions
+                    .iter()
+                    .all(|a| !a.button.activatable.get()),
+                "{route}: and no action may be activated"
+            );
+            assert!(!demo.focus_is_live(), "{route}: nor is the record live");
+        }
+    }
+
+    /// The record outliving a dismissal is new, and `Space`'s condition reads
+    /// focus, so the pads stranding at full press is a live risk rather than a
+    /// hypothetical one — it was a real bug two rounds ago, measured on the pads
+    /// at `[0.0, 0.0, 0.0]` after an `Escape`.
+    #[test]
+    fn a_surviving_focus_record_does_not_strand_the_pads_after_a_frame() {
+        // **After a frame, which is the gap.** `space_presses_the_pads_again_after
+        // _every_dismissal_route` presses `Space` with no frame in between, so it
+        // never reaches the new state: the record alive *and* `sync_dialog_focus`
+        // having run. Only here is `focused` a `Some` naming a button of a dialog
+        // that is no longer there, which is the state that could strand the pads.
+        for route in ["Escape", "a tap on the scrim", "a tap on Cancel", "D"] {
+            let mut demo = shown_dialog();
+            match route {
+                "Escape" => demo.handle_event(key_event(Keycode::Escape)),
+                "D" => demo.handle_event(key_event(DIALOG_KEY)),
+                "a tap on Cancel" => {
+                    let (down, up) = click_at(CANCEL_BUTTON.x + 4.0, CANCEL_BUTTON.y + 4.0);
+                    demo.handle_event(down);
+                    demo.handle_event(up);
+                }
+                _ => {
+                    let (down, up) = click_at(60.0, 60.0);
+                    demo.handle_event(down);
+                    demo.handle_event(up);
+                }
+            }
+            demo.frame(WINDOW, Duration::from_millis(16));
+
+            assert_eq!(
+                demo.focused,
+                Some(demo.dialog.actions[0].handle()),
+                "{route}: the record did survive the frame — this is the state under \
+                 test, and it is new"
+            );
+            assert!(
+                !demo.focus_is_live(),
+                "{route}: but it is not live, which is the whole of the answer"
+            );
+            let mut enter = InputEvent::new(
+                InputEventKind::KeyDown {
+                    key: Key::Keyboard(Keycode::Return),
+                    keymod: Mod::empty(),
+                },
+                None,
+            );
+            assert!(
+                !demo.offer_to_focused(&mut enter),
+                "{route}: and the focused control declines the key outright"
+            );
+
+            demo.handle_event(key_event(Keycode::Space));
+            settle(&mut demo);
+            let first = demo.pads[0].press.get();
+            assert!(
+                first > 0.5,
+                "{route}: so Space still presses the pads, and the first has had the \
+                 whole 150 ms: {first}"
+            );
+        }
+    }
+
+    #[test]
+    fn space_presses_the_pads_again_after_every_dismissal_route() {
+        // **The second consequence of the same stale record**, and the one with no
+        // report against it: `Space`'s condition reads focus, so a stale `Some`
+        // stopped the one key that presses the pads from pressing them. Measured
+        // before the fix — `Space` after an `Escape` dismissal left the pads at
+        // `[0.0, 0.0, 0.0]` where a `D` dismissal left them at `[1.0, 0.84, 0.36]`.
+        // Two dismissal routes, two behaviours, and nothing on screen to say which.
+        //
+        // **The threshold is on the first pad only**, and that is the stagger rather
+        // than a convenience: [`settle`] runs 150 ms, `STAGGER_STEP` is 60 and
+        // `PRESS_DURATION` is 150, so the second pad is 90 ms in and the third 30 ms
+        // in — the measured triple is in the message so a reader can see all three.
+        for route in ["Escape", "a tap on the scrim", "a tap on Cancel", "D"] {
+            let mut demo = shown_dialog();
+            match route {
+                "Escape" => demo.handle_event(key_event(Keycode::Escape)),
+                "D" => demo.handle_event(key_event(DIALOG_KEY)),
+                "a tap on Cancel" => {
+                    let (down, up) = click_at(CANCEL_BUTTON.x + 4.0, CANCEL_BUTTON.y + 4.0);
+                    demo.handle_event(down);
+                    demo.handle_event(up);
+                }
+                _ => {
+                    let (down, up) = click_at(60.0, 60.0);
+                    demo.handle_event(down);
+                    demo.handle_event(up);
+                }
+            }
+            assert!(!demo.dialog.visible.get(), "{route} dismissed it");
+
+            demo.handle_event(key_event(Keycode::Space));
+            settle(&mut demo);
+            let pads = demo
+                .pads
+                .iter()
+                .map(|pad| pad.press.get())
+                .collect::<Vec<_>>();
+            assert!(
+                pads[0] > 0.5,
+                "{route} then Space presses the pads again, and the first has had \
+                 the whole 150 ms: {pads:?}"
+            );
+            assert!(
+                pads.iter().all(|press| *press > 0.0),
+                "and all three have left zero, which is what the defect looked like: \
+                 {pads:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_printable_key_acts_without_a_row_in_the_shortcut_table() {
+        // **The complement of finding 2's fix, over the keycodes this build can
+        // deliver cheaply.** Every keycode [`Keycode::from_u32`] maps below
+        // [`KEYCODE_PRINTABLE_END`] is pressed with the dialog closed, and each one
+        // that is not a row of [`GALLERY_SHORTCUTS`] must leave the gallery
+        // untouched — which is what makes the table the *only* route rather than
+        // merely the one under the guard.
+        //
+        // **It cannot pass by the table and the dispatch having drifted**, because
+        // there is nothing to drift from: `handle_event` looks the key up in this
+        // very array.
+        let mut checked = 0_usize;
+        let mut unaccounted: Vec<Keycode> = Vec::new();
+        for raw in 0..=KEYCODE_PRINTABLE_END {
+            let Some(keycode) = Keycode::from_u32(raw) else {
+                continue;
+            };
+            if GALLERY_SHORTCUTS.iter().any(|(_, key, _)| *key == keycode) {
+                continue;
+            }
+            checked += 1;
+            let mut demo = shortcut_fixture(false);
+            let before = gallery_state(&demo);
+            demo.handle_event(key_event(keycode));
+            settle(&mut demo);
+            if gallery_state(&demo) != before {
+                unaccounted.push(keycode);
+            }
+        }
+        assert!(
+            unaccounted.is_empty(),
+            "these keys move the gallery and have no row in `GALLERY_SHORTCUTS`, so \
+             nothing wraps them in the modal guard: {unaccounted:?}"
+        );
+        assert!(
+            checked > 50,
+            "and {checked} unlisted printable keycodes really were pressed, rather \
+             than the loop skipping them all"
+        );
+    }
+
+    #[test]
+    fn the_gallery_shortcut_list_holds_every_key_the_table_has() {
+        // **The production table, pressed one at a time with the dialog closed**,
+        // so every row is shown to reach something. A row that reached nothing would
+        // satisfy the "does not act while showing" half on its own and be a lie in
+        // the other direction.
+        //
+        // The table *is* the dispatch, so this is not a list checked against a
+        // `match` — there is no `match`. What it does check is that every row's
+        // function still does what its name says, which is the one way a table of
+        // function pointers can rot silently.
+        assert_eq!(GALLERY_SHORTCUTS.len(), 18, "eighteen shortcuts");
+        assert!(
+            !GALLERY_SHORTCUTS
+                .iter()
+                .any(|(_, key, _)| *key == DIALOG_KEY),
+            "and `D` is not one of them, because `D` is the dialog's own and is \
+             matched above the guard"
+        );
+        for (what, keycode, _) in GALLERY_SHORTCUTS {
+            let mut demo = shortcut_fixture(false);
+            let before = gallery_state(&demo);
+            demo.handle_event(key_event(keycode));
+            settle(&mut demo);
+            assert_ne!(
+                gallery_state(&demo),
+                before,
+                "{what} moves something in the gallery when the dialog is closed"
+            );
+        }
+    }
+
+    #[test]
+    fn a_gallery_shortcut_does_nothing_while_the_dialog_is_showing() {
+        // **The operator's decision of 2026-10-03**, and the assertion that says it
+        // is implemented rather than intended: every one of the demo's own
+        // shortcuts, pressed once with the dialog up, and nothing the gallery can
+        // see has moved.
+        //
+        // **`Space` is not in this list and that is not an oversight.** Its arm is
+        // `Space if self.focused.is_none()`, and a showing dialog holds focus
+        // inside itself, so the focus condition alone already stops it and this
+        // test could not tell the guard from that. It is in
+        // `the_gallery_shortcut_list_holds_every_key_the_table_has` instead, where
+        // the closed-dialog half is what matters, and its arm is still inside the
+        // guard because the condition is about focus rather than about modality.
+        for (what, keycode, _) in GALLERY_SHORTCUTS
+            .into_iter()
+            .filter(|(_, key, _)| *key != Keycode::Space)
+        {
+            let mut demo = shortcut_fixture(true);
+            let before = gallery_state(&demo);
+            demo.handle_event(key_event(keycode));
+            settle(&mut demo);
+            assert_eq!(
+                gallery_state(&demo),
+                before,
+                "{what} must not act while the dialog is showing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_gallery_shortcut_acts_again_once_the_dialog_is_closed() {
+        // **The control beside the test above, and the reason it is a separate
+        // function rather than a second assertion in the first.** A shortcut that
+        // did nothing in either state — a typo'd keycode, a key the table never
+        // matched — passes "does not act while showing" perfectly, and the only
+        // thing that tells the two apart is the same key moving something once the
+        // dialog is gone.
+        //
+        // `.ai/NEVERAGAIN.md` § *A drawn control with nothing behind it*, applied to
+        // a keyboard shortcut: name the gesture that operates the thing, and assert
+        // the gesture moves it.
+        for (what, keycode, _) in GALLERY_SHORTCUTS {
+            let mut demo = shortcut_fixture(false);
+            let before = gallery_state(&demo);
+            demo.handle_event(key_event(keycode));
+            settle(&mut demo);
+            assert_ne!(
+                gallery_state(&demo),
+                before,
+                "{what} acts again with the dialog closed"
+            );
+        }
+    }
+
+    #[test]
+    fn the_dialogs_own_key_is_above_the_guard_and_still_both_ways() {
+        // The guard in `handle_event` is `else if !self.dialog_is_modal()`, so
+        // anything that has to work *while the dialog is up* must be matched above
+        // it. `D` is the one such key and this is what holds it there: if `D`'s arm
+        // were moved back into the table, this fails.
+        let mut demo = shown_dialog();
+        assert!(demo.dialog.visible.get(), "the dialog opens showing");
+        demo.handle_event(key_event(DIALOG_KEY));
+        assert!(
+            !demo.dialog.visible.get(),
+            "`D` closes it from inside the guard's scope"
+        );
+
+        let mut demo = dialog_closed();
+        assert!(!demo.dialog.visible.get(), "and it starts closed");
+        demo.handle_event(key_event(DIALOG_KEY));
+        assert!(
+            demo.dialog.visible.get(),
+            "and `D` opens it too, which is the same arm and the other direction"
+        );
+    }
+
+    #[test]
+    fn a_pointer_press_behind_the_scrim_operates_nothing() {
+        // **The same guard, on the three arms that reach the gallery without
+        // routing.** `handle_event`'s `MouseButtonDown` and `FingerDown` arms call
+        // `pad_at`, `slider_at` and `keyboard_at` themselves, so the tap-side
+        // filter in `route_input_event` never sees them: a press on a pad with the
+        // dialog showing lit the pad, and only the *tap* on the release was ever
+        // offered to the dialog. All three targets are outside the panel — asserted
+        // here rather than assumed, because a target under the panel would be
+        // swallowed by the panel and this test would pass for the wrong reason.
+        //
+        // Three gestures, three controls, each with the closed-dialog control
+        // beside it, for the reason the entry above is named after — and **three
+        // fresh demos, one per control**, because a *release* on the scrim is a
+        // dismissal: `Dialog::on_event` consumes a tap anywhere in its box and
+        // closes on one that misses the panel, which is correct and which would
+        // leave the second and third controls being tested with nothing in the
+        // way. The first control's release is therefore its own last act.
+
+        // **The pad: a press over its own centre.**
+        let probe = shown_dialog();
+        let pad = probe.node_rect(probe.pads[0].node).expect("a laid-out pad");
+        let (px, py) = (pad.x + pad.width / 2.0, pad.y + pad.height / 2.0);
+        assert!(
+            !inside(PANEL, Rect::new(px - 1.0, py - 1.0, 2.0, 2.0)),
+            "the pad's centre at ({px}, {py}) is outside the panel at {PANEL:?}, so \
+             this is a press on the scrim"
+        );
+        let mut demo = shown_dialog();
+        demo.handle_event(mouse_down_at(px, py, 0));
+        settle(&mut demo);
+        assert_eq!(
+            demo.pads
+                .iter()
+                .map(|pad| pad.press.get())
+                .collect::<Vec<f32>>(),
+            vec![0.0, 0.0, 0.0],
+            "no pad is pressing"
+        );
+        assert_eq!(demo.mouse_pressed, None, "and no pad is armed for release");
+
+        // **The slider: a press over its own centre, which is the gesture that
+        // starts a drag.**
+        let mut demo = shown_dialog();
+        let slider = demo.slider_rect().expect("a laid-out slider");
+        let (sx, sy) = (
+            slider.x + slider.width / 2.0,
+            slider.y + slider.height / 2.0,
+        );
+        demo.handle_event(mouse_down_at(sx, sy, 0));
+        assert!(
+            !demo.slider_dragging,
+            "the drag never started, at ({sx}, {sy})"
+        );
+        demo.handle_event(mouse_up_at(sx, sy, 40_000_000));
+
+        // **The keyboard: a press over one key's own centre, which is the gesture
+        // that lights it.**
+        let mut demo = shown_dialog();
+        let (kx, ky) = key_center(&demo, KeyAction::Char('a'));
+        demo.handle_event(mouse_down_at(kx, ky, 0));
+        assert!(
+            !demo.keyboard.is_key_grabbed(),
+            "no key lit at ({kx}, {ky}), which is `a`'s own centre"
+        );
+
+        // **The three controls, with the dialog closed.** Without this the whole
+        // test is satisfied by three broken controls.
+        let mut demo = dialog_closed();
+        let pad = demo.node_rect(demo.pads[0].node).expect("a laid-out pad");
+        demo.handle_event(mouse_down_at(
+            pad.x + pad.width / 2.0,
+            pad.y + pad.height / 2.0,
+            0,
+        ));
+        demo.frame(WINDOW, Duration::from_millis(50));
+        assert!(
+            demo.pads[0].press.get() > 0.0,
+            "the pad presses when the dialog is closed"
+        );
+        demo.handle_event(mouse_up_at(
+            pad.x + pad.width / 2.0,
+            pad.y + pad.height / 2.0,
+            40_000_000,
+        ));
+
+        let (kx, ky) = key_center(&demo, KeyAction::Char('a'));
+        demo.handle_event(mouse_down_at(kx, ky, 0));
+        assert!(
+            demo.keyboard.is_key_grabbed(),
+            "and the key lights, which is what `is_key_grabbed` is for"
+        );
+        demo.handle_event(mouse_up_at(kx, ky, 40_000_000));
+    }
+
+    #[test]
+    fn a_release_is_never_gated_so_nothing_can_be_stranded_mid_press() {
+        // **The asymmetry the guard deliberately does not have**, and the one way
+        // to strand a control: hold `Space` so the pads are going down, press `D`
+        // so the dialog opens, release `Space`. A guard on the releases would
+        // leave three pads at 1.0 behind the scrim with nothing left to bring them
+        // back, and the demo has no other gesture that would.
+        let mut demo = dialog_closed();
+        demo.handle_event(key_event(Keycode::Space));
+        for _ in 0..6 {
+            demo.frame(WINDOW, Duration::from_millis(50));
+        }
+        let held = demo
+            .pads
+            .iter()
+            .map(|pad| pad.press.get())
+            .collect::<Vec<f32>>();
+        assert!(
+            held.iter().all(|press| *press > 0.5),
+            "all three pads are down first: {held:?}"
+        );
+
+        // The dialog opens underneath them, mid-press.
+        demo.handle_event(key_event(DIALOG_KEY));
+        assert!(demo.dialog.visible.get(), "and it is showing");
+
+        // The release, with the dialog up. Nothing else in the demo will ever run
+        // again while it is, so this is the only thing that can bring them back.
+        demo.handle_event(key_up(Keycode::Space));
+        for _ in 0..40 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        let after = demo
+            .pads
+            .iter()
+            .map(|pad| pad.press.get())
+            .collect::<Vec<f32>>();
+        assert!(
+            after.iter().all(|press| *press < 0.01),
+            "and all three came back up, so the release is not gated: {after:?}"
+        );
+    }
+
+    #[test]
+    fn the_demo_opens_with_a_dialog_showing_and_its_panel_inside_the_window() {
+        // Acceptance criterion 7 — *"Demo shows a dialog with OK and Cancel
+        // buttons"* — and the tree it is shown in. **From literals**: `PANEL`,
+        // `OK_BUTTON` and `CANCEL_BUTTON` are written out from the arithmetic in
+        // their own docs, and the window's own size is a literal here rather than
+        // `WINDOW`, so a fixture that read the constants back could not fail.
+        let demo = shown_dialog();
+
+        let window = Rect::new(0.0, 0.0, 1280.0, 1020.0);
+        assert_eq!(
+            demo.dialog_rect(),
+            window,
+            "the dialog's box is the whole window, which is what an overlay is: \
+             the scrim covers all of it, not the panel"
+        );
+        let panel = demo.dialog.panel_rect(
+            demo.dialog_rect(),
+            &demo.dialog_advance(),
+            demo.dialog_line_height(),
+        );
+        assert_eq!(
+            panel, PANEL,
+            "and the panel is the {PANEL:?} the arithmetic gives"
+        );
+
+        // **Inside the window, against a literal rather than against `WINDOW`.**
+        // 430 is past zero, 423.6 is below the top, and 850 and 596.4 are short of
+        // 1280 and 1020 — a panel 172.8 tall in a window 1020 tall cannot be in
+        // the wrong place by accident, and `no_two_placed_rects_overlap` says
+        // nothing about an overlay on purpose.
+        assert!(
+            inside(window, panel),
+            "the panel at {panel:?} is inside the {window:?} drawn with literals"
+        );
+        assert_eq!(
+            (panel.y + panel.height, window.height),
+            (596.4, 1020.0),
+            "and the arithmetic in `PANEL`'s own doc is what produced it: 423.6 of \
+             top and 596.4 of bottom"
+        );
+
+        // **Both buttons are inside the panel**, which is the part of criterion 7
+        // that a screenshot cannot settle by itself: a panel with buttons beside it
+        // satisfies "a dialog with OK and Cancel" in words and not on screen.
+        let actions = painted_action_rects(&demo);
+        assert_eq!(actions.len(), 2, "the acceptance criterion's two");
+        assert_eq!(actions, vec![OK_BUTTON, CANCEL_BUTTON], "as recorded");
+        for (label, button) in DIALOG_ACTIONS.iter().zip(&actions) {
+            assert!(
+                inside(panel, *button),
+                "{label} at {button:?} is inside the panel at {panel:?}"
+            );
+        }
+        assert_eq!(
+            CANCEL_BUTTON.x - (OK_BUTTON.x + OK_BUTTON.width),
+            8.0,
+            "with the widget's own 8-pixel gap between them, and `OK` first, which \
+             is the order [`DIALOG_ACTIONS`] gives and so the order `Tab` walks"
+        );
+        assert_eq!(
+            dialog_run_texts(&demo),
+            vec![
+                DIALOG_TITLE,
+                "Turn the gallery's colours over to the",
+                "other theme, exactly as the T key does.",
+                DIALOG_ACTIONS[0],
+                DIALOG_ACTIONS[1],
+            ],
+            "and the panel says what it is: the title, the body **wrapped to two \
+             lines** at the panel's inner width, then the two button labels"
+        );
+
+        // In the tree, on the node the frame loop and the hit test both name.
+        let nodes = demo.nodes.borrow();
+        assert!(
+            nodes.get(demo.dialog.handle()).is_some(),
+            "the dialog has a node of its own"
+        );
+        assert_eq!(
+            nodes.get(demo.dialog.handle()).and_then(WidgetNode::parent),
+            None,
+            "which is a root: an overlay is not laid out inside the content it \
+             covers, and that is what lets `modal_chain` be the only thing keeping \
+             the gallery out of the tap route"
+        );
+        for (index, label) in DIALOG_ACTIONS.iter().enumerate() {
+            assert_eq!(
+                nodes
+                    .get(demo.dialog.actions[index].handle())
+                    .and_then(WidgetNode::parent),
+                Some(demo.dialog.handle()),
+                "{label} is a real node attached to the dialog's, which is what \
+                 puts it in the paint order and in the `Tab` order"
+            );
+        }
+    }
+
+    #[test]
+    fn the_dialogs_nodes_are_painted_by_the_frame_loop_and_only_while_it_is_there() {
+        // `Demo::frame` walks `self.order` and rebuilds every node's `PaintState`,
+        // and `Demo::draw` walks the same `order`, so a widget the loop does not
+        // name is a widget that is never on the screen however correct its own
+        // paint is. The dialog's subtree is **appended** to that order rather than
+        // attached to the gallery's root, and this is what holds the append down.
+        let mut demo = shown_dialog();
+        let dialog = demo.dialog.handle();
+        let first_action = demo.dialog.actions[0].handle();
+
+        let gallery_nodes = demo.order.len() - 1 - demo.dialog.actions.len();
+        assert_eq!(
+            demo.order[gallery_nodes], dialog,
+            "the dialog's own node is the first of its subtree, and it comes after \
+             all {gallery_nodes} nodes of the gallery"
+        );
+        assert!(
+            demo.order.contains(&first_action),
+            "and its actions are in the order too, or nothing could send their \
+             commands and `Tab` would have nothing to walk"
+        );
+        assert!(
+            !demo.commands_at(dialog).is_empty(),
+            "so the loop painted it: an overlay, a shadow, a panel, three text runs \
+             and two buttons' worth of commands"
+        );
+
+        // The other direction: a dialog that is hidden with nothing running records
+        // nothing, and **the loop is what proves that**, because a test that asked
+        // `Dialog::paint` directly would not know whether the demo ever stopped
+        // calling it.
+        demo.handle_event(key_event(DIALOG_KEY));
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(300));
+        }
+        assert!(
+            demo.commands_at(dialog).is_empty(),
+            "a closed dialog with its fade over draws nothing at all, so there is \
+             no invisible panel left on the screen"
+        );
+        assert!(
+            demo.dialog
+                .actions
+                .iter()
+                .all(|action| !action.button.focused.get()),
+            "and no focus ring left on a button nobody can reach, which is what \
+             `sync_dialog_focus` exists for"
+        );
+    }
+
+    #[test]
+    fn a_tap_on_the_button_that_was_drawn_there_fires_that_button() {
+        // **The gesture that operates the control, aimed where it is painted** —
+        // `.ai/NEVERAGAIN.md` § *a drawn control with nothing behind it*. The point
+        // comes out of the recorded paint and not out of `Dialog::action_rect`,
+        // because asking the widget where it draws a button and then pressing
+        // there is asking it twice.
+        let mut demo = shown_dialog();
+        let actions = painted_action_rects(&demo);
+        assert_eq!(actions, vec![OK_BUTTON, CANCEL_BUTTON]);
+        let middle = |rect: Rect| (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+
+        // **The control, in the theme as well as the dialog**: the demo opens on
+        // the dark theme, so `OK` switching it is a change and not a coincidence.
+        assert!(demo.dark, "the demo opens on the dark theme");
+        let (x, y) = middle(actions[0]);
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+
+        assert!(
+            !demo.dark,
+            "`OK` fired: its callback asked for the theme switch, which is the only \
+             thing in the demo either button can do that the other cannot"
+        );
+        // And the *panel* followed it, which is a separate thing from the gallery
+        // following it: `toggle_theme` re-reads the dialog's palette, and a dialog
+        // left on the dark surface over a light window is a dark hole in it.
+        assert_eq!(
+            demo.dialog.surface.get(),
+            DialogPalette::from_theme(&Theme::light()).surface,
+            "so the panel is on the theme it is now over rather than the one it \
+             was opened on"
+        );
+        assert!(
+            !demo.dialog.visible.get(),
+            "and the dialog is on its way out — the dismissal is wrapped around the \
+             callback by `add_action`, so a caller cannot lose it by writing a \
+             callback"
+        );
+        assert!(
+            !demo.pending_theme.get(),
+            "with the request drained rather than left set, so the next `OK` is a \
+             fresh one and not a repeat of this one"
+        );
+
+        // **The control beside it: `Cancel` does not switch the theme.** Without
+        // this, "a tap fires the button under it" is satisfied by a chain that
+        // fires the first button whatever was pressed.
+        let mut demo = shown_dialog();
+        let cancel = painted_action_rects(&demo)[1];
+        let (x, y) = middle(cancel);
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        assert!(demo.dark, "`Cancel` changed nothing");
+        assert!(
+            !demo.dialog.visible.get(),
+            "and closed the dialog, which is the half of it that is not its callback"
+        );
+
+        // And **the gap between them**, one pixel left of `Cancel` and so inside
+        // the panel and on nobody: a press there fires nothing and is not a
+        // dismissal either. A test that pressed "near a button" would pass without
+        // this and prove nothing about the button.
+        let mut demo = shown_dialog();
+        let cancel = painted_action_rects(&demo)[1];
+        let (down, up) = click_at(cancel.x - 1.0, cancel.y + cancel.height / 2.0);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        assert!(demo.dark, "the gap is nobody's");
+        assert!(
+            demo.dialog.visible.get(),
+            "and it is inside the panel, so it does not dismiss either"
+        );
+    }
+
+    #[test]
+    fn a_tap_outside_the_panel_does_not_reach_the_gallery_behind_it() {
+        // **This is the assertion that makes "modal" mean something.** A control
+        // the dialog should have blocked, pressed where it is drawn, and nothing
+        // happens — with the same press against a closed dialog beside it, so the
+        // test cannot pass by the control being broken.
+        //
+        // The **field** is the control, and the choice is arithmetic rather than
+        // taste: its rect starts at y 756 and the panel's ends at 596, so it is
+        // entirely below the panel and a press on it is a press on the *scrim* and
+        // not on the panel. A press on the slider or the toggle would have been
+        // swallowed by the panel — the panel covers the middle of the gallery,
+        // which the operator accepted — and would have proved less.
+        let mut demo = shown_dialog();
+        let field = demo.text_input_rect().expect("the field is placed");
+        assert!(
+            field.y > PANEL.y + PANEL.height,
+            "the field at {field:?} is below the panel at {PANEL:?}, so it is \
+             behind the scrim and not behind the panel"
+        );
+        let (x, y) = (field.x + field.width / 2.0, field.y + field.height / 2.0);
+        let focus_before = demo.focused;
+
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+
+        assert!(
+            !demo.text_input.focused.get(),
+            "the field was not focused: the modal ate the tap"
+        );
+        assert_eq!(
+            demo.focused, focus_before,
+            "and focus stayed where it was — inside the dialog"
+        );
+        assert!(
+            !demo.dialog.visible.get(),
+            "so the press did reach the scrim, which is a dismissal: the tap was \
+             **consumed by the dialog**, not dropped on the floor, and this is the \
+             assertion that says so rather than a control that happens not to \
+             have moved"
+        );
+
+        // **The control: the identical press with the dialog closed.**
+        let mut demo = dialog_closed();
+        let field = demo.text_input_rect().expect("the field is placed");
+        let (x, y) = (field.x + field.width / 2.0, field.y + field.height / 2.0);
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        assert!(
+            demo.text_input.focused.get(),
+            "with the dialog closed the same press does reach the field, so the \
+             assertion above is about the modal and not about a dead control"
+        );
+    }
+
+    #[test]
+    fn a_tap_on_a_key_behind_the_scrim_inserts_nothing() {
+        // The keyboard is the second control behind the overlay, and it is here
+        // because **a tap that reaches nothing and a tap that reaches a control
+        // with nothing to say look identical** from the first test alone: the
+        // keyboard is the one control in the window whose tap is *reported* rather
+        // than applied, so a press behind the scrim that still inserted a
+        // character would be a hole the field's focus assertion could not see.
+        let mut demo = shown_dialog();
+        let (x, y) = key_center(&demo, KeyAction::Char('a'));
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+
+        assert_eq!(
+            demo.text_input.text.get(),
+            String::new(),
+            "no key reported, so no character reached the field"
+        );
+        assert_eq!(
+            demo.pending_key.get(),
+            None,
+            "and the key the keyboard would have reported is not left waiting: the \
+             modal branch returns rather than falling through to the chain that \
+             drains it"
+        );
+
+        // The control: the same press with the dialog closed does insert.
+        let mut demo = dialog_closed();
+        let (x, y) = key_center(&demo, KeyAction::Char('a'));
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        assert_eq!(
+            demo.text_input.text.get(),
+            String::from("a"),
+            "which is what makes the assertion above about the modal"
+        );
+    }
+
+    #[test]
+    fn the_demo_never_offers_an_event_outside_the_dialog_while_it_is_showing() {
+        // The whole of `modal_chain`, over **every control in the window** rather
+        // than one of them, and with the closed demo's own chain beside each one.
+        // The input module cannot be asked this question: `input::route` walks
+        // from the node under the pointer to the root and knows nothing about a
+        // modal, so a caller that offers to the chain it returns has offered to
+        // the gallery.
+        let demo = shown_dialog();
+        let mut in_dialog = vec![demo.dialog.handle()];
+        in_dialog.extend(demo.dialog.actions.iter().map(|action| action.handle()));
+
+        // **Every leaf in the gallery, and each one aimed at by its own laid-out
+        // centre** rather than at a hand-written point — the same rule
+        // `key_center` states for the keyboard's keys.
+        let positions: Vec<(&'static str, Handle, Rect)> = [
+            ("the first pad", demo.pads[0].node),
+            ("a text panel label", demo.label_nodes[0]),
+            ("the gauge", demo.gauge.handle()),
+            ("the slider", demo.slider.node()),
+            ("the toggle", demo.toggle.handle()),
+            ("the image", demo.image.handle()),
+            ("the chart", demo.chart.handle()),
+            ("the field", demo.text_input.handle()),
+            ("the keyboard", demo.keyboard.handle()),
+        ]
+        .into_iter()
+        .map(|(what, handle)| {
+            let rect = demo.node_rect(handle).expect("a laid-out node");
+            (what, handle, rect)
+        })
+        .collect();
+        assert_eq!(positions.len(), 9, "and the gallery has nine");
+
+        for (what, _handle, rect) in &positions {
+            let (x, y) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+            let event = InputEvent::new(InputEventKind::Tap, Some(Offset::new(x, y)));
+
+            // **The claim: whatever this point is over, the only node the demo
+            // offers it to is inside the dialog.**
+            let chain = demo.modal_chain(&event);
+            assert!(
+                !chain.is_empty(),
+                "{what}: an empty chain would drop the event, which is not the same \
+                 claim as 'only the dialog sees it'"
+            );
+            for offered in &chain {
+                assert!(
+                    in_dialog.contains(offered),
+                    "{what}: {offered:?} is outside the dialog, at ({x}, {y})"
+                );
+            }
+        }
+
+        // **The control beside it, and only where the input module can supply
+        // one.** `input::route` reaches seven of the nine: the pads and the text
+        // column's labels sit *under* the controls layer, which is given the whole
+        // window and is therefore the deepest node under every point to the left
+        // of it — a property of the demo's own tree that predates this change and
+        // is the reason [`Demo::pad_at`] exists at all. Two positions the module
+        // cannot reach are not two positions a caller may offer to.
+        let closed = dialog_closed();
+        for (what, handle, rect) in &positions {
+            if !matches!(*what, "the first pad" | "a text panel label") {
+                let (x, y) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+                let event = InputEvent::new(InputEventKind::Tap, Some(Offset::new(x, y)));
+                let chain = {
+                    let nodes = closed.nodes.borrow();
+                    input::route(&nodes, closed.root, &event)
+                };
+                assert!(
+                    chain.contains(handle),
+                    "{what}: `input::route` reaches it at ({x}, {y}) when nothing is \
+                     in the way, so the assertion above is about the modal and not \
+                     about a control the module cannot see"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn escape_closes_the_dialog_through_the_demos_own_event_path() {
+        // **Through the demo's own path** — an SDL key-down, the recogniser, the
+        // routing — and not by calling `Dialog::on_event`. The route that matters
+        // is the one a reader presses: a `Button` declines `Escape`, so this only
+        // works because the demo offers the key to the *dialog* before it offers
+        // it to the focused button.
+        let mut demo = shown_dialog();
+        demo.handle_event(key_event(Keycode::Escape));
+        assert!(
+            !demo.dialog.visible.get(),
+            "the dialog is on its way out and the demo has stopped routing to it"
+        );
+        assert!(demo.dark, "and nothing else happened");
+
+        // **The control beside it**: the same key with the dialog closed reaches
+        // nothing and changes nothing, so the assertion above is about the dialog.
+        let mut demo = dialog_closed();
+        demo.handle_event(key_event(Keycode::Escape));
+        assert!(!demo.dialog.visible.get(), "still closed");
+        assert!(demo.dark, "and the theme did not switch");
+
+        // And a dialog is not left open by a key it does not answer: `Tab` is
+        // declined by `Dialog::on_event` and then becomes the navigation key's.
+        let mut demo = shown_dialog();
+        demo.handle_event(key_event(Keycode::Escape));
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(300));
+        }
+        assert!(!demo.dialog.is_drawn(), "and its fade runs out");
+    }
+
+    /// The ring on a dismissed dialog's button must leave **with the panel**.
+    ///
+    /// **The defect this is for.** [`Demo::sync_dialog_focus`] derived the ring
+    /// from `self.focused`, and that record is retired the instant the dialog
+    /// stops being modal — so on the *first* frame after a dismissal the ring was
+    /// already gone while the panel, its text and its buttons were still on screen
+    /// at 98% of their opacity. Measured on the recorded commands before the fix,
+    /// one 16 ms frame into the widget's 300 ms bounce: the panel and both action
+    /// backgrounds at alpha **250**, and no ring at all.
+    ///
+    /// **The numbers are written out rather than derived.** 250 is
+    /// `round(255 * 0.978)`, and 0.978 is `shown_fraction` at the scale 0.9978
+    /// that one 16 ms step of the fade's easing reaches; an assertion written as
+    /// that expression would be true by construction and would survive the very
+    /// change it is meant to catch. **What would move these numbers:** the
+    /// dialog's `duration` or `easing`, or the easing's own curve.
+    #[test]
+    fn the_focus_ring_fades_out_with_the_panel_instead_of_popping() {
+        let mut demo = shown_dialog();
+
+        assert_eq!(
+            dialog_shape_alphas(&demo, PANEL_RADIUS),
+            vec![255],
+            "the fixture is a panel at rest"
+        );
+        assert_eq!(
+            dialog_shape_alphas(&demo, RING_RADIUS),
+            vec![255],
+            "with **one** action's ring on it and opaque — one shape at the ring's \
+             radius and not two, because Cancel is not focused"
+        );
+
+        demo.handle_event(key_event(Keycode::Escape));
+
+        // **One frame.** Not two and not the whole fade: the complaint is about
+        // what the first frame draws, and a test that advanced further would pass
+        // with the ring gone from the first.
+        demo.frame(WINDOW, Duration::from_millis(16));
+
+        assert!(demo.dialog.is_drawn(), "the panel is still on screen");
+        assert!(
+            !demo.dialog.visible.get(),
+            "and the dialog is no longer modal, which is the predicate that retired \
+             the focus record"
+        );
+        assert!(
+            !demo.focus_is_live(),
+            "so the focused control cannot be activated — **liveness** is keyed on \
+             `visible` and stays keyed on it; this is the half of the split that \
+             must not move, and it is asserted here rather than assumed"
+        );
+
+        assert_eq!(
+            dialog_shape_alphas(&demo, PANEL_RADIUS),
+            vec![250],
+            "the panel has barely moved: 16 ms into a 300 ms bounce"
+        );
+        assert_eq!(
+            dialog_shape_alphas(&demo, RING_RADIUS),
+            vec![250],
+            "**and the ring is still drawn, at the panel's own alpha**: a shape at \
+             the ring's radius is still being recorded, fading with the panel \
+             rather than having vanished over an opaque one"
+        );
+        assert_eq!(
+            dialog_shape_alphas(&demo, ACTION_BACKGROUND_RADIUS),
+            vec![250, 250],
+            "the two action backgrounds agree with it, which is the same fade \
+             arriving through the one multiplier they already had"
+        );
+
+        // **The control beside it.** Past the end of the fade the ring is gone, so
+        // the assertions above are about the fade rather than about the ring being
+        // drawn unconditionally.
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(300));
+        }
+        assert!(!demo.dialog.is_drawn(), "the fade runs out");
+        assert_eq!(
+            dialog_shape_alphas(&demo, RING_RADIUS),
+            Vec::<u8>::new(),
+            "and the ring has gone with it"
+        );
+    }
+
+    #[test]
+    fn the_dialog_key_opens_a_closed_dialog() {
+        let mut demo = dialog_closed();
+        assert!(!demo.dialog.is_drawn(), "it starts closed");
+
+        demo.handle_event(key_event(DIALOG_KEY));
+
+        assert!(demo.dialog.visible.get(), "`D` opened it");
+        assert!(
+            demo.dialog.is_drawn(),
+            "and it is being drawn from that frame"
+        );
+        assert_eq!(
+            demo.focused,
+            demo.dialog.actions.first().map(|action| action.handle()),
+            "with focus on its first action, because `Focus` hands an activation \
+             key to the button node itself and a dialog nothing is focused in has \
+             an `Enter` that reaches nothing"
+        );
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(300));
+        }
+        assert_eq!(demo.dialog.scale.get(), 1.0, "and it arrives");
+        assert_eq!(
+            painted_action_rects(&demo),
+            vec![OK_BUTTON, CANCEL_BUTTON],
+            "at the panel these tests wrote out"
+        );
+    }
+
+    #[test]
+    fn the_dialog_key_closes_an_open_one() {
+        // **The other direction, asserted on its own.** "One key toggles" is two
+        // claims and the second is the one that catches a key wired to `present`
+        // only — which would open the dialog, close nothing, and leave a `D` that
+        // appeared to do nothing on the second press.
+        let mut demo = shown_dialog();
+        assert!(demo.dialog.visible.get(), "it starts open");
+
+        demo.handle_event(key_event(DIALOG_KEY));
+
+        assert!(!demo.dialog.visible.get(), "`D` closed it");
+        assert!(
+            demo.dialog.is_drawn(),
+            "and the fade is still running, which is why `dialog_is_modal` is keyed \
+             on `visible` rather than on this"
+        );
+        assert_eq!(
+            demo.focused,
+            Some(demo.dialog.actions[0].handle()),
+            "**and the record stays**, which is the reversal of 2026-10-03: `D` used \
+             to call `set_focus(None)` here, and that made this the one dismissal \
+             route whose ring popped. Activation is withdrawn instead, by the frame \
+             that follows"
+        );
+        assert!(
+            !demo.focus_is_live(),
+            "so it is already unreachable even though the record still names it"
+        );
+        assert!(demo.dark, "with nothing else changed: closing is not `OK`");
+
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(300));
+        }
+        assert!(!demo.dialog.is_drawn(), "the fade runs out");
+        assert!(demo.commands_at(demo.dialog.handle()).is_empty());
+    }
+
+    #[test]
+    fn the_dialogs_title_is_bold_and_its_body_is_not() {
+        // **Requirement 2's *"Title: bold text at top of panel"*, on the recorded
+        // commands**, and through the demo's own frame loop rather than by asking
+        // the widget: a test that called `Dialog::paint` would not know whether
+        // the demo ever asked it.
+        let demo = shown_dialog();
+        assert_eq!(
+            dialog_run_weights(&demo),
+            vec![
+                FontWeight::Bold,    // "Switch theme"
+                FontWeight::Regular, // the body's first line
+                FontWeight::Regular, // and its second
+                FontWeight::Regular, // "OK", a Button's own label
+                FontWeight::Regular, // "Cancel", likewise
+            ],
+            "the title is the panel's only bold run, and the button labels are \
+             regular whatever the panel around them is doing"
+        );
+        assert_eq!(
+            dialog_run_texts(&demo)[0],
+            DIALOG_TITLE,
+            "and the bold run is the title, not the body"
+        );
+
+        // **The theme switch keeps it bold**, because `set_palette` rewrites three
+        // colours and a palette that reached the panel without reaching the weight
+        // would be a themed dialog with a plain title.
+        let mut demo = shown_dialog();
+        demo.handle_event(key_event(Keycode::T));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            dialog_run_weights(&demo).first(),
+            Some(&FontWeight::Bold),
+            "and `OK`'s theme switch, which is the same code path, does not lose it \
+             either"
+        );
+    }
+
+    #[test]
+    fn the_dialog_replaces_the_tab_order_while_it_is_showing() {
+        // **Both halves, each with the other beside it**, because "the background
+        // is out of the order" is only a claim if the dialog's buttons are in it,
+        // and "the buttons are in the order" is only a claim if the five are
+        // reachable the moment the dialog closes.
+        let mut demo = shown_dialog();
+        let actions: Vec<Handle> = demo.dialog.actions.iter().map(|a| a.handle()).collect();
+        assert_eq!(actions.len(), 2, "`OK` and `Cancel`");
+        let background = [
+            demo.slider.node(),
+            demo.image.handle(),
+            demo.toggle.handle(),
+            demo.progress.handle(),
+            demo.text_input.handle(),
+        ];
+
+        // A full lap in **both** directions, three times round, because a control
+        // appended to the tree would be reached on the wrap — which is exactly where
+        // a test that only checks the first two stops looking.
+        for lap in 0..3 {
+            for (key, name) in [
+                (key_event(Keycode::Tab), "Tab"),
+                (key_event_with(Keycode::Tab, Mod::LSHIFTMOD), "Shift+Tab"),
+            ] {
+                for _ in 0..(actions.len() + 1) {
+                    demo.handle_event(key.clone());
+                    let landed = demo
+                        .focused
+                        .expect("a navigation key always lands somewhere");
+                    assert!(
+                        actions.contains(&landed),
+                        "lap {lap}: {name} stays inside the dialog, on {landed:?}"
+                    );
+                    assert!(
+                        !background.contains(&landed),
+                        "lap {lap}: and never on one of the five behind the overlay"
+                    );
+                }
+            }
+        }
+
+        // **The walk's own order**, on a fresh demo so the starting point is the
+        // seeded one: from `OK`, `Tab` is `Cancel` and the next is `OK` again.
+        // Without this, "focus is somewhere among the two" would be satisfied by a
+        // set that also held the five and by a walk that visited them in the wrong
+        // order.
+        let mut demo = shown_dialog();
+        assert_eq!(
+            demo.focused,
+            Some(actions[0]),
+            "the dialog opens with its first action focused, which is `OK` — the \
+             left-hand one, as `DIALOG_ACTIONS` has them"
+        );
+        demo.handle_event(key_event(Keycode::Tab));
+        assert_eq!(
+            demo.focused,
+            Some(actions[1]),
+            "`Tab` from `OK` is `Cancel`"
+        );
+        demo.handle_event(key_event(Keycode::Tab));
+        assert_eq!(demo.focused, Some(actions[0]), "and the next wraps to `OK`");
+        demo.handle_event(key_event_with(Keycode::Tab, Mod::LSHIFTMOD));
+        assert_eq!(
+            demo.focused,
+            Some(actions[1]),
+            "and `Shift+Tab` goes the other way"
+        );
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.dialog.actions[1].button.focused.get(),
+            "and the focused action draws its ring: `Focus` hands the key to the \
+             button node and the node's `focused` property is what draws it"
+        );
+        assert!(
+            !demo.dialog.actions[0].button.focused.get(),
+            "while the other one does not"
+        );
+
+        // **And the other half: closed, the five are back**, in their own order and
+        // wrapping — which `tab_walks_every_focusable_control_in_order_and_wraps`
+        // also checks, and is repeated here as the **control beside** the first
+        // half's claim rather than as a second opinion about that test.
+        let mut demo = dialog_closed();
+        let order = expected_focus_order(&demo);
+        assert_eq!(order.len(), 5, "the gallery's own five");
+        for lap in 0..2 {
+            for (index, (what, handle)) in order.iter().enumerate() {
+                demo.handle_event(key_event(Keycode::Tab));
+                assert_eq!(
+                    demo.focused,
+                    Some(*handle),
+                    "lap {lap}: Tab {index} is the {what}"
+                );
+            }
+        }
+
+        // **And the dialog's two buttons are out of it**, on a fresh demo and a full
+        // lap plus one in **both** directions: a control appended to the tree would
+        // be reached on the wrap, which is exactly where a test that only checks
+        // the first five stops looking.
+        let mut demo = dialog_closed();
+        let buttons: Vec<Handle> = demo.dialog.actions.iter().map(|a| a.handle()).collect();
+        for (key, name) in [
+            (key_event(Keycode::Tab), "Tab"),
+            (key_event_with(Keycode::Tab, Mod::LSHIFTMOD), "Shift+Tab"),
+        ] {
+            for step in 0..(order.len() + 1) {
+                demo.handle_event(key.clone());
+                let landed = demo
+                    .focused
+                    .expect("a navigation key always lands somewhere");
+                assert!(
+                    !buttons.contains(&landed),
+                    "{name} {step} lands on {landed:?}, which is a dialog button"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_activation_key_reaches_the_dialogs_focused_action() {
+        // The keyboard half of the row, and the reason the dialog is offered a key
+        // before the button is: `Dialog::on_event` forwards a key that is not
+        // `Escape` to the one action that holds focus, and `Button::on_event`
+        // refuses an activation key unless **that** button is focused. `Tab` has
+        // just moved focus to `Cancel`, so this must fire `Cancel` and not `OK`.
+        let mut demo = shown_dialog();
+        demo.handle_event(key_event(Keycode::Tab));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.dialog.actions[1].button.focused.get(),
+            "focus is on the second action"
+        );
+
+        demo.handle_event(key_event(Keycode::Return));
+
+        assert!(
+            !demo.dialog.visible.get(),
+            "`Enter` fired the focused action and the dismissal wrapped around it"
+        );
+        assert!(
+            demo.dark,
+            "and it was `Cancel`, so the theme did not switch"
+        );
+    }
+
+    #[test]
+    fn the_dialog_measure_size_is_the_themes_largest() {
+        // A copy of a theme token drifts, and a drifted one is invisible: the panel
+        // would simply be measured against a size nothing else in the window uses.
+        // Both themes are read, and the body's own size is checked against the
+        // other half of the same claim — **the measurement is at the largest of
+        // the three sizes the panel draws at**, which is what makes it the
+        // conservative direction (see `DIALOG_FONT`).
+        for theme in [Theme::dark(), Theme::light()] {
+            let number = |token| {
+                theme
+                    .get(token)
+                    .as_number()
+                    .unwrap_or_else(|| panic!("{token:?} is not a number in the theme"))
+            };
+            assert_eq!(
+                number(ThemeToken::FontSizeLg),
+                DIALOG_FONT,
+                "the title's size, which is the one the dialog measures at"
+            );
+            assert!(
+                number(ThemeToken::FontSizeLg) > number(ThemeToken::FontSizeMd),
+                "and it really is the larger of the two the panel draws text at"
+            );
+        }
+        // And the line height really is one number for all three: 18 times the
+        // stand-in's 1.2, which is what makes the fixture's panel 172.8 tall.
+        let demo = laid_out();
+        assert!(
+            (demo.dialog_line_height() - 21.6).abs() < 0.01,
+            "so the panel's height in `PANEL`'s doc is this arithmetic and not a \
+             remembered number: {}",
+            demo.dialog_line_height()
+        );
     }
 }

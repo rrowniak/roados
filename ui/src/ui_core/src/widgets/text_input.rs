@@ -2009,6 +2009,7 @@ mod tests {
                     color,
                     font_size,
                     extra_advance,
+                    ..
                 } => Some((*x, *y, text.clone(), *color, *font_size, *extra_advance)),
                 _ => None,
             })

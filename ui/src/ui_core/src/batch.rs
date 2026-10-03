@@ -39,6 +39,14 @@ pub enum ShaderKind {
     /// Texture sampling. The texture atlas arrives with the Image widget
     /// (task 16).
     Image,
+    /// A blurred drop shadow, drawn offscreen and composited on its own.
+    ///
+    /// **A shader kind and not a blend mode**, because the shadow is the only
+    /// command in this module that cannot be drawn by one of the other three
+    /// passes: it needs an offscreen target, a blur and a tint, none of which a
+    /// quad carries. Giving it a kind of its own also means it can never merge
+    /// into a solid batch — see [`BatchKey::is_singleton`].
+    Shadow,
 }
 
 /// The key that groups draw commands into batches.
@@ -53,6 +61,26 @@ pub struct BatchKey {
     pub blend_mode: BlendMode,
     /// The shader the batch is drawn with.
     pub shader: ShaderKind,
+}
+
+impl BatchKey {
+    /// Returns whether a batch under this key must hold exactly one command.
+    ///
+    /// **The only such key is the shadow's**, and the reason is about *where* a
+    /// command draws rather than what it draws. [`Batcher::submit_order`]
+    /// splits a frame into [`Segment`]s at every shadow, so a shadow that shared
+    /// a batch with anything else — with the shadow before it, or with a solid
+    /// rect — would take that neighbour across the boundary with it, and the
+    /// composite would land one command too early or too late.
+    ///
+    /// Merging is otherwise strictly good: it is the difference between one draw
+    /// call and two. A singleton batch pays a second draw call every frame, which
+    /// is why this is a property of the key rather than a flag every caller has
+    /// to remember to set.
+    #[must_use]
+    pub fn is_singleton(&self) -> bool {
+        matches!(self.shader, ShaderKind::Shadow)
+    }
 }
 
 /// A group of draw commands that share a [`BatchKey`] and are submitted as
@@ -83,14 +111,87 @@ pub struct BatchedCommands {
     pub transparent: Vec<Batch>,
 }
 
+/// One run of batches between two shadows, and the shadow that ends it.
+///
+/// **This is a frame's submission order, and the order is the whole point of
+/// the type.** A group is not enough: grouping every opaque batch before every
+/// translucent one is correct for translucent-over-opaque, which is all the
+/// application stacked until a modal dialog — an overlay at alpha 128 and a
+/// panel at the theme's opaque surface — needed the other order. Both are
+/// recorded in the right order and both commands are right; only the submission
+/// was wrong, and no assertion on a recorded command can see that.
+///
+/// A frame with no shadow has exactly one segment, and that segment's two groups
+/// are the two [`BatchedCommands`] groups — the same batches, in the same order,
+/// by the same code. [`Batcher::submit_order`] and [`Batcher::finish`] share
+/// `Batcher::groups_of` so that equality is structural rather than a
+/// coincidence two methods have to keep.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::batch::Batcher;
+/// use ui_core::paint::{Color, DrawCommand, Painter, Rect};
+///
+/// // A modal dialog: the overlay, then the shadow, then the panel. Both of the
+/// // overlay and the panel would have landed in one opaque-first frame without
+/// // the segmentation, and the overlay would have ended up on top of the panel.
+/// let mut painter = Painter::new();
+/// painter.rect(Rect::new(0.0, 0.0, 800.0, 600.0), Color::new(0, 0, 0, 128));
+/// painter.shadow(
+///     Rect::new(240.0, 160.0, 320.0, 200.0),
+///     12.0,
+///     Color::new(0, 0, 0, 128),
+///     6.0,
+///     (0.0, 8.0),
+/// );
+/// painter.rounded_rect(
+///     Rect::new(240.0, 160.0, 320.0, 200.0),
+///     12.0,
+///     Color::new(245, 245, 245, 255),
+/// );
+///
+/// let mut batcher = Batcher::new();
+/// for command in painter.finish() {
+///     batcher.add(command);
+/// }
+///
+/// let segments = batcher.submit_order();
+/// assert_eq!(segments.len(), 2, "the shadow is one boundary among three commands");
+/// assert_eq!(segments[0].transparent.len(), 1, "the overlay, before the shadow");
+/// assert!(segments[0].opaque.is_empty());
+/// assert!(segments[0].shadow.is_some());
+/// assert_eq!(segments[1].opaque.len(), 1, "the panel, after it");
+/// assert!(segments[1].shadow.is_none());
+/// ```
+#[derive(Clone, Debug, PartialEq)]
+pub struct Segment {
+    /// Batches drawn front-to-back with blending disabled.
+    pub opaque: Vec<Batch>,
+    /// Batches drawn back-to-front with premultiplied-alpha blending.
+    pub transparent: Vec<Batch>,
+    /// The shadow to composite once this segment is on screen, as a batch
+    /// holding that one command and the clip it was recorded under.
+    ///
+    /// A [`Batch`] and not a [`DrawCommand`] so that the shadow's clip rides
+    /// along the way [`Batch::clip`] says every other batch's does: the
+    /// composite is a draw call, and a draw call has one scissor.
+    pub shadow: Option<Batch>,
+}
+
 /// Groups draw commands into batches by [`BatchKey`].
 ///
 /// Batches keep recording order, so the opaque group is front-to-back; the
 /// transparent group is reversed by [`Batcher::finish`] so it composites
-/// back-to-front.
+/// back-to-front. The two are per *segment*: see [`Batcher::submit_order`] for
+/// why a frame is more than one of them and what the segmentation is for.
 #[derive(Clone, Debug, Default)]
 pub struct Batcher {
-    batches: Vec<Batch>,
+    /// The batches of the segment being recorded. **Only this list is searched
+    /// for a batch to merge into.**
+    open: Vec<Batch>,
+    /// The segments already sealed, in recorded order.
+    sealed: Vec<Vec<Batch>>,
 }
 
 impl Batcher {
@@ -98,7 +199,8 @@ impl Batcher {
     #[must_use]
     pub fn new() -> Self {
         Batcher {
-            batches: Vec::new(),
+            open: Vec::new(),
+            sealed: Vec::new(),
         }
     }
 
@@ -113,16 +215,37 @@ impl Batcher {
     /// Commands under different clips never share a batch, because the clip is
     /// GPU state the renderer has to set between draw calls: one batch is one
     /// draw call, and a draw call has one scissor.
+    ///
+    /// **A command whose key [`BatchKey::is_singleton`] seals the open segment
+    /// and starts the next**, so it is alone in its batch *and* nothing recorded
+    /// after it can merge into a batch recorded before it. That second half is
+    /// not a detail of the shadow; it is what makes the segmentation mean
+    /// anything. Two opaque rects — the window's background and a dialog's
+    /// panel — share a key and a clip, so without the seal they are one batch,
+    /// one batch has one position in the recorded stream, and both would be
+    /// submitted **before** the translucent overlay the panel is supposed to sit
+    /// on top of. The panel would be dimmed, which is the defect
+    /// [`Segment`] exists to fix, arrived at by a different road.
     pub fn add_clipped(&mut self, command: DrawCommand, clip: Option<Rect>) {
         let key = command.batch_key();
+        if key.is_singleton() {
+            let mut finished = std::mem::take(&mut self.open);
+            finished.push(Batch {
+                key,
+                commands: vec![command],
+                clip,
+            });
+            self.sealed.push(finished);
+            return;
+        }
         if let Some(batch) = self
-            .batches
+            .open
             .iter_mut()
             .find(|batch| batch.key == key && batch.clip == clip)
         {
             batch.commands.push(command);
         } else {
-            self.batches.push(Batch {
+            self.open.push(Batch {
                 key,
                 commands: vec![command],
                 clip,
@@ -130,23 +253,31 @@ impl Batcher {
         }
     }
 
-    /// Clears all batches, leaving the batcher usable for the next frame.
+    /// Clears every batch, leaving the batcher usable for the next frame.
     pub fn reset(&mut self) {
-        self.batches.clear();
+        self.open.clear();
+        self.sealed.clear();
     }
 
     /// Returns `true` if no commands have been recorded.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.batches.is_empty()
+        self.open.is_empty() && self.sealed.iter().all(|segment| segment.is_empty())
     }
 
-    /// Drains the batches into an opaque group in recording order and a
+    /// Splits `batches` into an opaque group in recording order and a
     /// transparent group reversed to back-to-front.
-    pub fn finish(&mut self) -> BatchedCommands {
+    ///
+    /// The one place that grouping happens. [`Batcher::finish`] and
+    /// [`Batcher::submit_order`] both go through it, so a frame with no shadow
+    /// and the first segment of a frame with one are the same batches in the same
+    /// order **by construction** — which matters, because this grouping touches
+    /// the submission order of every frame in the application and a second copy
+    /// of the rule would be free to drift from it.
+    fn groups_of(batches: impl IntoIterator<Item = Batch>) -> BatchedCommands {
         let mut opaque = Vec::new();
         let mut transparent = Vec::new();
-        for batch in self.batches.drain(..) {
+        for batch in batches {
             match batch.key.blend_mode {
                 BlendMode::Opaque => opaque.push(batch),
                 BlendMode::Transparent => transparent.push(batch),
@@ -157,6 +288,82 @@ impl Batcher {
             opaque,
             transparent,
         }
+    }
+
+    /// Drains the batches into an opaque group in recording order and a
+    /// transparent group reversed to back-to-front.
+    ///
+    /// **This is the whole frame's grouping and nothing knows about order across
+    /// a shadow.** A caller that has a frame with a shadow in it wants
+    /// [`Batcher::submit_order`] instead: this method has nowhere to put the
+    /// boundary, and putting the panel of a modal dialog in front of its overlay
+    /// is the defect [`Segment`] exists to fix. It stays for the callers that ask
+    /// about one frame's materials rather than its order.
+    pub fn finish(&mut self) -> BatchedCommands {
+        let mut batches = Vec::new();
+        for segment in self.sealed.drain(..) {
+            batches.extend(segment);
+        }
+        batches.append(&mut self.open);
+        Self::groups_of(batches)
+    }
+
+    /// Drains the batches into the order they are submitted in: one [`Segment`]
+    /// per run of commands between two shadows, in recorded order.
+    ///
+    /// A frame with no shadow yields **one** segment, and that segment is
+    /// [`Batcher::finish`]'s two groups exactly — see [`Segment`] and
+    /// `Batcher::groups_of`. A frame with `n` shadows yields `n + 1` segments,
+    /// each of which may be empty of one group or of both: a shadow recorded
+    /// first is a segment with nothing but the shadow in it, and nothing in the
+    /// frame says that is not what was meant.
+    ///
+    /// The split is at the shadow and not around it, so the shadow is
+    /// [`Segment::shadow`] of the segment it **ends**, and everything recorded
+    /// after it is in the next one. That is what puts a panel's shadow behind the
+    /// panel and in front of the overlay the panel sits on.
+    pub fn submit_order(&mut self) -> Vec<Segment> {
+        let mut segments: Vec<Segment> = Vec::new();
+        for sealed in self.sealed.drain(..) {
+            let mut batches = sealed;
+            // Sealing puts the shadow last and nothing merges into it, so the
+            // last batch is the shadow. The `match` rather than an `expect`
+            // because a batch that turned out not to be one has to go back into
+            // the segment it came from, not vanish.
+            let shadow = match batches.pop() {
+                Some(batch) if batch.key.is_singleton() => Some(batch),
+                other => {
+                    if let Some(batch) = other {
+                        batches.push(batch);
+                    }
+                    None
+                }
+            };
+            let BatchedCommands {
+                opaque,
+                transparent,
+            } = Self::groups_of(batches);
+            segments.push(Segment {
+                opaque,
+                transparent,
+                shadow,
+            });
+        }
+        // The trailing run after the last shadow is a segment with no shadow of
+        // its own. A frame that ended on a shadow still has one, and it is empty
+        // — which keeps "the frame is a list of segments" true whatever the last
+        // command was, instead of leaving the caller to ask whether the list ends
+        // in one.
+        let BatchedCommands {
+            opaque,
+            transparent,
+        } = Self::groups_of(self.open.drain(..));
+        segments.push(Segment {
+            opaque,
+            transparent,
+            shadow: None,
+        });
+        segments
     }
 }
 
@@ -207,6 +414,17 @@ impl DrawCommand {
                 },
                 shader: ShaderKind::Image,
             },
+            // The blend mode is [`BlendMode::from_color`] of the shadow's own
+            // colour and nothing decides anything with it: the composite turns
+            // blending on explicitly, the way it does for every translucent
+            // batch, and a shadow the caller made opaque blends exactly as
+            // little as it is asked to. Reporting it honestly is what lets the
+            // tests read a shadow's alpha off the key.
+            DrawCommand::Shadow { color, .. } => BatchKey {
+                texture: None,
+                blend_mode: BlendMode::from_color(*color),
+                shader: ShaderKind::Shadow,
+            },
         }
     }
 }
@@ -214,7 +432,7 @@ impl DrawCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paint::{Rect, UvRect};
+    use crate::paint::{FontWeight, Rect, UvRect};
 
     fn rect(color: Color) -> DrawCommand {
         DrawCommand::Rect {
@@ -283,6 +501,7 @@ mod tests {
             color: transparent(),
             font_size: 16.0,
             extra_advance: 0.0,
+            weight: FontWeight::Regular,
         });
         batcher.add(rect(opaque()));
 
@@ -305,6 +524,7 @@ mod tests {
             color: opaque(),
             font_size: 16.0,
             extra_advance: 0.0,
+            weight: FontWeight::Regular,
         });
 
         let batched = batcher.finish();
@@ -620,5 +840,434 @@ mod tests {
             BlendMode::from_color(Color::new(0, 0, 0, 0)),
             BlendMode::Transparent
         );
+    }
+
+    // The tests below cover the submission order. They exist because the
+    // ordering they pin is **invisible to every other assertion in this
+    // module**: a draw-command assertion asks what was recorded, and both
+    // commands of a modal dialog are recorded, with the right colours, in the
+    // right order. Only the order they are *submitted* in was wrong — the
+    // overlay, at alpha 128, landing on top of the panel at the theme's opaque
+    // surface — and that is what these tests are about.
+
+    /// A shadow of a rounded rect, off the origin so a fixture cannot mistake
+    /// an offset for the rect's own.
+    fn shadow() -> DrawCommand {
+        DrawCommand::Shadow {
+            rect: Rect::new(240.0, 160.0, 320.0, 200.0),
+            radius: 12.0,
+            color: Color::new(0, 0, 0, 128),
+            blur: 6.0,
+            offset: (0.0, 8.0),
+        }
+    }
+
+    /// A rounded rect of `color`, at a rect whose `index` keeps two of them from
+    /// sharing one in a test that cares about how many there are.
+    fn rounded_at(index: u32, color: Color) -> DrawCommand {
+        DrawCommand::RoundedRect {
+            // `f32` has `From<u16>` but no `From<u32>`, and these indices are
+            // single digits: a fixture that needed a wide one would be testing
+            // the conversion rather than the batching.
+            rect: Rect::new(
+                f32::from(u16::try_from(index).unwrap_or(0)) * 40.0,
+                80.0,
+                32.0,
+                24.0,
+            ),
+            radius: 4.0,
+            color,
+        }
+    }
+
+    /// The shaders a segment's two groups hold, in submission order: the opaque
+    /// group first, then the transparent one as it composites.
+    fn shaders_of(segment: &Segment) -> Vec<ShaderKind> {
+        segment
+            .opaque
+            .iter()
+            .chain(segment.transparent.iter())
+            .map(|batch| batch.key.shader)
+            .collect()
+    }
+
+    #[test]
+    fn a_frame_with_no_shadow_is_one_segment_and_the_groups_it_has_always_had() {
+        // The control for everything below: the same three commands with no
+        // shadow between two of them are **one** segment, and its groups are the
+        // ones `finish` has always returned. Without this case a segmentation
+        // that split at nothing and lost a batch would look correct.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, transparent()));
+        batcher.add(rounded_at(1, opaque()));
+        batcher.add(rounded_at(2, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 1, "no shadow, so no boundary");
+        assert!(segments[0].shadow.is_none(), "and nothing to composite");
+
+        // And the exact groups, measured against `finish`'s own answer on the
+        // same commands — which is the claim that a no-shadow frame submits
+        // exactly what it submitted before this type existed.
+        let mut control = Batcher::new();
+        control.add(rounded_at(0, transparent()));
+        control.add(rounded_at(1, opaque()));
+        control.add(rounded_at(2, opaque()));
+        let expected = control.finish();
+
+        assert_eq!(segments[0].opaque, expected.opaque);
+        assert_eq!(segments[0].transparent, expected.transparent);
+        assert_eq!(
+            segments[0].opaque.len(),
+            1,
+            "one batch, as before: the two opaque rects share a key and a clip"
+        );
+        assert_eq!(
+            segments[0].opaque[0].commands.len(),
+            2,
+            "and both commands are in it, as they were"
+        );
+        assert_eq!(segments[0].transparent.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_frame_is_one_empty_segment() {
+        // The frame with nothing in it has to have an answer: a renderer that
+        // walked segments would otherwise have to ask whether the list was empty
+        // and treat "no commands" and "no segments" as different cases.
+        let mut batcher = Batcher::new();
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 1);
+        assert!(segments[0].opaque.is_empty());
+        assert!(segments[0].transparent.is_empty());
+        assert!(segments[0].shadow.is_none());
+    }
+
+    #[test]
+    fn a_shadow_is_a_boundary_and_the_commands_around_it_keep_their_recorded_order() {
+        // The dialog: an overlay, a shadow, a panel. Recorded in that order and
+        // submitted in that order — which is the requirement, and which the
+        // pre-segmentation grouping could not express, because it drew every
+        // opaque batch before every translucent one.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, transparent()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(1, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(
+            segments.len(),
+            2,
+            "one boundary among three commands, and a trailing segment"
+        );
+        assert_eq!(
+            shaders_of(&segments[0]),
+            vec![ShaderKind::Solid],
+            "the overlay, on its own before the shadow"
+        );
+        assert!(
+            segments[0].opaque.is_empty(),
+            "an overlay is translucent, so the opaque group before a shadow is \
+             empty and the frame's stacking is carried by the segmentation"
+        );
+        assert_eq!(
+            shaders_of(&segments[1]),
+            vec![ShaderKind::Solid],
+            "the panel after it"
+        );
+        assert!(
+            segments[1].shadow.is_none(),
+            "the last segment has no shadow"
+        );
+    }
+
+    #[test]
+    fn an_opaque_command_after_a_shadow_lands_in_a_later_segment_than_a_translucent_one_before_it()
+    {
+        // The property itself, stated as an index comparison rather than as two
+        // counts, because the counts pass in three different wrong orderings:
+        // two segments with the shadow's group on either side, and one segment
+        // holding both. This is the assertion that does not.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, transparent()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(1, opaque()));
+
+        let segments = batcher.submit_order();
+        let index_of = |segment: usize, group: fn(&Segment) -> &Vec<Batch>| -> usize {
+            segments
+                .iter()
+                .position(|candidate| !group(candidate).is_empty())
+                .map(|found| found + segment)
+                .unwrap_or(segments.len() + segment)
+        };
+        let translucent = index_of(0, |segment| &segment.transparent);
+        let opaque = index_of(1, |segment| &segment.opaque);
+        assert!(
+            translucent < opaque,
+            "the overlay is submitted at segment {translucent} and the panel at \
+             {opaque}: the opaque panel has to be drawn **after** the \
+             translucent overlay, or the overlay dims it"
+        );
+    }
+
+    #[test]
+    fn a_shadow_alone_is_a_segment_that_holds_nothing_but_the_shadow() {
+        // Recorded first, before anything is drawn under it. The frame is
+        // [shadow, overlay, panel], so the shadow's own segment is empty of both
+        // groups and the list still starts with it — a shadow is where it was
+        // put, and nothing here says otherwise.
+        let mut batcher = Batcher::new();
+        batcher.add(shadow());
+        batcher.add(rounded_at(0, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 2);
+        assert!(segments[0].opaque.is_empty(), "nothing was drawn before it");
+        assert!(segments[0].transparent.is_empty());
+        assert!(
+            segments[0].shadow.is_some(),
+            "and the shadow is still first, with an empty segment before it"
+        );
+        assert_eq!(segments[1].opaque.len(), 1, "the panel follows it");
+    }
+
+    #[test]
+    fn a_frame_ending_on_a_shadow_still_ends_in_a_segment() {
+        // The trailing segment is empty rather than absent, so a caller walking
+        // segments does not have to ask whether the list ends in one. The control
+        // is the same three commands with one more after the shadow.
+        let mut batcher = Batcher::new();
+        batcher.add(shadow());
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 2, "the shadow and then the trailing one");
+        assert!(segments[1].opaque.is_empty());
+        assert!(segments[1].transparent.is_empty());
+        assert!(segments[1].shadow.is_none());
+
+        let mut with_a_command_after = Batcher::new();
+        with_a_command_after.add(shadow());
+        with_a_command_after.add(rounded_at(0, opaque()));
+        assert_eq!(
+            with_a_command_after.submit_order().len(),
+            2,
+            "the same two segments: the trailing one now holds the command"
+        );
+    }
+
+    #[test]
+    fn n_shadows_are_n_plus_one_segments() {
+        // The count, with the control beside it: the same commands with the
+        // shadows left out are one segment, so the count cannot be right by
+        // having found the right batches.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, opaque()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(1, opaque()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(2, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 3, "two shadows, three segments");
+        assert!(segments[0].shadow.is_some(), "the first boundary");
+        assert!(segments[1].shadow.is_some(), "the second");
+        assert!(segments[2].shadow.is_none(), "and the trailing one");
+        for segment in &segments {
+            assert_eq!(
+                segment.opaque.len(),
+                1,
+                "each segment holds the one opaque command recorded next to it"
+            );
+        }
+
+        let mut control = Batcher::new();
+        control.add(rounded_at(0, opaque()));
+        control.add(rounded_at(1, opaque()));
+        control.add(rounded_at(2, opaque()));
+        assert_eq!(
+            control.submit_order().len(),
+            1,
+            "the same three commands with no shadow are one segment"
+        );
+    }
+
+    #[test]
+    fn two_shadows_of_the_same_material_are_still_two_boundaries() {
+        // The merge this has to refuse: both shadows are the same colour and the
+        // same kind, so the batching rule that merges everything else merges
+        // them into one batch of two commands — and one batch has one position in
+        // the recorded stream, so the boundary between the two shadows would be
+        // gone and the first one's composite would land after the second.
+        let mut batcher = Batcher::new();
+        batcher.add(shadow());
+        batcher.add(shadow());
+
+        let segments = batcher.submit_order();
+        assert_eq!(
+            segments.len(),
+            3,
+            "two shadows are two boundaries however alike they are"
+        );
+        for segment in &segments[..2] {
+            let batch = segment.shadow.as_ref().expect("a shadow of its own");
+            assert_eq!(
+                batch.commands.len(),
+                1,
+                "and each shadow's batch holds one command, not two"
+            );
+        }
+    }
+
+    #[test]
+    fn a_shadow_never_merges_into_a_solid_batch() {
+        // The other half of `is_singleton`, and the one that would be a wrong
+        // picture rather than a wrong count: a shadow's commands are handed to
+        // the shadow pass, so a batch holding a rect and a shadow would submit
+        // the rect to neither pass it is drawn by.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, opaque()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(1, opaque()));
+
+        let segments = batcher.submit_order();
+        let shadow_batch = segments[0].shadow.as_ref().expect("the shadow");
+        assert_eq!(shadow_batch.key.shader, ShaderKind::Shadow);
+        assert!(
+            shadow_batch
+                .commands
+                .iter()
+                .all(|command| { matches!(command, DrawCommand::Shadow { .. }) }),
+            "and the shadow batch holds nothing but the shadow"
+        );
+        assert_eq!(
+            segments[1].opaque.len(),
+            1,
+            "the two rects are in two segments"
+        );
+    }
+
+    #[test]
+    fn a_shadows_batch_key_names_its_shader_and_reports_its_own_colour() {
+        // The key is what routes the command to the shadow pass, and what
+        // `submit_order` splits on. A shadow carrying a texture would be a
+        // batch that cannot be drawn by the pass that owns it.
+        let translucent = shadow().batch_key();
+        assert_eq!(translucent.shader, ShaderKind::Shadow);
+        assert_eq!(translucent.texture, None, "a shadow samples no texture");
+        assert_eq!(translucent.blend_mode, BlendMode::Transparent);
+
+        // The boundary, on both sides of it: an opaque shadow is still its own
+        // batch, because "singleton" is about the shader and not about blending.
+        let mut opaque_shadow = shadow();
+        if let DrawCommand::Shadow { color, .. } = &mut opaque_shadow {
+            *color = Color::new(0, 0, 0, 255);
+        }
+        let key = opaque_shadow.batch_key();
+        assert_eq!(
+            key.blend_mode,
+            BlendMode::Opaque,
+            "its own alpha still says so"
+        );
+        assert!(key.is_singleton(), "and it is still its own batch");
+
+        // The control: no other key is a singleton, or every batch in the
+        // application would be a draw call of its own.
+        assert!(!rect(opaque()).batch_key().is_singleton());
+        assert!(!image(1).batch_key().is_singleton());
+    }
+
+    #[test]
+    fn a_shadow_keeps_the_clip_it_was_recorded_under() {
+        // The composite is a draw call, and a draw call has one scissor, so a
+        // shadow recorded inside a scrolling viewport has to carry that viewport
+        // with it. A shadow batch with the clip dropped would composite over the
+        // whole window.
+        let clip = Some(Rect::new(40.0, 60.0, 300.0, 200.0));
+        let mut batcher = Batcher::new();
+        batcher.add_clipped(rounded_at(0, opaque()), clip);
+        batcher.add_clipped(shadow(), clip);
+        batcher.add_clipped(rounded_at(1, opaque()), clip);
+
+        let segments = batcher.submit_order();
+        let shadow_batch = segments[0].shadow.as_ref().expect("the shadow");
+        assert_eq!(
+            shadow_batch.clip, clip,
+            "the shadow's own clip, not the one before or after it"
+        );
+        assert_eq!(
+            segments[1].opaque[0].clip, clip,
+            "and so does the batch after"
+        );
+    }
+
+    #[test]
+    fn nothing_recorded_after_a_shadow_shares_a_batch_with_something_before_it() {
+        // **The defect this segmentation does not fix on its own, and the reason
+        // the shadow seals the open segment rather than only being its own batch.**
+        //
+        // Both rects here are solid, opaque, untextured and unclipped — the
+        // window's background and a dialog's panel are exactly those two things.
+        // With merging by key alone they are **one batch**, a batch holds one
+        // position in the recorded stream, and both of them would then be
+        // submitted in the segment *before* the shadow: the panel before the
+        // translucent overlay it is supposed to sit on top of, which is the
+        // dimmed-panel defect arrived at by a different road.
+        //
+        // The control beside the count is the same pair of rects with no shadow
+        // between them, which do merge — one batch of two commands — because
+        // merging them is right when there is no boundary between them.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, opaque()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(1, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 2);
+        assert_eq!(
+            segments[0].opaque[0].commands.len(),
+            1,
+            "only the rect recorded before the shadow"
+        );
+        assert_eq!(
+            segments[1].opaque[0].commands.len(),
+            1,
+            "and the one recorded after it is in a batch of its own"
+        );
+
+        let mut control = Batcher::new();
+        control.add(rounded_at(0, opaque()));
+        control.add(rounded_at(1, opaque()));
+        let segments = control.submit_order();
+        assert_eq!(
+            segments[0].opaque[0].commands.len(),
+            2,
+            "with no shadow between them the two rects merge, as they always did"
+        );
+    }
+
+    #[test]
+    fn a_seal_does_not_stop_commands_on_one_side_of_it_from_merging() {
+        // The other side of the same rule, and the one that would be a
+        // performance regression if sealing were a blunt instrument: the batching
+        // task bought a screen of widgets drawn in a handful of draw calls, and a
+        // shadow in one panel must not turn every widget after it into a batch of
+        // its own.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, opaque()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(1, opaque()));
+        batcher.add(rounded_at(2, opaque()));
+        batcher.add(rounded_at(3, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(
+            segments[1].opaque.len(),
+            1,
+            "three opaque rects after the shadow are one draw call"
+        );
+        assert_eq!(segments[1].opaque[0].commands.len(), 3);
+        assert_eq!(segments[0].opaque.len(), 1, "and one before it");
+        assert_eq!(segments[0].opaque[0].commands.len(), 1);
     }
 }

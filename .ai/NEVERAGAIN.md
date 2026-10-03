@@ -748,3 +748,56 @@ of it is a **count through the public API with its control beside it** — "3
 polygons where this data holds 3 segments", and the same data without the `NaN` —
 and that is one line per case. A count next to a control is what turns a fixture
 from a smoke test into a measurement.
+
+## 2026-10-03 — A test filtered to one binary reported a survivor that the whole suite kills
+
+Task 22's review mutated `Dialog::is_drawn` to ignore its transition, ran
+`cargo test --lib`, got **1364 passed / 0 failed**, and recorded a **survivor**.
+Re-run against the whole suite the same mutation is killed by one assertion in
+`ui_demo` (`main.rs:11697`). The ui_core suite was green throughout; the demo's
+was the one that failed, and `--lib` had hidden it.
+
+**Rule:** a mutation verdict is a claim about **the suite the failing test is in**,
+so run the mutation against **every binary that has tests** and report **every
+`test result:` line**, not the last one. This is the *On a shared tree* entry one
+level down: a filter argument prints the same nothing as a weak test, and the fix
+is the same — parse each line, and if only one binary ran, that is not a result.
+
+## 2026-10-03 — A cache invalidated in the wrong order is a cache that lies
+
+Task 22 added a blurred shadow that composites through an offscreen target.
+`bind_default_target` restored the framebuffer and the viewport, and the code
+carried a comment saying the clip was "applied once, before all of it". It was
+not: `bind_for_write` does `gl.disable(GL_SCISSOR_TEST)`, nothing re-enabled it,
+and **the composite — the only pass that puts the shadow on screen — ran
+unclipped**. The `blur <= 0` path *was* clipped, because it bound the default
+target immediately after `apply_clip`, so the two paths disagreed and only the
+unused one was right.
+
+**And the fix has an ordering to it.** The first repair re-applied the clip at
+the composite call site, which leaves `apply_clip`'s early-return cache able to
+skip a later `set_scissor` as "unchanged". The repair that is actually sound
+writes it **through `apply_clip`, after invalidating the cache**.
+
+**Rule:** a cache of GL or driver state is only as good as **every writer** of
+that state, and a "I already set that" cache makes a direct write silently
+ineffective. When restoring state you did not set, **invalidate the cache first,
+then write through the setter** — never past it. And **a comment claiming a state
+transition happens "once, up front" is a testable claim**: the only assertion in
+the tree read the batch's `clip` field, which is precisely a shape of assertion
+that cannot see whether the GPU was ever told.
+
+## 2026-10-03 — `open(path, "w").write(expr)` truncates before `expr` runs
+
+An agent's edit script did `open(path, "w").write(src.replace(start, new + src[end:], 1))`.
+**`open(path, "w")` truncates the file the instant it is called — before the
+argument is evaluated.** The expression raised `TypeError`, so the file was left
+at **0 bytes**. It was recovered from a snapshot of the *previous* round, so an
+hour of work was lost and re-applied.
+
+**Rule:** in a script that rewrites a file, **open it for reading first, build the
+whole new content in a variable, and only then open for writing** — or write to
+`.new` and `mv` it into place. `open(p, "w").write(f(x))` has the argument
+evaluated *after* the truncation, which is the opposite of what it looks like. This
+is the same family as the three backup-trap entries above with a new mechanism:
+not a bad restore, but a **destructive open standing in for a write**.

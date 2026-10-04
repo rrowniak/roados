@@ -176,6 +176,7 @@ use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapM
 use ui_core::widgets::progress::{Palette as ProgressPalette, Progress};
 use ui_core::widgets::slider::{Orientation, Palette as SliderPalette, Slider};
 use ui_core::widgets::text_input::{Palette as TextInputPalette, TextInput};
+use ui_core::widgets::toast::{Palette as ToastPalette, Severity, Toasts};
 use ui_core::widgets::toggle::{Palette as TogglePalette, Toggle};
 // `Callback` is the payload-free alias of the same type every other widget's
 // handler is, and the demo imports it under a second name: a slider's handler
@@ -1284,6 +1285,77 @@ const DIALOG_FONT: f32 = 18.0;
 /// free on the target's keyboard; `D` is free in a QWERTY, a QWERTZ and an AZERTY.
 const DIALOG_KEY: Keycode = Keycode::D;
 
+// ------------------------------------------------------------------ task 23
+//
+// The toast's four strings and its three numbers. They are constants for the same
+// reason every other constant in this file is: a test asserts against them, a
+// capture is read against them, and a reader who wants to know what is on screen
+// has one place to look.
+
+/// The notifications the demo raises, each with the severity its disc is drawn in.
+///
+/// **Four messages and four severities, paired by index**, because the demo's
+/// job with a widget is to show what it can draw and the disc is the only part of
+/// a toast that varies in colour: `Info` is the theme's `Primary`, `Success` its
+/// `Success`, `Warning` its `Warning` and `Error` its `Error`, which is the whole
+/// of the four cases `ui_core::widgets::toast::Severity` has. A gallery that
+/// showed one of them would show one.
+///
+/// What would reverse it: more messages than severities, which would mean the
+/// pairing is a list of pairs rather than two parallel ones.
+const TOASTS: [(&str, Severity); 4] = [
+    ("Settings saved", Severity::Success),
+    ("Connection lost", Severity::Error),
+    ("Battery at 20 percent", Severity::Warning),
+    ("Route updated", Severity::Info),
+];
+
+/// How long each of those stays up.
+///
+/// **Four seconds, and it is longer than the dialog's three** because a toast has
+/// to be read *and* acted on — the whole of it is that the gallery underneath it
+/// keeps working — while a dialog is a question somebody is already looking at.
+/// The unit tests use three seconds; nothing in the widget depends on the value.
+const TOAST_DURATION: Duration = Duration::from_secs(4);
+
+/// How many of [`TOASTS`] the demo raises when it starts.
+///
+/// **Two, and the reason is a capture rather than a design.** Acceptance
+/// criterion 6 wants a toast on screen and criterion 5 wants the stack; input
+/// injection does not reach the window on this host (see
+/// `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws*), so a
+/// stack that had to be built by pressing a key could only ever be photographed
+/// through an instrument. Two at launch puts both criteria in the one capture
+/// that needs none, exactly as the operator's decision to open the dialog showing
+/// did for task 22.
+const TOASTS_AT_LAUNCH: usize = 2;
+
+/// The font size the toast's message is measured at and drawn at.
+///
+/// The theme's `FontSizeMd`, which is what `ui_core::widgets::toast` draws it at
+/// and what the widget's own drift test holds its copy of the token to. It is
+/// here because the demo needs the number for the **advance closure** — the widget
+/// measures text through the caller's seam and cannot know a font size.
+const TOAST_FONT: f32 = 14.0;
+
+/// The key that raises a notification.
+///
+/// **`K`, for no mnemonic and for a reason the table gives**: every single letter
+/// the demo already binds is spoken for — `T`, `C`, `F`, `G`, `H`, `A`, `S`, `P`,
+/// `D` — and `E`, `I`, `N`, `O`, `U`, `V`, `W`, `X`, `Y`, `J`, `L`, `M`, `Q`, `R`,
+/// `Z`, `B` are free, of which `K` is the one a reader of the list below reaches
+/// for first.
+///
+/// **It is matched above the modal guard and not as a row of
+/// [`GALLERY_SHORTCUTS`]**, on `D`'s argument: a notification is *not* the
+/// gallery's own action, it is a message about it, and suppressing it while a
+/// dialog is up would leave the demo with no way to show a toast at all in the
+/// state it opens in. `a_toast_is_raised_by_its_own_key_in_both_states` is what
+/// holds that down, and it is the test the key's position is written for.
+///
+/// What would reverse it: anything the operator prefers.
+const TOAST_KEY: Keycode = Keycode::K;
+
 /// The image the demo shows: a texture and the window of it the fit needs.
 ///
 /// The two together, because [`ImageSource::of`] is what turns a handle into
@@ -2235,6 +2307,19 @@ struct Demo {
     /// so an action's click cannot write a `&mut self` it was not lent, and a
     /// property is the only thing it can be given that reaches the demo.
     pending_theme: Property<bool>,
+    /// The stack of notifications, hanging from the bottom of the window.
+    ///
+    /// **A plain owned field, for the reason [`Demo::dialog`] is.** Nothing in a
+    /// toast's callback reaches the demo — a toast has no callback at all, which
+    /// is the same fact as its not consuming input — so there is nothing to share
+    /// and nothing that could hold a clone and break `set_palette`.
+    toasts: Toasts,
+    /// Which of [`TOASTS`] the next press of [`TOAST_KEY`] raises.
+    ///
+    /// A plain counter rather than a property, for the same reason the chart's
+    /// `next` is one: it is read and written only by [`Demo::raise_toast`] and no
+    /// callback writes it.
+    toast_next: usize,
 }
 
 impl Demo {
@@ -3025,6 +3110,49 @@ impl Demo {
         // underneath the scrim.
         let first_action: Option<Handle> = dialog.actions.first().map(|action| action.handle());
 
+        // ----------------------------------------------- task 23: the toasts
+        //
+        // **Built last and attached to nothing**, on the dialog's argument: a
+        // notification overlays the window, so `Toasts::new` gives the host a node
+        // with no parent and every toast a node under **it**. So the toasts are a
+        // **second root** like the dialog's, and one `paint_order` walk over the
+        // host reaches every toast under it — which is why `order` gains exactly
+        // one `extend` rather than one per toast, and why a gallery that routes
+        // its events from its own root cannot reach any of them.
+        //
+        // Three things are wired here and each is a decision:
+        //
+        // - **the palette**, read from the theme before anything is drawn, for
+        //   the reason every other palette in this function is;
+        // - **`Motion::from_theme`**, which is `DurationFast` and the standard
+        //   curve — the task's own four animations over that duration, so unlike
+        //   the dialog's bounce there is nothing to override;
+        // - **the host's node given the window tight**, so the layout pass and the
+        //   paint pass read one number: the widget places every toast inside the
+        //   box it is handed, and `Demo::toasts_rect` hands the paint pass the box
+        //   the layout pass placed.
+        let mut toasts = Toasts::new(&mut nodes);
+        toasts.set_palette(ToastPalette::from_theme(&theme));
+        toasts.set_motion(Motion::from_theme(&theme));
+        {
+            let handle = toasts.handle();
+            nodes
+                .get_mut(handle)
+                .ok_or("ui_demo: the toast host's node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(WINDOW));
+        }
+        // **Raised at construction, two of them**, on the argument
+        // [`TOASTS_AT_LAUNCH`] gives: a stack the capture can see, built the same
+        // way the dialog is opened showing so that neither acceptance criterion
+        // depends on a key reaching the window.
+        for (index, (message, severity)) in TOASTS.iter().take(TOASTS_AT_LAUNCH).enumerate() {
+            toasts.show(&mut nodes, *message, TOAST_DURATION);
+            if let Some(toast) = toasts.toast(index) {
+                toast.severity.set(Some(*severity));
+            }
+        }
+
         // The chart's stroke reaches [`Chart::stroke_reach`] past its own node,
         // and a node's rect is not what its pixels are — so the neighbours that
         // box is close to are checked here rather than only in a test, for the
@@ -3377,7 +3505,10 @@ impl Demo {
         // reaches the node, so a caller that repaints only when `tick` returns
         // true repaints exactly while something moves.
 
-        // The tree never changes shape, so the order is computed once.
+        // The **gallery's** tree never changes shape, so its part of the order is
+        // computed once — and one node is added to the order after that, by
+        // `Demo::raise_toast`, because a toast raised by a key press did not exist
+        // when this ran.
         //
         // The **content node the list's rows hung from** was the reason this was
         // a paragraph, and the list is gone as of 2026-10-02: no node in the
@@ -3393,6 +3524,13 @@ impl Demo {
         // send them in.
         let mut order = paint_order(&nodes.borrow(), root.handle());
         order.extend(paint_order(&nodes.borrow(), dialog.handle()));
+        // **And the toasts after the dialog**, which is the whole of requirement
+        // 5's *"on top of all other content"*: `Demo::draw` sends the nodes in
+        // this order, so a notification a modal dialog is covering is still seen
+        // — which is what a notification *is*, and the reason the two are walked
+        // in this order rather than the other one round. One `extend` for the
+        // host, whose walk carries every toast under it.
+        order.extend(paint_order(&nodes.borrow(), toasts.handle()));
         Ok(Demo {
             nodes,
             root: root.handle(),
@@ -3453,6 +3591,11 @@ impl Demo {
             submit_readout,
             dialog,
             pending_theme,
+            toasts,
+            // **Continuing [`TOASTS`] rather than starting it again**: the two
+            // cards raised above came off the front of the table, so a press of
+            // `K` says the third rather than repeating the first.
+            toast_next: TOASTS_AT_LAUNCH,
         })
     }
 
@@ -3580,6 +3723,26 @@ impl Demo {
                 // rather than as an arm of the table below for that reason alone.
                 if keycode == DIALOG_KEY {
                     self.toggle_dialog();
+                } else if keycode == TOAST_KEY {
+                    // **Above the guard for the same reason `D` is above it, and
+                    // the reason is not the same one.** `D` has to work while the
+                    // dialog is up because that is how a dialog that opened
+                    // itself is closed; `K` has to work while the dialog is up
+                    // because a notification is *about* the application rather
+                    // than part of the page the scrim is covering, and a toast
+                    // the demo cannot raise in the state it opens in is a widget
+                    // with no route to it at all. It is also why it is not a row of
+                    // `GALLERY_SHORTCUTS`, which the guard wraps whole.
+                    //
+                    // **Which leaves the same gap `D` leaves**, and it is named here
+                    // rather than left for a reader to find:
+                    // `no_printable_key_acts_without_a_row_in_the_shortcut_table`
+                    // presses every printable keycode and asks whether the
+                    // **gallery** moved, and a `GalleryState` does not hold toasts
+                    // — so this key acts, is in no row, and that test cannot see
+                    // it. `a_toast_is_raised_by_its_own_key_in_both_states` covers
+                    // it in both states, which is what that test is for.
+                    self.raise_toast();
                 } else if !self.dialog_is_modal() {
                     // **One guard for the whole table**, and the operator's decision
                     // of 2026-10-03: a modal that leaves the host application's own
@@ -4090,6 +4253,76 @@ impl Demo {
             .unwrap_or_else(|| Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height))
     }
 
+    /// Returns the box the toast stack is placed in.
+    ///
+    /// **The host's own laid-out rect**, which is the window because
+    /// [`Demo::new`] gives that node the window tight, and the fallback is
+    /// [`WINDOW`] for the same reason [`Demo::dialog_rect`]'s is: the demo has one
+    /// window and a node the layout pass has not reached yet is not a condition a
+    /// caller should have to handle.
+    ///
+    /// It is read in [`Demo::frame`] before the walk borrows the arena, and it is
+    /// the only number the two passes share: the widget lays every toast out
+    /// inside this box and paints them inside it, so a card's rect and the box it
+    /// was placed in cannot disagree.
+    fn toasts_rect(&self) -> Rect {
+        self.node_rect(self.toasts.handle())
+            .unwrap_or_else(|| Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height))
+    }
+
+    /// Returns the advance a toast's message is measured with, at [`TOAST_FONT`].
+    ///
+    /// **A function and not a closure written at each site**, on the dialog's
+    /// argument: there are two readers — the paint pass and any test that asks
+    /// where a card is — and they have to be handed the same one.
+    fn toasts_advance(&self) -> impl Fn(char) -> f32 + '_ {
+        move |ch: char| self.metrics.advance(ch, TOAST_FONT)
+    }
+
+    /// Returns the line box a toast's message is measured at.
+    ///
+    /// One number for the widget's one font size: [`TOAST_FONT`] is the size it
+    /// draws at *and* the size the layout measures at, so unlike the dialog's
+    /// three sizes there is no conservative choice to make here.
+    fn toasts_line_height(&self) -> f32 {
+        self.metrics.line_height(TOAST_FONT)
+    }
+
+    /// Raises the next of [`TOASTS`], and reports whether one was raised.
+    ///
+    /// **The severities cycle with the messages**, so a second press shows a
+    /// different colour as well as a different sentence: four presses is the whole
+    /// set twice, and the stack is what shows that the fourth card is *below* the
+    /// third rather than beside it.
+    fn raise_toast(&mut self) -> bool {
+        let (message, severity) = TOASTS[self.toast_next % TOASTS.len()];
+        self.toast_next += 1;
+        // The index of the toast about to exist, taken **before** the show: the
+        // host appends, so this is the one that was just added, and it is how the
+        // severity reaches the new card without a second mutable borrow of the
+        // host.
+        let index = self.toasts.len();
+        let handle = {
+            let mut arena = self.nodes.borrow_mut();
+            self.toasts.show(&mut arena, message, TOAST_DURATION)
+        };
+        // **The new node goes into the paint order here**, and this is the one
+        // place in the demo where the order changes shape. `Demo::new` computes it
+        // once because the gallery's tree never changes; a toast raised by a key
+        // press is a node that did not exist then, and `Demo::frame` walks `order`
+        // — so a toast whose node is not in it records nothing at all, is painted
+        // nowhere, and every test that reads the **recorded** paint of a raised
+        // card finds it empty. Appended rather than inserted, because `order` is
+        // the submission order and a new notification is on top of everything that
+        // was already there.
+        self.order.push(handle);
+        let Some(toast) = self.toasts.toast(index) else {
+            return false;
+        };
+        toast.severity.set(Some(severity));
+        true
+    }
+
     /// Returns the advance the dialog's text is measured with, at
     /// [`DIALOG_FONT`].
     ///
@@ -4328,6 +4561,28 @@ impl Demo {
         // and from the widget's own dismissal — a per-frame aim would restart both
         // on every frame, which is the argument `sync_toggle_state` makes.
         let _ = self.dialog.tick(delta);
+        // The toasts' arrivals, departures and countdowns, on the same argument:
+        // the tick is here, the **aim** is not. `Toasts::show` is what starts a
+        // fade and the countdown is what ends it, and a per-frame aim would
+        // restart both on every frame, which is the argument `sync_toggle_state`
+        // makes. `Toasts::tick` is also the only place a dismissed toast is ever
+        // dropped and its **node given back to the arena**, so this is the frame
+        // a finished notification leaves the tree — which is why the arena is
+        // borrowed for it here and released again immediately.
+        {
+            let mut arena = self.nodes.borrow_mut();
+            let _ = self.toasts.tick(&mut arena, delta);
+            // **And the paint order is pruned beside it**, because `raise_toast`
+            // appends a node that `Toasts::tick` has just removed. A stale handle
+            // resolves to nothing and the frame loop skips it, so this is **not**
+            // for correctness — it is so the walk's length is the number of live
+            // nodes rather than every toast the demo has ever raised.
+            //
+            // `Arena::remove` bumps the slot's generation, so `get` cannot answer
+            // for a removed handle even after the slot is reused: a prune here
+            // cannot drop a live node and cannot keep a dead one.
+            self.order.retain(|handle| arena.get(*handle).is_some());
+        }
         // The one number the readout below the chart names that the demo has to
         // write rather than bind, for the reason `Demo::chart_moving` gives:
         // `Chart::is_animating` is a method over the widget's own clock. Guarded
@@ -4348,6 +4603,13 @@ impl Demo {
             // above cannot reach it, and the one number that both the paint pass
             // and the hit test read is its laid-out rect.
             layout.layout(self.dialog.handle(), Constraints::tight(size));
+            // **The toast host's own pass, and it lays its toasts out with it.**
+            // Its node has no parent for the dialog's reason, and each toast's
+            // node is under it, so this one call is the whole stack's layout. The
+            // toast nodes' own rects come out empty — the widget places the cards
+            // itself and nothing hit-tests those nodes — and the number this pass
+            // gives the **host** is the one the paint pass hands back to it.
+            layout.layout(self.toasts.handle(), Constraints::tight(size));
         }
 
         // Where it is in the order above that the frame rate goes: after the
@@ -4357,6 +4619,15 @@ impl Demo {
         // paint arm below and by `Dialog::on_event`, and a button inside a dialog
         // that has closed must not still be holding one.
         self.sync_dialog_focus();
+
+        // The box the toast stack is placed in, read **before** the walk borrows
+        // the arena mutably: the toasts are placed inside the host's own rect by
+        // the widget, so the number the paint pass needs is the host's laid-out
+        // rect and not this node's. It is the same one-number rule the dialog's
+        // arms are written on, and reading it here rather than inside the arm is
+        // what the borrow allows — a second lookup of the arena under a `&mut` to
+        // a node is not.
+        let toast_screen = self.toasts_rect();
 
         let mut nodes = self.nodes.borrow_mut();
 
@@ -4415,6 +4686,34 @@ impl Demo {
                     Some(rect) => self.dialog.paint(rect.into(), &advance, line_height),
                     None => Vec::new(),
                 };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The toast host, and its toasts, in the walk `order` gained with
+            // them. **Two arms rather than one because the host and a toast hold
+            // different things**: the host's node carries no commands at all — every
+            // command belongs to the toast that recorded it, which is what keeps
+            // one toast's shadow out of the next toast's batch segment — and a
+            // toast's node carries its own, so `Demo::frame_clips` and
+            // `Demo::draw` see one card's commands at a time.
+            if handle == self.toasts.handle() {
+                // Empty and **not dirty**: there is nothing to submit for a node
+                // that never records anything, and a dirty empty state would send
+                // a no-op draw call every frame.
+                *node.paint_mut() = PaintState::new();
+                continue;
+            }
+            // `index_of` is the arm's whole dispatch, exactly as the dialog's is by
+            // identity: it answers which toast this node is, and `None` for every
+            // node in the gallery.
+            if let Some(index) = self.toasts.index_of(handle) {
+                let advance = self.toasts_advance();
+                let commands = self.toasts.paint_toast(
+                    index,
+                    toast_screen,
+                    &advance,
+                    self.toasts_line_height(),
+                );
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
@@ -4997,6 +5296,7 @@ impl Demo {
         // it already had and the transition goes nowhere.
         let gauge_palette = GaugePalette::from_theme(&new_theme);
         let dialog_palette = DialogPalette::from_theme(&new_theme);
+        let toast_palette = ToastPalette::from_theme(&new_theme);
         let slider_palette = SliderPalette::from_theme(&new_theme);
         let toggle_palette = TogglePalette::from_theme(&new_theme);
         let progress_palette = ProgressPalette::from_theme(&new_theme);
@@ -5016,6 +5316,14 @@ impl Demo {
         // be a dark panel floating in a white window, which is why this line is
         // here at all rather than left to the panel's first paint.
         self.dialog.set_palette(dialog_palette);
+        // The toasts carry a palette too, and on the **dialog's** argument rather
+        // than the others': a toast's colours change only when the theme does, and
+        // it is immediate rather than animated for the same reason. `set_palette`
+        // on the host reaches the cards **already on screen** as well as the ones
+        // to come, which is the half that matters here — the demo opens with two
+        // showing, so a palette that only reached new toasts would leave the two
+        // the reader can see on the old theme's colours.
+        self.toasts.set_palette(toast_palette);
         self.slider.widget.set_palette(slider_palette);
         self.slider.widget.animate_to_state(motion);
         self.toggle.set_palette(toggle_palette);
@@ -7003,20 +7311,24 @@ mod tests {
     /// The parents in the demo's tree that a **widget** owns rather than the
     /// demo assembling them.
     ///
-    /// **One again, and it came back with the dialog on 2026-10-03.** There were
-    /// two such parents from task 18 — the node a `List` scrolls in and the
+    /// **Two now, and the second arrived with the toast on 2026-10-03.** There
+    /// were two such parents from task 18 — the node a `List` scrolls in and the
     /// content node it hangs its rows from, both owned by the `Scroll` — and this
-    /// list held them until the operator had the list taken out on 2026-10-02. It
-    /// is back for the same shape of reason: a `Dialog`'s action buttons are real
-    /// [`Button`](ui_core::widgets::button::Button) widgets with nodes of their
-    /// own, and [`Dialog::add_action`] attaches them to the dialog's own node,
-    /// which the demo did not build and cannot.
+    /// list held them until the operator had the list taken out on 2026-10-02. The
+    /// dialog's came back for the same shape of reason: a `Dialog`'s action
+    /// buttons are real [`Button`](ui_core::widgets::button::Button) widgets with
+    /// nodes of their own, and [`Dialog::add_action`] attaches them to the
+    /// dialog's own node, which the demo did not build and cannot. The toast
+    /// host's is the same argument one task later: every toast is its own node
+    /// and [`Toasts::show`](ui_core::widgets::toast::Toasts::show) attaches it
+    /// to the host's node, which is how one `paint_order` walk reaches a whole
+    /// stack.
     ///
-    /// Named here rather than papered over, which is what the previous two
-    /// entries in this history were for, and the count asserted below is what
-    /// stops the list from quietly growing.
+    /// Named here rather than papered over, which is what the previous entries in
+    /// this history were for, and the count asserted below is what stops the list
+    /// from quietly growing.
     fn widget_owned_parents(demo: &Demo) -> Vec<Handle> {
-        vec![demo.dialog.handle()]
+        vec![demo.dialog.handle(), demo.toasts.handle()]
     }
 
     #[test]
@@ -7055,7 +7367,8 @@ mod tests {
         assert_eq!(
             parents,
             containers.len() + widget_owned.len(),
-            "and every parent in the tree is one of those five or the dialog"
+            "and every parent in the tree is one of those five or a widget-owned \
+             one: the five the demo assembles, the dialog and the toast host"
         );
         assert_eq!(
             containers.len(),
@@ -7066,10 +7379,11 @@ mod tests {
         );
         assert_eq!(
             widget_owned.len(),
-            1,
-            "and exactly one parent is a widget's: the dialog's own node, with its \
-             two action buttons under it. A second would be a new exception and \
-             would have to be named and counted here"
+            2,
+            "and exactly two parents are a widget's: the dialog's own node, with \
+             its two action buttons under it, and the toast host's, with every \
+             toast under it. A third would be a new exception and would have to be \
+             named and counted here"
         );
     }
 
@@ -12125,11 +12439,22 @@ mod tests {
         let dialog = demo.dialog.handle();
         let first_action = demo.dialog.actions[0].handle();
 
-        let gallery_nodes = demo.order.len() - 1 - demo.dialog.actions.len();
+        // **The gallery is everything in front of the dialog's subtree**, and the
+        // count is derived rather than counted: the dialog's subtree is its own
+        // node and its two action buttons, and the toast host's subtree is
+        // everything behind that in the walk.
+        let gallery_nodes =
+            demo.order.len() - 1 - demo.dialog.actions.len() - 1 - demo.toasts.len();
         assert_eq!(
             demo.order[gallery_nodes], dialog,
             "the dialog's own node is the first of its subtree, and it comes after \
              all {gallery_nodes} nodes of the gallery"
+        );
+        assert_eq!(
+            demo.order.last().copied(),
+            demo.toasts.toast_handle(demo.toasts.len() - 1),
+            "and the toast stack is walked last of all, so a notification is on \
+             top of the modal dialog it is covering"
         );
         assert!(
             demo.order.contains(&first_action),
@@ -12823,6 +13148,528 @@ mod tests {
             "so the panel's height in `PANEL`'s doc is this arithmetic and not a \
              remembered number: {}",
             demo.dialog_line_height()
+        );
+    }
+
+    // ---------------------------------------------------------- task 23: toasts
+    //
+    // The toast fixtures, and what the demo's own numbers give. The card is
+    // `min(1280 - 48, 360) = 360` wide and centred, so `x = (1280 - 360) / 2 =
+    // 460`; the height is 32 of padding and one line box at the stand-in's
+    // `14 × 1.2 = 16.8`, so 48.8; and the bottom margin puts the newest card's top
+    // edge at `1020 - 24 - 48.8 = 947.2`, with the older one 8 pixels above it.
+
+    /// The card the demo's newest toast is painted in.
+    const TOAST_CARD: Rect = Rect {
+        x: 460.0,
+        y: 947.2,
+        width: 360.0,
+        height: 48.8,
+    };
+
+    /// The card above it: 947.2 − 48.8 − 8.
+    const TOAST_CARD_ABOVE: Rect = Rect {
+        x: 460.0,
+        y: 890.4,
+        width: 360.0,
+        height: 48.8,
+    };
+
+    /// Asserts two rects agree to within a thousandth of a pixel.
+    ///
+    /// **The card's height is arithmetic in `f32`** — 32 of padding and the
+    /// stand-in's `14 × 1.2 = 16.8` line box — and `16.8` is not a number `f32`
+    /// holds exactly, so `32 + 16.8` is `48.800003`. Every other fixture in this
+    /// file compares rects with `assert_eq!` because their numbers are whole or
+    /// exactly representable; this one says how far apart two rects may be and why
+    /// rather than rounding the expectation until it fits.
+    #[track_caller]
+    fn close_rect(what: &str, got: Option<Rect>, want: Rect) {
+        let got = got.unwrap_or_else(|| panic!("{what}: nothing was drawn where {want:?} is"));
+        for (part, got, want) in [
+            ("x", got.x, want.x),
+            ("y", got.y, want.y),
+            ("width", got.width, want.width),
+            ("height", got.height, want.height),
+        ] {
+            assert!(
+                (got - want).abs() < 0.001,
+                "{what}: {part} is {got} and the fixture says {want}"
+            );
+        }
+    }
+
+    /// Returns a demo with the dialog closed and its toasts at rest.
+    ///
+    /// **`dialog_closed` is the whole fixture and it is why these numbers are
+    /// settled ones**: it runs three 300 ms frames, which is more than both the
+    /// toast's 150 ms arrival and its 4 000 ms duration's first second, so the
+    /// cards are painted at rest and still there. The dialog has to be closed for
+    /// the *press* tests, because a modal swallows the tap before it can reach
+    /// anything — which is the dialog's acceptance criterion, not a workaround.
+    fn gallery_with_toasts() -> Demo {
+        let demo = dialog_closed();
+        assert!(
+            demo.toasts.is_drawn(),
+            "the toasts raised at launch are still up after the dialog's 900 ms"
+        );
+        demo
+    }
+
+    /// Returns the card the toast at `index` was **painted** in, or `None`.
+    ///
+    /// **Read back from the recorded paint**, on the same argument as
+    /// `painted_action_rects`: the test asks where the card is on the screen and
+    /// not where the widget says it would be, so a card drawn somewhere else fails
+    /// instead of agreeing with itself. The filter is the rounded rectangle — the
+    /// shadow is a `Shadow`, the disc a `Circle` and the message a `Text`.
+    fn painted_toast_rect(demo: &Demo, index: usize) -> Option<Rect> {
+        let handle = demo.toasts.toast_handle(index)?;
+        demo.commands_at(handle)
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::RoundedRect { rect, .. } => Some(*rect),
+                _ => None,
+            })
+    }
+
+    /// Returns the colour the card at `index` was painted with.
+    fn painted_toast_fill(demo: &Demo, index: usize) -> Option<Color> {
+        let handle = demo.toasts.toast_handle(index)?;
+        demo.commands_at(handle)
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::RoundedRect { color, .. } => Some(*color),
+                _ => None,
+            })
+    }
+
+    /// Acceptance criteria 6 and 5, on the demo as it ships.
+    ///
+    /// **From literals** — [`TOAST_CARD`] and [`TOAST_CARD_ABOVE`] are written
+    /// out from the arithmetic above — and **from the recorded paint**, so a card
+    /// drawn in the wrong place fails here rather than agreeing with the widget
+    /// that put it there.
+    #[test]
+    fn the_demo_opens_with_two_toasts_stacked_and_the_newest_is_the_lowest() {
+        let demo = gallery_with_toasts();
+        assert_eq!(
+            demo.toasts.len(),
+            TOASTS_AT_LAUNCH,
+            "two, raised in `Demo::new` so that the capture needs no key"
+        );
+
+        close_rect(
+            "the older card",
+            painted_toast_rect(&demo, 0),
+            TOAST_CARD_ABOVE,
+        );
+        close_rect("the newest card", painted_toast_rect(&demo, 1), TOAST_CARD);
+        // **Against the two rects the paint pass actually recorded**, and not
+        // against the two constants: an assertion over two literals is a constant
+        // and proves that the arithmetic in their docs is right once, here, and
+        // never again as either number moves.
+        let (older, newer) = (
+            painted_toast_rect(&demo, 0).expect("the older card"),
+            painted_toast_rect(&demo, 1).expect("the newer card"),
+        );
+        assert!(
+            older.y + older.height < newer.y,
+            "the two do not overlap: a stack whose cards touch is one card"
+        );
+        assert!(
+            newer.y + newer.height <= WINDOW.height - 24.0,
+            "and the stack keeps its margin from the bottom of the window: \
+             1020 − 24"
+        );
+
+        // Each card carries its own message and its own disc, read from the paint
+        // rather than from the widget's properties.
+        for (index, (message, _)) in TOASTS.iter().take(TOASTS_AT_LAUNCH).enumerate() {
+            let handle = demo.toasts.toast_handle(index).expect("two toasts");
+            let commands = demo.commands_at(handle);
+            assert!(
+                commands.iter().any(
+                    |command| matches!(command, DrawCommand::Text { text, .. } if text == message)
+                ),
+                "card {index} says {message:?}"
+            );
+            assert!(
+                commands
+                    .iter()
+                    .any(|command| matches!(command, DrawCommand::Circle { .. })),
+                "and card {index} carries a disc, because both of the launch \
+                 toasts have a severity"
+            );
+        }
+    }
+
+    /// The demo's paint walk reaches the stack, and the host's node holds none of
+    /// it.
+    ///
+    /// `Demo::frame`'s walk has a fall-through `let Some(pad) = … else {
+    /// continue; }`, so a node in `order` with no matching arm records **nothing
+    /// and says nothing** — a toast that was wired into the order and not into
+    /// the walk would be a widget that passes every test here and is not on the
+    /// screen.
+    #[test]
+    fn every_toasts_commands_arrive_through_its_own_node() {
+        let demo = gallery_with_toasts();
+        let host = demo.toasts.handle();
+        assert!(
+            demo.order.contains(&host),
+            "the host is in the paint order: `Demo::new` appends one walk over it"
+        );
+        assert!(
+            demo.commands_at(host).is_empty(),
+            "and the host's node carries no commands of its own, which is what \
+             keeps each toast's shadow out of the next toast's batch segment"
+        );
+        for index in 0..demo.toasts.len() {
+            let handle = demo.toasts.toast_handle(index).expect("a live toast");
+            assert!(
+                demo.order.contains(&handle),
+                "toast {index}'s node is in the order, under the host's"
+            );
+            assert!(
+                !demo.commands_at(handle).is_empty(),
+                "and the loop painted it: {index} would be invisible otherwise"
+            );
+        }
+    }
+
+    /// **Acceptance criterion 4 — a toast does not block input** — as the mirror
+    /// of `a_tap_outside_the_panel_does_not_reach_the_gallery_behind_it`.
+    ///
+    /// It cannot be written with `input::route` alone, for the reason that test's
+    /// own comment gives in the other direction: the dialog's chain is built by
+    /// hand because a modal is a decision, whereas **a second root never appears
+    /// in the routed chain at all**. So this asserts both halves — the structural
+    /// fact that makes it true, and the gesture that shows it is true.
+    #[test]
+    fn a_tap_inside_a_drawn_toast_reaches_the_control_under_it() {
+        let demo = gallery_with_toasts();
+        let card = painted_toast_rect(&demo, 1).expect("the newest card, painted");
+        close_rect("the newest card", Some(card), TOAST_CARD);
+
+        // **A key of the on-screen keyboard that the card is painted over.**
+        // The point comes out of the widget's own key rects and the card out of
+        // the recorded paint, so the two are independent numbers and the assertion
+        // is about the overlap rather than about either one of them. **`a` is
+        // chosen by the overlap and not by name**: which row a letter is in is the
+        // keyboard's business, and a test that named a key would fail when a row
+        // moved rather than saying anything about the toast.
+        let covered = (0..demo.keyboard.key_count())
+            .filter_map(|index| demo.keyboard.key_rect(index, demo.keyboard_rect()?))
+            .find(|key| {
+                let centre = Offset::new(key.x + key.width / 2.0, key.y + key.height / 2.0);
+                centre.x >= card.x
+                    && centre.x <= card.x + card.width
+                    && centre.y >= card.y
+                    && centre.y <= card.y + card.height
+            })
+            .unwrap_or_else(|| {
+                panic!("no key of the keyboard is painted over the card at {card:?}")
+            });
+        let (kx, ky) = (
+            covered.x + covered.width / 2.0,
+            covered.y + covered.height / 2.0,
+        );
+        let label = demo
+            .keyboard
+            .key_at(
+                Offset::new(kx, ky),
+                demo.keyboard_rect().expect("the keyboard"),
+            )
+            .and_then(|id| demo.keyboard.key_action(id));
+        assert!(
+            label.is_some(),
+            "and the key at ({kx}, {ky}) is a real key of the keyboard: {label:?}"
+        );
+
+        // Half one: the chain the demo routes from its own root.
+        let chain = {
+            let nodes = demo.nodes.borrow();
+            input::route(
+                &nodes,
+                demo.root,
+                &InputEvent::new(InputEventKind::Tap, Some(Offset::new(kx, ky))),
+            )
+        };
+        assert!(
+            !chain
+                .iter()
+                .any(|handle| { demo.toasts.index_of(*handle).is_some() })
+                && !chain.contains(&demo.toasts.handle()),
+            "and nothing in the chain is a toast or its host: {chain:?}"
+        );
+        assert!(
+            chain.contains(&demo.keyboard.handle()),
+            "while the keyboard underneath it is in the chain: {chain:?}"
+        );
+
+        // Half two: the gesture. **The press goes through the demo's own event
+        // path**, so this is `handle_event` and not a call to the keyboard.
+        let mut demo = demo;
+        demo.handle_event(mouse_down_at(kx, ky, 0));
+        assert!(
+            demo.keyboard.is_key_grabbed(),
+            "so a press under a toast lights the key that is under it, which is \
+             the whole of \"does not block input\""
+        );
+        demo.handle_event(mouse_up_at(kx, ky, 40_000_000));
+
+        // And the control: **the same press with no toast anywhere**, so the half
+        // above cannot be satisfied by a keyboard that lights under anything.
+        let mut bare = dialog_closed();
+        for _ in 0..40 {
+            bare.frame(WINDOW, Duration::from_millis(200));
+        }
+        assert!(bare.toasts.is_empty(), "the toasts have gone by now");
+        bare.handle_event(mouse_down_at(kx, ky, 0));
+        assert!(
+            bare.keyboard.is_key_grabbed(),
+            "and the key lights with no toast over it as well, so the assertion \
+             above is about the toast and not about the keyboard"
+        );
+        bare.handle_event(mouse_up_at(kx, ky, 40_000_000));
+    }
+
+    /// The toast key, above the modal guard, and why it has to be.
+    #[test]
+    fn a_toast_is_raised_by_its_own_key_in_both_states() {
+        assert!(
+            !GALLERY_SHORTCUTS
+                .iter()
+                .any(|(_, key, _)| *key == TOAST_KEY),
+            "`K` is not a row of the gallery's table, for the reason \
+             `GALLERY_SHORTCUTS`' doc gives: it is not the gallery's own action"
+        );
+
+        // **With the dialog showing**, which is the state the demo opens in and
+        // the one the guard would otherwise swallow.
+        let mut demo = shown_dialog();
+        let before = demo.toasts.len();
+        demo.handle_event(key_event(TOAST_KEY));
+        assert_eq!(
+            demo.toasts.len(),
+            before + 1,
+            "so a notification can be raised while the modal is up: suppressing \
+             it would leave the demo with no route to its own widget"
+        );
+        assert_eq!(
+            demo.toasts.toast(0).map(|toast| toast.message.get()),
+            Some(String::from(TOASTS[0].0)),
+            "and it is the first of `TOASTS`"
+        );
+
+        // And with it closed, which is the other direction of the same arm.
+        let mut demo = gallery_with_toasts();
+        let before = demo.toasts.len();
+        demo.handle_event(key_event(TOAST_KEY));
+        assert_eq!(demo.toasts.len(), before + 1);
+        assert_eq!(
+            demo.toasts
+                .toast(demo.toasts.len() - 1)
+                .map(|toast| toast.message.get()),
+            Some(String::from(TOASTS[TOASTS_AT_LAUNCH].0)),
+            "and the newest card — `toast_next` cycled past the two raised at \
+             launch — says the third of `TOASTS` rather than the first again"
+        );
+        assert_eq!(
+            demo.toast_next,
+            TOASTS_AT_LAUNCH + 1,
+            "which is what `toast_next` is for"
+        );
+
+        // **The raised card is painted, and the assertion is on the recorded
+        // paint** because that is where a toast whose node was left out of
+        // `order` shows up: `Demo::frame` walks `order`, so a node that is not in
+        // it records nothing and is on screen nowhere. The first version of this
+        // wiring failed exactly here, and the failure was invisible in every other
+        // test in the file.
+        let raised = demo.toasts.len() - 1;
+        let handle = demo.toasts.toast_handle(raised).expect("three toasts");
+        assert!(
+            demo.order.contains(&handle),
+            "so the raised node is in the paint order"
+        );
+        demo.frame(WINDOW, Duration::from_millis(200));
+        assert_eq!(
+            demo.order.last().copied(),
+            Some(handle),
+            "and it is last, because a notification is on top of what was already \
+             there"
+        );
+        assert_eq!(
+            painted_toast_rect(&demo, raised).map(|rect| rect.width),
+            Some(TOAST_CARD.width),
+            "and the frame loop painted a card {raised} wide"
+        );
+    }
+
+    /// Requirement 3's countdown, through the demo's own frame loop.
+    ///
+    /// **The tick is `TOAST_DURATION` plus one arrival**, and the frames here are
+    /// the loop's own: nothing here reaches into the toast's accumulator. That is
+    /// the difference between this and the widget's own test, and it is the half
+    /// that says the demo *calls* `Toasts::tick` — a widget that counted down
+    /// correctly and was never ticked would pass every test in `ui_core`.
+    #[test]
+    fn a_toast_leaves_the_demo_after_its_duration_and_the_frame_loop_takes_it() {
+        let mut demo = gallery_with_toasts();
+        assert_eq!(
+            demo.toasts.len(),
+            TOASTS_AT_LAUNCH,
+            "both of the launch toasts are up"
+        );
+
+        // **The fixture has already spent 900 ms of the countdown** — that is what
+        // `dialog_closed` runs — so of the arrival's 150 ms plus
+        // [`TOAST_DURATION`]'s 4 000 ms there are 3 250 ms left. Sixteen frames of
+        // 200 ms is 3 200 of them, which is fifty short of the end.
+        for _ in 0..16 {
+            demo.frame(WINDOW, Duration::from_millis(200));
+        }
+        assert_eq!(
+            demo.toasts.len(),
+            TOASTS_AT_LAUNCH,
+            "so at 4 100 ms of their 4 150 ms both are still up"
+        );
+        assert!(demo.toasts.is_drawn(), "and painted");
+
+        for _ in 0..4 {
+            demo.frame(WINDOW, Duration::from_millis(200));
+        }
+        assert_eq!(
+            demo.toasts.len(),
+            0,
+            "and at 4 900 ms both have run their countdown, faded out over their \
+             150 ms departure and been dropped by `Toasts::tick` — the frame loop \
+             is what runs it, and this is the half that says the demo calls it at \
+             all"
+        );
+        for index in 0..TOASTS_AT_LAUNCH {
+            assert_eq!(
+                painted_toast_rect(&demo, index),
+                None,
+                "and nothing is left painted at index {index}"
+            );
+        }
+    }
+
+    /// **The paint order does not grow as toasts come and go**, which is what the
+    /// prune beside `Toasts::tick` in [`Demo::frame`] is for.
+    ///
+    /// `raise_toast` appends a node, and `Toasts::tick` gives that node back to
+    /// the arena — so without the prune the walk would grow by one `Handle` for
+    /// every toast the demo has ever raised. **The length is the claim and it is
+    /// read before and after**, with the control being the two launch toasts: if
+    /// the prune did nothing the second reading would be four longer.
+    #[test]
+    fn the_paint_order_does_not_grow_as_toasts_come_and_go() {
+        let mut demo = gallery_with_toasts();
+        let opening = demo.order.len();
+        assert!(
+            !demo.toasts.is_empty(),
+            "with the launch toasts up, so there is something to lose"
+        );
+
+        for _ in 0..4 {
+            demo.handle_event(key_event(TOAST_KEY));
+        }
+        assert_eq!(
+            demo.toasts.len(),
+            TOASTS_AT_LAUNCH + 4,
+            "four more raised by the key, and six in the stack"
+        );
+        assert_eq!(
+            demo.order.len(),
+            opening + 4,
+            "and four more entries in the paint order: the host's walk put each \
+             new node in it"
+        );
+
+        // Past every one of their countdowns and departures: 6 s of frames at
+        // 200 ms, where a toast lives [`TOAST_DURATION`] plus its arrival and its
+        // departure. **The two launch toasts go with them**, which is the point
+        // the arithmetic below turns on: `opening` counted their nodes, and they
+        // are dead by now.
+        for _ in 0..30 {
+            demo.frame(WINDOW, Duration::from_millis(200));
+        }
+        assert!(
+            demo.toasts.is_empty(),
+            "all six have gone: {} are left",
+            demo.toasts.len()
+        );
+        assert_eq!(
+            demo.order.len(),
+            opening - TOASTS_AT_LAUNCH,
+            "and the paint order is back to its opening length less the two launch \
+             toasts' own nodes: the prune drops every handle whose node the arena \
+             has taken back, not only the four just raised. Without it the length \
+             would be {}, not {}",
+            opening + 4,
+            opening - TOASTS_AT_LAUNCH,
+        );
+        let stale = demo
+            .order
+            .iter()
+            .filter(|handle| demo.nodes.borrow().get(**handle).is_none())
+            .count();
+        assert_eq!(stale, 0, "so nothing in it points at a node that is gone");
+    }
+
+    /// A theme switch reaches the toasts already on screen.
+    ///
+    /// The demo opens with two toasts showing, so this is the switch that the
+    /// palette's second half exists for: `Toasts::set_palette` has to write the
+    /// cards already up, or the reader sees a light gallery with two dark cards
+    /// floating in it.
+    #[test]
+    fn a_theme_switch_reaches_the_toasts_already_on_screen() {
+        let mut demo = gallery_with_toasts();
+        let before = painted_toast_fill(&demo, 0).expect("a painted card");
+        // **The premultiplied literals, not the palette's own colours**: the dark
+        // theme's Surface is `30 30 30`, and the widget multiplies every channel
+        // by its 0.94 presence, so what the card is painted is `28 28 28 240`
+        // (`30 × 0.94 = 28.2` and `255 × 0.94 = 239.7`). Reading the palette here
+        // would test the palette and not the card.
+        assert_eq!(
+            before,
+            Color::new(28, 28, 28, 240),
+            "the dark theme's Surface at 94%, premultiplied by the widget"
+        );
+
+        demo.handle_event(toggle_theme_event());
+        // **One frame before the paint is read**, because a toast's colours are a
+        // paint property and the frame loop is what records them: asking for the
+        // recorded fill on the frame the switch happened would read the card as it
+        // was, and this test would pass for the wrong reason.
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let after = painted_toast_fill(&demo, 0).expect("the card is still painted");
+        assert_eq!(
+            after,
+            Color::new(230, 230, 230, 240),
+            "so one `T` moves both cards to the light palette: the light theme's \
+             `245 245 245` at the same 94%"
+        );
+        assert_ne!(
+            after, before,
+            "and the two really are different, which is what makes the assertion \
+             above a measurement rather than a tautology"
+        );
+
+        // The new card a further press raises is on it too, from the host's own
+        // palette rather than from the ones already on screen.
+        demo.handle_event(key_event(TOAST_KEY));
+        demo.frame(WINDOW, Duration::from_millis(200));
+        assert_eq!(
+            painted_toast_fill(&demo, demo.toasts.len() - 1),
+            Some(Color::new(230, 230, 230, 240)),
+            "and so is the next one raised, from the host's palette rather than \
+             from the cards already on screen"
         );
     }
 }

@@ -801,3 +801,124 @@ whole new content in a variable, and only then open for writing** — or write t
 evaluated *after* the truncation, which is the opposite of what it looks like. This
 is the same family as the three backup-trap entries above with a new mechanism:
 not a bad restore, but a **destructive open standing in for a write**.
+
+## 2026-10-03 — A shadow lands on whatever was recorded before it, not on
+## whatever comes next
+
+**Nothing shipped wrong here.** Task 23's toast is the first translucent surface
+in the repository with opaque content drawn on it, and the order the task file's
+reasoning implies — `surface → Shadow → text` — is wrong in a way nothing could
+see: a shadow is composited **after everything its own segment recorded**
+(`render.rs:2011`), so a shadow between a surface and its content lands **on the
+surface**. Had it shipped, a black 0.5 shadow over its own caster's whole
+footprint would have drawn the card at 15 instead of 30 — with every draw command
+recorded, in the right order, with the right colour, and the picture wrong. The
+three operator decisions were taken before any code and the arrangement was
+derived from the pipeline's rules, so **this entry is a rule that was applied, not
+a defect that was shipped**, and it is here because the mistake is available to
+the next agent rather than because it was made here.
+
+The three facts that decide it are all one layer down and none is visible from a
+command list: a segment's opaque batches are submitted **before** its translucent
+ones, so a translucent surface and an opaque run in one segment are drawn in the
+wrong order; the translucent group is submitted **reversed**, so to draw A then B
+inside one segment a caller must record **B then A**; and commands sharing a
+`BatchKey` **merge**, so two commands that must not swap cannot be separated by
+recording order alone. The toast's answer — every colour multiplied by its own
+`surface_opacity` so all of them share one group, recorded
+`shadow, text, surface, disc` — is in `toast.rs`'s module doc, and
+`the_shadow_lands_behind_the_surface_and_the_text_lands_on_it_in_submission`
+runs the recorded commands through the **real** `Batcher` and reads the order
+they are *submitted* in.
+
+**Rule:** when a draw order is load-bearing, assert it through the batcher and the
+renderer's own traversal, not on the recorded list — and when a `Shadow` is the
+thing separating two primitives, ask which of the two it is composited over.
+`Painter::shadow`'s doc says "record it before the thing casting the shadow",
+which is right for an **opaque** caster and silently wrong for a translucent one.
+
+## 2026-10-03 — A paint order computed once does not contain a node created later
+
+Task 23's demo wiring computed `order` once in `Demo::new` — with the comment
+"the tree never changes shape, so the order is computed once" — and a toast
+raised by a key press is a node that did not exist then. `Toasts::paint_toast`
+recorded the card's commands onto that node every frame and **nothing was ever
+painted**, because `Demo::frame` walks `order` and the fall-through
+`let Some(pad) = … else { continue; }` never saw the node.
+
+The frame loop's fall-through already warns about a node that is in the order with
+no arm; this is the same silence one step further out, and neither is visible to a
+test that asks the widget what it records. What caught it was a test that asserted
+on the **recorded paint of the demo**, which is empty for a node the loop never
+touched.
+
+**Rule:** a node created after the paint order is computed has to be appended to
+it, at the position its own semantics ask for — and a widget that **creates a
+node per instance** (a notification, a row, a popped item) makes that a permanent
+obligation rather than a one-off. The widget's own tests cannot catch it; a test
+that reads what the frame loop recorded can.
+
+## 2026-10-03 — `cp -p` restores the file's mtime, so cargo never rebuilds
+
+Task 23's review round ran a deliberate-break loop whose restore was
+`cp -p "$SNAP" "$FILE"`. **`-p` preserves the snapshot's timestamps**, so the
+restored source came back looking untouched to cargo: cargo fingerprints
+`mtime`, decided `ui_core` was fresh, and linked the demo against the **rlib the
+previous mutation had produced**. **Eight failures came out of mutations that had
+nothing to do with what they changed**, and two mutation runs had to be discarded
+and repeated from scratch.
+
+Nothing about it looks like a bug when it happens. The file is byte-identical to
+the snapshot — `diff` says so — and the suite *is* red, so a runner reports it
+as a result: eight clean mutations "survived" for reasons that had nothing to do
+with their assertions. The tell is that a mutation of `toast.rs` fails tests in
+`ui_demo`, and the only way that happens with a fresh `ui_core` is a stale
+artifact. `.ai/NEVERAGAIN.md` already has four backup-trap entries — a backup
+taken before an edit and restored after it, a snapshot refreshed per session
+rather than per mutation, a `SIGPIPE` from `head` killing the restore, and
+`open(path, "w")` truncating before its argument is evaluated — and **this is the
+same family with a new mechanism: not a bad restore but a restore that preserves
+metadata and thereby lies to the build cache.**
+
+**Rule:** a mutation runner's restore must make the tree look *newer* than the
+build, not older. **`cp` without `-p` is the right restore**; if a snapshot has to
+be taken with metadata preserved for some reason, `touch` the restored file
+afterwards. And **when a mutation in one crate fails tests in another, suspect the
+runner before the code** — cargo's own fingerprint is the thing that was lied
+to. The stronger check, which catches this and a wrong restore alike, is to
+`touch` the mutated file *before* building as well: a deliberate break is a
+change nobody else made, and nothing needs its old timestamp kept.
+
+## 2026-10-04 — One log path for a loop of runs is one run of evidence, and the
+## total it fed cannot be re-derived
+
+Task 23's deliberate-break runner sent every run to a single fixed path —
+`run_suite() { (cd ui && cargo test …) >"$LOG" 2>&1; }`, `LOG=/tmp/opencode/mutation.log` —
+and all thirteen mutations shared it. **`>` truncates, so each run destroyed the only
+record of the one before it.** A second script, `mutate12.sh`, has the same shape and
+kept the same shape's damage. **Twelve-plus runs of evidence are gone.** What survived
+is two `test result:` triples, and the hand-over's total — sixteen breaks, fifteen
+killed, one survivor — was a console summary line (`### $RUN run: $KILLED killed, $SURVIVED
+survived, $NOOPS no-ops`) that existed only on a terminal. **The scripts on disk hold
+thirteen and one invocations: fourteen against a reported sixteen, and nothing left
+settles which two are unaccounted for.** Found on 2026-10-04, when a recount tried to
+re-derive that total from the logs it claimed to come from.
+
+Losing the logs is the smaller half. **What remains looks like proof**: two logs with
+complete `test result:` lines are indistinguishable from a whole record, so the record
+went on citing them beside a total they cannot support — a hand-over whose figures no
+file on disk accounts for. **The tell is a total no run on disk adds up to**, and it is
+invisible precisely because the surviving logs are real. Two later runners get this
+right and are the reason 27 of the triples this task quotes are re-derivable at all:
+`mut.sh` and `mut3.sh` write **one log per mutation, named for it**
+(`mutlog/m18_no_clock_clear.log`, `mutlog2/r3_from_rest.log`), which is why the single
+unrecoverable gap in that record is recorded as a gap instead of being guessed at.
+
+**Rule:** a loop writes **one log path per iteration, named for what produced it** —
+`log="$WORK/$NAME.log"` — never a fixed path shared by every run; `>` keeps exactly one
+and `>>` produces one file nobody can read. Print each run's three `test result:` lines
+into the transcript as well as into the file, so the tally lives somewhere the loop does
+not overwrite. And **a reported total is only reportable if every part of it is
+re-derivable from a file that still exists** — where one is not, the honest output is
+the per-run evidence plus the gap, which is what
+`doc/ui/IMPLEMENTATION_STATE.md` § *What was measured and how* now does.

@@ -8,9 +8,10 @@
 //!
 //! The three pads sit inside a card: the [`Container`] widget, with a background
 //! bound to the theme's `Surface` and a padding of [`CARD_PADDING`]. It is the
-//! one place the demo draws a container — the other four in the tree, the text
-//! column, the text panel, the controls layer and the root, group children and
-//! have no background, which is what a container with no background looks like.
+//! **first** of the two places the demo draws a container — the second is the tab
+//! bar, since task 24.3 — and the other four in the tree, the text column, the
+//! text panel, the controls layer and the root, group children and have no
+//! background, which is what a container with no background looks like.
 //!
 //! Every colour in the demo comes from the theme: the background from
 //! `Background`, each pad's rest colour from `Error`, `Success` or `Primary`.
@@ -43,15 +44,21 @@
 //! a control consume the events meant for it. `Tab` and `Shift+Tab` move focus
 //! and `Enter` activates the control holding it.
 //!
-//! **There is no row of buttons.** Three of them — a counter, a disabled one and
-//! a reset — were here for tasks 11 to 19 to prove that a button animates, and
-//! the operator took them out on 2026-10-01: *"You can remove the first three
-//! buttons that were used for testing animations."* What that costs is written
-//! down where it is paid rather than left for a reader to discover: the press
-//! and release transition, the hover tint, the focus ring and the click callback
-//! are no longer on screen anywhere, and `ui_demo` is the only place in the
-//! repository where any of them was demonstrated. What is left that a pointer
-//! drives is the slider and the toggle.
+//! **There is no row of buttons, and there never was one since 2026-10-01.**
+//! Three of them — a counter, a disabled one and a reset — were here for tasks 11
+//! to 19 to prove that a button animates, and the operator took them out: *"You
+//! can remove the first three buttons that were used for testing animations."*
+//! What that cost was written down where it is paid rather than left for a reader
+//! to discover: the press and release transition, the hover tint, the focus ring
+//! and the click callback were no longer on screen anywhere, and `ui_demo` was the
+//! only place in the repository where any of them was demonstrated.
+//!
+//! **Task 24.3 pays that back, and the six tab buttons are what pays it.** Each
+//! one is a real [`Button`] with a real [`Callback`], and the demo writes its
+//! `hovered`, `pressed` and `focused` from the same three places the pads' press
+//! and the controls' focus come from, so all five of the lost behaviours are on
+//! screen again — and none of them is a mock. What is left that a pointer drives
+//! besides the bar is the slider and the toggle.
 //!
 //! **There is no list either, and that cost more.** It was here for task 18 — a
 //! hundred rows in a 280-tall viewport, with a readout naming the first row on
@@ -78,6 +85,61 @@
 //! already there moves. `no_two_placed_rects_overlap` and
 //! `every_placed_rect_is_inside_the_window` are what hold that claim up.
 //!
+//! **The top [`TAB_BAR_HEIGHT`] pixels are the tab bar's, and task 24.2 is what
+//! paid for them.** Every widget was moved down [`CONTENT_TOP`] to make the room,
+//! **at the places the demo writes its positions and not in the constants** — so
+//! every `*_ORIGIN` below still says what it clears, and the shift is one term at
+//! each of the six sites rather than a difference between sixty numbers and
+//! themselves. Nothing moved relative to anything else, so the collision tests
+//! kept their meaning within a page, and the frame-rate readout and the
+//! text-entry band both came back down to the bottom of the window to pay for it.
+//!
+//! **The bar is six buttons in a row, and it is on every page.** `Demo::tab_bar`
+//! is a [`Container`] in [`LayoutMode::row`] with the theme's `Surface` behind it
+//! and [`TAB_BAR_PADDING`] around it; its children are one [`Button`] per page in
+//! [`Page::ALL`] order, each labelled with [`Page::name`] and each
+//! [`TAB_BUTTON_TALL`] tall. It is the demo's **second** container with a
+//! background — the card of pads is the first, and the other four draw nothing.
+//!
+//! **`Button` has no `selected` property and the demo supplies one.** The widget's
+//! properties are `label`, `background`, `foreground`, `border_radius`, `on_click`,
+//! `focus_ring`, `padding_h`, `padding_v`, `font_size`, `hovered`, `pressed`,
+//! `disabled`, `focused`, `activatable`, `scale` and `opacity`; there is no
+//! `selected` among them, and a reader looking for one in
+//! `ui_core::widgets::button` will not find it. **The selected appearance is the
+//! demo's own**: `tab_palette` gives the button for the page on show the
+//! theme's active pair and every other button the rest pair, and
+//! [`Demo::aim_tab_buttons`] carries the two that changed there over
+//! [`tab_motion`]. Read the struct rather than looking for a property that is not
+//! there.
+//!
+//! **The bar's nodes are in no page's list, and that is what 24.1 settled.** A
+//! [`PageMember`] carries one page per row and cannot express "all six", so a
+//! control on every page belongs to `tests::always_painted_handles` — twelve
+//! nodes now — and not to [`Demo::page_members`]. The same shape is why the
+//! addition to the `Tab` order is in [`Demo::focus_navigation`] and not in
+//! [`Demo::focusables`], which filters on `member.page == self.page` and so
+//! **cannot** return a node that is on every page.
+//!
+//! **The bar is under the dialog's scrim with everything else.** The dialog is
+//! modal, every tap and every key goes to it, and a `Tab` that walked out of it
+//! onto a tab button would put focus somewhere the scrim covers. The bar is
+//! reachable the moment the dialog closes.
+//!
+//! **The gallery is grouped into six pages, and one page is on show at a time.**
+//! `--tab=<name>` picks which, `pads` is the default, and `--help` lists the six.
+//! A page is a **named set of handles and nothing else**: switching pages does not
+//! move a rect, re-lay anything or resize the window — the tree below is still laid
+//! out from the same absolute constants — so what a page decides is *which* of those
+//! rectangles are drawn, hit and in the `Tab` order. `every_page_places_every_rect_
+//! where_the_gallery_placed_it` is what holds that down.
+//!
+//! **That is what dissolves the crowding the window's size forced.** Every widget
+//! for tasks 11 to 22 shares one canvas because they all had to, and the panel the
+//! dialog puts over the middle of it is the operator's accepted answer to that. One
+//! canvas holding one page's worth is the second answer: the twenty-six widgets were
+//! never crowded by their own sizes, they were crowded by sharing a window.
+//!
 //! In the bottom left of the window a readout names how fast the loop is running:
 //! the current rate, the run's average and its worst single frame. The number is
 //! measured from the frame deltas the loop already computes — see [`fps`] — and
@@ -87,22 +149,36 @@
 //! the demo otherwise only stops when its window is closed and a measurement
 //! nobody can end is not a measurement.
 //!
-//! **And a dialog is over the whole of it, showing.** `D` opens and closes it,
-//! `Escape` closes it, and while it is up it is modal: it takes every tap and
-//! every key aimed at a widget, the five controls behind it come out of the `Tab`
-//! order, and its own two buttons come into it. `OK` switches the theme and
+//! **And on the `overlays` page a dialog is over the whole of it, showing.** `D`
+//! opens and closes it, `Escape` closes it, and while it is up it is modal: it takes
+//! every tap and every key aimed at a widget, the page's own controls come out of
+//! the `Tab` order, and its two buttons come into it. `OK` switches the theme and
 //! `Cancel` does nothing, which is the only way two buttons in a dialog can mean
-//! different things without a second widget in it.
+//! different things without a second widget in it. `D` activates `overlays` as it
+//! opens the panel, and **`K` activates it as it raises a notification**, because a
+//! dialog and the toast host are page content there and both are shown on no other
+//! page; see [`Demo::show_page`].
 //!
-//! It **opens showing rather than waiting to be opened**, and that is a decision
-//! about evidence rather than about the demo. Input injection does not work on
-//! this host — task 21's positive control had `T` move 212 pixels of gauge needle
-//! from an injected press, and pointer injection has never delivered anything at
-//! all — so a dialog that began hidden could only ever be photographed through an
-//! instrument, and three of the captures in this task's history already rested on
-//! instrumented routes. Starting visible means the capture in
-//! `doc/ui/TASK_UI_PRIM_22.md` needs no seed, no rebuild and no environment
-//! variable, and it is a capture of the real demo.
+//! **On the other five pages there is no dialog at all**, and that is a decision
+//! rather than an omission. `Demo::new` presents it at construction **only when the
+//! run opened on `overlays`**, because a modal dialog on a page that does not show it
+//! is a window where every tap and every key is swallowed by a scrim nobody can see:
+//! the scrim is not painted, the panel is not painted, and `dialog_is_modal` does not
+//! read whether the page is on show. With `pads` as the default page that would have
+//! been the launch state of `ui_demo` with no argument at all, which is the shape
+//! `.ai/NEVERAGAIN.md` records three reviews mistaking for a tooling problem — a
+//! window that looks right and answers nothing.
+//!
+//! On `overlays` it **opens showing rather than waiting to be opened**, and that is
+//! still a decision about evidence rather than about the demo. Input injection does
+//! not work on this host — task 21's positive control had `T` move 212 pixels of
+//! gauge needle from an injected press, and pointer injection has never delivered
+//! anything at all — so a dialog that began hidden could only ever be photographed
+//! through an instrument, and three of the captures in this task's history already
+//! rested on instrumented routes. Starting visible means the capture in
+//! `doc/ui/TASK_UI_PRIM_22.md` needs no seed, no rebuild and no environment variable
+//! and `--tab=overlays` reproduces it; that is where those captures live now, and the
+//! parent's requirement 3 records the same consequence for the pages in general.
 //!
 //! **It covers the middle of the gallery while it is up**, which the operator
 //! accepted rather than a reader having to discover: a centred panel over a full
@@ -114,10 +190,12 @@
 //! **What "modal" covers here, and it is everything.** While the dialog is visible
 //! the demo offers every event to the dialog's subtree and to nothing else, the
 //! `Tab` order is the dialog's two buttons alone, and **the demo's own shortcuts
-//! are suppressed as well** — the whole of [`GALLERY_SHORTCUTS`] and the three
+//! are suppressed as well** — the whole of [`GALLERY_SHORTCUTS`] and **the two**
 //! pointer arms that reach the pads, the slider and the keyboard without routing
-//! at all. One guard covers the key table and one covers the pointer presses; see
-//! [`Demo::handle_event`].
+//! at all. **Two guards cover them, one per arm**: `handle_event`'s `MouseButtonDown`
+//! and its `FingerDown`, each with its own `if self.dialog_is_modal()`, because a
+//! finger is a pointer too and the release arms beside them are unguarded by design.
+//! See [`Demo::handle_event`].
 //!
 //! **That last half was not in the first version of this paragraph, and the gap was
 //! deliberate rather than overlooked**: `input::route` walks nodes, so *the input
@@ -165,7 +243,7 @@ use ui_core::render::context::Context;
 use ui_core::render::Renderer;
 use ui_core::texture::{Pixels, TextureCache, TextureHandle};
 use ui_core::theme::{PropertyValue, Theme, ThemeToken};
-use ui_core::widgets::button::Motion;
+use ui_core::widgets::button::{Button, Motion, Palette as ButtonPalette};
 use ui_core::widgets::chart::{Chart, ChartType, Palette as ChartPalette};
 use ui_core::widgets::container::Container;
 use ui_core::widgets::dialog::{Dialog, DialogAction, Palette as DialogPalette};
@@ -194,10 +272,19 @@ use ui_core::widgets::Callback as ValueCallback;
 ///
 /// **The height grew twice, and the second time is task 19's.** 720 was reached
 /// because the controls would not fit beside the text panel, and 1020 because
-/// [`BAND_TOP`] is 720: everything above it is the gallery exactly as it was, and
-/// the text-entry band goes below. **Nothing above [`BAND_TOP`] moved**, which is
-/// the point, and `the_gallery_above_the_band_is_where_it_was` checks it rather
-/// than trusting it.
+/// [`BAND_TOP`] was 720: everything above it was the gallery exactly as it was,
+/// and the text-entry band went below. **Nothing above [`BAND_TOP`] moved**,
+/// which was the point, and `the_gallery_above_the_band_is_where_it_was` checked
+/// it rather than trusting it.
+///
+/// **That sentence is task 24.2's to reverse, and this is where it stopped being
+/// true.** The tab bar is paid for by moving the gallery **down** [`CONTENT_TOP`]
+/// rather than by growing the window, and the band moved **up** by the same
+/// [`CONTENT_TOP`] because it is the only page that carries the keyboard and
+/// there is no room below it — so the band now hangs off the window's own bottom
+/// edge ([`BAND_TOP`] is derived, not the literal 720) and the gallery no longer
+/// ends above it. `the_gallery_above_the_band_is_where_it_was` still checks the
+/// shift, as one term rather than as thirty rewritten constants.
 ///
 /// **1020 is measured, not chosen.** The first attempt was 1160 — a field and a
 /// keyboard stacked — and the window came back **1052 pixels tall**: this host
@@ -207,11 +294,135 @@ use ui_core::widgets::Callback as ValueCallback;
 /// of the keyboard never reaches the screen, so the capture that is supposed to
 /// prove the widget draws cannot see it. 1020 leaves room under the cap, and the
 /// band is laid out **side by side** rather than stacked for the same reason — a
-/// field over a 300-tall keyboard needs 364 pixels of band and the budget is 300.
+/// field over a [`KEYBOARD_HEIGHT`]-tall keyboard needs more than
+/// [`BAND_HEIGHT`] pixels of band.
+///
+/// **Task 24.2 does not spend any of it.** [`CONTENT_TOP`] pays for the tab bar
+/// by moving the gallery down inside the window, not by asking for a taller one,
+/// because a window taller than the cap cannot be photographed at all — which is
+/// why `every_page_places_every_rect_where_the_gallery_placed_it` asserts this
+/// pair of numbers rather than trusting the prose above.
 const WINDOW: Size = Size {
     width: 1280.0,
     height: 1020.0,
 };
+
+/// How tall the tab bar at the top of the window is: the number
+/// `doc/ui/TASK_UI_PRIM_24.md`'s requirement 2 names.
+///
+/// **The number was written by task 24.2 rather than left to 24.3**, so that the
+/// strip 24.2 reserved is the strip 24.3 fills: two agents choosing 64
+/// independently would be two chances to disagree, and the second one would find
+/// the gallery already moved. **Task 24.3 filled it and changed nothing here.**
+/// The bar is given this height as a tight constraint, and
+/// `the_bar_is_exactly_as_tall_as_its_padding_and_its_buttons` is what says the
+/// two are the same number rather than two that happen to agree.
+const TAB_BAR_HEIGHT: f32 = 64.0;
+
+/// The gap between the tab bar's own box and its buttons, on all four sides.
+///
+/// **Ten, and it is load-bearing twice.** It is the `Padding` requirement 1 asks
+/// the bar to carry — the bar is the demo's **second** container with a visible
+/// background, and this is what makes the background visible rather than a
+/// `[TAB_BAR_HEIGHT]`-tall strip of `Surface` with the buttons hard against its
+/// edges — and it is also *how the buttons land at y 10*, because
+/// [`LayoutMode::row`] places a child at the padded edge of its parent's inner
+/// box and the bar sits at `y 0`. One number, therefore, is what makes
+/// requirement 2's "44 tall at y 10" true of the code rather than of a comment.
+///
+/// [`TAB_BUTTON_TALL`] plus this on the top and the bottom is exactly
+/// [`TAB_BAR_HEIGHT`], and `the_bar_is_exactly_as_tall_as_its_padding_and_its_
+/// buttons` asserts the equality rather than leaving it to arithmetic in prose.
+const TAB_BAR_PADDING: f32 = 10.0;
+
+/// How tall one tab button is drawn, and the project's own touch-target floor.
+///
+/// **44, and it is the same 44 three other places already name**: the keyboard's
+/// [`KEY_HEIGHT`], the parent's requirement 2, and `Button`'s own
+/// `MIN_TOUCH_TARGET`, which is private and which this equals by arriving at the
+/// same number rather than by reading it. The widget *enforces* the floor on its
+/// own node through [`Button::size`]; this constant is the demo asking for that
+/// height outright, and `every_tab_button_is_at_least_the_touch_target_floor_tall`
+/// is asserted **over the laid-out rects** rather than read off the number here,
+/// because a constant compared with itself is a sentence.
+const TAB_BUTTON_TALL: f32 = 44.0;
+
+/// The gap between two tab buttons on the bar's main axis.
+///
+/// **The theme's `SpacingSm`, copied rather than read**, for the reason
+/// `Button`'s own `THEME_SPACING_SM` is copied: the widget has no theme to read a
+/// spacing from, and `Button`'s test
+/// `the_default_padding_and_radius_are_the_theme_tokens_values` is what stops
+/// that copy drifting. Reading it per frame from the theme would be the
+/// alternative, and it would need to be told about a switch rather than following
+/// one.
+const TAB_BUTTON_GAP: f32 = 8.0;
+
+/// The font size a tab button's page name is drawn at.
+///
+/// **The theme's `FontSizeLg` (18) rather than the widget's 14 default**, and the
+/// reason is the one the operator gave for the field and the keyboard: a name
+/// that has to be read at arm's length from a driver's seat is read at the size
+/// the rest of the demo's readouts are read at, and 14 pixels on a bar 64 tall is
+/// a caption. `TAB_BUTTON_TALL` is the floor and this is the choice inside it.
+///
+/// Not read from the theme, and that is deliberate: every font size the demo
+/// writes is its own constant — [`READOUT_FONT`], [`KEY_FONT`],
+/// [`TOAST_FONT`], [`DIALOG_FONT`] — and this joins them rather than becoming the
+/// one that reads a token. A theme that changed its font sizes would then change
+/// the theme's own text and not the demo's controls, which is the same split
+/// [`GAUGE_MOTION`] versus `THEME_TRANSITION` already makes.
+const TAB_BUTTON_FONT: f32 = 18.0;
+
+/// The gap between a tab button's label and its left and right edges.
+///
+/// **14, and it is the demo's rather than the widget's 8** because a tab is a
+/// target a finger lands on rather than a button inside a panel: the whole point
+/// of the width is that the name inside it is never cut, and the width itself
+/// comes from [`Button::content_size`] — which reads this number twice — so the
+/// padding and the label are one measurement rather than two guesses.
+const TAB_BUTTON_PADDING_H: f32 = 14.0;
+
+/// The motion a tab button's colour and scale changes run on.
+///
+/// **Written here rather than spelled at each call site**, because there are
+/// three kinds of change and they are the same motion: the selection pair on a
+/// page switch, the press and the release, and the hover.
+///
+/// **And it is [`Motion::from_theme`], which is the theme's `DurationFast` — 150
+/// ms, not [`THEME_TRANSITION`]'s 300.** The task file asks for the 300 and names
+/// the call in the same sentence; the call is what this uses, and
+/// `a_selection_change_runs_on_the_themes_fast_duration` is what measures which
+/// of the two the code actually got. `DurationFast` is right for this and
+/// `DurationNormal` is not: the theme's own tokens are what a 300 ms transition
+/// belongs to, and a tab that takes a third of a second to change its mind is a
+/// bar that answers late.
+fn tab_motion(theme: &Theme) -> Motion {
+    Motion::from_theme(theme)
+}
+
+/// Where the gallery starts: below the tab bar.
+///
+/// **Added where the demo writes a position, and never to the constants.** Every
+/// `*_ORIGIN` below is a literal whose own doc says what it clears — 668 is
+/// below the progress readout's own line, 240 is below the image-fit label's —
+/// and adding 64 to the constants would make every one of those sentences false
+/// by exactly the height of the bar. So [`Demo::new`] adds this at each place it
+/// calls `Offset::new`, the shift is then **one term per site** rather than a
+/// difference between two numbers, and a constant's doc keeps meaning what it
+/// meant.
+///
+/// What it costs: a doc that quotes an absolute position is now quoting one in
+/// *content* coordinates, 64 above where the pixels land. Every relationship
+/// those docs state is relative and survives; **the ones that named the window or
+/// the band are corrected where the shift falsified them, and there are five**
+/// — [`PROGRESS_ORIGIN`], [`CHART_ORIGIN`], [`FPS_READOUT_ORIGIN`],
+/// [`TEXT_INPUT_ORIGIN`] and [`KEYBOARD_ORIGIN`], each of which now says in its
+/// own words that its figure is a content coordinate. ([`WINDOW`] and
+/// [`BAND_HEIGHT`] were corrected for the same reason and are a different pair:
+/// they are not `*_ORIGIN`s, and the first review round caught the count here
+/// being two when the diff carried five.)
+const CONTENT_TOP: f32 = TAB_BAR_HEIGHT;
 
 /// How long one frame is budgeted to take: **60 Hz**, the rate
 /// `doc/ui/DEMO_APPLICATION.md` lists as *"Smooth animations and transitions —
@@ -661,7 +872,7 @@ const GAUGE_SPRING: Easing = Easing::Spring {
 /// Where the demo's toggle sits, under the slider's readout.
 ///
 /// The readout's own line ends at [`SLIDER_ORIGIN`]'s 496 plus
-/// [`SLIDER_READOUT_DROP`]'s 52 and its own 24 pixels, and the toggle's box is
+/// [`SLIDER_READOUT_DROP`]'s 64 and its own 24 pixels, and the toggle's box is
 /// the widget's own — a 48-wide track in a 44-tall touch target — so this is the
 /// next line that clears it.
 const TOGGLE_ORIGIN: (f32, f32) = (CONTROLS_ORIGIN.0, 592.0);
@@ -684,8 +895,12 @@ const TOGGLE_READOUT_WIDTH: f32 = 240.0;
 /// Where the demo's progress bar sits, the last thing in the left column of the
 /// band.
 ///
-/// 668 plus the bar's own 44 pixels is 712, and the window is 720: eight
-/// pixels of margin, which is the whole of what is left below the band.
+/// 668 plus the bar's own 44 pixels is 712, and [`CONTENT_TOP`] takes it to 776:
+/// **which is past [`BAND_TOP`]'s 680, and that is fine** — the bar is
+/// `controls` and the band is `input`'s, so no page draws both. What the old
+/// sentence here said ("the window is 720, eight pixels of margin below it") was
+/// already stale when task 19 grew the window to 1020, and task 24.2 made it
+/// worse by making the margin a real overlap rather than a stale number.
 const PROGRESS_ORIGIN: (f32, f32) = (CONTROLS_ORIGIN.0, 668.0);
 
 /// The box the progress bar is given.
@@ -747,10 +962,14 @@ const PROGRESS_TENTHS: f32 = 10.0;
 /// which ends at 224, so the chart is below the tallest thing in that column
 /// rather than beside its label.
 ///
-/// **It is above [`BAND_TOP`]**, so the chart joins the gallery rather than the
-/// band, and `the_gallery_above_the_band_is_where_it_was` still means what it
-/// said: nothing above 720 moved, so every capture of tasks 11 to 20 is still a
-/// capture of the same pixels.
+/// **It used to be above [`BAND_TOP`], and task 24.2 is what stopped that.** The
+/// shift the tab bar is paid for moves the chart down [`CONTENT_TOP`] and moves
+/// the band's top *up* by the same, so the chart's 754 now runs past
+/// [`BAND_TOP`]'s 680 — which is fine, because **the two are on different
+/// pages**: the chart is `data`'s and the band is `input`'s, and no page draws
+/// both. What replaced the sentence is a per-page claim,
+/// `no_two_placed_rects_overlap` over all six pages, which is what a cross-page
+/// overlap assertion was never able to be.
 ///
 /// What would reverse this is a head unit whose chart is wide rather than tall,
 /// which is the operator's number and not an agent's.
@@ -833,14 +1052,25 @@ const CHART_X_LABEL_GUTTER: f32 = 18.0;
 /// **measured, not derived**, which is why this is four and not a computed number.
 /// The chart's x labels live inside its own node, in the gutter the widget
 /// reserves below the plot; the gutter is 18 px of a 450-tall node, so the reserved
-/// space ends at the node's bottom edge at 690 — **but the reserved 18 is
+/// space ends at the node's bottom edge at **754** — **but the reserved 18 is
 /// `X_LABEL_GAP` plus `LABEL_FONT_SIZE` plus two pixels of slack, and the real
 /// line box of a run of text at 12 px is taller than 12**, so "the labels end at
-/// 690" is a claim about the reservation rather than about the pixels. What the
+/// 754" is a claim about the reservation rather than about the pixels. What the
 /// pixels do is in a capture of the running demo: **the labels' ink is on rows
-/// 678 to 687**, three pixels clear of 690, and the readout's own line is at
-/// 699..712 in the same capture — twelve pixels below the lowest ink the chart
+/// 742 to 751**, three pixels clear of 754, and the readout's own line is at
+/// 763..776 in the same capture — twelve pixels below the lowest ink the chart
 /// draws.
+///
+/// **Re-measured 2026-10-04, and this is a measurement record so a stale figure
+/// here is the worst place for a 64-pixel error.** `ui_demo --tab=data` on a
+/// release build, the 270 × 130 crop at `(1000, 690)` read row by row: three ink
+/// bands, at **690..736** (the plot: series, grid and the x axis, whose axis is
+/// the band's last two rows), **742..751** (the labels) and **763..776** (the
+/// readout's line). **Every figure here is a window row, not a content
+/// coordinate** — the node's bottom edge is `CHART_ORIGIN.1 + CHART_SIZE.height`
+/// = 690 in content coordinates and 754 on screen, and the two differ by the
+/// [`CONTENT_TOP`] task 24.2 introduced. The review of this task measured the same
+/// two bands independently and got 742..751 and 763..776.
 ///
 /// `no_node_is_clipped_and_the_chart_keeps_its_geometry_inside_its_own_rect` is
 /// what holds that claim in the suite: it asserts, over all three shapes and both
@@ -990,6 +1220,20 @@ const IMAGE_CORNER_RADIUS: f32 = 10.0;
 /// two readouts at the bottom of the window are within a line of each other and
 /// neither is over the other: this one is 400 wide and ends at 460, a long way
 /// left of 1000.
+///
+/// **Those y figures are content coordinates and the pixels are [`CONTENT_TOP`]
+/// lower** — **748 and 758, not 684 and 694.** Every *relationship* above is
+/// relative and survives the shift untouched, which is the whole of
+/// [`CONTENT_TOP`]'s argument for being applied at the placement rather than
+/// here; only the two absolutes moved, and they moved together.
+///
+/// **758, and not the 763 that [`CHART_READOUT_GAP`]'s doc measures.** That doc's
+/// 763 is where the readout's glyph **ink** starts in a capture — the line box is
+/// at 758 and the type sits five pixels into it — which is a different quantity
+/// from an origin, and an earlier version of this sentence used it here. It broke
+/// the rule the sentence states, in the paragraph added to fix exactly that kind of
+/// slip, and it was checkable in one subtraction: `CHART_ORIGIN.1` 240 +
+/// `CHART_SIZE.height` 450 + `CHART_READOUT_GAP` 4 = 694, and 694 + 64 = 758.
 const FPS_READOUT_ORIGIN: (f32, f32) = (60.0, 684.0);
 
 /// The width the frame-rate readout is given.
@@ -1011,14 +1255,27 @@ const FPS_READOUT_WIDTH: f32 = 400.0;
 
 // ------------------------------------------------------------------ task 19
 
-/// The y at which the text-entry band begins: the old bottom of the window.
+/// The y at which the text-entry band begins: the bottom of the window less
+/// [`BAND_HEIGHT`].
 ///
-/// Everything above this line is tasks 11–18's layout and **has not moved**. The
-/// window grew downwards rather than the demo being re-laid-out, so every capture
-/// taken of the earlier tasks is still a capture of the same pixels. That is the
-/// whole argument for growing the window rather than rearranging it, and it is
-/// why the operator chose it over restructuring the gallery.
-const BAND_TOP: f32 = 720.0;
+/// **Derived, and it was the literal 720 until task 24.2.** It used to be a
+/// number typed in beside the window's own height, and every capture taken of
+/// tasks 11–18 was a capture of the same pixels because nothing above that line
+/// had moved. The tab bar is paid for by moving the gallery **down**
+/// [`CONTENT_TOP`] — the window cannot grow, and a window taller than this
+/// host's window manager allows cannot be photographed at all — which puts the
+/// band and the gallery in the same 64 pixels. **So the band's top is derived
+/// from the window and its own height instead**, and it hangs off the **bottom**
+/// of the window where the only thing below it is the window itself.
+///
+/// **What it costs, and it is not free.** The band is on the `input` page and
+/// the gallery is not on it, so nothing draws in the overlap on any page — but
+/// `the_gallery_above_the_band_is_where_it_was` used to be able to say "every
+/// gallery rect ends above `BAND_TOP`", and that sentence was false the moment
+/// the gallery moved. What replaced it is a per-page claim
+/// (`no_two_placed_rects_overlap` over `every_placed_rect_is_inside_the_window`'s
+/// six pages), which is stronger where it applies and says nothing across pages.
+const BAND_TOP: f32 = WINDOW.height - BAND_HEIGHT;
 
 /// How far below [`BAND_TOP`] the band starts.
 ///
@@ -1029,17 +1286,30 @@ const BAND_TOP: f32 = 720.0;
 const BAND_DROP: f32 = 16.0;
 
 /// The top of everything in the band.
+///
+/// **`CONTENT_TOP` is added to it at the placement and not here**, which is the
+/// one asymmetry in the band's arithmetic and it is deliberate: every `*_ORIGIN`
+/// in this file is a content coordinate ([`CONTENT_TOP`]'s own doc says why), and
+/// the band is the one group of widgets whose box has to move *up* by that same
+/// amount because it is already at the bottom of the window. So the band's box
+/// is [`BAND_TOP`] and its contents are 64 lower, and
+/// `the_whole_band_fits_in_the_space_below_the_gallery` is what holds the two
+/// together.
 const BAND_TOP_OF_BAND: f32 = BAND_TOP + BAND_DROP;
 
 /// Where the demo's text input sits, at the left of the band.
 ///
 /// **Left of the keyboard rather than above it**, which is the layout decision
 /// this band makes. Stacked is the arrangement most phone keyboards use, and it
-/// needs [`BAND_HEIGHT`] to be a field plus a gap plus a 260-tall keyboard; beside
-/// it the band is as tall as the keyboard alone, which is what fits the 300 pixels
-/// [`WINDOW`] leaves below the gallery. For a car it is also the better shape: a
-/// driver reaches a keyboard to the side of the field without the field moving
-/// under their hand.
+/// needs the band to be a field, a gap and a [`KEYBOARD_HEIGHT`]-tall keyboard;
+/// beside it the band is as tall as the keyboard alone, which is what
+/// [`BAND_HEIGHT`] is. For a car it is also the better shape: a driver reaches a
+/// keyboard to the side of the field without the field moving under their hand.
+///
+/// **A content coordinate, and [`CONTENT_TOP`] is added to it at the placement**
+/// — this doc was rewritten by task 24.2 and lost that sentence, which is the
+/// second half of [`CONTENT_TOP`]'s own list of the five docs that had to be
+/// corrected. The `+ 20` is the gap between the band's top and the field's.
 const TEXT_INPUT_ORIGIN: (f32, f32) = (BAND_MARGIN, BAND_TOP_OF_BAND + 20.0);
 
 /// The box the text input is given.
@@ -1059,13 +1329,36 @@ const TEXT_INPUT_SIZE: Size = Size {
 /// The margin the band keeps on the left, the same 60 the gallery uses.
 const BAND_MARGIN: f32 = 60.0;
 
-/// How tall the band is: [`WINDOW`] less [`BAND_TOP`].
+/// How tall the band is, and **what it is now derived from**.
 ///
-/// The whole of the space task 19 was given, and the number the layout has to fit
-/// inside. It is a named constant rather than an expression at each use because
-/// the alternative is a `- BAND_TOP` at four different places, which is four
-/// chances to disagree about where the gallery ends.
-const BAND_HEIGHT: f32 = WINDOW.height - BAND_TOP;
+/// It was `WINDOW.height - BAND_TOP` — the space the band was given, read back
+/// out of the window — and task 24.2 **inverted that**: [`BAND_TOP`] is now the
+/// window's bottom less *this*, so this has to be a number the band derives from
+/// what it holds rather than a subtraction, or the two would each be the other.
+///
+/// The three terms are the band from its own top edge to the bottom of the
+/// tallest thing in it: the keyboard's [`KEYBOARD_HEIGHT`], the [`BAND_DROP`]
+/// above it, and the [`CONTENT_TOP`] the shift moved it down. **So the band is
+/// exactly as tall as its contents plus the two gaps above them, and its bottom
+/// edge is the window's own** — which is what "the band sits against the bottom
+/// of the window" means when it is a formula rather than a sentence.
+///
+/// It is a named constant rather than an expression at each use because the
+/// alternative is a `- BAND_TOP` at four different places, which is four
+/// chances to disagree about where the band ends.
+///
+/// **It has no slack, and that is worth saying rather than leaving to be
+/// discovered.** Because [`BAND_TOP`] is `WINDOW.height - BAND_HEIGHT`, any
+/// change to this moves the band's top **and** its contents together, and
+/// `the_band_is_at_the_bottom_of_the_window_and_its_overlap_with_the_gallery_is_
+/// cross_page` asserts the keyboard's bottom edge **equals** `WINDOW.height` —
+/// so **every value other than 340 fails**, by one pixel or by thirty-two.
+/// An earlier round of this task's own review reported "the largest slack is
+/// 17 px", and that was wrong: measured by sweeping this constant, s = 1 already
+/// fails, on that one test. The keyboard used to end 24 pixels above the window's
+/// bottom edge and **cannot** be given them back by any value here — the number
+/// to change would be [`KEYBOARD_HEIGHT`], and that is a widget's size.
+const BAND_HEIGHT: f32 = BAND_DROP + CONTENT_TOP + KEYBOARD_HEIGHT;
 
 /// The font size the text input's own text is drawn at.
 ///
@@ -1076,10 +1369,17 @@ const TEXT_INPUT_FONT: f32 = 24.0;
 /// Where the on-screen keyboard sits, right of the field.
 ///
 /// **Side by side rather than under it**, which is the layout decision this band
-/// makes, and [`WINDOW`] gives the reason: a field over a keyboard needs the band
-/// to be a field plus a gap plus a 260-tall keyboard, and [`BAND_HEIGHT`] is 300.
-/// For a car the side-by-side shape is also the better one — a driver reaches the
-/// keys beside the field without the field moving under their hand.
+/// makes, and [`BAND_HEIGHT`] gives the reason: a field over a keyboard needs the
+/// band to be a field, a gap and a [`KEYBOARD_HEIGHT`]-tall keyboard, and the
+/// band is exactly the keyboard plus the two gaps above it. For a car the
+/// side-by-side shape is also the better one — a driver reaches the keys beside
+/// the field without the field moving under their hand.
+///
+/// **A content coordinate, and [`CONTENT_TOP`] is added to it at the placement** —
+/// the fifth of the five [`CONTENT_TOP`]'s doc names, and the reason this one is
+/// worth the sentence: the band's box moved *up* by the shift while its contents
+/// moved *down*, so this origin is the one place in the file where the two
+/// directions have to be read together.
 const KEYBOARD_ORIGIN: (f32, f32) = (520.0, BAND_TOP_OF_BAND);
 
 /// How tall one key is drawn, in pixels.
@@ -1356,6 +1656,264 @@ const TOAST_FONT: f32 = 14.0;
 /// What would reverse it: anything the operator prefers.
 const TOAST_KEY: Keycode = Keycode::K;
 
+/// One page of the gallery: a named subset of the demo's widgets, and the value
+/// `--tab=` accepts.
+///
+/// **Six, and [`Page::ALL`] is the only list of them.** The `--help` text, the
+/// unknown-name message, [`Page::name`] and [`Page::from_name`] and the tab bar
+/// task 24.3 will build are all read from it or from [`Page::name`], so a page
+/// cannot be printable and not selectable — which is the same one-list rule
+/// [`GALLERY_SHORTCUTS`] is held to and for the same reason.
+///
+/// **A page is a set of handles and nothing else.** No rect moves when a page
+/// changes: the tree's geometry is absolute constants (see the module doc), so
+/// what a page decides is *which* of those rectangles are drawn, hit and
+/// focusable. `every_page_places_every_rect_where_the_gallery_placed_it` is what
+/// holds that down, and it is the acceptance criterion this sub-task is measured
+/// against.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Page {
+    /// The card of pads, the press and release animation and the `Space` cascade.
+    Pads,
+    /// The label column: the sizes `+` and `-` move, wrapping, the three
+    /// alignments, truncation, and the colour token `C` cycles.
+    Text,
+    /// The text field, the on-screen keyboard, and the text and submit readouts.
+    Input,
+    /// The slider, the toggle and the progress bar, and their three readouts.
+    Controls,
+    /// The gauge, the chart and the image, and their three readouts.
+    Data,
+    /// The dialog and the toast host — amended 2026-10-04, when task 23 landed and
+    /// the amendment that excluded the toast stopped having a reason.
+    Overlays,
+}
+
+impl Page {
+    /// Every page, in the order the parent's requirement 1 names them.
+    ///
+    /// **One list, and the order is load-bearing three times**: it is the order the
+    /// `--help` text and the unknown-name message print the six names in, it is the
+    /// order task 24.3's tab bar puts the six buttons in, and **it is the order
+    /// [`Demo::tabs`] pairs the buttons with their pages in**, so a button and the
+    /// page it asks for cannot be a pair two lists disagree about.
+    const ALL: [Page; 6] = [
+        Page::Pads,
+        Page::Text,
+        Page::Input,
+        Page::Controls,
+        Page::Data,
+        Page::Overlays,
+    ];
+
+    /// The page a run with no `--tab=` opens on.
+    ///
+    /// **Named rather than left to the enum's first variant**, so that a variant
+    /// inserted at the top cannot silently change which page a capture with no
+    /// flag photographs. `pads` is the parent's requirement 3's choice and its
+    /// reason: it is the one page every capture taken for tasks 11 to 22
+    /// contains, so a capture that used to need no argument is still
+    /// reproducible.
+    const DEFAULT: Page = Page::Pads;
+
+    /// Returns the page's lowercase name: the `--tab=` value, and the word the
+    /// unknown-name message names the others beside.
+    ///
+    /// **The only place the six names are written out.** [`Page::from_name`] is
+    /// derived from this through [`Page::ALL`], and everything printable is derived
+    /// from [`Page::ALL`], so there is one spelling of each name in the file —
+    /// the property that made the 2026-10-03 `GALLERY_SHORTCUTS` finding a defect
+    /// rather than a style note.
+    #[must_use]
+    fn name(self) -> &'static str {
+        match self {
+            Page::Pads => "pads",
+            Page::Text => "text",
+            Page::Input => "input",
+            Page::Controls => "controls",
+            Page::Data => "data",
+            Page::Overlays => "overlays",
+        }
+    }
+
+    /// Returns the page `--tab=<name>` names, or `None` for anything else.
+    ///
+    /// **Derived from [`Page::ALL`] and [`Page::name`] rather than spelled out**, so
+    /// a name that cannot be parsed is a name that was never written down. That is
+    /// the whole of the property, and it is the reason this function is six lines
+    /// long instead of a `match`.
+    ///
+    /// **Case-sensitive, and deliberately.** `--tab=Data` is a name that is not one
+    /// of the six, and it is answered with the six that are — a fold would make
+    /// `--tab=PADS` and `--tab=pads` two spellings of one page, and every spelling
+    /// is a second list of the six.
+    #[must_use]
+    fn from_name(name: &str) -> Option<Page> {
+        Self::ALL.into_iter().find(|page| page.name() == name)
+    }
+}
+
+/// What the command line asked [`main`] to do.
+///
+/// **Four answers and no more**, because each of them is a decision the demo makes
+/// before a window exists and each is a case a test can name. The alternative
+/// shape — an `Option<Page>` plus a `bool` for help — is two values that can
+/// disagree, and `--help --tab=nope` is the argument that would make them.
+#[derive(Debug, PartialEq, Eq)]
+enum Request {
+    /// Open on this page.
+    Open(Page),
+    /// Print [`usage`] and exit successfully.
+    Help,
+    /// `--tab=` named something that is not one of the six pages.
+    UnknownPage(String),
+    /// An argument the demo does not take.
+    UnknownArgument(String),
+}
+
+impl Request {
+    /// Returns the message an error answer is reported with.
+    ///
+    /// **Both refusals name the six pages**, and that is the operator's decision
+    /// of 2026-10-03 rather than a courtesy: *"A silently ignored argument is a
+    /// test that passes against nothing"*. A reader who typed `--tab=dta` learns
+    /// the six spellings from the refusal rather than from the source.
+    #[must_use]
+    fn message(&self) -> Option<String> {
+        match self {
+            Request::Open(_) | Request::Help => None,
+            Request::UnknownPage(name) => Some(format!(
+                "ui_demo: --tab={name:?} is not a page; the pages are {}",
+                page_names()
+            )),
+            Request::UnknownArgument(argument) => Some(format!(
+                "ui_demo: {argument:?} is not an argument this demo takes; \
+                 run `ui_demo --help`. The pages are {}",
+                page_names()
+            )),
+        }
+    }
+}
+
+/// Returns what `args` asks the demo to do.
+///
+/// **A pure function over a slice, and that is the whole of its design**: it reads
+/// no environment, no filesystem and no clock, because a parser that reaches for
+/// `std::env` can only be tested by writing the process's environment, and the
+/// process's environment is one value for every test running beside it. This is
+/// the shape [`run_seconds_from`] already has and the reason it has it.
+///
+/// **The last `--tab=` wins**, because that is the one rule that keeps the answer
+/// a function of the whole argument list rather than of an accident about which
+/// one a reader typed twice. A repeated `--tab` is not an error; a *silently
+/// dropped* one would be.
+///
+/// **An argument the demo does not take is refused rather than ignored**, for the
+/// reason [`Request::message`] gives. The one thing this parser does not do is
+/// guess: `--tab data` (a space, no `=`) is [`Request::UnknownArgument`], not
+/// `--tab=data` with a space in the name.
+fn request_from(args: &[String]) -> Request {
+    let mut requested = Request::Open(Page::DEFAULT);
+    for argument in args {
+        if argument == "--help" || argument == "-h" {
+            return Request::Help;
+        }
+        let Some(name) = argument.strip_prefix("--tab=") else {
+            return Request::UnknownArgument(argument.clone());
+        };
+        requested = match Page::from_name(name) {
+            Some(page) => Request::Open(page),
+            None => Request::UnknownPage(name.to_string()),
+        };
+    }
+    requested
+}
+
+/// Returns one argument per item of `raw`, and a marker for the ones that are not
+/// text.
+///
+/// **`args_os` and not `args`, and that is the whole of the difference.**
+/// `std::env::args` **panics** on an argument that is not valid Unicode — it unwraps
+/// the `OsString`'s `into_string` — and this demo took no arguments before task 24.1,
+/// so nothing here had a reason to care. Now it does: `./target/release/ui_demo
+/// $'--tab=\xff\xfe'` exited **101** with `called 'Result::unwrap()' on an 'Err'
+/// value`, and this file's own rule is that **an argument the demo does not take is
+/// refused rather than ignored**. A panic is neither refused nor ignored; it is the
+/// third thing.
+///
+/// **A `to_str` and a marker, with no `unwrap` anywhere**, and the marker is a
+/// string that cannot be an argument the parser would accept rather than an `enum`
+/// beside it: [`Request`] is over `String` because every case it has to report is
+/// text, and a `&'static str` is the one piece of a non-text argument that can travel
+/// through it. Nothing is lost: `--tab=` is ASCII, so an argument carrying bytes
+/// outside it cannot name a page, and the refusal message says so.
+///
+/// **A function and not a statement in `main`, for [`run_seconds_from`]'s reason
+/// one level up**: the interesting half is "what happens to an argument that is not
+/// text", and it is only testable if the conversion is separable from the process.
+/// `arguments_from` takes an iterator rather than reading the environment itself, so
+/// `a_non_unicode_argument_is_refused_rather_than_panicking` needs no subprocess.
+fn arguments_from<I, S>(raw: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    raw.into_iter()
+        .map(|argument| match argument.as_ref().to_str() {
+            Some(text) => String::from(text),
+            None => String::from(NOT_TEXT),
+        })
+        .collect()
+}
+
+/// What an argument that is not valid Unicode becomes.
+///
+/// **A marker rather than a diagnostic**, so that the refusal the parser prints is
+/// the same refusal every other unknown argument gets and the two cannot drift.
+/// Escaped rather than spelled out so that it cannot be typed as an argument.
+const NOT_TEXT: &str = "<not valid Unicode>";
+
+/// Returns the six page names as one comma-separated string.
+///
+/// Built from [`Page::ALL`] rather than written out, because the refusal message
+/// and `--help` must name the same six in the same order as [`Page::from_name`]
+/// accepts — and a hand-written list here is the second list that would let them
+/// drift.
+#[must_use]
+fn page_names() -> String {
+    Page::ALL
+        .iter()
+        .map(|page| page.name())
+        .collect::<Vec<&str>>()
+        .join(", ")
+}
+
+/// Returns what `--help` prints.
+///
+/// **Both refusals and this text name the six pages**, for the reason
+/// [`Request::message`] gives; `ui_demo --help` is where a reader looks first, so
+/// it is the last place to leave the list out.
+///
+/// The two environment variables are in here because they are the demo's other two
+/// settings and the inconsistency is real: `--tab=` is an argument and
+/// [`RUN_SECONDS_VAR`] is not, which the parent's requirement 3 records as a
+/// separate decision rather than an oversight. Printing both in one place is what
+/// keeps a reader from concluding the flags replaced them.
+#[must_use]
+fn usage() -> String {
+    format!(
+        "roados ui_demo [--tab=<page>]\n\
+         \n\
+         \x20 --tab=<page>   open on that page; one of: {}\n\
+         \x20 --help         print this and exit\n\
+         \n\
+         ROADOS_RUN_SECONDS  run for this many seconds and stop, or run until the\n\
+         \x20                   window is closed\n\
+         ROADOS_ASSET_DIR    the directory assets/demo.png is looked for in\n",
+        page_names()
+    )
+}
+
 /// The image the demo shows: a texture and the window of it the fit needs.
 ///
 /// The two together, because [`ImageSource::of`] is what turns a handle into
@@ -1409,6 +1967,31 @@ const ASSET_DIR_VAR: &str = "ROADOS_ASSET_DIR";
 const ASSET_SIZE: (u32, u32) = (320, 192);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // **Before the window exists, and that is the whole of why it is here.** A
+    // `--tab=` that opened a window and then picked a page would put one frame of
+    // the wrong page on the screen — and on this host a capture is the only way
+    // anything about the opening frame is ever checked, so a frame is evidence.
+    // The page reaches [`Demo::new`] instead, and there is no frame to be wrong.
+    let requested = request_from(&arguments_from(std::env::args_os().skip(1)));
+    if let Some(message) = requested.message() {
+        eprintln!("{message}");
+        // `exit` rather than an `Err` out of `main`, and the difference is the exit
+        // status: `Err` from `main` is `1` with a second line of its own on
+        // stderr, and the requirement is a non-zero status with the six names on
+        // it. Nothing has been built at this point, so there is nothing to drop on
+        // the way out.
+        std::process::exit(1);
+    }
+    let page = match requested {
+        Request::Open(page) => page,
+        Request::Help => {
+            print!("{}", usage());
+            return Ok(());
+        }
+        // Both refusals returned above, because `message` is the only reader of
+        // them and a refusal that fell through would open a window instead.
+        Request::UnknownPage(_) | Request::UnknownArgument(_) => Page::DEFAULT,
+    };
     let mut renderer = Renderer::new(Context::new(
         "roados ui_demo",
         f32_to_u32(WINDOW.width),
@@ -1417,9 +2000,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let font = Font::from_path(FONT_PATH)?;
     renderer.set_font(font.clone());
     // **The second face, and the reason the dialog's title is bold on screen.**
-    // `DrawCommand::Text` carries a weight and the renderer resolves it against
-    // the faces it holds; with no face for the weight asked for it falls back to
-    // the regular one, which is a deliberate rule and also the way a bold title
+    // `DrawCommand::Text` carries a weight and the renderer resolves it against the
+    // faces it holds; with no face for the weight asked for it falls back to the
+    // regular one, which is a deliberate rule and also the way a bold title
     // silently arrives as a plain one. There is nothing else to call here — this
     // is the only bold run in the demo.
     renderer.set_bold_font(Font::from_path(BOLD_FONT_PATH)?);
@@ -1431,7 +2014,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let picture = load_picture(&mut renderer);
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
-    let mut demo = Demo::new(TextMetrics::new(font), picture)?;
+    let mut demo = Demo::new(TextMetrics::new(font), picture, page)?;
     let run_for = run_seconds();
 
     let mut last = Instant::now();
@@ -2043,6 +2626,96 @@ fn themed_color(token: &Property<PropertyValue>, fallback: Color) -> Property<Co
     Property::bind(move || token.get().as_color().unwrap_or(fallback))
 }
 
+/// Returns the colours a tab button is drawn in: the theme's **active** pair when
+/// the button is the one for the page on show, and its **rest** pair when it is
+/// not.
+///
+/// **This is the whole of the demo's selected appearance, and `Button` has no
+/// `selected` property to hold it.** The widget's public properties are `label`,
+/// `background`, `foreground`, `border_radius`, `on_click`, `focus_ring`,
+/// `padding_h`, `padding_v`, `font_size`, `hovered`, `pressed`, `disabled`,
+/// `focused`, `activatable`, `scale` and `opacity`; a reader who opens
+/// `ui_core::widgets::button` looking for a selected state will not find one, and
+/// this function is why there is nothing to find.
+///
+/// **The active pair is [`ButtonPalette::from_theme`] and the rest pair is
+/// written out, and both are the theme's own tokens** — `Primary` on `OnPrimary`
+/// for the button on show, `Border` on `Text` for the other five. Two things
+/// about that choice are decisions rather than derivations, and neither is
+/// derivable because the theme has **no token for "not selected"**:
+///
+/// - **`Border` rather than `Surface` for the rest buttons' background.** The
+///   bar behind them is already `Surface`, so a `Surface` button would be the
+///   same colour as the bar and only its label would show — a row of six labels
+///   with one of them filled in, which is a state indicator and not a tab bar.
+///   `Border` is the theme's own "a line has been drawn here" colour, which is
+///   what an unselected target is, and it is lighter than `Surface` in both
+///   themes: 51 against 30 on dark, 224 against 245 on light;
+/// - **`Text` rather than `TextMuted` for the rest label**, so the two pairs
+///   differ in *background* and not only in the label, which is what a reader
+///   sees at the size the labels are drawn at.
+///
+/// **The ring is `Primary` for a rest button and `OnPrimary` for the selected
+/// one**, and that asymmetry is `ButtonPalette::from_theme`'s: a ring has to be
+/// legible on the button's own background and on the bar it is drawn over, and
+/// `OnPrimary` on a `Border` background on the dark theme is black on grey.
+///
+/// The pair is a **palette** rather than two property writes because
+/// [`Button::animate_to_state`] aims at [`Button::style`], which is the palette
+/// resolved through the button's state flags — writing the two properties directly
+/// would put a value on the button that the next `animate_to_state` throws away.
+fn tab_palette(theme: &Theme, selected: bool) -> ButtonPalette {
+    if selected {
+        return ButtonPalette::from_theme(theme);
+    }
+    let token = |wanted: ThemeToken, fallback: Color| match theme.get(wanted) {
+        PropertyValue::Color(color) => color,
+        _ => fallback,
+    };
+    ButtonPalette {
+        background: token(ThemeToken::Border, Color::new(51, 51, 51, 255)),
+        foreground: token(ThemeToken::Text, Color::new(255, 255, 255, 255)),
+        ring: token(ThemeToken::Primary, Color::new(187, 134, 252, 255)),
+    }
+}
+
+/// Returns the advance a tab button's page name is measured with, at
+/// [`TAB_BUTTON_FONT`].
+///
+/// **A function and not a closure written at each of its three sites**, for the
+/// reason [`Demo::toasts_advance`] gives for the toast's: the width is measured in
+/// `Demo::new` and the label is centred in `Demo::frame`, and they have to be
+/// handed the same one or a button is sized for a measurement it is not drawn
+/// with. `Button::content_size` and `Button::paint` take the same pair of
+/// arguments for the same reason — the widget's own contract.
+fn tab_advance(metrics: &TextMetrics) -> impl Fn(char) -> f32 + '_ {
+    move |ch: char| metrics.advance(ch, TAB_BUTTON_FONT)
+}
+
+/// Returns the line box a tab button's page name is measured at.
+///
+/// One number for the widget's one font size, exactly as
+/// [`Demo::toasts_line_height`] is one number for [`TOAST_FONT`].
+fn tab_line_height(metrics: &TextMetrics) -> f32 {
+    metrics.line_height(TAB_BUTTON_FONT)
+}
+
+/// Where the controls layer sits in [`Demo::containers`].
+///
+/// **Named, because `Demo::controls_layer` indexes with it** and a bare `3` in
+/// both places would be two numbers that have to be changed together. It is 3
+/// because the bar is *appended* to the list rather than inserted before the
+/// controls, which is what keeps this index the one it was on 2026-10-04.
+#[cfg(test)]
+const CONTROLS_LAYER: usize = 3;
+
+/// Where the tab bar sits in [`Demo::containers`].
+///
+/// **Last, and that is the load-bearing half** — see [`CONTROLS_LAYER`]'s doc and
+/// [`Demo::containers`]'s.
+#[cfg(test)]
+const TAB_BAR: usize = 5;
+
 /// A slider in the demo: the widget, and the dragging state the demo last wrote
 /// to it and last aimed it at.
 ///
@@ -2128,9 +2801,19 @@ struct Demo {
     ///
     /// The tree is built out of [`Container`]s rather than out of nodes the demo
     /// assembles itself, so a parent is the widget and the demo's frame loop
-    /// paints it through [`Container::paint`]. Only the row of pads is given a
-    /// background: it is the card that shows what a container with a background
-    /// and padding looks like, and the other four draw nothing.
+    /// paints it through [`Container::paint`]. **Two** of them are given a
+    /// background: the row of pads, which is the card that shows what a container
+    /// with a background and padding looks like, and the tab bar. The other four —
+    /// the text column, the text panel, the controls layer and the root — draw
+    /// nothing.
+    ///
+    /// **The bar is last in the list, and that is load-bearing for
+    /// `Demo::controls_layer`.** Two helpers name a container by its index, and
+    /// appending is what keeps the five indices that were already there the same
+    /// five containers. `every_parent_the_demo_assembles_is_a_container_widget`
+    /// asserts the length and `the_container_with_a_background_are_the_card_and_
+    /// the_bar` names both, so a reordering would fail rather than quietly answer
+    /// with a different widget.
     containers: Vec<Container>,
     /// The gauge, at the head of the right-hand control column.
     ///
@@ -2320,6 +3003,122 @@ struct Demo {
     /// `next` is one: it is read and written only by [`Demo::raise_toast`] and no
     /// callback writes it.
     toast_next: usize,
+    /// The page on show, and the page every gate reads.
+    ///
+    /// **A plain field and not a property**, because nothing binds to it and no
+    /// animation writes it: a page switch is an event, not a value being
+    /// interpolated towards, and a property would buy a `mark_dirty` on layout
+    /// that does not change.
+    page: Page,
+    /// Every node the pages choose between: the one list all three gates read.
+    ///
+    /// **Built once, in [`Demo::new`], and read by all three gates** — the paint
+    /// gate by [`Demo::empty_off_page_paint`], the hit-test gate by
+    /// [`Demo::sync_page_visibility`], the focus gate by [`Demo::focusables`]. One
+    /// list is the requirement and one list is the point: a `match` at each of
+    /// those call sites would be three more lists of the same fact, and the
+    /// hazard is the one the 2026-10-03 review named about [`GALLERY_SHORTCUTS`]
+    /// — two objects that can disagree, and did.
+    ///
+    /// **A node that is not in this list is on every page**, and that is not a
+    /// gap: the root, the background, the controls layer, the frame-rate readout,
+    /// the toast host, **the tab bar and its six buttons** are the always-painted
+    /// set — `tests::always_painted_handles` is the written-out answer, and the
+    /// test that uses it is what says the set is **complete** rather than merely
+    /// plausible.
+    ///
+    /// **They are kept showing because no row exists that could hide them**, not
+    /// because they draw nothing: three of them record nothing at all (the root,
+    /// the layer and the toast host), the background records a filled rect every
+    /// frame, the readout its label, the bar its `Surface` and the six buttons
+    /// their backgrounds and labels. An earlier version of this sentence said four
+    /// of the five record no geometry of their own, which put the background in
+    /// the same class as the root and made a node that paints every frame read as
+    /// an argument for why it is safe to leave alone. The one node that must never
+    /// be hidden must not be argued for on grounds that are false of it.
+    /// Requirement 8's *"Keep fps label"* is the operator's instruction and is what
+    /// holds the readout up.
+    ///
+    /// **The tab bar is here because a [`PageMember`] cannot put it anywhere
+    /// else.** A row carries **one page per row**, so "on every page" is not a
+    /// value the table can hold, and a row per page would be six rows that could
+    /// disagree with each other about the same node — the hazard this table exists
+    /// to avoid. `every_page_lists_at_least_one_node_and_no_node_is_on_two_pages`
+    /// is the assertion that says so.
+    ///
+    /// **A toast's row is added when the toast is raised**, by
+    /// [`Demo::raise_toast`], on the same obligation as the node being added to
+    /// [`Demo::order`]: a node that did not exist when the table was built is a
+    /// node no gate can see.
+    page_members: Vec<PageMember>,
+    /// The six tab buttons, in [`Page::ALL`] order, each paired with the page it
+    /// asks for.
+    ///
+    /// **A [`Tab`] and not a `Vec<Button>`, and the pairing is the whole of it.**
+    /// Six buttons and six pages are two lists the moment they are held apart, and
+    /// `GALLERY_SHORTCUTS` is the reason this file knows what that costs. So the
+    /// page rides on the row, the same argument as [`PageMember`]'s own fields, and
+    /// every reader below — the paint arm, the focus order, the selection pair —
+    /// asks the row rather than indexing a parallel vector.
+    ///
+    /// **The buttons are on every page, so they are in no page's list**: see
+    /// [`Demo::page_members`] and `tests::always_painted_handles`.
+    tabs: Vec<Tab>,
+    /// The page a click asked for, waiting for the demo to act on it.
+    ///
+    /// **The third of the demo's two-hop properties**, after
+    /// [`Demo::pending_key`] and [`Demo::pending_theme`], and the reason is the
+    /// same: [`Callback`] is `Fn`, so a click cannot write a `&mut self` it was not
+    /// lent, and a property is the only thing it can be given that reaches the demo.
+    ///
+    /// **`Property<Option<Page>>` and not a `bool`**, and that is the whole of the
+    /// choice: the six handlers are one closure over one property, and a `bool`
+    /// cannot say *which* button fired it. Six booleans would be six properties
+    /// and a six-armed drain.
+    pending_page: Property<Option<Page>>,
+}
+
+/// One tab on the bar: the page it switches to, and the button that asks for it.
+///
+/// **A row and not two fields on [`Demo`]**, for the reason
+/// [`GALLERY_SHORTCUTS`]'s own doc gives about a `match` beside a list of its
+/// keys: six buttons and six pages are two lists the moment they are held apart,
+/// and they are the kind that drift silently. `Page::ALL` is the third list and it
+/// is the one the tests read, so a pair here that disagrees with it is a pair a
+/// test catches.
+struct Tab {
+    /// The page a click on this button asks for.
+    page: Page,
+    /// The widget itself.
+    button: Button,
+}
+
+/// One row of [`Demo::page_members`]: a node, the page that shows it, and whether
+/// `Tab` stops on it.
+///
+/// **The focusable flag is a field of the row and not a list of its own**, and
+/// that is the whole of the design. A second list — "which controls `Tab` stops
+/// on", beside "which page each control is on" — is exactly the pair that can
+/// disagree, and requirement 6 asks for the active page's focusables while
+/// requirement 2 asks for one membership list; putting the flag in the row is
+/// what lets both be answered without a second copy of either.
+///
+/// [`GALLERY_SHORTCUTS`] is the same argument about the same hazard, one level up,
+/// and it is why that table's page is a field of the row too.
+struct PageMember {
+    /// The node this row is about.
+    handle: Handle,
+    /// The page that shows it.
+    page: Page,
+    /// Whether `Tab` stops here.
+    ///
+    /// **Five nodes are focusable and the flag says which**, so the flag is the
+    /// answer rather than a derivation: the gauge and the chart have no
+    /// `on_event` and no `focused` property, and the pads are driven by the space
+    /// bar and by [`Demo::pad_at`] — neither is a control a `Tab` could move focus
+    /// to, and a stop where nothing lights up is a stop a reader cannot see. See
+    /// [`Demo::offer_to`], which is the other half of that decision.
+    focusable: bool,
 }
 
 impl Demo {
@@ -2335,10 +3134,22 @@ impl Demo {
     /// the theme, which reaches the text through the same property graph the
     /// pads use.
     ///
+    /// **`page` is taken rather than set afterwards**, and that is the shape the
+    /// whole of this task rests on: a demo built on one page and switched to
+    /// another would have a first frame — and on this host a first frame is a
+    /// capture — with the wrong page's commands on it. Three gates are closed in
+    /// the constructor rather than on the first switch, and the hit-test gate is
+    /// closed by [`Demo::sync_page_visibility`] before this returns, so the first
+    /// frame hit-tests against the page the run asked for too.
+    ///
     /// The error is a message rather than a type of its own: the tree is
     /// written out here, so a node that cannot be attached is a bug in this
     /// file and not a runtime condition a caller could act on.
-    fn new(metrics: TextMetrics, picture: Option<Picture>) -> Result<Self, &'static str> {
+    fn new(
+        metrics: TextMetrics,
+        picture: Option<Picture>,
+        page: Page,
+    ) -> Result<Self, &'static str> {
         let theme = Theme::new();
         let mut nodes = Arena::new();
         let mut pads = Vec::new();
@@ -2403,6 +3214,163 @@ impl Demo {
                 return Err("ui_demo: a pad could not be attached to the row");
             }
         }
+        // The card's own position, **which it did not have until task 24.2**: a
+        // `Stack` places a child at the origin unless the child says otherwise,
+        // and every other positioned node in this function says. So the card was
+        // the one node whose origin was implicit, and it is now explicit for the
+        // same reason as the rest — [`CONTENT_TOP`] is added **at the position**,
+        // never to the constant.
+        //
+        // **The pads move with it rather than being moved themselves**, because
+        // they are the row's children and the row lays them out inside its own
+        // box: one write here is one shift for the card and the three pads, and a
+        // second placement of the pads would be a second thing to keep in step.
+        {
+            let card = nodes
+                .get_mut(row.handle())
+                .ok_or("ui_demo: the card of pads is missing")?;
+            card.layout_mut()
+                .set_position(Some(Offset::new(0.0, CONTENT_TOP)));
+        }
+
+        // **What the page a click asked for, waiting for the demo to act on it.**
+        // Declared before the bar because the six handlers are wired into it on
+        // the next block. See [`Demo::pending_page`] for why it is a property and
+        // why it is an `Option<Page>` rather than a `bool`.
+        let pending_page = Property::new(None);
+
+        // --------------------------------------------- task 24.3: the tab bar
+        //
+        // **A `Container` in `row()` holding one `Button` per page, and the
+        // operator's decision of 2026-10-03 that it is built in the demo** — there
+        // is no `TabBar` in `ui_core` and building one was declined, so
+        // `DEMO_APPLICATION.md` gaps #3 and #7 stay open and this is what gap #7
+        // prescribes for the dock.
+        //
+        // Four things are decided here and each has a reason:
+        //
+        // - **`LayoutMode::row()`, which places the buttons.** The bar is the
+        //   demo's one container whose children it does *not* place itself: the
+        //   six buttons are laid out by `arrange_flex` inside the bar's padded
+        //   box, exactly as the card lays the three pads out inside its own. That
+        //   is why no button's rect appears in `Demo::placed_handles` — the list
+        //   is of the leaves the demo *places* — and why the six are in
+        //   `tests::undrawn_leaf_exemptions` with the three pads rather than
+        //   named;
+        // - **the theme's `Surface` behind it**, bound as a property rather than
+        //   read once, for the reason the card's is: the property graph carries a
+        //   theme switch to a widget that is holding a token, and
+        //   `the_tab_bar_follows_a_theme_switch` is what says it did;
+        // - **`Padding::all(TAB_BAR_PADDING)`**, which is both the requirement's
+        //   visible padding and the reason a button lands at `y 10` — a `row`
+        //   places a child at the padded edge of its parent's inner box;
+        // - **a tight [`WINDOW.width`] by [`TAB_BAR_HEIGHT`]**, so the bar spans
+        //   the window rather than being as wide as six buttons and leaving the
+        //   background showing beside them.
+        let mut tab_bar = Container::new(&mut nodes, LayoutMode::row());
+        tab_bar.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(TAB_BUTTON_GAP)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+        );
+        tab_bar.set_padding(&mut nodes, Padding::all(TAB_BAR_PADDING));
+        tab_bar.background = themed_color(
+            &theme.property(ThemeToken::Surface),
+            Color::new(0, 0, 0, 255),
+        );
+        tab_bar.border_radius.set(
+            theme
+                .get(ThemeToken::BorderRadiusMd)
+                .as_number()
+                .unwrap_or(CARD_RADIUS_FALLBACK),
+        );
+        {
+            let bar = nodes
+                .get_mut(tab_bar.handle())
+                .ok_or("ui_demo: the tab bar is missing")?;
+            bar.layout_mut().set_constraints(Constraints::tight(Size {
+                width: WINDOW.width,
+                height: TAB_BAR_HEIGHT,
+            }));
+            // **At the window's own top left, and written out rather than left
+            // implicit**, for the reason the card's position is: every other
+            // positioned node in this function declares one, and a bar whose
+            // origin came from a parent's default is one whose origin a change of
+            // that parent's mode would move. The root is `LayoutMode::Absolute`
+            // **because** of task 24.2's card — a `Stack` parent reads no
+            // `position` at all — and the bar is the second node to depend on
+            // that.
+            //
+            // **No [`CONTENT_TOP`] here**, and that is the one position in this
+            // function that does not carry it: the shift is what moved the gallery
+            // *down past* this strip, so adding it here would put the bar where
+            // the gallery now begins.
+            bar.layout_mut().set_position(Some(Offset::new(0.0, 0.0)));
+        }
+        // **The six buttons, in [`Page::ALL`] order**, and the page rides on the
+        // row rather than beside it. Three things each button is given before it
+        // is measured, and the order is the whole of it:
+        //
+        // - the **palette**, which is [`tab_palette`]'s answer and is the *only*
+        //   way the demo supplies a selected appearance — `Button` has no
+        //   `selected` property, so a reader looking for one in
+        //   `ui_core::widgets::button` will not find it;
+        // - the **geometry properties**, because `Button::content_size` reads
+        //   `padding_h`, `font_size` and the label, and a width measured before
+        //   they are set is a width for the widget's defaults;
+        // - **`snap_to_state`**, for the reason every other widget in this
+        //   function has one: `Button::new` wrote the *default* palette's colours,
+        //   and aiming alone would leave the bar grey until something moved it.
+        let mut tabs: Vec<Tab> = Vec::with_capacity(Page::ALL.len());
+        for &tab_page in &Page::ALL {
+            let mut button = Button::new(&mut nodes, tab_page.name());
+            button.set_palette(tab_palette(&theme, tab_page == page));
+            button.font_size.set(TAB_BUTTON_FONT);
+            button.padding_h.set(TAB_BUTTON_PADDING_H);
+            button.border_radius.set(
+                theme
+                    .get(ThemeToken::BorderRadiusMd)
+                    .as_number()
+                    .unwrap_or(CARD_RADIUS_FALLBACK),
+            );
+            {
+                // **The width is measured, not guessed**, and it is measured
+                // through the demo's own [`TextMetrics`] rather than through a
+                // stand-in: `Button::content_size` is the only thing in the
+                // repository that knows how wide a page name is at
+                // [`TAB_BUTTON_FONT`], and a constant per page would be six copies
+                // of an answer that has to change when the font or the padding
+                // does. **The height is [`TAB_BUTTON_TALL`] outright** rather than
+                // the widget's `Button::size`, because `size` floors at 44 and
+                // requirement 2 asks for 44 — a floor would be indistinguishable
+                // from the number here, and the floor is the widget's business
+                // while this number is the demo's.
+                let content =
+                    button.content_size(&tab_advance(&metrics), tab_line_height(&metrics));
+                let size = Size::new(content.width, TAB_BUTTON_TALL);
+                nodes
+                    .get_mut(button.handle())
+                    .ok_or("ui_demo: a tab button's node is missing")?
+                    .layout_mut()
+                    .set_constraints(Constraints::tight(size));
+            }
+            {
+                // **The click writes a property, and the property is drained at
+                // the end of the event that fired it** — see
+                // [`Demo::pending_page`] and the drain in [`Demo::handle_event`].
+                let asked = pending_page.clone();
+                button.on_click = Callback::new(move || asked.set(Some(tab_page)));
+            }
+            button.snap_to_state();
+            if !tab_bar.add_child(&mut nodes, button.handle()) {
+                return Err("ui_demo: a tab button could not be attached to the bar");
+            }
+            tabs.push(Tab {
+                page: tab_page,
+                button,
+            });
+        }
 
         // The text panel, and the labels in it. Their colours come from the
         // theme like the pads', bound through the token `C` moves, so both a
@@ -2447,16 +3415,29 @@ impl Demo {
         // margin: a `Stack` places every child at its own origin, so the margin
         // has to come from the column's declared position rather than from the
         // panel's rect.
+        //
+        // [`CONTENT_TOP`] is added **here** and not to [`TEXT_PANEL_ORIGIN`],
+        // which is the rule every position in this function follows: the constant
+        // keeps saying what it clears and the shift is one term at the place it
+        // is written down.
         nodes
             .get_mut(text_column.handle())
             .ok_or("ui_demo: the text column is missing")?
             .layout_mut()
-            .set_position(Some(Offset::new(TEXT_PANEL_ORIGIN.0, TEXT_PANEL_ORIGIN.1)));
+            .set_position(Some(Offset::new(
+                TEXT_PANEL_ORIGIN.0,
+                TEXT_PANEL_ORIGIN.1 + CONTENT_TOP,
+            )));
         let text_panel = Container::new(&mut nodes, LayoutMode::Absolute);
         {
             let panel = nodes
                 .get_mut(text_panel.handle())
                 .ok_or("ui_demo: the text panel is missing")?;
+            // **Untouched, and the reason is in [`Demo::route_input_event`].** The
+            // panel is `tight(TEXT_PANEL)` at the window's own origin, so it covers
+            // the tab bar's strip and shadows it for hit tests; trimming its height
+            // would not help either, because a box that starts at `y 0` covers the
+            // strip whatever its height is, and `TEXT_PANEL` is task 24.2's.
             panel
                 .layout_mut()
                 .set_constraints(Constraints::tight(TEXT_PANEL));
@@ -3023,13 +4004,27 @@ impl Demo {
         // at this layout did not: it asked for a 1160-tall window and this host
         // returned 1052, which put the bottom of the keyboard off the bottom of
         // the screen where nobody could see it. Checked here rather than only in
-        // a test because **this is the failure that is invisible until somebody
+        // a test because **this is a failure that is invisible until somebody
         // looks at the screen**, and the demo is built long before that.
+        //
+        // **`CONTENT_TOP` is in both lines and `WINDOW` is the bound, not
+        // `BAND_TOP + BAND_HEIGHT`.** The band's box hangs off the window's
+        // bottom edge, so those two are the same number by construction
+        // ([`BAND_TOP`] is the window's height less [`BAND_HEIGHT`]) and writing
+        // it would only hide the fact being checked; what is actually being asked
+        // is whether the band's **contents**, which the shift moved down
+        // [`CONTENT_TOP`], still end on the screen.
         for (what, bottom) in [
-            ("the keyboard", KEYBOARD_ORIGIN.1 + KEYBOARD_HEIGHT),
-            ("the field", TEXT_INPUT_ORIGIN.1 + TEXT_INPUT_SIZE.height),
+            (
+                "the keyboard",
+                KEYBOARD_ORIGIN.1 + CONTENT_TOP + KEYBOARD_HEIGHT,
+            ),
+            (
+                "the field",
+                TEXT_INPUT_ORIGIN.1 + CONTENT_TOP + TEXT_INPUT_SIZE.height,
+            ),
         ] {
-            if bottom > BAND_TOP + BAND_HEIGHT {
+            if bottom > WINDOW.height {
                 return Err(what);
             }
         }
@@ -3096,19 +4091,42 @@ impl Demo {
                 .layout_mut()
                 .set_constraints(Constraints::tight(WINDOW));
         }
-        // **Presented here, at construction**, so the demo opens with it up. See
-        // the module doc for why that is a decision about evidence and not about
-        // the demo: input injection does not work on this host, so a dialog that
-        // began hidden could only ever be photographed through an instrument.
-        let _ = dialog.present();
-        // Focus starts **inside** the dialog, on its first action. Two things
-        // need it and neither can do without: `Focus` hands an activation key to
-        // the button node itself, so a dialog with nothing focused inside it has
-        // an `Enter` that reaches no button; and `Space` is the demo's
-        // *press-all-pads* gesture only `while self.focused.is_none()`, so with
-        // focus outside the dialog a bare space would press the three pads
-        // underneath the scrim.
-        let first_action: Option<Handle> = dialog.actions.first().map(|action| action.handle());
+        // **Presented here, at construction, and only on the page that shows it.**
+        // Both halves are decisions and the second one is not this file's:
+        //
+        // - *at construction*, so the capture of the overlays page needs no seed,
+        //   no rebuild and no environment variable — see the module doc;
+        // - *only when the run opened on `overlays`*, because a dialog is page
+        //   content and a modal dialog on a page that does not show it is a window
+        //   where **every tap and every key is swallowed by a scrim nobody can
+        //   see**. That is not a hypothetical degradation: it is the launch state
+        //   of `ui_demo` with no argument at all, once the default page is
+        //   `pads`, and it is the state `.ai/NEVERAGAIN.md` § *A still screenshot
+        //   of a 4 fps application* spent three reviews mistaking for something
+        //   else. `D` is the way to bring it up from any page, and it activates
+        //   `overlays` as it does.
+        //
+        // What would reverse it: nothing in this task, and the operator's decision
+        // that `pads` is the default page is what makes the condition necessary.
+        let presented = page == Page::Overlays;
+        if presented {
+            let _ = dialog.present();
+        }
+        // Focus starts **inside** the dialog, on its first action, and on nothing
+        // at all when the dialog is not presented. Two things need it and neither
+        // can do without: `Focus` hands an activation key to the button node
+        // itself, so a dialog with nothing focused inside it has an `Enter` that
+        // reaches no button; and `Space` is the demo's *press-all-pads* gesture
+        // only `while self.focused.is_none()`, so with focus outside the dialog a
+        // bare space would press the three pads underneath the scrim. A record
+        // naming a button of a dialog that is not there is the stale record
+        // `Demo::focus_is_live` exists to recognise, and the honest answer is that
+        // there was never a record to make.
+        let first_action: Option<Handle> = if presented {
+            dialog.actions.first().map(|action| action.handle())
+        } else {
+            None
+        };
 
         // ----------------------------------------------- task 23: the toasts
         //
@@ -3160,7 +4178,26 @@ impl Demo {
         // until somebody looks at the screen**, and the demo is built long before
         // that. The three are the control column's readouts, which end at
         // [`CHART_ORIGIN`]'s x less sixteen, the image-fit label's own line, which
-        // is the tallest thing above the chart, and the text-entry band.
+        // is the tallest thing above the chart, and **the window's own bottom
+        // edge**.
+        //
+        // **The first two bounds are in content coordinates and need no
+        // [`CONTENT_TOP`]**, and that they do not is the point of putting the
+        // shift at the placement rather than in the constants: the chart and the
+        // label above it both moved down by the same 64, so the gap between them
+        // is the same gap it was and this block reads true unedited. A version
+        // that added the shift to one side of a comparison and not the other
+        // failed the build on the first run, which is what a content-coordinate
+        // comparison is for.
+        //
+        // **The third bound was the text-entry band and task 24.2 replaced it**,
+        // because the band is `input`'s and the chart is `data`'s, and the shift
+        // that pays for the tab bar puts the chart's ink past [`BAND_TOP`] — two
+        // boxes that can no longer be on the same page, so a bound between them
+        // would be a bound between pages. What is left that both share is the
+        // window, and asking the ink to be **on the screen** is the stronger
+        // half of the old claim rather than a weaker one: the old one was implied
+        // by the band's bottom being the window's, and it is now said directly.
         //
         // **The bound is the widget's, and that is the whole of this block.**
         // There is no constant here of the reach's own, and there was: the demo
@@ -3214,8 +4251,8 @@ impl Demo {
             if reach.y < IMAGE_FIT_ORIGIN.1 + label.height {
                 return Err("the chart, or its stroke, reaches into the image's own readout");
             }
-            if reach.y + reach.height > BAND_TOP {
-                return Err("the chart, or its stroke, reaches into the text-entry band");
+            if reach.y + reach.height > WINDOW.height {
+                return Err("the chart, or its stroke, is drawn off the bottom of the window");
             }
             // **Downward is the fourth direction, and this check does not settle
             // it either** — [`CHART_READOUT_GAP`] is four pixels and the reach is
@@ -3225,14 +4262,30 @@ impl Demo {
             // less the x labels' gutter, and that gutter is another private
             // constant. **So the claim is measured rather than derived**, in
             // `no_node_is_clipped_and_the_chart_keeps_its_geometry_inside_its_own_
-            // rect`: the lowest thing the chart draws is y=670 against a readout
-            // that starts at 699.
+            // rect`, and **the rows it measures to are in [`CHART_READOUT_GAP`]'s
+            // own doc** rather than repeated here. An earlier version of this
+            // comment quoted them — 670 and 699, then 734 and 763 — and got two of
+            // the four wrong, because a figure copied into a second place is a
+            // figure with two owners and the review of task 24.2 found the two
+            // disagreeing. **One place says the number; this one says who measured
+            // it.**
         }
 
         // The gauge, its readout, the slider, its own readout and the four newer
         // widgets are each placed inside the controls layer, which is what
         // `Absolute` is for: each at its own offset from the layer's origin, which
         // is the window's own top left.
+        //
+        // **`CONTENT_TOP` goes on every one of them, at the position.** It is the
+        // whole of task 24.2's shift, and putting it here rather than in the
+        // constants is what keeps [`GAUGE_ORIGIN`]'s doc true — 240 is below the
+        // image-fit label's line and 440 is below the dial's own bottom edge, and
+        // those relationships are what a reader checks. A mutation that drops the
+        // term from any of these places is what `the_gallery_above_the_band_is_where_
+        // it_was` and the per-page collision tests exist to kill — **and there are
+        // four syntactic sites here holding seventeen nodes**, which is why the
+        // sweep that found the text column unasserted had to run all six sites
+        // rather than one "placement" and call it done.
         for (node, origin) in [
             (gauge.handle(), GAUGE_ORIGIN),
             (gauge_readout.label.handle(), GAUGE_READOUT_ORIGIN),
@@ -3241,20 +4294,23 @@ impl Demo {
                 .get_mut(node)
                 .ok_or("ui_demo: the gauge is missing")?
                 .layout_mut()
-                .set_position(Some(Offset::new(origin.0, origin.1)));
+                .set_position(Some(Offset::new(origin.0, origin.1 + CONTENT_TOP)));
         }
         nodes
             .get_mut(slider.widget.handle())
             .ok_or("ui_demo: the slider is missing")?
             .layout_mut()
-            .set_position(Some(Offset::new(SLIDER_ORIGIN.0, SLIDER_ORIGIN.1)));
+            .set_position(Some(Offset::new(
+                SLIDER_ORIGIN.0,
+                SLIDER_ORIGIN.1 + CONTENT_TOP,
+            )));
         nodes
             .get_mut(slider_readout.label.handle())
             .ok_or("ui_demo: the slider readout is missing")?
             .layout_mut()
             .set_position(Some(Offset::new(
                 SLIDER_ORIGIN.0,
-                SLIDER_ORIGIN.1 + SLIDER_READOUT_DROP,
+                SLIDER_ORIGIN.1 + SLIDER_READOUT_DROP + CONTENT_TOP,
             )));
         for (node, origin) in [
             (toggle.handle(), TOGGLE_ORIGIN),
@@ -3275,12 +4331,18 @@ impl Demo {
                 .get_mut(node)
                 .ok_or("ui_demo: a node in the band is missing")?
                 .layout_mut()
-                .set_position(Some(Offset::new(origin.0, origin.1)));
+                .set_position(Some(Offset::new(origin.0, origin.1 + CONTENT_TOP)));
         }
-        // The layer is the window, not a box of its own: it is a `Stack` child,
-        // and a `Stack` sizes a child from its own constraints but places it at
-        // the origin. Giving it the window's size makes the offsets inside it
-        // window coordinates, which is what the positions above assume.
+        // The layer is the window, not a box of its own: it is an `Absolute`
+        // child, and an `Absolute` parent places a child at the position the child
+        // declares, so the offsets written above are window coordinates whatever
+        // this box's own size is. **It is `tight(WINDOW)` and it is left that way**,
+        // and the reason is in [`Demo::route_input_event`]: the two readers of the
+        // root's child list run in opposite directions, so shrinking this box to
+        // stop it shadowing the tab bar would move a rect task 24.2 owns — **and it
+        // could not help at all**, because the layer's origin has to stay at
+        // `0, 0` for the offsets above to be window coordinates, and a box that
+        // starts at `y 0` covers the strip whatever its height is.
         //
         // It was called the **button band** while there were buttons in it, and it
         // is now the controls layer — it holds every control below the pads and
@@ -3328,9 +4390,67 @@ impl Demo {
 
         // A stack: the background fills the window behind the row of pads, the
         // text panel and the controls layer, and all three are painted over it.
-        let root = Container::new(&mut nodes, LayoutMode::Stack);
+        //
+        // **`LayoutMode::Absolute` rather than `LayoutMode::Stack` since task
+        // 24.2, and this is the one word the pads card's shift needed.**
+        // `TASK_UI_PRIM_24.2.md` says the card is *"a `Stack` child with no
+        // `set_position`, so it sits at the origin by default"* and asks for an
+        // explicit `Offset::new(0.0, CONTENT_TOP)` — and **`set_position` on a
+        // `Stack` child does nothing**: `arrange_stack` (`layout.rs:1361`) builds
+        // every `Placement` at `Offset::ZERO` and **never reads `position`**, where
+        // `arrange_absolute` (`layout.rs:1380`) reads it and is the only arm that
+        // does — and `LayoutState::position`'s own doc (`layout.rs:835`) says
+        // *"Returns the position an `Absolute` parent places this node at, if it
+        // declares one."* The first run of this task failed with the card still at
+        // `y: 0.0`.
+        //
+        // **`Absolute` is the same arrangement for every other child here**, and
+        // that is what keeps this one word rather than a re-flow: the two arms
+        // differ **in exactly one field, the origin** — the same
+        // `sized(nodes, handle, loose)` extent and the same loosened constraints —
+        // and a child that declares no position therefore lands on `Offset::ZERO`
+        // under either, which three of these four do. The background and the
+        // controls layer are `tight(WINDOW)` and stay at `0, 0`; the text panel is
+        // `tight(TEXT_PANEL)` and stays at `0, 0` with the column inside it placed
+        // at [`TEXT_PANEL_ORIGIN`] as before. **So the card is the only child whose
+        // rect this changes**, and that is read off the one differing field rather
+        // than off a test.
+        //
+        // `every_page_places_every_rect_where_the_gallery_placed_it` used to be
+        // cited here and **cannot support the claim**: it compares the six pages
+        // with *each other*, so a change common to all six — the card 64 px higher
+        // on every page — passes it. The review of this task caught that. The test
+        // that *does* pin the card is `the_gallery_above_the_band_is_where_it_was`,
+        // which reads its measured `y` against [`CONTENT_TOP`] directly.
+        let root = Container::new(&mut nodes, LayoutMode::Absolute);
         for &child in &[
             background,
+            // **The tab bar between the background and everything else**, which is
+            // requirement 1's *"as the first child so it paints over the background
+            // and under everything else"*: the background is attached first, so the
+            // bar is painted over it, and the card, the text panel and the controls
+            // layer are attached after.
+            //
+            // **And it is the position `Tab` order is read off**, which is why it
+            // is second and not last: `Focus::focus_order` walks the tree in child
+            // order, so a bar attached after the controls layer would put the six
+            // buttons *last* in the focus walk and requirement 6's "first" would be
+            // false. `tab_walks_the_six_buttons_before_the_pages_own_controls` is
+            // what says it.
+            //
+            // **Being second here has one cost, and it is measured rather than
+            // argued:** the controls layer and the text panel are both boxes that
+            // start at the window's origin and are attached after this one, and
+            // `hit_test_from` walks children in **reverse**, so a tap over a bar
+            // button comes back with the chain `[controls layer, root]` and the bar
+            // is not on it. [`Demo::route_input_event`] has a fallback for exactly
+            // that, and the comment there is where the measurement lives.
+            //
+            // **Painting under everything else is satisfied by geometry rather than
+            // by this list**, and there is nothing else in the strip to be under:
+            // `the_bar_and_the_background_are_the_only_thing_in_the_strip` asserts
+            // that over every page's every command.
+            tab_bar.handle(),
             row.handle(),
             text_panel.handle(),
             controls.handle(),
@@ -3531,7 +4651,109 @@ impl Demo {
         // in this order rather than the other one round. One `extend` for the
         // host, whose walk carries every toast under it.
         order.extend(paint_order(&nodes.borrow(), toasts.handle()));
-        Ok(Demo {
+
+        // ------------------------------------------------ task 24.1: the pages
+        //
+        // **The page table, built once here and read by all three gates.** See
+        // [`Demo::page_members`] for why it is one list rather than a `match` at
+        // each gate, and [`PageMember`] for why `Tab`'s answer is a field of the
+        // row rather than a second list.
+        //
+        // **The order within a page is the tree's paint order**, which is what
+        // makes a row readable: the seven text labels are in the order
+        // `demo_labels` builds them and the controls are in the order they were
+        // added to the layer. `Tab` does not read this order — `Focus` re-derives
+        // the order by walking the tree — but a table whose rows are in no
+        // order is a table nobody can check against the window.
+        //
+        // **The twelve nodes that are deliberately absent are the always-painted
+        // set**, and they are the twelve `tests::always_painted_handles` names —
+        // which is the only place in the source that writes them out, so that a
+        // second enumeration cannot drift from it. Three of them record no
+        // commands of their own; the background records a filled rect every frame,
+        // so "it draws nothing" is not what holds any of the twelve up — the
+        // absence of a row is. The tab bar and its six buttons are seven of them,
+        // which is why the count is twelve and not five: the bar is a container and
+        // a button is a leaf, so the set grew by seven with the strip and each of
+        // the seven is on this list rather than on a page's own. The readout is
+        // requirement 8's *"Keep fps label"*, which is
+        // the operator's instruction and not this task's to page; the toast host is
+        // here for the reason its own row's absence gives below. **That helper is
+        // the assertion that says this list is complete**, and it could not be
+        // here: the test module is the only place that can see `Demo::order` and
+        // the table together.
+        let mut page_members: Vec<PageMember> = Vec::new();
+        let mut on = |page: Page, handle: Handle, focusable: bool| {
+            page_members.push(PageMember {
+                handle,
+                page,
+                focusable,
+            });
+        };
+        // `pads`: the card the three pads sit in, then the three pads. None of
+        // them is a `Tab` stop — see [`PageMember::focusable`].
+        on(Page::Pads, row.handle(), false);
+        for pad in &pads {
+            on(Page::Pads, pad.node, false);
+        }
+        // `text`: the panel, the column inside it, and the seven labels. The
+        // column is here rather than left out because it is the node the labels
+        // are children of, and `hit_test` skips the whole subtree of an invisible
+        // node — hiding the labels alone would leave a container that is on no
+        // page drawing nothing over a page that is not showing.
+        on(Page::Text, text_panel.handle(), false);
+        on(Page::Text, text_column.handle(), false);
+        for &handle in &label_nodes {
+            on(Page::Text, handle, false);
+        }
+        // `input`: the field, its two readouts and the keyboard. The field is the
+        // only focusable here, and the keyboard is not: a key is driven by the
+        // press that grabbed it, not by `Tab`.
+        on(Page::Input, text_input.handle(), true);
+        on(Page::Input, text_readout.label.handle(), false);
+        on(Page::Input, submit_readout.label.handle(), false);
+        on(Page::Input, keyboard.handle(), false);
+        // `controls`: the three controls and their three readouts. All three
+        // controls are focusable, which is why `Tab` reaches three of them here
+        // and one on `data` and one on `input` — the five focusables of 2026-10-03
+        // split across three pages, and that split is the whole of requirement 6.
+        on(Page::Controls, slider.node(), true);
+        on(Page::Controls, slider_readout.label.handle(), false);
+        on(Page::Controls, toggle.handle(), true);
+        on(Page::Controls, toggle_readout.label.handle(), false);
+        on(Page::Controls, progress.handle(), true);
+        on(Page::Controls, progress_readout.label.handle(), false);
+        // `data`: the gauge, the chart and the image, and their readouts. **The
+        // image is the one focusable and the gauge and the chart are not**, for
+        // the reason [`PageMember::focusable`] gives: a gauge is a display and a
+        // chart answers no event at all, and an `Image` says where focus is in
+        // words because it has no `focused` property to draw a ring from.
+        on(Page::Data, gauge.handle(), false);
+        on(Page::Data, gauge_readout.label.handle(), false);
+        on(Page::Data, image.handle(), true);
+        on(Page::Data, image_fit_readout.label.handle(), false);
+        on(Page::Data, chart.handle(), false);
+        on(Page::Data, chart_readout.label.handle(), false);
+        // `overlays`: the dialog, its two actions, and the toast host's cards.
+        // **The host itself is not a row**, and the reason is that it records no
+        // commands of its own — every command belongs to the toast that recorded
+        // it — so a row for it would buy nothing and cost a thing: the walk gives
+        // the host `PaintState::new()`, which is *not dirty*, precisely so it does
+        // not ask the renderer to submit an empty batch every frame. Putting it in
+        // the table would overwrite that with a dirty empty state on every frame
+        // the overlays page is not showing. The cards themselves are rows, and a
+        // card raised later is added by [`Demo::raise_toast`].
+        on(Page::Overlays, dialog.handle(), false);
+        for action in &dialog.actions {
+            on(Page::Overlays, action.handle(), false);
+        }
+        for index in 0..toasts.len() {
+            if let Some(handle) = toasts.toast_handle(index) {
+                on(Page::Overlays, handle, false);
+            }
+        }
+
+        let mut demo = Demo {
             nodes,
             root: root.handle(),
             order,
@@ -3554,7 +4776,17 @@ impl Demo {
             // this function: a modal opens with focus inside it. `sync_dialog_focus`
             // is what turns this into the property the button draws a ring from.
             focused: first_action,
-            containers: vec![row, text_column, text_panel, controls, root],
+            containers: vec![
+                row,
+                text_column,
+                text_panel,
+                controls,
+                root,
+                // **Last, and the field's doc says why**: two helpers name a
+                // container by index and appending keeps the five that were
+                // already there the same five.
+                tab_bar,
+            ],
             gauge,
             gauge_type,
             gauge_readout,
@@ -3596,7 +4828,417 @@ impl Demo {
             // cards raised above came off the front of the table, so a press of
             // `K` says the third rather than repeating the first.
             toast_next: TOASTS_AT_LAUNCH,
+            page,
+            page_members,
+            tabs,
+            pending_page,
+        };
+        // **The hit-test gate is closed here rather than on the first switch**, so
+        // the first frame is gated as well as the first frame *after* a switch. It
+        // is the one gate that has to be: `set_visible` is a write to the arena, so
+        // doing it here rather than lazily on the first `show_page` is what makes
+        // `input::route` skip an off-page subtree from the very first tap.
+        demo.sync_page_visibility();
+        Ok(demo)
+    }
+
+    /// Returns whether `handle` is one of the nodes a page chooses between.
+    ///
+    /// **A superset of [`Demo::shows`], and not the same thing**: this asks
+    /// whether *any* page lists the node, and `shows` asks whether the page on
+    /// show is that one, so a node another page lists answers `true` here and
+    /// `false` there. Every gate that asks "is this node hidden" has to ask *this*
+    /// rather than `shows`, or the always-painted set — the five
+    /// `tests::always_painted_handles` names, which **no page lists at all**, so
+    /// both of these answers are `false` for every one of them — is hidden on every
+    /// page.
+    fn is_page_content(&self, handle: Handle) -> bool {
+        self.page_members
+            .iter()
+            .any(|member| member.handle == handle)
+    }
+
+    /// Returns whether the page on show is the one that shows `handle`.
+    ///
+    /// **One predicate for the paint gate, the hit-test gate and the three pointer
+    /// helpers**, and that is the requirement rather than a convenience: they are
+    /// three gates over one list, so a gate that answered from a second list
+    /// would be a page that is half-hidden, which is the defect requirement 4's
+    /// three bullets exist to name.
+    ///
+    /// A node in no page's list answers `false`, which is why every caller that
+    /// wants "drawn or not" asks [`Demo::on_show`] instead.
+    fn shows(&self, handle: Handle) -> bool {
+        self.page_members
+            .iter()
+            .any(|member| member.handle == handle && member.page == self.page)
+    }
+
+    /// Returns whether `handle` is drawn and hit on the page on show.
+    ///
+    /// **The always-painted set passes**, on [`Demo::is_page_content`]'s argument, and
+    /// this is the predicate both of those gates use.
+    fn on_show(&self, handle: Handle) -> bool {
+        !self.is_page_content(handle) || self.shows(handle)
+    }
+
+    /// Returns the handles `Tab` stops on while `page` is on show, in table order.
+    ///
+    /// **A filter over the one list rather than a list of its own**, which is
+    /// what makes "the active page's focusables" answerable at all: a focusable
+    /// that was not a member of its own page would be a control `Tab` walks to on
+    /// a page that does not show it, and the 2026-10-03 review's hazard is
+    /// precisely a pair of lists that can disagree.
+    ///
+    /// **A tab button cannot be added here**, and this function's own signature says
+    /// why: it filters on `member.page == self.page`, and a [`PageMember`] carries
+    /// **one page per row**, so it cannot return a node that is on every page.
+    ///
+    /// **Requirement 6 puts the addition in [`Demo::focus_navigation`] instead** —
+    /// the six buttons are on every page, so they belong to every page's *focusable
+    /// set* rather than to any page's *membership*, and that is a different question
+    /// asked in a different place. This function's doc used to claim the addition as
+    /// its own, which was both a second definition of where it goes and a promise the
+    /// signature cannot keep.
+    ///
+    /// **And the shape is now built rather than described.** The six buttons are on
+    /// every page and no page's list, which is `tests::always_painted_handles`'
+    /// shape; `Demo::tab_focusables` is the one place they enter the `Tab` order,
+    /// and `every_page_lists_at_least_one_node_and_no_node_is_on_two_pages` is the
+    /// assertion that says a button *as a row of the table* would make it a page's
+    /// own node instead.
+    ///
+    /// This still returns the page's own controls alone, and the six pages between
+    /// them hold the five focusables the demo has besides the bar: three on
+    /// `controls`, one on `data`, one on `input`.
+    fn focusables(&self) -> Vec<Handle> {
+        self.page_members
+            .iter()
+            .filter(|member| member.page == self.page && member.focusable)
+            .map(|member| member.handle)
+            .collect()
+    }
+
+    /// Returns the six tab buttons' handles, in [`Page::ALL`] order.
+    ///
+    /// **The one place the bar enters the `Tab` order**, and it is a function
+    /// rather than a written-out list for the reason
+    /// [`Demo::focusables`] is a filter: a list of six handles beside
+    /// [`Demo::tabs`] is a second list of the six buttons, and
+    /// `.ai/NEVERAGAIN.md`'s *a sweep of a mechanism's call sites is not a sweep of
+    /// the data it is built from* is what a second list costs.
+    ///
+    /// **The order inside this list is not the order `Tab` walks.** That is the
+    /// tree's paint order — [`input::Focus`] recomputes it by walking from
+    /// [`Demo::root`] — and the bar is attached to the root **before** the text
+    /// panel and the controls layer, so the six come first for a reason that is in
+    /// `Demo::new`'s child list rather than here. `tab_walks_the_six_buttons_
+    /// before_the_pages_own_controls` is what says the two agree.
+    fn tab_focusables(&self) -> Vec<Handle> {
+        self.tabs.iter().map(|tab| tab.button.handle()).collect()
+    }
+
+    /// Returns the widget for the tab button at `handle`, or `None` for any other
+    /// node in the demo.
+    ///
+    /// **A search over [`Demo::tabs`] rather than a position**, because a handle is
+    /// what routing and the paint walk arrive with and a position would be a second
+    /// way of naming the same six things.
+    fn tab_button(&self, handle: Handle) -> Option<&Button> {
+        self.tabs
+            .iter()
+            .find(|tab| tab.button.handle() == handle)
+            .map(|tab| &tab.button)
+    }
+
+    /// Returns the index of the tab button under `(x, y)`, and `None` for a point
+    /// that is not over one.
+    ///
+    /// **Asked of the buttons' own laid-out rects**, which are the boxes they are
+    /// drawn in and the boxes [`input::route`] hit-tests against — so a press that
+    /// this says misses is a press the router cannot deliver either. That is the
+    /// same rule the three existing helpers follow (`Demo::pad_at`,
+    /// `Demo::slider_at`, `Demo::keyboard_at`) and for the same reason: a hit test
+    /// of the demo's own arithmetic would be asking twice and checking nothing.
+    fn tab_at(&self, x: f32, y: f32) -> Option<usize> {
+        self.tabs.iter().position(|tab| {
+            self.node_rect(tab.button.handle())
+                .is_some_and(|rect| over_rect(rect, x, y))
         })
+    }
+
+    /// Points every tab button at the palette its role calls for under the theme the
+    /// demo is **heading for**, and carries the buttons for `changed` to it.
+    ///
+    /// **The palettes are written for all six and the transition is aimed at the
+    /// ones in `changed`, and that split is the whole of requirement 4.** A page
+    /// switch passes the two pages it moved between — the one that was selected and
+    /// the one that now is — because those are the only two whose pair differs; a
+    /// theme switch passes all six, because every button's palette moved.
+    ///
+    /// **The theme is [`Demo::target_theme`] and not [`Demo::theme`].** The demo's
+    /// own `theme` is *mid-transition* for 300 ms after a switch, so a bar whose
+    /// palette were read from it would be aimed at a target that is moving — which
+    /// is precisely the defect [`Demo::toggle_theme`]'s doc describes for a palette
+    /// read after `switch_to`, reached from the other direction. `target_theme` is
+    /// the two lines `toggle_theme` used to open with, and both now read it.
+    ///
+    /// **The aim is written here and nowhere else, and never per frame.** A
+    /// per-frame aim restarts the button's clock every frame and the colour creeps
+    /// toward its target for ever, which is the gauge needle's argument in reverse
+    /// and the reason `Demo::sync_toggle_state` exists. [`Demo::frame`] ticks the
+    /// six buttons and does not aim them.
+    fn aim_tab_buttons(&mut self, changed: &[Page]) {
+        let theme = self.target_theme();
+        let motion = tab_motion(&theme);
+        for tab in &mut self.tabs {
+            tab.button
+                .set_palette(tab_palette(&theme, tab.page == self.page));
+            if changed.contains(&tab.page) {
+                tab.button.animate_to_state(motion);
+            }
+        }
+    }
+
+    /// Returns the theme the demo is on, or heading for.
+    ///
+    /// **A plain field's answer rather than [`Demo::theme`]'s**, and the difference
+    /// is the whole of what it is for: `theme` is the animating value, and every
+    /// caller that needs to know *where the colours are going* needs the one at the
+    /// end of the transition. This is the two-line `if` that
+    /// [`Demo::toggle_theme`] opened with, and it is here now because the bar needs
+    /// it on every switch and a second copy of the same `if` beside
+    /// `toggle_theme`'s is the pair of lists this file keeps having to apologise
+    /// for.
+    fn target_theme(&self) -> Theme {
+        if self.dark {
+            Theme::dark()
+        } else {
+            Theme::light()
+        }
+    }
+
+    /// Writes each tab button's `hovered` from whether a pointer is over it, and
+    /// aims the buttons whose flag moved.
+    ///
+    /// **Guarded by the value, for the reason `Demo::tick_fps` is.** A pointer that
+    /// moves inside a button arrives as a stream of motion events, and an aim on
+    /// every one of them restarts the transition on every one of them — which is
+    /// the creep `Demo::aim_tab_buttons` exists to avoid, reached from a different
+    /// direction. So the write and the aim happen on the frame the flag changes and
+    /// on no other.
+    ///
+    /// **Asked of [`Demo::tab_at`]**, so "which button is under the pointer" has one
+    /// answer in the demo rather than one per reader.
+    fn sync_tab_hover(&mut self, x: f32, y: f32) {
+        let over = self.tab_at(x, y);
+        for (index, tab) in self.tabs.iter_mut().enumerate() {
+            let wanted = over == Some(index);
+            if tab.button.hovered.get() != wanted {
+                tab.button.hovered.set(wanted);
+                tab.button.animate_to_state(tab_motion(&self.theme));
+            }
+        }
+    }
+
+    /// Holds `index`'s button down, and aims it.
+    ///
+    /// **The press is the demo's to write, for the reason [`Demo::grab_key`]'s
+    /// is**: the gesture recogniser reports a tap on the *release*, so there is no
+    /// "the finger went down on the button" for the widget to read, and the pressed
+    /// appearance has to be on screen for the whole time the pointer is down.
+    ///
+    /// **And the aim is here and not in `Demo::frame`**, on the gauge's argument:
+    /// the tick is per frame, the aim is per press.
+    fn press_tab(&mut self, index: usize) {
+        let motion = tab_motion(&self.theme);
+        if let Some(tab) = self.tabs.get_mut(index) {
+            tab.button.pressed.set(true);
+            tab.button.animate_to_state(motion);
+        }
+    }
+
+    /// Releases whichever button [`Demo::press_tab`] held down, and aims it.
+    ///
+    /// **One function rather than an index**, on [`Demo::release_all`]'s argument:
+    /// the release has to be able to find out *whether* there was a press, and a
+    /// condition on the current position would decline a release whose pointer had
+    /// travelled off the button — which is a button left at 0.95 scale with no
+    /// gesture left that could bring it back.
+    fn release_tab(&mut self) {
+        let motion = tab_motion(&self.theme);
+        for tab in &mut self.tabs {
+            if tab.button.pressed.get() {
+                tab.button.pressed.set(false);
+                tab.button.animate_to_state(motion);
+            }
+        }
+    }
+
+    /// Makes `page` the page on show, and closes the two gates a switch has to
+    /// close again.
+    ///
+    /// **No rect moves and no layout input changes**, which is what makes a switch
+    /// free: `LayoutState::set_visible` deliberately does not mark a node dirty,
+    /// because nothing about its cached rect changed. The paint gate needs no
+    /// closing here either — [`Demo::frame`] empties the off-page nodes on every
+    /// frame, so the very next frame is already correct.
+    ///
+    /// **A switch to the page already on show does nothing at all.** What the early
+    /// return saves is a redundant `sync_page_visibility` walk over the whole table
+    /// — which is why `K`, pressed repeatedly on `overlays`, does not pay for one.
+    /// It is **not** what keeps `K` from retiring the focus inside the dialog: the
+    /// `on_show` test below is, with or without the return, because a dialog action
+    /// is a row on `overlays` and so is on show both before and after. An earlier
+    /// version of this doc credited the return with it, and deleting the return
+    /// survives the suite — which is how the error was found.
+    ///
+    /// **The near neighbour of the hazard 24.3 inherits, measured 2026-10-04 and
+    /// recorded because it is one line and not a behaviour change.**
+    /// [`Demo::dialog_is_modal`] is keyed on `visible`, which `dismiss()` clears at
+    /// once, so the eighteen shortcuts are live again while the panel is still being
+    /// painted for the 300 ms of its fade: `D` to dismiss and then `,` inside the
+    /// fade lands on `data` with `visible` false and `is_drawn` true, and the scrim
+    /// and the focus ring go in one frame. It is cosmetic, it needs two presses
+    /// inside 300 ms, and **the feared state stays unreachable** — a page that does
+    /// not show a *visible* dialog is the one that would matter, and nothing produces
+    /// it yet. Whether to close it is the operator's call with 24.3's design in
+    /// front of them, so nothing is changed here.
+    ///
+    /// What would reverse any of this: a page that moved a rect rather than
+    /// hiding one, which is task 24.2's territory and the reason this task is
+    /// separable from it.
+    ///
+    /// **And it is the bar's only entry point**, which is the claim that decides
+    /// where requirement 5's drain sits rather than here: [`Demo::pending_page`]
+    /// is drained at the *end* of the event that fired it and calls this, so a page
+    /// switch never happens in the middle of a dispatch — a switch here would move
+    /// rects and write `set_visible` under an event [`Demo::route_input_event`] is
+    /// still walking up the chain.
+    fn show_page(&mut self, page: Page) {
+        if self.page == page {
+            return;
+        }
+        let previous = self.page;
+        self.page = page;
+        self.sync_page_visibility();
+        // **Retire the focus the page being left was holding, and only that.**
+        // `set_focus(None)` unconditionally would be wrong in one case the
+        // requirement does not name and the key table makes: `K` while the dialog
+        // is up switches *to* the dialog's own page, and the focus inside a modal
+        // is not a control left behind — dropping it would put the dialog's ring
+        // out and hand `Space` to the three pads behind the scrim. So the question
+        // is asked of the table rather than of the switch, and the table is the one
+        // place that knows which page a control is on.
+        //
+        // **A tab button is not retired by this, and that is right rather than an
+        // oversight**: a button is on every page, so `on_show` answers `true` for
+        // it whatever the switch did, and focus stays on the button the reader
+        // walked to.
+        if self.focused.is_some_and(|held| !self.on_show(held)) {
+            self.set_focus(None);
+        }
+        // **The bar follows every switch, not only the ones a button asked for.**
+        // This is the one place the selected appearance is written, so a page
+        // reached with a gallery shortcut — `,` for `data`, `D` for `overlays` —
+        // moves the selection too; a bar that only followed its own clicks would
+        // show two buttons filled in on the second page the reader ever visited.
+        //
+        // **And it is here rather than in the drain of [`Demo::pending_page`]**
+        // because of that: the drain is where a *click* lands, and the switch is
+        // the thing every route goes through.
+        self.aim_tab_buttons(&[previous, page]);
+    }
+
+    /// Writes the hit-test gate: every node in the table is visible on the page
+    /// that shows it and invisible on the five that do not, and every node outside
+    /// it is left alone.
+    ///
+    /// **A switch calls this and the constructor calls this**, and the constructor
+    /// call is the one that matters: `LayoutState::set_visible` is a write to the
+    /// arena, so a gate closed only on the first switch would leave the *first*
+    /// frame hit-testing every page at once.
+    ///
+    /// **One walk and one write per row, on the switch and never per frame.**
+    /// The layout pass places every node it reaches, visible or not — that is
+    /// `LayoutState::visible`'s own doc — so nothing here can move a rect and
+    /// nothing here has to be re-done each frame.
+    fn sync_page_visibility(&mut self) {
+        let page = self.page;
+        // Collected before the arena is borrowed, so the question is asked of the
+        // table and the answer is applied in one pass rather than interleaved.
+        let wanted: Vec<(Handle, bool)> = self
+            .page_members
+            .iter()
+            .map(|member| (member.handle, member.page == page))
+            .collect();
+        let mut nodes = self.nodes.borrow_mut();
+        for (handle, visible) in wanted {
+            if let Some(node) = nodes.get_mut(handle) {
+                node.layout_mut().set_visible(visible);
+            }
+        }
+    }
+
+    /// Empties the recorded commands of every node the page on show is not
+    /// showing.
+    ///
+    /// **One pass over [`Demo::order`] after the frame has painted, rather than a
+    /// test inside each of the walk's twelve arms**, and the reason is the hazard
+    /// the 2026-10-03 review named one level up: a gate at every call site is a
+    /// list of call sites, and a seventh widget or a tenth readout would forget it
+    /// silently. A node's paint state is replaced wholesale on every frame, so
+    /// emptying it here is the same answer as never having recorded it — and this
+    /// function is the only place in the file that writes the empty state, which is
+    /// what stops the answer being written twice with two different meanings.
+    ///
+    /// **Empty and _dirty_, which is what requirement 4 asks for literally — and
+    /// the reason it gives for that choice did not hold in this pipeline.**
+    /// `TASK_UI_PRIM_24.1.md` says `PaintState::new()` would leave the renderer
+    /// holding the batch it had already submitted for that node, *"so the old page
+    /// stays on screen"*. **There is no such mechanism here**, and reading the
+    /// pipeline says so in four places:
+    ///
+    /// - `Renderer::begin_frame` clears the colour buffer **and** calls
+    ///   `Batcher::reset`, which clears both `open` and `sealed` — so nothing
+    ///   submitted last frame survives into this one;
+    /// - `Renderer::draw_node_clipped` adds to **this frame's** batcher and nowhere
+    ///   else, and `Renderer`'s fields hold **no per-node command cache**;
+    /// - so a node whose paint state is not dirty contributes nothing, and a node
+    ///   whose paint state is dirty and empty contributes an empty batch.
+    ///
+    /// **The two forms are therefore equivalent on screen in this pipeline**, and
+    /// the deliberate break that swaps one for the other survives the whole suite
+    /// for exactly that reason: `PaintState::commands` is empty either way, so every
+    /// recorded-command assertion in the file still holds. **No capture
+    /// distinguishes them either**, for the same reason — the pixels are the same
+    /// either way — which is the opposite of what this comment claimed to be about.
+    /// What the dirty form costs is one no-op `take_commands()` per off-page node
+    /// per frame, and the six per-page frame rates do not separate that from the
+    /// noise on this host.
+    ///
+    /// **The dirty form is kept and the choice is the operator's to review rather
+    /// than the implementer's**: requirement 4 names it, so it is written as
+    /// specified and its cost is recorded here rather than quietly removed. What
+    /// this doc must not do is credit the flag with a rendering consequence it does
+    /// not have — an earlier version of it said exactly that and was wrong, which is
+    /// `.ai/NEVERAGAIN.md` § *A brief's rationale becomes the widget's doc comment*
+    /// one layer up.
+    fn empty_off_page_paint(&self, nodes: &mut Arena<WidgetNode>) {
+        let page = self.page;
+        for &handle in self.order.iter() {
+            let off_page = self
+                .page_members
+                .iter()
+                .any(|member| member.handle == handle && member.page != page);
+            if !off_page {
+                continue;
+            }
+            let Some(node) = nodes.get_mut(handle) else {
+                continue;
+            };
+            *node.paint_mut() = PaintState::from_commands(Vec::new());
+        }
     }
 
     /// Sets the font size every label is drawn at, and re-gives each label the
@@ -3742,6 +5384,18 @@ impl Demo {
                     // — so this key acts, is in no row, and that test cannot see
                     // it. `a_toast_is_raised_by_its_own_key_in_both_states` covers
                     // it in both states, which is what that test is for.
+                    //
+                    // **And it activates its own page before it acts, which is the
+                    // one thing a row of [`GALLERY_SHORTCUTS`] could have carried
+                    // for it and cannot.** The toast host is page content on
+                    // `overlays` — the operator's amendment of 2026-10-04 — so a
+                    // card raised on any other page is a card the paint gate empties:
+                    // a notification with no route to the screen. `K` is not a row
+                    // and `TOAST_KEY`'s own doc says it never will be, so the two
+                    // keys above the guard each activate their page here instead,
+                    // and `the_two_keys_above_the_guard_activate_the_page_that_shows
+                    // _what_they_raise` is what holds that down.
+                    self.show_page(Page::Overlays);
                     self.raise_toast();
                 } else if !self.dialog_is_modal() {
                     // **One guard for the whole table**, and the operator's decision
@@ -3772,9 +5426,20 @@ impl Demo {
                     // functions that bridge it (`Keycode::from_scancode`,
                     // `Scancode::from_keycode`) are **`unsafe`**, which this file does
                     // not add.
-                    if let Some((_, _, act)) =
-                        GALLERY_SHORTCUTS.iter().find(|(_, key, _)| *key == keycode)
+                    //
+                    // **The row's page is activated before the row's function runs**,
+                    // and it is here rather than inside each of the eighteen because
+                    // the eighteen are functions and a function cannot be given a
+                    // preamble. `None` — one row, `T` — means the page does not
+                    // move, and `every_shortcut_works_from_every_page_and_lands_on_
+                    // its_own` is what says the seventeen and the one apart.
+                    if let Some((_, _, page, act)) = GALLERY_SHORTCUTS
+                        .iter()
+                        .find(|(_, key, _, _)| *key == keycode)
                     {
+                        if let Some(page) = *page {
+                            self.show_page(page);
+                        }
                         act(self);
                     }
                 }
@@ -3815,15 +5480,16 @@ impl Demo {
                 // pointer is down, which is before any tap exists.
                 //
                 // **Guarded, and this arm is the reason modality needed saying
-                // twice.** These three checks reach the gallery *directly*, without
+                // twice.** These four checks reach the gallery *directly*, without
                 // going through [`Demo::route_input_event`], so the tap-side filter
                 // in that function cannot see them: a press on a pad with the
                 // dialog showing lit the pad, because the press is answered here
-                // and only the *tap* on the release was ever routed. All three
+                // and only the *tap* on the release was ever routed. All four
                 // targets are outside the panel — the pads are in the top left, the
-                // slider at 664 by 496 and the keyboard below the band — so a press
-                // on any of them lands on the scrim, and a scrim that dims
-                // something which then lights up is not modal.
+                // slider at 664 by 496, the keyboard below the band and **the tab
+                // bar above all of it** — so a press on any of them lands on the
+                // scrim, and a scrim that dims something which then lights up is
+                // not modal.
                 if self.dialog_is_modal() {
                     // Nothing to do, and **nothing to undo either**: the releases
                     // below are unguarded, so a pointer that goes down on the scrim
@@ -3841,6 +5507,19 @@ impl Demo {
                     // press that missed the key grabs nothing, and the keyboard
                     // lights whichever key the gesture ends on.
                     self.grab_key(Offset::new(x, y));
+                } else if let Some(index) = self.tab_at(x, y) {
+                    // **Last of the four, and last for a reason a reader can
+                    // check**: the bar's box is 0…64 tall and nothing else in the
+                    // demo is above 64, so no earlier arm can have claimed the
+                    // press. Putting it last rather than first keeps the three
+                    // existing arms untouched.
+                    //
+                    // **Guarded by the chain above**, which is requirement 8's
+                    // "the bar is unreachable while the dialog is up": this arm
+                    // reaches the bar *directly*, so the modal filter in
+                    // [`Demo::route_input_event`] cannot see it, and a button
+                    // lighting up under the scrim is the same defect a lit pad was.
+                    self.press_tab(index);
                 }
                 // **Nothing is offered to the chart**, and that is the same
                 // decision `the_chart_is_not_in_the_focus_order` records: a chart
@@ -3857,6 +5536,11 @@ impl Demo {
                 }
                 self.slider_dragging = false;
                 self.release_key();
+                // **Unguarded, like every release here**, on the argument the pads'
+                // release gives: a release has no effect on anything a guarded press
+                // did not start, and `release_tab` asks whether there *was* a press
+                // rather than where the pointer is.
+                self.release_tab();
             }
             // A finger is a pointer too, and a car has no mouse: the same press
             // and release the left button gets, from the touch events SDL delivers
@@ -3873,13 +5557,34 @@ impl Demo {
                     self.slider_dragging = true;
                 } else if self.keyboard_at(x, y) {
                     self.grab_key(Offset::new(x, y));
+                } else if let Some(index) = self.tab_at(x, y) {
+                    // The bar on a finger, on the mouse arm's argument: the press is
+                    // guarded by the modal chain above and the release below is not.
+                    self.press_tab(index);
                 }
             }
             Event::FingerUp { .. } | Event::FingerCanceled { .. } => {
                 self.slider_dragging = false;
                 // A canceled touch releases the key too, for the same reason: a
-                // finger that is gone must not leave a key lit.
+                // finger that is gone must not leave a key lit — and it releases
+                // the tab button for the same reason.
                 self.release_key();
+                self.release_tab();
+            }
+            // **Hover, and it is the one thing the bar puts back that a keyboard
+            // cannot reach.** `MouseMotion` and `FingerMotion` were two arms of the
+            // `_` catch-all before task 24.3, and the reason they can be answered
+            // now is that `Button::hovered` exists and the demo is the only place in
+            // the repository with a button on screen to write it to.
+            //
+            // **Deliberately unguarded**, and that is worth saying because every
+            // press in this function is guarded: `hovered` starts and stops a
+            // transition on a button nobody can activate, and a button that cannot
+            // be activated must not claim to be one. The button under the scrim
+            // would tint as the pointer crosses the panel, which is cosmetic and
+            // happens on no page but `overlays`.
+            Event::MouseMotion { x, y, .. } | Event::FingerMotion { x, y, .. } => {
+                self.sync_tab_hover(x, y);
             }
             _ => {}
         }
@@ -3896,6 +5601,25 @@ impl Demo {
         if self.pending_theme.get() {
             self.pending_theme.set(false);
             self.toggle_theme();
+        }
+        // **The tab bar's click, drained here for the same reason and one more.**
+        //
+        // The extra one is [`Demo::route_input_event`]: a routed tap is offered to
+        // one node at a time, and the node it was offered to is the tab button —
+        // whose `on_click` fires *inside* that walk. Switching pages there would
+        // call [`Demo::sync_page_visibility`], which writes `set_visible` on the
+        // arena, while the walk still holds the chain it built from the same tree,
+        // and would re-place the bar's own subtree's siblings under an event that
+        // has not finished being routed. `pending_theme` above is the same rule for
+        // a theme switch, and `pending_key` in [`Demo::offer_to`] is the same rule
+        // for a keystroke.
+        //
+        // **`Property<Option<Page>>` rather than a `bool`,** which is the whole of
+        // [`Demo::pending_page`]'s type: six handlers and one property, and a
+        // `bool` could not say which button fired it.
+        if let Some(page) = self.pending_page.get() {
+            self.pending_page.set(None);
+            self.show_page(page);
         }
     }
 
@@ -3922,8 +5646,12 @@ impl Demo {
             // `Escape` and dismisses, and it forwards every other key to its own
             // focused action — so an `Enter` still reaches the button node, by the
             // widget's route rather than the demo's. It declines `Tab`, which is
-            // then the navigation arm's to move, and the five controls behind it
-            // are out of the order while the dialog is up.
+            // then the navigation arm's to move, and **the active page's own
+            // controls are out of the order while the dialog is up** — which, since
+            // the dialog is only ever presented on `overlays` and `overlays` has no
+            // focusable control of its own, is not "the five" any more: it is
+            // nothing at all, and `focus_navigation`'s modal branch is the whole of
+            // what the order is while it is showing.
             //
             // Offering the *button* first would be the alternative and it is
             // wrong in a way only the acceptance test finds: a `Button` declines
@@ -3991,6 +5719,12 @@ impl Demo {
             }
         }
 
+        // The pointer's own position, taken once: the routed chain below does not
+        // need it and the bar's fallback does, and `InputEvent::position` is an
+        // `Option` that is `Some` on this arm by construction.
+        let Some(point) = event.position() else {
+            return;
+        };
         let chain = {
             let nodes = self.nodes.borrow();
             input::route(&nodes, self.root, event)
@@ -3999,6 +5733,69 @@ impl Demo {
             self.offer_to(handle, event);
             if event.consumed() {
                 break;
+            }
+        }
+
+        // **The tab bar, once the tree has declined — and the measurement is what
+        // makes this a fallback and not a bypass.**
+        //
+        // `hit_test_from` walks a node's children **in reverse**: the later child
+        // covers the earlier. The bar is the root's *second* child, so the controls
+        // layer (`tight(WINDOW)`) and the text panel (`tight(TEXT_PANEL)` at the
+        // origin) are both checked before it and both contain every point in the
+        // top 64 pixels. **A tap over a bar button therefore came back with the
+        // chain `[controls layer, root]`** — measured on the first run of
+        // `clicking_a_tab_button_switches_to_that_page`, which switched no page and
+        // left `pending_page` at `None` — and neither handle answers anything, so
+        // the tap was dropped and **the bar could not be clicked at all**.
+        //
+        // **The alternative was to move the bar**, and both moves fail:
+        //
+        // - attached **last**, it is hit-tested first, and then `Focus::focus_order`
+        //   — which walks the *same* child list forwards — puts the six buttons
+        //   **last** in the `Tab` order and requirement 6's "first" is false;
+        // - with the controls layer's box **trimmed** to stop at the strip, nothing
+        //   moves but nothing is gained either: the layer's origin has to stay at
+        //   `0, 0` for the offsets inside it to be window coordinates, and a box
+        //   that starts at `y 0` covers the strip whatever its height is.
+        //
+        // **The two readers of one child list run in opposite directions, so no
+        // ordering of that list satisfies both.** What is left is to ask the
+        // question twice, and this arm is the second time.
+        //
+        // **The `!event.consumed()` guard below is what makes that a fallback and
+        // not a bypass, and it is correct by construction rather than by test** —
+        // which is a claim about *geometry*, and the geometry is asserted by
+        // [`nothing_the_demo_places_reaches_into_the_strip`]:
+        //
+        // - **nothing but the bar is in the strip.** A point over a bar button is in
+        //   no other control's box, so no node in the tree other than the bar's own
+        //   subtree can consume a tap there, and **the guard is unreachable on this
+        //   tree** — which is also why a bypass ordering would be indistinguishable
+        //   from this one here, and why the guard has nothing to be tested against;
+        // - **`the_bar_and_the_background_are_the_only_thing_in_the_strip` and
+        //   [`nothing_the_demo_places_reaches_into_the_strip`] are what keep that
+        //   premise true.** A widget that entered the strip would put a real control
+        //   under a bar button, and the guard would become load-bearing: it is the
+        //   line between a fallback and a widget that swallows another widget's
+        //   input.
+        //
+        // **The review of this task found that by mutation**: dropping the guard
+        // leaves the suite green, which is what "unreachable" means seen from the
+        // other side, and the assertion it cannot have is added in
+        // `a_tap_over_a_bar_button_is_not_in_the_routed_chain` — which pins the
+        // *premise* rather than the guard, because the premise is the part a future
+        // widget can change.
+        //
+        // **`Demo::tab_at` and `input::route` read the same laid-out rects**, so
+        // the two answers cannot disagree about whether the point is over a button;
+        // what differs is only which *container* the tree put in the chain on the
+        // way there.
+        if !event.consumed() {
+            if let Some(index) = self.tab_at(point.x, point.y) {
+                if let Some(button) = self.tabs.get(index).map(|tab| tab.button.handle()) {
+                    self.offer_to(button, event);
+                }
             }
         }
     }
@@ -4144,6 +5941,32 @@ impl Demo {
     /// is where the buttons' arm used to be**, and the fall-through they needed is
     /// gone with it: the last arm is now the keyboard's, which returns explicitly.
     ///
+    /// **The tab bar's six buttons are in here again**, as the last arm before the
+    /// dialog's, and they are the only handles in the gallery tree that reach a
+    /// [`Button`]. Three routes arrive and all three end at the same line:
+    ///
+    /// - a **tap**, which **does not arrive by [`input::route`]** on this tree.
+    ///   The bar is a child of [`Demo::root`] and its buttons are on every page,
+    ///   but `hit_test_from` walks a node's children in **reverse** and the
+    ///   controls layer and the text panel are both attached after the bar, so the
+    ///   chain for a tap on any of the six buttons on any of the six pages is two
+    ///   handles and **never names the button**.
+    ///   `a_tap_over_a_bar_button_is_not_in_the_routed_chain` asserts exactly that,
+    ///   and [`Demo::route_input_event`]'s comment is where the measurement lives;
+    ///   **the route that carries the tap is the fallback in that same function**,
+    ///   which asks [`Demo::tab_at`] after the tree has declined. `Button::on_event`
+    ///   fires the click from there, unchanged;
+    /// - **`Space` and `Enter`**, offered by [`Demo::offer_to_focused`] because the
+    ///   button holds focus — the widget refuses an activation key it is not
+    ///   focused for, which is what stops a `Space` reaching every tab at once;
+    /// - a **press**, which never arrives here: `Button::on_event` answers a tap
+    ///   and a key and nothing else, and `handle_event`'s pointer arms write
+    ///   `pressed` themselves for the reason [`Demo::grab_key`] gives.
+    ///
+    /// **No paint gate on the way in, and none is needed**: the bar is on every
+    /// page, so `set_visible` is never written for its nodes and every route here
+    /// is a route to something that is on screen.
+    ///
     /// The two that answer a `KeyDown` only while they hold focus are the slider
     /// and the toggle; the field answers a key of its own and the keyboard answers
     /// a tap. So a `Tab` reaches all four and none of them takes it.
@@ -4169,6 +5992,28 @@ impl Demo {
     /// buttons are real `Button` widgets with nodes of their own, and a tap that
     /// lands on one is offered to the button rather than to the dialog, so the
     /// button's own press state is the thing a finger sees.
+    ///
+    /// **The hazard task 24.3 inherits, and it is narrower than it first looks.** The
+    /// parent's requirement 8 says the bar is unreachable while the dialog is up, and
+    /// **that holds for a bar's click**: a routed tap on a tab button would be
+    /// offered to the dialog and consumed, because [`Demo::route_input_event`] takes
+    /// its modal branch **before any offer is made at all**. So a control's press
+    /// cannot reach the gallery directly, and a `Button` never does the thing the
+    /// three helpers do — and **that includes the bar's, which is why
+    /// `handle_event`'s press arms needed the modal guard this arm's does not
+    /// have.** Measured on task 24.3's tree: with the dialog up, a tap on every one
+    /// of the six buttons leaves the page on `overlays` and writes nothing.
+    ///
+    /// **What is left is the 300 ms fade**, and it is [`Demo::show_page`]'s own
+    /// paragraph rather than a second claim about it: `D` dismisses, and inside the
+    /// fade `dialog_is_modal()` is already false while the panel is still being
+    /// painted, so a shortcut in that window moves the page and the scrim and the
+    /// focus ring go in one frame. Cosmetic, one frame, and measured on
+    /// `--tab=overlays` on 2026-10-04. A sweep over 6 start pages x {`D`, `K`} x 6
+    /// table rows x 3 timings found **no** page on show with a dialog it does not
+    /// show, so the invisible-modal state the requirement warns about is not
+    /// reachable on this tree; whether to close the fade is the operator's call with
+    /// 24.3's design in front of them.
     fn offer_to(&self, handle: Handle, event: &mut InputEvent) -> bool {
         if handle == self.slider.node() {
             return match self.slider_rect() {
@@ -4208,6 +6053,19 @@ impl Demo {
                 apply_key_action(&self.text_input, action);
             }
             return consumed;
+        }
+        // **The six tab buttons, before the dialog's arms and after everything
+        // above**, because a handle in the gallery tree cannot be the dialog's and
+        // the position is free — and because it is the arm a reader looking for
+        // "where does the click reach" comes to first.
+        //
+        // **`Button::on_event` takes no rect**, which is why this line is one
+        // expression where the slider's and the field's are several: the hit test
+        // already happened, in [`input::route`], against the button's own laid-out
+        // box. That is the widget's own contract and it is why the demo cannot
+        // answer a tap with a button it has not already found.
+        if let Some(button) = self.tab_button(handle) {
+            return button.on_event(event);
         }
         // The dialog, and each of its actions, in the one place that turns a
         // handle into a widget. **The three numbers handed to `on_event` are the
@@ -4316,6 +6174,16 @@ impl Demo {
         // the submission order and a new notification is on top of everything that
         // was already there.
         self.order.push(handle);
+        // **And into the page table, which is the same obligation with a second
+        // gate behind it.** A node in no page's list is on every page — that is
+        // what "not page content" means — so a raised card that was not added here
+        // would be painted on every page, and `K` would put a notification on
+        // `pads` as well as on `overlays`.
+        self.page_members.push(PageMember {
+            handle,
+            page: Page::Overlays,
+            focusable: false,
+        });
         let Some(toast) = self.toasts.toast(index) else {
             return false;
         };
@@ -4359,8 +6227,18 @@ impl Demo {
     ///
     /// The order itself is the tree's paint order, so the controls layer's
     /// children are what decide it and **the order they were added in is the
-    /// `Tab` order**: the slider, the image, the toggle, the progress bar and the
-    /// field. `tab_walks_every_focusable_control_in_order_and_wraps` walks it.
+    /// `Tab` order**. `tab_walks_every_focusable_control_in_order_and_wraps`
+    /// walks it, on every page.
+    ///
+    /// **The focusable set is the page's own focusables, filtered out of the one
+    /// membership table** — [`Demo::focusables`] — and the five this demo had on
+    /// 2026-10-03 now sit on three pages: the slider, the toggle and the bar on
+    /// `controls`, the image on `data`, the field on `input`. **And in front of all
+    /// of them, on every one of the six pages, are the six tab buttons** — see
+    /// [`Demo::tab_focusables`] for why the addition is here and not in
+    /// `focusables`, and why the order within the list is not the order `Tab`
+    /// walks. `tab_walks_the_six_buttons_before_the_pages_own_controls` is what
+    /// says the two agree.
     ///
     /// **The gauge is deliberately not in this list**, for the reason
     /// [`Demo::offer_to`] gives: it has no `on_event` and no `focused` property,
@@ -4368,11 +6246,16 @@ impl Demo {
     /// it did. **The chart is not in it either**, for the chart's own reason, and
     /// `the_chart_is_not_in_the_focus_order` is that decision's test.
     ///
-    /// **The dialog replaces the whole list while it is showing**, and it is a
-    /// replacement rather than an addition: a modal's background controls are not
-    /// focusable, because a `Tab` that walked out of the dialog into the gallery
-    /// would put focus somewhere the dialog's overlay covers and that nothing can
-    /// be seen through. The five come back the moment the dialog closes, and
+    /// **The dialog replaces the whole list while it is showing** — the six tab
+    /// buttons with it — and it is a replacement rather than an addition: a modal's
+    /// background controls are not focusable, because a `Tab` that walked out of
+    /// the dialog onto a tab button would put focus somewhere the dialog's overlay
+    /// covers and that nothing can be seen through. That is the parent's
+    /// requirement 8, and it is the whole of "the bar is unreachable while the
+    /// dialog is showing": the walk's **root** is the dialog's node, which is a
+    /// second root in the arena, so the bar is not in the tree this walk can reach
+    /// and marking its buttons focusable would find nothing. They come back the
+    /// moment the dialog closes, and
     /// `the_dialog_replaces_the_tab_order_while_it_is_showing` is that claim with
     /// the control beside it.
     ///
@@ -4405,18 +6288,21 @@ impl Demo {
         let next = {
             let nodes = self.nodes.borrow();
             let modal = self.dialog_is_modal();
-            // The five in the tree's paint order, and so in the `Tab` order. None
-            // of them has a disabled state of its own, so every one of them is in
-            // the order always — which is not the same as saying every one of them
-            // answers every key: `offer_to` is what decides, and a widget with no
-            // key of its own declines.
-            let background = [
-                self.slider.node(),
-                self.image.handle(),
-                self.toggle.handle(),
-                self.progress.handle(),
-                self.text_input.handle(),
-            ];
+            // **The page's own focusables, in the tree's paint order**, and so in
+            // the `Tab` order. None of them has a disabled state of its own, so
+            // every one of them is in the order while its page is on show — which
+            // is not the same as saying every one of them answers every key:
+            // `offer_to` is what decides, and a widget with no key of its own
+            // declines.
+            //
+            // **And the six tab buttons in front of them, in the order
+            // [`Demo::tab_focusables`] gives** — which is `Page::ALL` order, and
+            // is *not* the order the walk takes: the walk re-derives that from the
+            // tree, and the bar is attached to the root before the controls layer,
+            // so the two agree without either being arranged to make the other
+            // true.
+            let page_focusables = self.focusables();
+            let tabs = self.tab_focusables();
             let actions: Vec<Handle> = self
                 .dialog
                 .actions
@@ -4431,8 +6317,20 @@ impl Demo {
                     self.root
                 },
             );
-            for handle in if modal { &actions[..] } else { &background[..] } {
-                focus.set_focusable(*handle, true);
+            if modal {
+                // **The dialog's two buttons alone, and the bar is not in the
+                // walk at all** — not "de-prioritised", *absent*: the walk's root
+                // is the dialog's own node, and the bar is under the gallery's
+                // root, so no marking could put it in this order. That is the
+                // parent's requirement 8 and the reason a `Tab` cannot walk onto a
+                // button the scrim covers.
+                for handle in &actions {
+                    focus.set_focusable(*handle, true);
+                }
+            } else {
+                for handle in tabs.iter().chain(page_focusables.iter()) {
+                    focus.set_focusable(*handle, true);
+                }
             }
             // Re-entering the order where focus already is. `Focus` starts with
             // nothing focused, so without this a wheel turned twice in a row
@@ -4465,6 +6363,13 @@ impl Demo {
     /// `progress_focused` and `image_focused`. Neither the gauge nor the chart is
     /// named here because neither is in the order; see [`Demo::offer_to`].
     ///
+    /// **And the six tab buttons are written here too**, which is what puts the
+    /// focus ring on the button that holds focus — the one thing the demo could not
+    /// show between 2026-10-01 and task 24.3. They are **not** guarded by the
+    /// "changed" tests the two above carry, because a `Property::set` that writes
+    /// the same value still notifies `on_change`, and a button has no such
+    /// callback here; the guard would be the same two lines for no effect.
+    ///
     /// **The dialog's actions are not written here**, and that is deliberate:
     /// a dismissal takes the focus away without going through this function — `OK`
     /// and `Cancel` fire and close, `Escape` closes, a tap on the scrim closes —
@@ -4474,6 +6379,9 @@ impl Demo {
     fn set_focus(&mut self, next: Option<Handle>) {
         self.focused = next;
         let focused = self.focused;
+        for tab in &self.tabs {
+            tab.button.focused.set(Some(tab.button.handle()) == focused);
+        }
         let slider_wanted = Some(self.slider.node()) == focused;
         if self.slider.widget.focused.get() != slider_wanted {
             self.slider.widget.focused.set(slider_wanted);
@@ -4561,6 +6469,16 @@ impl Demo {
         // and from the widget's own dismissal — a per-frame aim would restart both
         // on every frame, which is the argument `sync_toggle_state` makes.
         let _ = self.dialog.tick(delta);
+        // The six tab buttons' own clocks, on the same argument and for the same
+        // reason as every other tick in this function: the tick is here and the
+        // **aim** is not. A button's transition is started by
+        // [`Demo::aim_tab_buttons`], [`Demo::press_tab`], [`Demo::release_tab`]
+        // and [`Demo::sync_tab_hover`] — once per switch, once per press and once
+        // on the frame a hover flag moves — and a per-frame aim would restart it
+        // every frame, which is the argument `sync_toggle_state` makes.
+        for tab in &self.tabs {
+            let _ = tab.button.tick(delta);
+        }
         // The toasts' arrivals, departures and countdowns, on the same argument:
         // the tick is here, the **aim** is not. `Toasts::show` is what starts a
         // fade and the countdown is what ends it, and a per-frame aim would
@@ -4582,6 +6500,23 @@ impl Demo {
             // for a removed handle even after the slot is reused: a prune here
             // cannot drop a live node and cannot keep a dead one.
             self.order.retain(|handle| arena.get(*handle).is_some());
+            // **And so is the page table, which is the same obligation and was the
+            // half that did not get it.** `raise_toast` appends a row as well as a
+            // node, so every toast the demo had ever raised left a row naming a
+            // node the arena had taken back. **No gate writes through such a row**
+            // — `is_page_content` and `shows` compare handles, and the paint gate's
+            // post-pass asks `arena.get` first — so this is not a correctness fix
+            // either. It is the premise of an assertion:
+            // `every_page_lists_at_least_one_node_and_no_node_is_on_two_pages`
+            // requires every row's handle to be in the paint order, and
+            // `a_switch_refreshes_the_hit_test_gate` tolerated a row that was not.
+            // One of them was wrong about the demo, and a reader would have believed
+            // the assertion. **The same generation argument as the line above holds
+            // here**, because this is the same arena and the same `get`: a row whose
+            // node is live cannot be dropped, and a row whose node was taken back
+            // cannot be kept.
+            self.page_members
+                .retain(|member| arena.get(member.handle).is_some());
         }
         // The one number the readout below the chart names that the demo has to
         // write rather than bind, for the reason `Demo::chart_moving` gives:
@@ -4644,10 +6579,20 @@ impl Demo {
                 continue;
             }
             // A container paints its own background, and paints nothing at all
-            // when it has none: four of the demo's five draw no commands, and
-            // the row of pads draws the card the pads sit inside. The walk is
-            // parent first, so the card is recorded before the pads and so is
-            // drawn behind them.
+            // when it has none. **The demo assembles six containers and exactly two
+            // of the six have a background**: the row of pads, which draws the card
+            // the pads sit inside, and the tab bar. **The other four draw nothing —
+            // the root, the text column, the text panel and the controls layer** —
+            // and the root is the one that surprises, because it is
+            // `Constraints::tight(WINDOW)`. **It is the window background *node*
+            // that fills the window, not the root container**: `Container::new`
+            // starts `background` at alpha 0 and nothing here sets it on the root,
+            // so this arm records nothing for it.
+            // `the_container_with_a_background_are_the_card_and_the_bar` is the
+            // test that says which is which, on the two pages that tell them apart.
+            //
+            // The walk is parent first, so the card is recorded before the pads and
+            // so is drawn behind them.
             if let Some(container) = self.containers.iter().find(|it| it.handle() == handle) {
                 let commands = match node.layout().rect() {
                     Some(rect) => container.paint(rect.into()),
@@ -4697,9 +6642,19 @@ impl Demo {
             // toast's node carries its own, so `Demo::frame_clips` and
             // `Demo::draw` see one card's commands at a time.
             if handle == self.toasts.handle() {
-                // Empty and **not dirty**: there is nothing to submit for a node
-                // that never records anything, and a dirty empty state would send
-                // a no-op draw call every frame.
+                // Empty and **not dirty**, and the reason is arithmetic rather than
+                // a rendering one: `draw_node_clipped` returns early on a node that
+                // is not dirty, so this costs one `is_dirty()` read per frame
+                // instead of a `take_commands()`. **It draws nothing either way**,
+                // because a dirty empty state adds an empty batch and nothing is
+                // submitted from one.
+                //
+                // **An earlier version of this comment said a dirty empty state
+                // would "send a no-op draw call every frame", and that was the same
+                // false claim [`Demo::empty_off_page_paint`] carried about the
+                // opposite choice**: this pipeline keeps no per-node command cache
+                // for either form to be stale in, so neither has the rendering
+                // consequence either comment described.
                 *node.paint_mut() = PaintState::new();
                 continue;
             }
@@ -4714,6 +6669,28 @@ impl Demo {
                     &advance,
                     self.toasts_line_height(),
                 );
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The six tab buttons, and **an arm of their own for the same reason
+            // the slider and the field have one**: `Button::paint` measures its
+            // label, so it takes an advance closure and a line height, and adding
+            // two parameters to the rect-only arm below would be a change to five
+            // widgets' code for one widget's seam.
+            //
+            // **The bar's own container is not here** — it is one of
+            // `self.containers`, so the arm above paints it with a background —
+            // and its children are reached through the bar rather than as the
+            // root's siblings, which is why the walk finds them at all: `order` is
+            // a `paint_order` walk and the bar is a child of the root.
+            if let Some(button) = self.tab_button(handle) {
+                let advance = tab_advance(&self.metrics);
+                let commands = match node.layout().rect() {
+                    Some(rect) => {
+                        button.paint(rect.into(), &advance, tab_line_height(&self.metrics))
+                    }
+                    None => Vec::new(),
+                };
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
@@ -4828,6 +6805,14 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
             }
         }
+
+        // **The paint gate, last**, and it is last because it is the only thing in
+        // the frame that is about *which* page is on show rather than about any one
+        // node's own appearance: every node above has recorded whatever it records
+        // on any page, and this empties the ones the page on show does not have.
+        // Running it first would be undone by every arm after it, and running it
+        // per arm would be the list of call sites the requirement rejects.
+        self.empty_off_page_paint(&mut nodes);
     }
 
     /// Opens the dialog if it is closed and closes it if it is up.
@@ -4864,6 +6849,12 @@ impl Demo {
             // when the dialog stops being drawn, which is the same frame the ring
             // goes.
         } else {
+            // **The page first, and for `K`'s reason.** The dialog is page content
+            // on `overlays`, and a modal on a page that does not show it is a
+            // window where every tap and every key is swallowed by a scrim nobody
+            // can see. `D` is the way to bring the panel up from any page, so it is
+            // the way to bring its page up too.
+            self.show_page(Page::Overlays);
             let _ = self.dialog.present();
             self.set_focus(self.dialog.actions.first().map(|action| action.handle()));
         }
@@ -5285,11 +7276,12 @@ impl Demo {
     /// rate it arrives and the widget picks nothing.
     fn toggle_theme(&mut self) {
         self.dark = !self.dark;
-        let new_theme = if self.dark {
-            Theme::dark()
-        } else {
-            Theme::light()
-        };
+        // **One answer to "which theme is the demo heading for", and it is
+        // [`Demo::target_theme`]'s** rather than a second `if` written here: the
+        // bar reads the same thing on every page switch, and two expressions of
+        // "the dark theme if `dark`" in one file is the pair of lists
+        // `GALLERY_SHORTCUTS` exists to prevent.
+        let new_theme = self.target_theme();
         // Read every palette from `new_theme`, **before** `switch_to` consumes it.
         // The switch animates the theme's own tokens, so a palette read after it
         // is the palette the theme is leaving, which re-aims every widget at what
@@ -5367,6 +7359,21 @@ impl Demo {
         // The image has no palette at all — an image is not themed, it is a
         // picture — and a theme switch reaches it nowhere, which is correct: the
         // window behind it changes and the picture does not.
+        //
+        // **The tab bar's own background is *not* here, because it does not need
+        // to be**: it is a `Property::bind` over `theme.property(Surface)`, exactly
+        // as the card of pads is, so the property graph carries the switch to it
+        // with nothing told. That is requirement 7's whole claim and
+        // `the_tab_bar_follows_a_theme_switch` is what says it happened.
+        //
+        // **Its six buttons *are* here**, on the same argument as every other
+        // themed widget above: `Button`'s palette is a private plain field behind
+        // [`Button::set_palette`], not a bound property, so a caller announces a new
+        // palette and then aims at it. **All six and not only the selected one** —
+        // a theme switch moves every button's pair, and aiming only the two a
+        // *switch* would move is aiming at a target that a theme switch has
+        // already replaced for the other four.
+        self.aim_tab_buttons(&Page::ALL);
     }
 
     /// Moves the image to the next fit in [`IMAGE_FITS`], wrapping round.
@@ -5437,6 +7444,53 @@ impl Demo {
     /// pressing them after an `Escape`. This is `Space`'s whole body, and it is a
     /// method rather than a pattern guard on a `match` arm because a row of
     /// [`GALLERY_SHORTCUTS`] is a **function** and a function is not a pattern.
+    ///
+    /// **A `Space` on a focused tab button switches that button's page, and this
+    /// method declines — and both halves of that are measured, not argued.**
+    ///
+    /// `GALLERY_SHORTCUTS`' `Space` row is `Some(Page::Pads)`, so `handle_event`'s
+    /// key `match` calls `Demo::show_page(Pads)` and *then* calls this. **The
+    /// method returns without pressing anything**: a focused tab button satisfies
+    /// [`Demo::focus_is_live`], so `press_all` is never reached.
+    /// `space_and_enter_activate_the_focused_tab_button` asserts that as
+    /// `vec![0.0, 0.0, 0.0]` for the pads — **three zeros, read after the key.**
+    ///
+    /// **And the button's own page is the one that lands, because the row's
+    /// `show_page` is the first of two and the drain's is the second.** The order
+    /// inside one `handle_event` is:
+    ///
+    /// 1. the key `match` — `show_page(Page::Pads)`, then `act(self)`, which is this
+    ///    method declining;
+    /// 2. the `for … route_input_event` loop — the focused button's `on_click`,
+    ///    **one [`Callback`] per button and only the focused one fires**, writes
+    ///    [`Demo::pending_page`] **once**;
+    /// 3. the drain at the end of **`handle_event`** — and it is this function, not
+    ///    [`Demo::frame`] — which reads that property and calls `show_page` with
+    ///    **the button's** page.
+    ///
+    /// **So `pending_page` is written once and read once, and the last `show_page`
+    /// wins.** An earlier version of this comment said the row's page won, that
+    /// the property was written twice, and that the pads pressed anyway; all three
+    /// were wrong, and each was wrong in the direction that made the interaction
+    /// look more dramatic than it is. **The review of this task is what caught it**,
+    /// and the lesson is that this paragraph was written without reading the
+    /// `match`, the loop and the drain in that order.
+    ///
+    /// **The two tests that sweep `GALLERY_SHORTCUTS` are about the unfocused
+    /// fixture, and neither is about this case.** `every_shortcut_works_from_
+    /// every_page_and_lands_on_its_own` iterates **all eighteen rows** — `Space`
+    /// among them — on `shortcut_fixture_on(page, false)`, which focuses nothing,
+    /// so it asserts `Page::Pads` there, from the row and not from a button.
+    /// **`None` is one row, `T`**, and `a_shortcut_with_no_widget_of_its_own_stays_
+    /// on_the_page_it_was_pressed_from` is the test that says so; an earlier
+    /// version of this comment attributed the `None`-row claim to both.
+    ///
+    /// **Setting the row's page to `None` would not change the focused case and is
+    /// not this task's to make.** With `None` the row would leave the page alone
+    /// and the drain would still switch it — the button's page either way — so the
+    /// only thing it would change is the *unfocused* fixture's `Space`, from
+    /// `Pads` to wherever the user was. That is 24.1's call about a key the widgets
+    /// own, and 24.3 is not the round to make it.
     fn press_pads_if_unfocused(&mut self) {
         if !self.focus_is_live() {
             self.press_all();
@@ -5541,7 +7595,29 @@ impl Demo {
     }
 
     /// Returns the index of the pad whose laid-out rect contains `(x, y)`.
+    ///
+    /// **The page guard is the first line of the body, and it is here because this
+    /// function is one of three that never reach [`Demo::route_input_event`].**
+    /// Those three — this one, [`Demo::slider_at`] and [`Demo::keyboard_at`] — are
+    /// called straight from the **`MouseButtonDown` and `FingerDown` arms and
+    /// nowhere else**: `MouseButtonUp`, `FingerUp` and `FingerCanceled` release
+    /// rather than ask, and they are the arms that are deliberately *unguarded*. The
+    /// reason for calling them at all is that the demo needs the *press*, and the
+    /// gesture recogniser only reports a tap on the *release*. So the tap-side filter
+    /// in
+    /// [`Demo::route_input_event`] cannot see them, and the `set_visible` the
+    /// hit-test gate is built on is never consulted: each of them asks its own
+    /// rectangles, and a rectangle on a page that is not showing is still a
+    /// rectangle.
+    ///
+    /// **The card rather than a pad, and that is the honest handle to ask about.**
+    /// The three pads are on one page by construction — they are the card's
+    /// children — so the card answers "are the pads on show" as well as any single
+    /// pad does, and it is the one that exists whichever pad is being asked.
     fn pad_at(&self, x: f32, y: f32) -> Option<usize> {
+        if !self.on_show(self.card().handle()) {
+            return None;
+        }
         let nodes = self.nodes.borrow();
         self.pads.iter().position(|pad| {
             nodes
@@ -5562,7 +7638,13 @@ impl Demo {
     /// The slider is asked about after the pads, so a point over the pads never
     /// reaches it: those are the controls that are drawn on top of that part of
     /// the window.
+    ///
+    /// **The page guard is [`Demo::pad_at`]'s, for the same reason**, and the
+    /// slider's own node is the handle this one asks about.
     fn slider_at(&self, x: f32, y: f32) -> Option<()> {
+        if !self.on_show(self.slider.node()) {
+            return None;
+        }
         self.slider_rect()
             .is_some_and(|rect| over_rect(rect, x, y))
             .then_some(())
@@ -5617,7 +7699,16 @@ impl Demo {
     /// decides which: `grab_key` reports whether it found a key at all. Narrowing
     /// this to "over a key" would leave a key lit by a press that started in a
     /// gap and travelled onto it.
+    ///
+    /// **The page guard is [`Demo::pad_at`]'s, for the same reason** — this is the
+    /// third of the three helpers that bypass the router — and it is the one that
+    /// matters most here, because the keyboard is the largest thing a finger can
+    /// land on: without it a tap anywhere in the band would grab and light a key on
+    /// a page that is not showing any of them.
     fn keyboard_at(&self, x: f32, y: f32) -> bool {
+        if !self.on_show(self.keyboard.handle()) {
+            return false;
+        }
         self.keyboard_rect()
             .is_some_and(|rect| over_rect(rect, x, y))
     }
@@ -5688,32 +7779,57 @@ impl Demo {
     /// `the_demo_opens_with_a_dialog_showing_and_its_panel_inside_the_window`
     /// instead, which is the question an overlay's geometry actually raises.
     ///
+    /// **Task 24.2 added [`Demo::page_rects`], which is this list narrowed to one
+    /// page**, and the two collision tests now walk that rather than this — see
+    /// [`Demo::page_rects`] for what the narrowing stops asserting.
+    ///
     /// It is `cfg(test)` because nothing in the running demo asks: the demo lays
     /// its widgets out and paints them, and a list of the boxes it placed is
     /// something only a reader checking the arithmetic wants.
     #[cfg(test)]
     fn placed_rects(&self) -> Vec<(&'static str, Rect)> {
         let nodes = self.nodes.borrow();
-        let rect = |what: &'static str, handle: Handle| {
-            let found = nodes
-                .get(handle)
-                .and_then(|node| node.layout().rect())
-                .map(Into::into);
-            found.map(|rect| (what, rect))
-        };
-        let mut rects: Vec<(&'static str, Rect)> = Vec::new();
-        if let Some(found) = rect("pads card", self.card().handle()) {
-            rects.push(found);
-        }
+        self.placed_handles()
+            .into_iter()
+            .filter_map(|(what, handle)| {
+                let found = nodes
+                    .get(handle)
+                    .and_then(|node| node.layout().rect())
+                    .map(Into::into);
+                found.map(|rect| (what, rect))
+            })
+            .collect()
+    }
+
+    /// Every **leaf** the demo places, named, as the `(name, handle)` pairs
+    /// [`Demo::placed_rects`] and [`Demo::page_rects`] are both built from.
+    ///
+    /// **The handles are here rather than derived inside each of those two**, and
+    /// that is what lets the per-page list be a *filter* rather than a second
+    /// list: a page's rects are found by asking which of these nodes the page
+    /// draws, so a widget added to this list cannot be silently absent from one
+    /// page and present in the other.
+    ///
+    /// **One list is not the same as a checked list, and this function alone is
+    /// not checked.** Both consumers filter it, and the assertion that the filter
+    /// partitions the list used to compare it with itself — so deleting a row here
+    /// left every test green. `.ai/NEVERAGAIN.md` § *a sweep of a mechanism's call
+    /// sites is not a sweep of the data it is built from* is about exactly that,
+    /// **and this doc cited it while making the mistake it names**; the row
+    /// deletion was found by the review of task 24.2. The fix is
+    /// [`assert_placed_handles_is_complete`], which compares this list against
+    /// [`expected_placed_rect_names`] — a written-out answer, because a derived one
+    /// would agree with whatever this function says.
+    #[cfg(test)]
+    fn placed_handles(&self) -> Vec<(&'static str, Handle)> {
+        let mut handles: Vec<(&'static str, Handle)> = vec![("pads card", self.card().handle())];
         for &handle in &self.label_nodes {
-            if let Some(found) = rect("text panel label", handle) {
-                // Named for what it is rather than for its text: the text moves
-                // with `+` and `-` and a name that moved with it would name a
-                // different failure every run.
-                rects.push(found);
-            }
+            // Named for what it is rather than for its text: the text moves
+            // with `+` and `-` and a name that moved with it would name a
+            // different failure every run.
+            handles.push(("text panel label", handle));
         }
-        for (what, handle) in [
+        handles.extend([
             ("gauge", self.gauge.handle()),
             ("gauge readout", self.gauge_readout.label.handle()),
             ("slider", self.slider.node()),
@@ -5731,12 +7847,55 @@ impl Demo {
             ("text readout", self.text_readout.label.handle()),
             ("submit readout", self.submit_readout.label.handle()),
             ("keyboard", self.keyboard.handle()),
-        ] {
-            if let Some(found) = rect(what, handle) {
-                rects.push(found);
-            }
-        }
-        rects
+        ]);
+        handles
+    }
+
+    /// [`Demo::placed_rects`] narrowed to **the page on show**: that page's own
+    /// members, plus the leaves that are on every page.
+    ///
+    /// **The always-painted half is one node — the frame-rate readout** — and it is
+    /// on every page because the operator's instruction was *"Keep fps label"*.
+    /// It is asked of [`Demo::on_show`] rather than of a list written out here,
+    /// because that is the predicate the paint gate itself uses and a second
+    /// answer would be a second thing to disagree with it.
+    ///
+    /// **What this stops asserting is the point of the change.** The union said
+    /// that twenty-five placed leaves coexist in one window without touching,
+    /// which was only ever true because they all had to be: `the shift down [`CONTENT_TOP`]
+    /// for the tab bar is what made it false — the progress bar at 732 and the
+    /// keyboard at 760 share sixteen rows of pixels and **no page draws both**, so
+    /// the union assertion was measuring a constraint the pages had already
+    /// dissolved. What it strengthens is each page's own layout, which is the
+    /// thing a reader switching tabs actually sees.
+    ///
+    /// **Twenty-five of them, and the number is checked** —
+    /// [`expected_placed_rect_names`] holds the whole set and
+    /// [`assert_placed_handles_is_complete`] asserts its length. The three pads are
+    /// three more widgets on screen and are **not** in it: they are the card's
+    /// children, laid out by the row, and [`assert_every_drawn_leaf_is_named_or_excused`]
+    /// is what says which nodes those are.
+    ///
+    /// **`overlays` contributes one rect, and that is not an oversight**: the
+    /// dialog, its actions and the toast cards are all overlays, and
+    /// [`Demo::placed_rects`] omits overlays for the reason its own doc gives.
+    /// The page is checked by the paint gate instead — "a page records no command
+    /// on a node that is not its own" — which is the question an overlay page
+    /// raises.
+    #[cfg(test)]
+    fn page_rects(&self) -> Vec<(&'static str, Rect)> {
+        let nodes = self.nodes.borrow();
+        self.placed_handles()
+            .into_iter()
+            .filter(|(_, handle)| self.on_show(*handle))
+            .filter_map(|(what, handle)| {
+                let found = nodes
+                    .get(handle)
+                    .and_then(|node| node.layout().rect())
+                    .map(Into::into);
+                found.map(|rect| (what, rect))
+            })
+            .collect()
     }
 
     /// Returns where the slider's thumb is at `fraction` of its range, in window
@@ -5766,9 +7925,53 @@ impl Demo {
 
     /// Returns the card the pads sit inside: the row of pads, which is the
     /// first container the demo builds and the only one it gives a background.
-    #[cfg(test)]
+    ///
+    /// **Production code since the page gate**, which asks it whether the pads are
+    /// on show; it was `cfg(test)` while only tests wanted to know which container
+    /// was the card.
     fn card(&self) -> &Container {
         &self.containers[0]
+    }
+
+    /// Returns the controls layer: the `Absolute` container every control below the
+    /// gallery is placed inside.
+    ///
+    /// **`cfg(test)`, and the difference from [`Demo::card`] is who asks for it.**
+    ///
+    /// The likeness an earlier version of this sentence reached for was the wrong
+    /// one: `card` is **not** `#[cfg(test)]` — it carries no attribute at all, and
+    /// its own doc says it has been production code since the page gate, because
+    /// `pad_at` asks it whether the pads are on show. What is true of **both**
+    /// helpers is that the frame loop walks `self.containers` rather than naming
+    /// one, so nothing in production needs a container by index **except** the
+    /// card. **Nothing outside a test needs the controls layer by index at all**,
+    /// and that is what makes this one test-only — so a production reader auditing
+    /// the attribute was being sent to the one container helper that has it, which
+    /// answers a different question.
+    #[cfg(test)]
+    fn controls_layer(&self) -> &Container {
+        &self.containers[CONTROLS_LAYER]
+    }
+
+    /// Returns the tab bar: the `row()` container its six buttons are children of.
+    ///
+    /// **`cfg(test)` on the same ground as [`Demo::controls_layer`]:** the frame
+    /// loop walks `self.containers` and finds the bar by handle, so nothing in
+    /// production needs it by index, and what the tests want from it is its handle
+    /// — to name it in `undrawn_leaf_exemptions` and to say which node in the tree
+    /// has six children.
+    ///
+    /// **By index and not by handle**, which is a choice rather than an oversight:
+    /// the alternative is a [`Demo`] field holding the handle, and a field beside
+    /// the widget is a second answer to "which node is the bar" that nothing keeps
+    /// in step. The index is checked by
+    /// `the_container_with_a_background_are_the_card_and_the_bar`, which asserts
+    /// that this returns a container with six children whose mode is `row` and a
+    /// background that is not transparent — so a reorder fails rather than quietly
+    /// naming a different container.
+    #[cfg(test)]
+    fn tab_bar(&self) -> &Container {
+        &self.containers[TAB_BAR]
     }
 
     /// Returns the text the slider's readout is showing, as the last frame
@@ -5851,104 +8054,138 @@ impl Demo {
 /// What would reverse it: a shortcut that needs its key's *held* state — a chord, or
 /// a binding that reads the modifiers — which a `fn(&mut Demo)` cannot express and
 /// which would want the `match` back with a coverage test beside it.
-/// One row of [`GALLERY_SHORTCUTS`]: what the key is called, which key it is, and
-/// what it does.
+/// One row of [`GALLERY_SHORTCUTS`]: what the key is called, which key it is, the
+/// page the widget it acts on is on, and what it does.
 ///
 /// A named alias because `clippy::type_complexity` reads the spelled-out type as
-/// three things to factor and because the third field is the whole point of the
+/// four things to factor and because the fourth field is the whole point of the
 /// table — a reader should not have to count `fn(&mut Demo)`s to see that the rows
 /// carry behaviour and not only names.
-type GalleryShortcut = (&'static str, Keycode, fn(&mut Demo));
+///
+/// **The page is a field of the row rather than something the dispatch works out**,
+/// and requirement 6's own argument is the reason: the table *is* the dispatch, so
+/// a page derived from the function beside the key would be a second list beside
+/// the first — the exact pair a `match` and a list of its keys were found to be on
+/// 2026-10-03.
+type GalleryShortcut = (&'static str, Keycode, Option<Page>, fn(&mut Demo));
 
+/// The gallery's eighteen keyboard shortcuts, each with the page it belongs to.
+///
+/// **`None` is one row and not an oversight.** `T` switches the theme, and the
+/// theme reaches every colour in the demo through the property graph — the parent
+/// task's requirement 1 says so in as many words when it declines to make the
+/// theme switcher a page of its own: *"a page holding only the theme switcher
+/// would be a page holding nothing that is not everywhere"*. So `T` has no widget,
+/// no page to land on, and `None` is what says *stay where you are*. Every other
+/// row names the page its widget is on, and `every_shortcut_works_from_every_page_
+/// and_lands_on_its_own` is what holds the seventeen and the one apart.
 const GALLERY_SHORTCUTS: [GalleryShortcut; 18] = [
     (
         "Space, which presses every pad",
         Keycode::Space,
+        Some(Page::Pads),
         Demo::press_pads_if_unfocused,
     ),
     (
         "T, which switches the theme",
         Keycode::T,
+        None,
         Demo::toggle_theme,
     ),
     (
         "+, which grows the text with the shift held",
         Keycode::Plus,
+        Some(Page::Text),
         Demo::text_size_up,
     ),
     (
         "=, which grows the text without it",
         Keycode::Equals,
+        Some(Page::Text),
         Demo::text_size_up,
     ),
     (
         "-, which shrinks the text",
         Keycode::Minus,
+        Some(Page::Text),
         Demo::text_size_down,
     ),
     (
         "C, which moves the text's colour token",
         Keycode::C,
+        Some(Page::Text),
         Demo::cycle_text_color,
     ),
     (
         "0, which sends the slider to its minimum",
         Keycode::_0,
+        Some(Page::Controls),
         Demo::slider_to_min,
     ),
     (
         "1, which sends the slider to its maximum",
         Keycode::_1,
+        Some(Page::Controls),
         Demo::slider_to_max,
     ),
     (
         "F, which cycles the image's fit",
         Keycode::F,
+        Some(Page::Data),
         Demo::cycle_image_fit,
     ),
     (
         "[, which winds the progress bar back",
         Keycode::LeftBracket,
+        Some(Page::Controls),
         Demo::progress_back,
     ),
     (
         "], which winds the progress bar on",
         Keycode::RightBracket,
+        Some(Page::Controls),
         Demo::progress_on,
     ),
     (
         "P, which switches the bar's mode",
         Keycode::P,
+        Some(Page::Controls),
         Demo::toggle_progress_mode,
     ),
     (
         ", which turns the gauge back",
         Keycode::Comma,
+        Some(Page::Data),
         Demo::gauge_back,
     ),
     (
         ". which turns the gauge on",
         Keycode::Period,
+        Some(Page::Data),
         Demo::gauge_on,
     ),
     (
         "G, which changes the gauge's shape",
         Keycode::G,
+        Some(Page::Data),
         Demo::cycle_gauge_type,
     ),
     (
         "H, which changes the chart's shape",
         Keycode::H,
+        Some(Page::Data),
         Demo::cycle_chart_type,
     ),
     (
         "A, which appends a chart reading",
         Keycode::A,
+        Some(Page::Data),
         Demo::append_chart_sample,
     ),
     (
         "S, which drops the oldest chart reading",
         Keycode::S,
+        Some(Page::Data),
         Demo::shift_chart_sample,
     ),
 ];
@@ -6050,13 +8287,34 @@ mod tests {
     /// fit's geometry, its place in the paint order — is the same either way,
     /// because the two are the same size.
     fn demo() -> Demo {
-        Demo::new(mono_metrics(), None).unwrap()
+        demo_on(Page::DEFAULT)
+    }
+
+    /// Returns a demo whose **page is `page`**, on the default page otherwise.
+    ///
+    /// **The fixture every other one is written on top of**, and its second form
+    /// is the whole of the migration task 24.1 carried. Before pages a test could
+    /// name its subject and the demo had everything on screen; now a test whose
+    /// subject is on another page has to say so *before its first frame*, because
+    /// the paint gate empties the nodes of the five pages that are not showing and
+    /// a test that reads a recorded command would find an empty list — which reads
+    /// as "the widget draws nothing" and is the opposite of the truth.
+    ///
+    /// **`Page::DEFAULT` is `pads`,** so the tests whose subject really is on the
+    /// default page are unchanged and the ones that are not name theirs.
+    fn demo_on(page: Page) -> Demo {
+        Demo::new(mono_metrics(), None, page).unwrap()
     }
 
     /// Lays the demo out once, the way the first frame does, so a test can ask
     /// where the pads are.
     fn laid_out() -> Demo {
-        let mut demo = demo();
+        laid_out_on(Page::DEFAULT)
+    }
+
+    /// [`laid_out`] on `page`. See [`demo_on`] for why the page is a parameter.
+    fn laid_out_on(page: Page) -> Demo {
+        let mut demo = demo_on(page);
         demo.frame(WINDOW, Duration::from_millis(16));
         demo
     }
@@ -6065,8 +8323,8 @@ mod tests {
     /// so a test about the gallery is not also a test about the modal over it.
     ///
     /// **This is the single most consequential fixture change task 22 made**, and
-    /// it is a change of *precondition* rather than of assertion: the demo now
-    /// opens with the dialog showing — input injection does not work on this host,
+    /// it is a change of *precondition* rather than of assertion: the demo used to
+    /// open with the dialog showing — input injection does not work on this host,
     /// so a dialog that began hidden could only be photographed through an
     /// instrument — and twenty-odd tests drive a control **behind** the overlay. A
     /// tap on the slider with the dialog up is correctly swallowed by the modal, so
@@ -6078,8 +8336,24 @@ mod tests {
     /// assertion is `is_drawn()` rather than `visible`, because a dialog that is
     /// hidden but still fading is still on the screen.
     fn dialog_closed() -> Demo {
-        let mut demo = laid_out();
-        demo.handle_event(key_event(DIALOG_KEY));
+        dialog_closed_on(Page::DEFAULT)
+    }
+
+    /// [`dialog_closed`] on `page`. See [`demo_on`] for why the page is a
+    /// parameter.
+    ///
+    /// **The `D` press is conditional, and that is a consequence of the page rather
+    /// than of the fixture.** `D` is a toggle, and the dialog is presented at
+    /// construction *only on the page that shows it* — so on the five pages that do
+    /// not show it there is nothing to close, and pressing `D` would **open** it.
+    /// The condition below asks the demo rather than assuming, which is what keeps
+    /// this fixture honest on all six pages instead of only the one whose dialog
+    /// happens to be up.
+    fn dialog_closed_on(page: Page) -> Demo {
+        let mut demo = laid_out_on(page);
+        if demo.dialog_is_modal() {
+            demo.handle_event(key_event(DIALOG_KEY));
+        }
         // The widget's own transition is 300 ms — its `motion`'s default, which the
         // demo deliberately does not override — so three whole spans is two spans
         // of slack over it.
@@ -6404,7 +8678,7 @@ mod tests {
 
     #[test]
     fn the_last_panel_label_is_cut_with_an_ellipsis() {
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Text);
         let runs = label_runs(&demo, 6);
         assert_eq!(runs.len(), 1, "the long label is one line, not wrapped");
         assert!(
@@ -6421,7 +8695,7 @@ mod tests {
 
     #[test]
     fn the_text_panel_shows_the_greeting() {
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Text);
         assert_eq!(
             first_label_runs(&demo)[0].2,
             "Hello, World!",
@@ -6431,7 +8705,7 @@ mod tests {
 
     #[test]
     fn the_panel_lays_out_its_labels_in_the_column() {
-        let mut demo = demo();
+        let mut demo = demo_on(Page::Text);
         demo.frame(WINDOW, Duration::from_millis(16));
         let nodes = demo.nodes.borrow();
         let rects: Vec<_> = demo
@@ -6453,7 +8727,7 @@ mod tests {
 
     #[test]
     fn a_wrapped_label_records_more_than_one_line() {
-        let mut demo = demo();
+        let mut demo = demo_on(Page::Text);
         demo.frame(WINDOW, Duration::from_millis(16));
         let nodes = demo.nodes.borrow();
         let runs = nodes
@@ -6472,7 +8746,7 @@ mod tests {
 
     #[test]
     fn the_plus_and_minus_keys_move_the_text_size() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Text);
         let start = demo.labels[0].label.font_size.get();
         demo.handle_event(key(Keycode::Equals));
         assert_eq!(
@@ -6486,7 +8760,7 @@ mod tests {
 
     #[test]
     fn the_text_size_stays_inside_its_bounds() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Text);
         for _ in 0..100 {
             demo.handle_event(key(Keycode::Minus));
         }
@@ -6502,7 +8776,7 @@ mod tests {
         // The size is a plain field rather than a property because it changes
         // the labels' rects, not only their glyphs: the panel lays them out by
         // the rects it is given.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Text);
         let first = demo.label_nodes[0];
         let before = {
             let nodes = demo.nodes.borrow();
@@ -6524,7 +8798,7 @@ mod tests {
 
     #[test]
     fn the_c_key_moves_the_token_the_text_takes_its_colour_from() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Text);
         let first = first_label_color(&demo);
         assert_eq!(
             first,
@@ -6542,8 +8816,8 @@ mod tests {
 
     #[test]
     fn the_text_follows_the_theme_switch() {
-        let dark = first_label_color(&dialog_closed());
-        let mut demo = dialog_closed();
+        let dark = first_label_color(&dialog_closed_on(Page::Text));
+        let mut demo = dialog_closed_on(Page::Text);
         demo.handle_event(key(Keycode::T));
         for _ in 0..35 {
             demo.frame(WINDOW, Duration::from_millis(10));
@@ -6606,7 +8880,7 @@ mod tests {
         // 50%".** Half of 0..240 is 120, and that is what the demo builds it at,
         // so the dial opens on exactly the reading the criterion names rather than
         // on its minimum.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Data);
         assert_eq!(
             demo.gauge.value.get(),
             GAUGE_START,
@@ -6644,7 +8918,7 @@ mod tests {
         // widget it is bound to — see the note where the readout is built. Two
         // copies of one mapping is two things to keep in step, so this is what
         // holds them in step: every tenth of the range, through the widget.
-        let mut demo = laid_out();
+        let mut demo = laid_out_on(Page::Data);
         for step in 0..=10u8 {
             let share = f32::from(step) / 10.0;
             let value = GAUGE_MIN + (GAUGE_MAX - GAUGE_MIN) * share;
@@ -6681,7 +8955,7 @@ mod tests {
         // those greys. That is the same trap the button band fell into first, and
         // the test below the demo's `snap_to_state` calls is the reason it is
         // written where it is rather than left to a paint pass.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Data);
         let themed = GaugePalette::from_theme(&Theme::dark());
         assert_eq!(demo.gauge.track.get(), themed.track, "the track");
         assert_eq!(demo.gauge.fill.get(), themed.fill, "the fill");
@@ -6712,7 +8986,7 @@ mod tests {
         // passes its target and comes back, so the needle overshoots. A `set`
         // instead of an animation would be at the far end on the first frame and
         // pass a test that only looked at where it ended up.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let before = demo.gauge.shown.get();
         demo.handle_event(key(Keycode::Period));
         assert_eq!(
@@ -6791,7 +9065,7 @@ mod tests {
         // tells them apart: a spring goes **past** its target and comes back, an
         // ease does not. Without this the demo would animate a needle and the
         // claim "spring physics" would be a name for whatever curve was used.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         demo.handle_event(key(Keycode::Period));
         let mut peak = 0.0f32;
         for _ in 0..60 {
@@ -6822,7 +9096,7 @@ mod tests {
         // pointing below its own floor. The demo clamps and the widget clamps, and
         // this asks the demo's — because the demo is the thing that can produce a
         // value outside the range in the first place.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         for _ in 0..20 {
             demo.handle_event(key(Keycode::Comma));
         }
@@ -6854,7 +9128,7 @@ mod tests {
         // the constant: a value accumulated by addition is off the grid by a
         // fraction of a pixel per press, and a needle a third of a degree off is a
         // needle that is not on the mark the key name claims it is on.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let mut seen: Vec<f32> = Vec::new();
         for _ in 0..10 {
             demo.handle_event(key(Keycode::Comma));
@@ -6880,7 +9154,7 @@ mod tests {
         // Three shapes and a key to reach them with, and the readout has to
         // follow: a demo that cycled the dial and left the label naming the shape
         // it started in would be showing a caption for a different picture.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         assert_eq!(demo.gauge.gauge_type(), GaugeType::Needle, "it starts here");
         for expected in ["Arc", "Circle", "Needle"] {
             demo.handle_event(key(Keycode::G));
@@ -6910,7 +9184,7 @@ mod tests {
         // polygons too — one per band segment — so a filter on the variant alone
         // would count 51 of them and call them needles. A three-pointed polygon is
         // the needle and nothing else this widget records.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let needles = |demo: &Demo| {
             demo.commands_at(demo.gauge.handle())
                 .iter()
@@ -6940,7 +9214,7 @@ mod tests {
         // gauge that does not move. **The bounds**: nothing the widget records
         // reaches outside its own rect, so a 200-pixel node cannot draw into the
         // slider 56 pixels below it.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Data);
         let rect = demo
             .node_rect(demo.gauge.handle())
             .expect("a laid-out gauge");
@@ -7036,7 +9310,7 @@ mod tests {
         // re-aims every widget at what it already had and the transition goes
         // nowhere while every test stays green. The gauge is aimed like the rest,
         // and this is the assertion that says so.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let dark_track = demo.gauge.track.get();
         assert_eq!(
             dark_track,
@@ -7106,8 +9380,16 @@ mod tests {
             gauge.x > column_right,
             "and the whole column is right of the text at {column_right}"
         );
-        // Above the band, which is the constraint that keeps every capture of
+        // Above the band, which **was** the constraint that kept every capture of
         // tasks 11 to 19 a capture of the same pixels.
+        //
+        // **Task 24.2 made that a cross-page comparison and it is kept as one
+        // because it is still true**: the gauge's readout ends at 536 and
+        // [`BAND_TOP`] is 680. What it is no longer is a statement about the two
+        // sharing a window — the gauge is `data`'s and the band is `input`'s, so
+        // `no_two_placed_rects_overlap` over the pages is what says they do not
+        // collide, and this is the number that would notice if [`BAND_TOP`] were
+        // ever derived from something this column is in.
         assert!(
             readout.y + readout.height <= BAND_TOP,
             "and nothing it draws is below {BAND_TOP}"
@@ -7180,7 +9462,7 @@ mod tests {
         // What it also rules out is the opposite defect: a tap that fell through
         // to the pads, which are the one thing in the window that does answer a
         // press.
-        let mut demo = laid_out();
+        let mut demo = laid_out_on(Page::Data);
         let gauge = demo
             .node_rect(demo.gauge.handle())
             .expect("a laid-out gauge");
@@ -7367,15 +9649,17 @@ mod tests {
         assert_eq!(
             parents,
             containers.len() + widget_owned.len(),
-            "and every parent in the tree is one of those five or a widget-owned \
-             one: the five the demo assembles, the dialog and the toast host"
+            "and every parent in the tree is one of those six or a widget-owned one: \
+             the six the demo assembles, the dialog and the toast host"
         );
         assert_eq!(
             containers.len(),
-            5,
-            "the demo assembles five: the card, the text column and its panel, the \
-             controls layer and the root. It was six while the button row was a \
-             container of its own"
+            6,
+            "the demo assembles six: the card, the text column and its panel, the \
+             controls layer, the root and **the tab bar**. It was five between task \
+             24.1 and task 24.3 and was six before 2026-10-01, while the button row \
+             was a container of its own — the same six the demo has now assembled for \
+             a different reason"
         );
         assert_eq!(
             widget_owned.len(),
@@ -7412,18 +9696,28 @@ mod tests {
         // CARD_PADDING in from its far edges. A padding that was stored and never
         // applied would leave the card exactly the row's size, and these two
         // differences would be zero.
+        //
+        // **Measured from the card's own origin, and task 24.2 is why.** These
+        // two lines compared a **size** against an **absolute origin**, which is
+        // the trap `.ai/NEVERAGAIN.md`'s *a rect's origin and a rect's extent are
+        // different numbers* records and it was correct only while the card sat
+        // at the window's own top left: the first run of this task read `-52`
+        // instead of `12`, because the card had moved down `CONTENT_TOP` and taken
+        // its pads with it. Nothing here is weakened — the same twelve pixels are
+        // asked for — but the question is now the one the test means to ask.
         assert_eq!(
-            card.size.width - (last.origin.x + last.size.width),
+            card.size.width - ((last.origin.x - card.origin.x) + last.size.width),
             CARD_PADDING,
             "the card is CARD_PADDING wider than the pads reach"
         );
         assert_eq!(
-            card.size.height - (first.origin.y + PAD_SIZE.height),
+            card.size.height - ((first.origin.y - card.origin.y) + PAD_SIZE.height),
             CARD_PADDING,
             "and CARD_PADDING taller"
         );
         assert_eq!(
-            first.origin.x, CARD_PADDING,
+            first.origin.x - card.origin.x,
+            CARD_PADDING,
             "with the first pad inset by it as well"
         );
     }
@@ -7497,26 +9791,105 @@ mod tests {
         );
     }
 
+    /// A container with no background is invisible, so the demo has to name the
+    /// two that *do* have one and say the other four draw nothing.
+    ///
+    /// **The name changed when task 24.3 landed and the count with it**: the card
+    /// of pads is still the only container that had a background, and the tab bar
+    /// is the second. `TASK_UI_PRIM_24.3.md` requirement 1 says so — *"it is the
+    /// demo's **second** container with a visible background and the padding is
+    /// visible — the card of pads is the first"* — and a test called
+    /// `the_other_containers_draw_nothing` would have been a test whose name said
+    /// the bar draws nothing.
+    ///
+    /// **Run on two pages, because the card and the bar are on different ones.**
+    /// The bar is always-painted and the card is a row on `pads`, so on `text` the
+    /// card records **nothing** — the paint gate emptied it — and the only
+    /// container painting there is the bar. The old version of this test skipped the
+    /// card rather than accounting for that, which is what let it stay honest about
+    /// "the other four draw nothing" without noticing what the card was doing.
     #[test]
-    fn the_other_containers_draw_nothing() {
-        // A container with no background is invisible: the demo has five of them
-        // and the card is the sixth, so a background leaking onto any of the
-        // others would be visible as a box where the demo has always had the
-        // window's own background.
-        let demo = laid_out();
-        let card = demo.card().handle();
-        for container in &demo.containers {
-            if container.handle() == card {
-                continue;
+    fn the_container_with_a_background_are_the_card_and_the_bar() {
+        for page in [Page::Pads, Page::Text] {
+            let demo = laid_out_on(page);
+            for container in &demo.containers {
+                let handle = container.handle();
+                let nodes = demo.nodes.borrow();
+                let node = nodes.get(handle).expect("a container's node");
+                let commands = node.paint().commands().len();
+                if handle == demo.tab_bar().handle() {
+                    assert_eq!(
+                        commands, 1,
+                        "{page:?}: the bar is on every page and carries a background, \
+                         so it records its one rounded rectangle everywhere"
+                    );
+                } else if handle == demo.card().handle() {
+                    assert_eq!(
+                        commands,
+                        usize::from(page == Page::Pads),
+                        "{page:?}: the card is page content on `pads` and nothing \
+                         else, so the paint gate empties it on the other five — \
+                         which is a gate and not a container with no background"
+                    );
+                } else {
+                    assert_eq!(
+                        commands, 0,
+                        "{page:?}: a container with no background records no draw \
+                         commands"
+                    );
+                }
             }
+        }
+        let demo = laid_out_on(Page::Text);
+        // **And the two are the two, by index.** `Demo::controls_layer` and
+        // `Demo::tab_bar` name containers by index, so an appended bar that
+        // somehow answered for the controls layer would be invisible to every other
+        // test here; this is the line that says the accessor still names the bar.
+        let bar = demo.tab_bar();
+        let first_tab_parent = {
             let nodes = demo.nodes.borrow();
-            let node = nodes.get(container.handle()).expect("a container's node");
+            nodes
+                .get(demo.tabs[0].button.handle())
+                .and_then(WidgetNode::parent)
+                .expect("the first tab button is attached")
+        };
+        assert_eq!(
+            bar.handle(),
+            first_tab_parent,
+            "the accessor names the bar, and the bar is the parent of a tab button"
+        );
+        {
+            let nodes = demo.nodes.borrow();
+            let node = nodes.get(bar.handle()).expect("the bar's node");
             assert_eq!(
-                node.paint().commands().len(),
-                0,
-                "a container with no background records no draw commands"
+                node.layout().mode(),
+                ui_core::layout::LayoutMode::row(),
+                "and the bar is the row requirement 1 asks for"
+            );
+            assert_eq!(
+                node.children().len(),
+                Page::ALL.len(),
+                "holding one button per page"
+            );
+            assert!(
+                bar.background.get().a > 0,
+                "over a background that is not transparent, which is what makes the \
+                 padding visible"
             );
         }
+        let slider_parent = {
+            let nodes = demo.nodes.borrow();
+            nodes
+                .get(demo.slider.node())
+                .and_then(WidgetNode::parent)
+                .expect("the slider is attached")
+        };
+        assert_eq!(
+            demo.controls_layer().handle(),
+            slider_parent,
+            "and the controls layer is still the controls layer: the slider is one \
+             of its children and its parent is the layer itself"
+        );
     }
 
     /// A finger down at `(x, y)`, a motion to `(to_x, to_y)`, and a release at
@@ -7639,7 +10012,7 @@ mod tests {
         // "Renders track, fill, and thumb" is three shapes on one node: two
         // rounded rectangles and two circles, the thumb being a border with a
         // circle on top of it.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Controls);
         let commands = demo.slider_commands();
         let rects = commands
             .iter()
@@ -7658,7 +10031,7 @@ mod tests {
     fn a_drag_on_the_slider_moves_its_value_and_its_thumb() {
         // The whole path a finger takes: down, motion, up, and a frame between
         // each so the widget's properties reach the screen.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let (x, y) = demo.slider_at_fraction(0.5).expect("a laid-out slider");
         for event in drag_on(x, y, x + 80.0, y) {
             demo.handle_event(event);
@@ -7692,7 +10065,7 @@ mod tests {
         // why the demo offers the drag to the slider being dragged rather than
         // only to whatever is under the pointer. Without that the value would
         // stop at the edge of the node instead of at the end of the range.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let (x, y) = demo.slider_at_fraction(0.25).expect("a laid-out slider");
         for event in drag_on(x, y, x + 900.0, y) {
             demo.handle_event(event);
@@ -7714,7 +10087,7 @@ mod tests {
 
     #[test]
     fn a_tap_on_the_sliders_track_jumps_the_value_there() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let (x, y) = demo.slider_at_fraction(0.75).expect("a laid-out slider");
         let (down, up) = click_at(x, y);
         demo.handle_event(down);
@@ -7730,7 +10103,7 @@ mod tests {
 
     #[test]
     fn the_sliders_readout_follows_the_value_and_counts_its_adjustments() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         assert_eq!(
             demo.readout_text().as_deref(),
             Some("0 of 100, 0 adjustments")
@@ -7776,7 +10149,7 @@ mod tests {
         // binding a slider to a model does. The readout follows because it is
         // bound to the value; the count does not, because the widget did not
         // adjust anything.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         demo.handle_event(key(Keycode::_1));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(demo.slider.widget.value.get(), SLIDER_MAX);
@@ -7791,7 +10164,7 @@ mod tests {
         // starts where it was, is part way after one frame's worth of the
         // transition, and arrives. A `set` instead of an animation would be at
         // the value on the first frame and pass an end-only assertion.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         assert_eq!(
             painted_thumb_x(&demo),
             demo.slider_at_fraction(0.0).unwrap().0
@@ -7827,7 +10200,7 @@ mod tests {
 
     #[test]
     fn the_thumb_grows_while_a_pointer_is_holding_the_slider() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let (x, y) = demo.slider_at_fraction(0.5).expect("a laid-out slider");
         let resting = painted_thumb_radius(&demo);
 
@@ -7850,11 +10223,13 @@ mod tests {
 
     #[test]
     fn an_arrow_key_moves_the_slider_once_it_holds_focus() {
-        let mut demo = dialog_closed();
-        // **One** `Tab`, where it was three before the buttons went: the slider is
-        // the first control in the order and the two enabled buttons that used to
-        // precede it are not here.
-        demo.handle_event(key(Keycode::Tab));
+        let mut demo = dialog_closed_on(Page::Controls);
+        // **Through the bar and onto the page's first control**, which is what
+        // `tabs_onto` counts: the six tab buttons come first and the slider is
+        // `controls`' first control of its own.
+        for _ in 0..tabs_onto(Page::Controls, 0) {
+            demo.handle_event(key(Keycode::Tab));
+        }
         assert_eq!(demo.focused, Some(demo.slider.node()));
 
         demo.handle_event(key(Keycode::Right));
@@ -7876,7 +10251,7 @@ mod tests {
         // A key is not routed by position, so an arrow would otherwise move every
         // slider on screen. The widget's own test says this too; what the demo
         // adds is that nothing focuses the slider by accident.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         demo.handle_event(key(Keycode::Right));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(demo.slider.widget.value.get(), SLIDER_MIN);
@@ -7890,8 +10265,10 @@ mod tests {
         // first, and focus navigation only runs for what the control left alone —
         // so a focused slider is driven by it and whatever is left over still
         // walks the focus order.
-        let mut demo = dialog_closed();
-        demo.handle_event(key(Keycode::Tab));
+        let mut demo = dialog_closed_on(Page::Controls);
+        for _ in 0..tabs_onto(Page::Controls, 0) {
+            demo.handle_event(key(Keycode::Tab));
+        }
         assert_eq!(demo.focused, Some(demo.slider.node()));
         demo.handle_event(wheel(8000));
         demo.frame(WINDOW, Duration::from_millis(16));
@@ -7904,7 +10281,7 @@ mod tests {
 
     #[test]
     fn the_slider_paints_a_focus_ring_once_it_is_focused() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let rects = |demo: &Demo| {
             demo.slider_commands()
                 .iter()
@@ -7913,7 +10290,9 @@ mod tests {
         };
         assert_eq!(rects(&demo), 2, "an unfocused slider is a track and a fill");
 
-        demo.handle_event(key(Keycode::Tab));
+        for _ in 0..tabs_onto(Page::Controls, 0) {
+            demo.handle_event(key(Keycode::Tab));
+        }
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(rects(&demo), 3, "and a focused one has a ring as well");
     }
@@ -7924,7 +10303,7 @@ mod tests {
         // a switch carries the new colours to the slider through the property
         // graph: the widget is aimed at the new palette and its own transition
         // runs alongside the theme's.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let dark = demo.slider.widget.track.get();
         assert_eq!(
             dark,
@@ -7957,7 +10336,18 @@ mod tests {
             rect.x,
             column_right
         );
-        let gauge_bottom = GAUGE_ORIGIN.1 + GAUGE_SIZE.height;
+        // **The gauge's own laid-out rect rather than `GAUGE_ORIGIN.1 +
+        // GAUGE_SIZE.height`, and task 24.2 is why.** The constant sum is 440 and
+        // the slider is drawn at 560, so the assertion still held — with 120
+        // pixels of slack where it had 56, because the slider moved down
+        // [`CONTENT_TOP`] and the number it was compared against did not. **A
+        // comparison against a coordinate the shift left behind is a coincidence
+        // by the next change**, and reading both sides off the layout is the same
+        // assertion with the slack removed.
+        let gauge = demo
+            .node_rect(demo.gauge.handle())
+            .expect("a laid-out gauge");
+        let gauge_bottom = gauge.y + gauge.height;
         assert!(
             rect.y > gauge_bottom,
             "and at y = {}, below the gauge's own bottom edge at {gauge_bottom}",
@@ -8088,8 +10478,9 @@ mod tests {
             .expect("the chart is named above");
         assert_eq!(
             (chart.x, chart.y),
-            CHART_ORIGIN,
-            "at the list's own x and sixteen below the image fit label"
+            (CHART_ORIGIN.0, CHART_ORIGIN.1 + CONTENT_TOP),
+            "at the list's own x and sixteen below the image fit label, both of \
+             them CONTENT_TOP lower for the tab bar"
         );
         assert_eq!(
             (chart.width, chart.height),
@@ -8104,12 +10495,31 @@ mod tests {
             "and it is the rect its own node was laid out at, so the two cannot \
              disagree"
         );
+        // **This used to be `chart.y + chart.height <= BAND_TOP`, and task 24.2
+        // is what stopped it being true**: the chart's 754 is past the band's
+        // 680, because the gallery went down [`CONTENT_TOP`] and the band's box
+        // went up by the same. **The band is `input`'s and the chart is
+        // `data`'s, so the two cannot be compared at all** — the claim is
+        // replaced by the one thing both pages share, which is the window.
+        let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
         assert!(
-            chart.y + chart.height <= BAND_TOP,
-            "and it ends at {}, above the band at {BAND_TOP}, so the gallery above \
-             the band has not moved",
-            chart.y + chart.height
+            inside(window, chart),
+            "the chart at {chart:?} is inside the {WINDOW:?}, which is the bound \
+             two pages still share"
         );
+        // And its neighbours, which is what the band comparison was standing in
+        // for on the page the chart is actually drawn on.
+        let data_rects = laid_out_on(Page::Data).page_rects();
+        for (other_what, other) in &data_rects {
+            if *other_what == "chart" {
+                continue;
+            }
+            assert!(
+                !touches(chart, *other),
+                "and clear of the {other_what} at {other:?}, which is its own \
+                 page's half of `no_two_placed_rects_overlap`"
+            );
+        }
     }
 
     #[test]
@@ -8118,7 +10528,7 @@ mod tests {
         // data is a named constant a test can assert against, the chart is on the
         // theme rather than on the neutral greys `Chart::new` writes, and the
         // readout names what is on screen.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Data);
         assert_eq!(
             demo.chart.data.get(),
             CHART_SERIES[..CHART_OPENING_COUNT].to_vec(),
@@ -8173,7 +10583,7 @@ mod tests {
         // demo showing one of them does not show three. This is the key that
         // makes all three reachable on screen rather than in three builds, and
         // the readout is what says which one is on the glass.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         for lap in 0..2 {
             for press in 0..CHART_TYPES.len() {
                 // **The press comes first and the assertion names what it arrived
@@ -8226,7 +10636,7 @@ mod tests {
     /// file does not own.
     #[test]
     fn each_chart_shape_records_its_own_primitive_in_its_own_place() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let mut seen: Vec<(usize, usize, usize)> = Vec::new();
         for shape in 0..CHART_TYPES.len() {
             // **One press per pass, not `shape` presses**: the demo opens on the
@@ -8328,7 +10738,7 @@ mod tests {
         // event path: an SDL key-down, the recogniser, and the arm in
         // `handle_event`, which is the only route a key takes. A test that called
         // `animate_push` on the widget would prove the widget and not the wiring.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let opening = CHART_SERIES[..CHART_OPENING_COUNT].to_vec();
         assert_eq!(demo.chart.data.get(), opening);
 
@@ -8404,7 +10814,7 @@ mod tests {
         // same event path. **The length is the claim**, because a shift that
         // appended without dropping is an append: the window would grow on every
         // press, and the plot's pitch would shrink under the labels.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let opening = CHART_SERIES[..CHART_OPENING_COUNT].to_vec();
         let dropped = opening[0];
         let arriving = CHART_SERIES[CHART_OPENING_COUNT];
@@ -8470,7 +10880,7 @@ mod tests {
     /// the oldest reading is the one that went.
     #[test]
     fn the_append_key_slides_the_window_once_the_series_is_full() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let full = CHART_SERIES.len();
         let presses = full - CHART_OPENING_COUNT + 2;
         for _ in 0..presses {
@@ -8515,7 +10925,7 @@ mod tests {
     /// the rectangle it recorded is what a reader sees.
     #[test]
     fn a_new_bar_rises_from_its_baseline_rather_than_appearing() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         demo.handle_event(key(Keycode::H));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(
@@ -8638,7 +11048,7 @@ mod tests {
     #[test]
     fn a_theme_switch_reaches_the_chart_and_its_readout_in_every_shape() {
         for presses in 0..CHART_TYPES.len() {
-            let mut demo = dialog_closed();
+            let mut demo = dialog_closed_on(Page::Data);
             for _ in 0..presses {
                 demo.handle_event(key(Keycode::H));
             }
@@ -8742,7 +11152,7 @@ mod tests {
         // complaint about a readout that has been cut short. The longest line the
         // format can print is the one at the widest window: twelve readings, the
         // series' own largest reading, and the longest shape name while it moves.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Data);
         let width = demo
             .node_rect(demo.chart_readout.label.handle())
             .expect("a laid-out readout")
@@ -8786,7 +11196,7 @@ mod tests {
         // rather than an oversight: one label fewer than samples is the widget's
         // own documented case — a sample with no label at its index is drawn
         // without one.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let runs = |demo: &Demo| {
             demo.commands_at(demo.chart.handle())
                 .iter()
@@ -8864,7 +11274,7 @@ mod tests {
     fn the_series_never_grows_past_what_the_widget_can_mitre() {
         // **Laid out**, because the plot is measured off what the widget recorded
         // and a node has no rect until a pass has placed it.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Data);
         let reach = demo.chart.stroke_reach();
         assert_eq!(
             reach,
@@ -8916,7 +11326,7 @@ mod tests {
         // At 10 px the widget's answer is 20 px and a literal is not, so the two
         // sides of the identity come apart and the assertion above stops being a
         // tautology.
-        let mut thicker = laid_out();
+        let mut thicker = laid_out_on(Page::Data);
         thicker.chart.set_line_width(10.0);
         assert_eq!(
             thicker.chart.stroke_reach(),
@@ -9064,7 +11474,7 @@ mod tests {
     /// itself — [`CHART_X_LABEL_GUTTER`] — is compared against the widget's.
     #[test]
     fn the_plot_is_the_nodes_own_width_and_its_height_less_the_widgets_x_gutter() {
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Data);
         assert!(
             demo.chart.y_labels.get().is_empty(),
             "the demo writes no y labels, so no left gutter is reserved — which is \
@@ -9122,7 +11532,7 @@ mod tests {
     /// this window that answers a press, and the chart sits nowhere near them.
     #[test]
     fn a_press_on_the_chart_reaches_nothing() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let chart = demo
             .node_rect(demo.chart.handle())
             .expect("a laid-out chart");
@@ -9166,6 +11576,10 @@ mod tests {
         // **The chart is in this list where the list was**, and the list is not:
         // it went on 2026-10-02 to make room, so this test follows the same claim
         // onto the widget that now holds that column.
+        // **The tree and the order are page-independent and are asked of the
+        // default page**, because `order` is computed once in `Demo::new` and no
+        // page changes it — which is what makes this half of the test true on all
+        // six.
         let demo = laid_out();
         for (what, handle) in [
             ("toggle", demo.toggle.handle()),
@@ -9182,20 +11596,45 @@ mod tests {
                 "and the {what} is in the paint order, or it is never drawn"
             );
         }
+
+        // **The three readouts, each on its widget's own page.** Two of the four
+        // widgets are on `controls` and two on `data`, so a single demo cannot hold
+        // all three readouts on screen at once — the paint gate empties the ones
+        // whose page is not showing, and this is the first test in the file that a
+        // page changes rather than a fixture's convenience.
+        let controls = laid_out_on(Page::Controls);
         assert_eq!(
-            demo.readout_text_of(&demo.toggle_readout).as_deref(),
+            controls
+                .readout_text_of(&controls.toggle_readout)
+                .as_deref(),
             Some("off, 0 changes"),
             "the toggle starts off and its label says so"
         );
         assert_eq!(
-            demo.readout_text_of(&demo.progress_readout).as_deref(),
+            controls
+                .readout_text_of(&controls.progress_readout)
+                .as_deref(),
             Some("50%, determinate"),
             "the bar starts at half, which is task 17's acceptance criterion"
         );
         assert_eq!(
-            demo.readout_text_of(&demo.image_fit_readout).as_deref(),
+            controls.readout_text_of(&controls.image_fit_readout),
+            None,
+            "and the image's own readout is on the other page, so the controls page \
+             shows none of it — the gate emptying a node rather than the node being \
+             absent from the tree"
+        );
+
+        let data = laid_out_on(Page::Data);
+        assert_eq!(
+            data.readout_text_of(&data.image_fit_readout).as_deref(),
             Some("fit: Contain (stand-in)"),
-            "and the image starts fitted inside its box"
+            "and the image starts fitted inside its box, on the page that shows it"
+        );
+        assert_eq!(
+            data.readout_text_of(&data.toggle_readout),
+            None,
+            "while the toggle's readout is not on this page"
         );
     }
 
@@ -9204,7 +11643,7 @@ mod tests {
         // "A click turns it on and off, with a readout showing its state": the
         // readout is checked after each of two clicks, so a toggle that stuck on
         // would pass a test that only looked at the first.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         assert!(!demo.toggle.checked.get(), "it starts off");
 
         click_toggle(&mut demo);
@@ -9234,7 +11673,7 @@ mod tests {
         // Requirement 4 is a transition, not an end state: a `set` instead of an
         // animation would be at the far end on the first frame and pass a test
         // that only looked at where it ended up.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let rect = demo.toggle_rect().expect("a laid-out toggle");
         let off_end = demo.toggle.thumb_center(rect).0;
 
@@ -9269,7 +11708,7 @@ mod tests {
         // the colour: two rounded rects of the same size and the same place with
         // the same shape are the same drawing, and only one of the two numbers
         // distinguishes them.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let before = demo.toggle.style().track;
         assert_eq!(
             before,
@@ -9295,7 +11734,7 @@ mod tests {
     fn the_toggle_paints_a_pill_and_a_thumb_and_nothing_else() {
         // "Renders track and thumb" is two shapes on one node, in the order that
         // makes the thumb's shadow read as a ring rather than a disc.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Controls);
         let commands = demo.commands_at(demo.toggle.handle());
         let pills = commands
             .iter()
@@ -9313,7 +11752,7 @@ mod tests {
     fn a_key_switches_the_toggle_once_it_holds_focus() {
         // A key is not routed by position, so the toggle has to be the focused
         // node to hear one — and the demo is what has to put it there.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         demo.handle_event(key(Keycode::Return));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert!(
@@ -9321,10 +11760,13 @@ mod tests {
             "an unfocused toggle ignores the key, or nothing would ever focus it"
         );
 
-        // The third stop: the slider, the image, and then the toggle — the
-        // controls layer's paint order, which is the `Tab` order. It was the fifth
-        // while two enabled buttons preceded it.
-        for _ in 0..3 {
+        // The second of the controls page's own stops: the slider, then the toggle —
+        // the controls layer's paint order, which is the `Tab` order, and behind the
+        // six tab buttons. **The count is `tabs_onto`'s and not a literal**, which
+        // is the whole of what changed here: the loop bound was `2` until task
+        // 24.3 put six buttons in front of it, and a bound written down is a second
+        // way for this test to be wrong.
+        for _ in 0..tabs_onto(Page::Controls, 1) {
             demo.handle_event(key(Keycode::Tab));
         }
         assert_eq!(demo.focused, Some(demo.toggle.handle()), "Tab reached it");
@@ -9343,7 +11785,7 @@ mod tests {
         // image node, and pressing `F` changes what that one draws. Four copies
         // would be a gallery, and a test that counted four images would pass on
         // one.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let image_node = demo.image.handle();
         let images = |demo: &Demo| {
             demo.commands_at(image_node)
@@ -9379,7 +11821,7 @@ mod tests {
     fn the_image_says_which_fit_it_is_showing() {
         // The label is bound to the same property the key writes, so a cycle
         // that changed the fit without changing the label would show here.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let mut said = Vec::new();
         for _ in 0..4 {
             said.push(
@@ -9407,7 +11849,7 @@ mod tests {
         // claims about geometry, and the numbers that tell them apart are the
         // drawn rect and the sampled window. A test that only checked "an image
         // was drawn" would pass on four copies of the same call.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Data);
         let bounds = demo.image_rect().expect("a laid-out image");
         let mut drawn: Vec<(Rect, UvRect)> = Vec::new();
         for _ in 0..4 {
@@ -9502,7 +11944,7 @@ mod tests {
         // 160, so a label beside the box would be under it in that one mode and
         // clear of it in the other three. It is below the box, and this is what
         // says so for all four.
-        let mut demo = laid_out();
+        let mut demo = laid_out_on(Page::Data);
         let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
         let label = demo
             .node_rect(demo.image_fit_readout.label.handle())
@@ -9530,7 +11972,7 @@ mod tests {
         // "Rounded corners work" is the radius on the command, not the shape: a
         // textured quad is a quad whatever the radius, and only the number tells
         // the shader was asked.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Data);
         let radius = demo
             .commands_at(demo.image.handle())
             .iter()
@@ -9551,7 +11993,7 @@ mod tests {
         // The step is a tenth and the ends are 0 and 1, and the readout names the
         // **value** rather than the drawn one — which on the frame after a press
         // is a claim, because the two are not the same number then.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         assert_eq!(demo.progress.value.get(), PROGRESS_START);
 
         demo.handle_event(key(Keycode::RightBracket));
@@ -9612,7 +12054,7 @@ mod tests {
         // "Value changes animate smoothly" is two halves, and a `set` instead of
         // an animation would be at the value on the first frame and pass an
         // end-only assertion. So the test reads the drawn fill half way.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         // The **second** rounded rect, which is the fill: the track is drawn
         // first and is the whole width, so the widest of the two is the track and
         // asking for it would report a fill that never moves.
@@ -9662,7 +12104,7 @@ mod tests {
         // "Indeterminate mode shows sliding animation": the two halves are the
         // mode and the *movement*, and a bar that said it was sliding while its
         // slide sat still would pass a test on the label alone.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         assert!(!demo.progress.indeterminate(), "it starts determinate");
         assert_eq!(
             demo.readout_text_of(&demo.progress_readout).as_deref(),
@@ -9709,7 +12151,7 @@ mod tests {
     fn the_progress_bar_paints_a_track_and_a_fill_and_nothing_else() {
         // "Progress bar renders track and fill" is two rounded rectangles, and
         // the second test above is what says the second of them is a *fill*.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Controls);
         let commands = demo.commands_at(demo.progress.handle());
         assert_eq!(commands.len(), 2, "a track and a fill");
         assert!(
@@ -9720,26 +12162,374 @@ mod tests {
         );
     }
 
+    /// The six pages' own rects, each page's beside its own, in [`Page::ALL`] order.
+    ///
+    /// **The helper both collision tests read**, and it exists so the two of them
+    /// cannot disagree about what a page's layout is — the same argument
+    /// [`Demo::placed_rects`]'s doc makes for one list rather than a list per test.
+    ///
+    /// **It asserts the complement as it goes, once per page**, which is the only
+    /// place from which all six are visited: the exemption list is per page — the
+    /// dialog is excused on `overlays` alone and the three pads on `pads` alone —
+    /// so a single call on the default page would leave two of the three exemptions
+    /// unexercised. It is here rather than in either collision test because a
+    /// second call site is a second thing to forget, and
+    /// `assert_placed_handles_is_complete` is already read from two.
+    fn rects_by_page() -> Vec<(Page, Vec<(&'static str, Rect)>)> {
+        Page::ALL
+            .iter()
+            .map(|&page| {
+                let demo = laid_out_on(page);
+                assert_every_drawn_leaf_is_named_or_excused(&demo);
+                (page, demo.page_rects())
+            })
+            .collect()
+    }
+
+    /// The leaves [`Demo::placed_handles`] must name, **written out**.
+    ///
+    /// **The count is checked against [`assert_placed_handles_is_complete`], not
+    /// stated here** — a number written in a doc is a claim and a number in an
+    /// `assert_eq!` is a test, and this one was wrong in prose once already while
+    /// the list beside it was right. [`Demo::placed_rects`] and
+    /// [`Demo::page_rects`] are both *filters over that one list*, and the
+    /// partition assertion below used to compare the filter's output against the
+    /// unfiltered output of the same list — **so both of its directions were
+    /// membership assertions over one source, and deleting a row was invisible to
+    /// both.** Measured on 2026-10-04 by the review of this task: deleting
+    /// `("progress bar", ..)` from `placed_handles` leaves **1817 tests green**,
+    /// and so does deleting the keyboard's row. The compound is worse than either
+    /// alone: fattening the progress bar so it leaves the window is caught by
+    /// `every_placed_rect_is_inside_the_window`, and **that same fattening plus
+    /// the deleted row is green** — the node whose box crosses the band's top, the
+    /// one the whole per-page argument rests on, is the node a deletion removes.
+    ///
+    /// So this list is the *independent* answer, and it is written out rather than
+    /// derived from `placed_handles` for the reason
+    /// [`always_painted_handles`]'s doc gives: **an expected answer read back out
+    /// of the thing it is checking agrees with whatever that thing says**, which is
+    /// the whole thing it exists to catch. `.ai/NEVERAGAIN.md` § *a sweep of a
+    /// mechanism's call sites is not a sweep of the data it is built from* — which
+    /// this helper's own doc cited while making exactly that mistake — is task
+    /// 24.1's round-3 major, and this is the same one a table further down.
+    ///
+    /// **Seven `text panel label` rows, and the repetition is load-bearing**: the
+    /// comparison is over sorted lists with duplicates intact, so losing *one* of
+    /// the seven labels fails it. A set of names would not notice.
+    fn expected_placed_rect_names() -> Vec<&'static str> {
+        vec![
+            "pads card",
+            "text panel label",
+            "text panel label",
+            "text panel label",
+            "text panel label",
+            "text panel label",
+            "text panel label",
+            "text panel label",
+            "gauge",
+            "gauge readout",
+            "slider",
+            "slider readout",
+            "image",
+            "image fit label",
+            "toggle",
+            "toggle readout",
+            "progress bar",
+            "progress readout",
+            "chart",
+            "chart readout",
+            "fps readout",
+            "text input",
+            "text readout",
+            "submit readout",
+            "keyboard",
+        ]
+    }
+
+    /// Asserts that [`Demo::placed_handles`] names exactly what
+    /// [`expected_placed_rect_names`] writes out, with multiplicity.
+    ///
+    /// **Sorted, so a reorder does not fail it and a deletion does.** Two
+    /// `assert_eq!`s rather than one diff, because the two directions have
+    /// different causes: a name here that is not there is **a row deleted**, and a
+    /// name there that is not here is **a row added** — which is how a seventh
+    /// leaf would arrive without anybody deciding it should be checked.
+    fn assert_placed_handles_is_complete(demo: &Demo) {
+        let named = |rows: &[(&'static str, Handle)]| -> Vec<&'static str> {
+            rows.iter().map(|(what, _)| *what).collect()
+        };
+        let mut got = named(&demo.placed_handles());
+        got.sort_unstable();
+        let mut want = expected_placed_rect_names();
+        want.sort_unstable();
+        // **The count, checked rather than asserted in a doc comment.** One card,
+        // seven text-panel labels and seventeen controls and readouts — and the
+        // second review of this task caught the prose above claiming twenty-six
+        // while the list held twenty-five, which is the shape of the same failure a
+        // number nobody computed is a number nobody checked. Adding a leaf now has
+        // to change this line as well as the list, which is two edits and is the
+        // point.
+        assert_eq!(
+            want.len(),
+            25,
+            "the written-out list holds one card, seven text-panel labels and \
+             seventeen controls and readouts"
+        );
+        assert_eq!(
+            got, want,
+            "the leaves `placed_rects` and `page_rects` are both filtered from. A \
+             name missing from the left is a row deleted, and every collision test \
+             in the suite goes blind to that widget without one failing; a name \
+             only on the right is a row added, and nothing has decided yet whether \
+             it should be under test"
+        );
+    }
+
+    /// The nodes that draw something, have a box, and are **not** one of
+    /// [`Demo::placed_handles`]'s twenty-five — written out, and named individually
+    /// rather than derived from anything the demo already believes.
+    ///
+    /// **Twelve, and nine of them are laid out by a container rather than placed by
+    /// the demo** — the six tab buttons and the three pads. This is the *complement* of
+    /// [`assert_placed_handles_is_complete`], and it exists because that assertion
+    /// closed one direction of a hole and left the other open: it catches a row
+    /// **deleted** from `placed_handles` and a row **added** to it, and it is
+    /// structurally unable to see a widget that was **never listed** — because
+    /// "not in the list" is exactly the state it is looking for, and a node in no
+    /// list is invisible to every assertion phrased over the list's members. **The
+    /// three pads are the standing instance**: they are `pads`' card's children,
+    /// laid out by the row rather than placed, they have real boxes at
+    /// `(12, 76)`, `(284, 76)` and `(556, 76)` of 220 by 140, each records its own
+    /// commands, and **neither collision test can see them.** Measured over all six
+    /// pages on 2026-10-04 by the second review of this task, which found exactly
+    /// these five and no sixth.
+    ///
+    /// **It costs nothing today** — `the_pads_sit_inside_the_card_their_row_draws`
+    /// pins the containment by measurement, and a pad inside its own card cannot
+    /// collide with anything — **but the class of defect the fix was written for is
+    /// closed in one direction and open in the other**, and this is task 24.1's
+    /// round-3 major one table further down. The five are:
+    ///
+    /// - **the window's background**, on every page: the window itself, exempt for
+    ///   the same reason [`strip_excused`] exempts it;
+    /// - **the dialog** on `overlays`, and only there: presented at construction on
+    ///   the page that shows it, a modal, meant to cover everything;
+    /// - **the three pads**, on `pads` and only there.
+    ///
+    /// **Task 24.3 added seven more, and the bar's container is the interesting
+    /// one.** The six buttons are the pads' exact case: children a container lays
+    /// out, with real boxes and their own recorded commands, and no row in
+    /// [`Demo::placed_handles`] because the demo does not place them. The bar's
+    /// container is a different case and the exemption says why: **it *is* placed
+    /// by the demo** — an explicit `Offset::new(0.0, 0.0)` and a tight
+    /// [`WINDOW.width`] by [`TAB_BAR_HEIGHT`] — and it is exempt anyway, because
+    /// adding it to [`Demo::placed_handles`] makes `no_two_placed_rects_overlap`
+    /// fail against the card of pads: the bar's bottom edge is `y 64` and the card's
+    /// top edge is `y 64`, and [`touches`] counts a shared edge on purpose.
+    ///
+    /// **So the collision tests cannot see the bar at all, and what covers the
+    /// property instead is the two strip tests** — the bar's box being the whole
+    /// strip and nothing else being in it — plus
+    /// `the_bar_and_the_background_are_the_only_thing_in_the_strip`, which asserts
+    /// the positive half. **That is a recorded loss of coverage and not a silent
+    /// one**: the bar is the one node in the window whose rect no pairwise
+    /// comparison looks at.
+    ///
+    /// **Written out rather than derived**, for the reason
+    /// [`expected_placed_rect_names`]'s own doc gives: deriving this list from the
+    /// paint, or from `placed_handles`, would make the assertion agree with
+    /// whatever the demo happens to draw — which is the mistake this file has made
+    /// three times and this one exists to catch.
+    fn undrawn_leaf_exemptions(demo: &Demo) -> Vec<Handle> {
+        let mut exempt = vec![demo.background, demo.tab_bar().handle()];
+        exempt.extend(demo.tab_focusables());
+        if demo.page == Page::Overlays {
+            exempt.push(demo.dialog.handle());
+        }
+        for pad in &demo.pads {
+            exempt.push(pad.node);
+        }
+        exempt
+    }
+
+    /// Asserts that **every node which draws something and has a box is either
+    /// named in [`Demo::placed_handles`] or written out in
+    /// [`undrawn_leaf_exemptions`]**.
+    ///
+    /// **This is the assertion that closes the direction
+    /// [`assert_placed_handles_is_complete`] cannot see**, and it is phrased over
+    /// the *complement* for the reason `.ai/NEVERAGAIN.md` § *a sweep of a
+    /// mechanism's call sites is not a sweep of the data it is built from* gives:
+    /// an assertion over membership passes for a node in no list, by definition.
+    /// Walking [`Demo::order`] instead is what makes a missing one a failure.
+    ///
+    /// **Two filters, and each is load-bearing.** A node with **no extent** is not
+    /// counted — a box with no height cannot occupy anything, and `Toasts`' cards
+    /// are placed by the widget rather than by the pass; a node with **no
+    /// commands** is not counted, because "drawn" is the question and a node that
+    /// records none draws nothing however big its box is (the root, the controls
+    /// layer and the text column are all in that position).
+    ///
+    /// **The comparison is one `assert_eq!` over the drawn set, and it is blind to
+    /// an exemption naming a node which draws nothing.** Both sides are filtered
+    /// through `drawn` before they are compared — `unseen` is `drawn \ named`,
+    /// `excused` is `exempt ∩ drawn` — so the assertion is exactly *"`drawn`
+    /// minus `named` equals the exempt nodes that are drawing"*, and an exemption
+    /// whose node records nothing falls out of both sides without changing the
+    /// outcome. **Measured, not argued**: adding the root (extent 1280 by 1020,
+    /// zero commands) to `undrawn_leaf_exemptions` leaves every test green.
+    ///
+    /// **The direction that matters is the closed one**, and it is the one this
+    /// function exists for: a node that **draws** and is in neither list is a
+    /// failure, and that is the defect the three pads would have been. The
+    /// entries of the exemption list itself are held elsewhere — the background and
+    /// the dialog by `strip_excused`, which both strip tests read, and the pads by
+    /// the positive half below — **not by the `assert_eq!`.**
+    ///
+    /// **This paragraph was wrong in the same file for one review round.** An
+    /// earlier version claimed the `assert_eq!` could not be satisfied by an
+    /// exemption covering nothing; the failure message four lines below had been
+    /// corrected to say the opposite and the doc had not, so the two disagreed and
+    /// the doc was the one a reader reaches first. **The cause was a patch script
+    /// that raised on its second edit and therefore wrote nothing**, discarding its
+    /// first — see `.ai/NEVERAGAIN.md`'s entry on a multi-edit script that writes
+    /// once at the end. A reduction of the script re-applied two of the three
+    /// edits and the missing one was reported as done.
+    fn assert_every_drawn_leaf_is_named_or_excused(demo: &Demo) {
+        let named: Vec<Handle> = demo
+            .placed_handles()
+            .into_iter()
+            .map(|(_, handle)| handle)
+            .collect();
+        let exempt = undrawn_leaf_exemptions(demo);
+        let drawn: Vec<Handle> = demo
+            .order
+            .iter()
+            .copied()
+            .filter(|handle| {
+                demo.node_rect(*handle)
+                    .is_some_and(|rect| rect.width > 0.0 && rect.height > 0.0)
+                    && !demo.commands_at(*handle).is_empty()
+            })
+            .collect();
+        assert!(
+            !drawn.is_empty(),
+            "the demo draws something, or the comparison below is over two empty \
+             sets and agrees with itself"
+        );
+        let unseen: Vec<Handle> = drawn
+            .iter()
+            .copied()
+            .filter(|handle| !named.contains(handle))
+            .collect();
+        let excused: Vec<Handle> = exempt
+            .iter()
+            .copied()
+            .filter(|handle| drawn.contains(handle))
+            .collect();
+        assert_eq!(
+            unseen, excused,
+            "{:?}: the nodes that draw commands and are in neither the placed leaves \
+             nor the exemption list are `no_two_placed_rects_overlap` and \
+             `every_placed_rect_is_inside_the_window` blind to. The right-hand side \
+             is what `undrawn_leaf_exemptions` excuses *and* that are drawing — both \
+             sides are already intersected with the drawing set, so this says \
+             nothing about an exemption that covers a node which draws nothing",
+            demo.page
+        );
+        // **The pads' exemption is a live one, and that is asserted rather than
+        // assumed** — the same positive half `.ai/NEVERAGAIN.md` § *hiding a widget
+        // makes every test that crosses the boundary vacuous* demands of any
+        // assertion phrased over what is *not* there.
+        //
+        // **`any`, and not `all`, and the wording says so**: this asserts that **at
+        // least one** of the three pads records a command on `pads`, not that all
+        // three do. It is the weaker form and it is deliberate — the property being
+        // held down is *"the exemption covers something that draws"*, and one pad
+        // drawing is enough to show the three are not dead nodes. What says the
+        // other two are alive is the paint gate's own tests, and what says they are
+        // laid out is `the_pads_sit_inside_the_card_their_row_draws`.
+        if demo.page == Page::Pads {
+            assert!(
+                demo.pads.iter().any(|pad| drawn.contains(&pad.node)),
+                "at least one of the three pads records its own commands on `pads`, \
+                 which is what makes exempting them a fact about the demo rather \
+                 than an entry covering nothing"
+            );
+        }
+    }
+
+    /// Asserts the per-page filter neither loses a leaf nor invents one.
+    ///
+    /// **Both directions, because either alone is satisfiable by a broken filter**:
+    /// dropping every node passes "nothing was lost" if the check is phrased over
+    /// emptiness, and keeping every node on every page passes "nothing was
+    /// invented". The whole list is the ground truth, and each of its entries has to
+    /// appear on some page and nothing may appear that is not in it.
+    ///
+    /// **And it opens by checking the list itself is complete**, which is the half
+    /// that was missing and the half that matters: the two directions below compare
+    /// one filter's output with the unfiltered output of the same source, which is
+    /// a statement about the *filter* and not about the *source*. See
+    /// [`assert_placed_handles_is_complete`]. **The other half of "is the source
+    /// right" — that nothing which draws is missing from it — is
+    /// [`assert_every_drawn_leaf_is_named_or_excused`], which
+    /// [`rects_by_page`] runs once per page.**
+    fn assert_the_pages_partition_the_placed_rects(union: &[(&'static str, Rect)]) {
+        let demo = laid_out();
+        assert_placed_handles_is_complete(&demo);
+        let all = demo.placed_rects();
+        for entry in union {
+            assert!(
+                all.contains(entry),
+                "{:?} at {:?} is on some page but is not one of the demo's placed rects",
+                entry.0,
+                entry.1
+            );
+        }
+        for entry in &all {
+            assert!(
+                union.contains(entry),
+                "{:?} at {:?} is placed by the demo and is on no page at all, so the \
+             per-page collision tests cannot see it",
+                entry.0,
+                entry.1
+            );
+        }
+    }
+
     #[test]
     fn every_placed_rect_is_inside_the_window() {
         // The window grew to 1280 by 720 so that four more widgets fitted, and
         // every one of them is placed by hand. A hand-placed box is a claim about
         // the window, and a claim about the window is the kind of thing that is
         // only ever true until somebody moves something.
-        let demo = laid_out();
-        let rects = demo.placed_rects();
-        assert!(
-            rects.len() > 20,
-            "the demo places {} boxes, so this is walking the whole set",
-            rects.len()
-        );
+        //
+        // **Per page since task 24.2, and the change is recorded rather than made
+        // quietly.** It used to walk the union — every positioned leaf in the demo,
+        // all twenty-five of them — and the acceptance criterion said "on each of
+        // the six pages". What it strengthens: each page's own layout is now
+        // checked where before only the union was. What it stops asserting: that
+        // twenty-five leaves coexist in one window without touching, which was only
+        // ever true because they all had to be. **The window is one thing and the pages share
+        // it**, so this bound did not weaken — it multiplied.
         let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
-        for (what, rect) in rects {
+        let mut union: Vec<(&'static str, Rect)> = Vec::new();
+        for (page, rects) in rects_by_page() {
             assert!(
-                inside(window, rect),
-                "the {what} is at {rect:?}, which is outside the {WINDOW:?}"
+                !rects.is_empty(),
+                "{page:?} places at least one box, or this page is not being walked"
             );
+            for (what, rect) in &rects {
+                assert!(
+                    inside(window, *rect),
+                    "{page:?}: the {what} is at {rect:?}, which is outside the \
+                 {WINDOW:?}"
+                );
+            }
+            union.extend(rects);
         }
+        assert_the_pages_partition_the_placed_rects(&union);
     }
 
     #[test]
@@ -9749,16 +12539,495 @@ mod tests {
         // the control's tests nor its own layout pass can see it — and both of
         // this repository's first two rendering defects were a *drawing* that was
         // right about everything except where it was.
-        let demo = laid_out();
-        let rects = demo.placed_rects();
-        for (index, (what, rect)) in rects.iter().enumerate() {
-            for (other_what, other) in &rects[index + 1..] {
-                assert!(
-                    !touches(*rect, *other),
-                    "the {what} at {rect:?} and the {other_what} at {other:?} share \
-                     a pixel"
+        //
+        // **Per page since task 24.2, for the reason
+        // `every_placed_rect_is_inside_the_window` gives** — with the arithmetic in
+        // it, because this is the assertion the shift made false and a reader is
+        // entitled to see how: the progress bar is at 732…776 and the keyboard at
+        // 760…1020, and they share sixteen rows between x 664 and 904. **No page
+        // draws both** — the bar is `controls` and the keyboard is `input` — so what
+        // the union version asserted was a constraint task 24.1 had already
+        // dissolved, and the two numbers above are the price of the bar.
+        let mut union: Vec<(&'static str, Rect)> = Vec::new();
+        for (page, rects) in rects_by_page() {
+            assert!(
+                !rects.is_empty(),
+                "{page:?} places at least one box, or this page is not being walked"
+            );
+            for (index, (what, rect)) in rects.iter().enumerate() {
+                for (other_what, other) in &rects[index + 1..] {
+                    assert!(
+                        !touches(*rect, *other),
+                        "{page:?}: the {what} at {rect:?} and the {other_what} at \
+                     {other:?} share a pixel"
+                    );
+                }
+            }
+            union.extend(rects);
+        }
+        assert_the_pages_partition_the_placed_rects(&union);
+    }
+
+    /// The nodes whose recorded commands are **excused** from the tab bar's strip,
+    /// on the page `demo` is showing.
+    ///
+    /// **One list, read by both strip tests**, and the reason is the file's own:
+    /// two answers to "what is excused" would be two things to disagree, and the
+    /// second witness below is worthless if it excuses a different set than the
+    /// first. Written out, and never derived from the paint — deriving it from
+    /// what is drawn is what would make both assertions agree with whatever the
+    /// demo happens to draw.
+    ///
+    /// **The background is on every page** because it *is* the window, and its one
+    /// command is a filled rectangle over all of it; asking it to stay out of the
+    /// strip would be asking the window not to be the window. **The dialog is on
+    /// `overlays` alone** because the dialog is presented at construction on the
+    /// page that shows it and its first recorded command is a scrim over the whole
+    /// window — a modal is *meant* to cover everything, the strip included, and
+    /// `TASK_UI_PRIM_24.md` requirement 8 puts the bar under the scrim with
+    /// everything else.
+    ///
+    /// **And task 24.3's seven, which is what this list was reserved for.** The
+    /// bar and its six buttons are *in* the strip — that is the whole of what they
+    /// are for — so an unchanged list fails both tests the moment the bar draws, and
+    /// they go in **in paint order**, which is the order the first strip test
+    /// collects them in and therefore the order `assert_eq!` compares.
+    ///
+    /// **Excusing them is not weakening the assertion, and the second half is what
+    /// says so**: what the strip must contain is the background and the bar and
+    /// nothing else, and excusing the bar leaves every *other* node's every command
+    /// still held above [`CONTENT_TOP`]. `the_bar_and_the_background_are_the_only_
+    /// thing_in_the_strip` is the positive half — it asserts the bar really is in
+    /// there, so an exemption covering nothing cannot pass.
+    fn strip_excused(demo: &Demo) -> Vec<Handle> {
+        let mut excused = vec![demo.background, demo.tab_bar().handle()];
+        excused.extend(demo.tab_focusables());
+        if demo.page == Page::Overlays {
+            excused.push(demo.dialog.handle());
+        }
+        excused
+    }
+
+    /// Returns the box every pixel `command` puts down, for the variants whose own
+    /// fields say where that is, or a zero-width box at a text run's own line box.
+    ///
+    /// **A second question from [`command_box`], and the difference is what it is
+    /// asked.** `command_box` answers *"is this inside the chart's own rect"*, for a
+    /// node whose commands are all primitives with a box; this one answers *"where
+    /// does this put ink"*, for **every node on the page** — so it has to cope with
+    /// the two variants `command_box` refuses. A [`DrawCommand::Image`] is exactly
+    /// its `rect`; a [`DrawCommand::Shadow`] is its rect moved by `offset` and then
+    /// grown by **`blur::reach(sigma)`**, which is the module's own answer to this
+    /// question — *"how far, in pixels, a shadow of blur `sigma` spreads past its
+    /// own rect"* — and is `taps_for(sigma)` as a **pixel count**. [`DrawCommand::Shadow`]'s
+    /// own doc says what that count is: the kernel runs `min(ceil(2·blur), 4)` taps
+    /// either side, so **the cap is a fixed four pixels whatever the sigma** (*"a
+    /// `blur` of 6.0 is four taps either side, not twelve"*) and the reach is 2σ
+    /// **only while 2σ is under four**. `scroll::command_bounds` bounds a scrolling
+    /// shadow with the same call, and this arm is now the same two lines as its.
+    ///
+    /// **This clause was wrong twice and the code was right.** Round two's review
+    /// caught the derivation — the doc said three sigma where `taps_for` is a
+    /// count — and round three's caught the residue: after the arm was fixed to
+    /// call `blur::reach`, sixty lines below this sentence still explained the
+    /// three-sigma figure it no longer computes. **A correction to code that leaves
+    /// its own justification standing is half a correction**, and
+    /// `inked_box_bounds_a_shadow_by_the_blur_modules_own_reach` is what now holds
+    /// the number, since nothing in the layout depends on it: the demo's two shadows
+    /// are 900 pixels down and a mutation back to three sigma survived until that
+    /// test existed.
+    ///
+    /// [`DrawCommand::Path`] keeps a `panic!`, and for `command_box`'s reason — a
+    /// variant nobody taught this about would be counted as harmless rather than as
+    /// an absence. The demo records no `Path`.
+    fn inked_box(command: &DrawCommand) -> Rect {
+        let box_of = |points: &[(f32, f32)]| {
+            let low_x = points.iter().map(|p| p.0).fold(f32::MAX, f32::min);
+            let low_y = points.iter().map(|p| p.1).fold(f32::MAX, f32::min);
+            let high_x = points.iter().map(|p| p.0).fold(f32::MIN, f32::max);
+            let high_y = points.iter().map(|p| p.1).fold(f32::MIN, f32::max);
+            Rect::new(low_x, low_y, high_x - low_x, high_y - low_y)
+        };
+        match command {
+            DrawCommand::Rect { rect, .. }
+            | DrawCommand::RoundedRect { rect, .. }
+            | DrawCommand::Image { rect, .. } => *rect,
+            // `y` is the **top of the line's box**, per the variant's own doc, so a
+            // text run's ink cannot be above it. The width is zero because a
+            // `DrawCommand::Text` carries none — the same gap
+            // `command_box`'s doc records, and the only question here is the top.
+            DrawCommand::Text { y, .. } => Rect::new(0.0, *y, 0.0, 0.0),
+            DrawCommand::Circle { center, radius, .. } => Rect::new(
+                center.0 - radius,
+                center.1 - radius,
+                radius * 2.0,
+                radius * 2.0,
+            ),
+            DrawCommand::Line {
+                start, end, width, ..
+            } => {
+                let (dx, dy) = (end.0 - start.0, end.1 - start.1);
+                let length = (dx * dx + dy * dy).sqrt();
+                let (nx, ny) = if length > 0.0 {
+                    (-dy / length * width / 2.0, dx / length * width / 2.0)
+                } else {
+                    (0.0, 0.0)
+                };
+                box_of(&[
+                    (start.0 + nx, start.1 + ny),
+                    (end.0 + nx, end.1 + ny),
+                    (end.0 - nx, end.1 - ny),
+                    (start.0 - nx, start.1 - ny),
+                ])
+            }
+            DrawCommand::Polygon { points, .. } => box_of(points),
+            DrawCommand::Shadow {
+                rect, offset, blur, ..
+            } => grown(
+                Rect::new(
+                    rect.x + offset.0,
+                    rect.y + offset.1,
+                    rect.width,
+                    rect.height,
+                ),
+                ui_core::render::blur::reach(*blur),
+            ),
+            DrawCommand::Path { .. } => {
+                panic!(
+                    "the demo records no {command:?}, and this test does not know \
+                     how to place one"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn inked_box_bounds_a_shadow_by_the_blur_modules_own_reach() {
+        // **The `Shadow` arm's own number, pinned**, because nothing else in the
+        // suite can see it: the demo's two shadows sit at y 909 and 967, so
+        // growing them by 4 pixels or by 24 makes no difference to any assertion
+        // here and `the_shadow_back_to_three_sigma` mutation survived until this
+        // test existed. **A helper's arithmetic that no layout depends on needs its
+        // own assertion**, or it is a comment with a `match` in front of it.
+        //
+        // **The figures are `blur::reach`'s, not a derivation of mine.** It is
+        // `taps_for(sigma)` as a pixel count — `min(round(ceil(2σ)), 4)` — and the
+        // second review of this task measured what the first version of this doc
+        // claimed instead: **three sigma is 24 at the demo's own `blur: 8` where
+        // the kernel's reach is 4**, and 0.6 at σ = 0.2 where the reach is 1. Six
+        // times too big in one case and too small in the other, in a number used as
+        // a bound.
+        let shadow = |blur: f32| {
+            inked_box(&DrawCommand::Shadow {
+                rect: Rect::new(10.0, 20.0, 100.0, 50.0),
+                radius: 8.0,
+                color: Color::new(0, 0, 0, 255),
+                blur,
+                offset: (5.0, -5.0),
+            })
+        };
+        assert_eq!(
+            shadow(8.0),
+            Rect::new(11.0, 11.0, 108.0, 58.0),
+            "the demo's own blur: the rect moves by the offset to (15, 15) and is \
+             grown by the kernel's four taps, which is `blur::reach(8.0)` and not \
+             three sigma"
+        );
+        assert_eq!(
+            shadow(0.2),
+            Rect::new(14.0, 14.0, 102.0, 52.0),
+            "and a sigma of 0.2 reaches one tap, where three sigma would have been \
+             0.6 and under-estimated it"
+        );
+        assert_eq!(
+            shadow(0.0),
+            Rect::new(15.0, 15.0, 100.0, 50.0),
+            "a shadow with no blur spreads by nothing, which is the control for the \
+             grow — the same pairing `blur::reach`'s own tests make"
+        );
+    }
+
+    #[test]
+    fn the_tab_bars_strip_holds_the_background_and_nothing_else() {
+        // **This is the acceptance criterion task 24.2 exists to satisfy, as 24.3
+        // amended it**: the tab bar's 64 pixels hold **the background and the bar's
+        // seven nodes and nothing else** — the bar and its six buttons, which is
+        // what the six *are*. **24.2 reserved the band and 24.3 filled it**, so the
+        // strip's expected contents are [`strip_excused`]'s and the half of the
+        // criterion still standing is the *nothing else*: every other node's every
+        // command is still held above [`CONTENT_TOP`], and
+        // `the_bar_and_the_background_are_the_only_thing_in_the_strip` is the
+        // positive half, asserting the bar really is in there so an exemption
+        // covering nothing cannot pass.
+        //
+        // **It is checked as *"nothing else is drawn there"* rather than as *"every
+        // widget's `y` is at least `CONTENT_TOP`"*, because the second is the first
+        // with the word "widget" put in, and **a node's box is not its ink** — three
+        // of this repository's rendering defects were commands recorded correctly
+        // and landing in the wrong place.
+        //
+        // **Two halves, because they answer different questions.** The first asks
+        // which *nodes* reach up there; the second asks where every *command* on
+        // every page puts ink. The first is what a container that fills the window
+        // needs (there are three, and one of them is the background the criterion is
+        // about), and the second is what catches a widget painting outside its own
+        // box.
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+
+            // **The first half: nodes with commands whose own box starts above the
+            // strip.** The expected list is [`strip_excused`]'s, which writes it
+            // out — for the same reason `always_painted_handles` is: an answer read
+            // back out of the thing it is checking agrees with whatever that thing
+            // says.
+            let strip: Vec<Handle> = demo
+                .order
+                .iter()
+                .copied()
+                .filter(|handle| {
+                    demo.node_rect(*handle).is_some_and(|rect| {
+                        // **A node with no extent is not *in* the strip.** The
+                        // toast cards' own nodes are 0 by 0, because `Toasts`
+                        // places its cards itself rather than through the layout
+                        // pass, and a box with no height cannot occupy 64 pixels
+                        // of anything. Where their ink lands is the second half's
+                        // question, asked of the commands rather than of a rect
+                        // that says nothing.
+                        rect.width > 0.0 && rect.height > 0.0 && rect.y < CONTENT_TOP
+                    }) && !demo.commands_at(*handle).is_empty()
+                })
+                .collect();
+            assert_eq!(
+                strip,
+                strip_excused(&demo),
+                "{page:?}: the nodes that both record commands and have their own box \
+             in the tab bar's {CONTENT_TOP} pixels. Anything else there is a widget \
+             the bar would have to be drawn on top of"
+            );
+
+            // **The second half: every command on the page, and where its ink lands.**
+            //
+            // **The nodes the first half excused are excused here too, and that is
+            // not a widening of it** — the background's one command is a filled
+            // rectangle over the whole window, and asking it not to reach the strip
+            // would ask the window not to be the window. What is left is every other
+            // node's every command, which is where a widget painting outside its own
+            // box would show up. `Overlays` needs no second excuse: its dialog is in
+            // `strip` and its toast cards are not in the strip, so the loop covers
+            // them.
+            let excused = strip_excused(&demo);
+            for &handle in &demo.order {
+                if excused.contains(&handle) {
+                    continue;
+                }
+                let own = demo.node_rect(handle);
+                for command in demo.commands_at(handle) {
+                    let inked = inked_box(&command);
+                    assert!(
+                        inked.y >= CONTENT_TOP,
+                        "{page:?}: {command:?} puts ink at {inked:?}, inside the tab \
+                     bar's {CONTENT_TOP} pixels, on a node whose own box is {own:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_highest_ink_on_any_page_is_the_card_of_pads_at_the_tab_bar() {
+        // **The second witness for the strip, and it exists because the first one
+        // was deletable.** The review of this task removed the per-command ink loop
+        // from `the_tab_bars_strip_holds_the_background_and_nothing_else` and
+        // **1817 tests stayed green** — the loop was not vacuous (raising its bound
+        // to `CONTENT_TOP + 8.0` fails on the card's own background rect at y 64),
+        // but nothing held it, so AC 2 rested on the node-box half alone.
+        //
+        // **This asserts the same property from the other end**: the *minimum* ink
+        // `y` over every page's unexcused commands, **and which node achieved it**.
+        // Pinning the number alone would let the loop above be deleted with this
+        // one keeping the property alive; pinning the *owner* as well is what says
+        // the card is the thing at the top rather than "something is".
+        //
+        // **Six pages, because the highest thing is not on all of them**, and the
+        // claim is over the union of the six, which is the only way to say "nothing
+        // is above this anywhere". **Measured 2026-10-04**, the minimum ink `y`
+        // over each page's unexcused commands:
+        //
+        // | page | minimum | on |
+        // |---|---|---|
+        // | `pads` | 64.0 | the card of pads |
+        // | `text` | 234.0 | the first text-panel label |
+        // | `input` | 748.0 | **the frame-rate readout** |
+        // | `controls` | 566.0 | the slider's **thumb border**, not its node |
+        // | `data` | 78.0 | the image's letterbox, not its node |
+        // | `overlays` | 748.0 | **the frame-rate readout** |
+        //
+        // **The readout is the minimum on two pages, and an earlier version of this
+        // comment said `overlays`' was a toast card at 909** — which is where the
+        // toast cards are, and it is not the answer. The readout is in no page's
+        // list and not in [`strip_excused`], so it is on all six pages and it is
+        // 684 pixels above anything else on the two pages that carry nothing in the
+        // upper half. The second review of this task measured the same six figures
+        // and got the same six.
+        //
+        // **Three of the six minima are ink rather than a node's edge**, which is
+        // why this asks the commands and not `page_rects`.
+        //
+        // On `controls` the slider records four commands and the highest is **not
+        // the track**: the node is at 560, the track is drawn at **580**, and 566 is
+        // a `DrawCommand::Circle` 40 across — `radius: 20.0`, black — recorded
+        // immediately before the 36-across thumb fill at 568. **That circle is the
+        // thumb's *border***: `Slider::paint` draws
+        // `painter.circle(center, radius + self.thumb_border_width, self.thumb_border
+        // .get())` before the fill (`slider.rs:876-885`), and `THUMB_BORDER` is 2.0
+        // (`slider.rs:92`), which is 18 + 2. **It is not the focus ring** — that is
+        // a different command, `painter.rounded_rect(grow(track, ring), radius +
+        // ring, self.palette.ring)` at `slider.rs:854-856`, gated on `focused`, and
+        // the demo's fixture records no such command at all.
+        //
+        // **This noun has been wrong three times in three review rounds and the
+        // number has been right throughout**, which is the finding: round three's
+        // review corrected "the track" and I wrote "the thumb ring", which is a
+        // different widget's ring. **Both were guesses about which of four
+        // commands a circle is**, and the two guesses were not checked against
+        // `Slider::paint` before being written down. Read the paint method; do not
+        // infer the widget from the primitive.
+        //
+        // On `data` the image's node is at 64 and `ImageFit::Contain` letterboxes
+        // it, so the ink starts at 78. **A test that read the rects would report
+        // three different numbers here and be right about none of the three
+        // questions being asked.**
+        //
+        // **The winning command per page**, measured the same way, in the same
+        // order: a `RoundedRect` (the card's surface), a `Text`, a `Text`, a
+        // `Circle`, an `Image`, a `Text`. Written as a plain comment and not a doc
+        // comment because it sits on a statement — the third round's clippy gate
+        // caught `unused_doc_comments` here, which is the only thing these four
+        // prose edits broke.
+        let mut highest: Option<(Page, Handle, &'static str, f32)> = None;
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+            let excused = strip_excused(&demo);
+            let names = demo.placed_handles();
+            for &handle in &demo.order {
+                if excused.contains(&handle) {
+                    continue;
+                }
+                // **Named as the row is recorded rather than looked up afterwards**,
+                // because the `Demo` that owns this arena is the one inside this
+                // loop and a lookup after it would need a second fixture.
+                let what = names
+                    .iter()
+                    .find(|(_, candidate)| *candidate == handle)
+                    .map(|(what, _)| *what)
+                    .unwrap_or("a node that is not one of the placed leaves");
+                for command in demo.commands_at(handle) {
+                    let top = inked_box(&command).y;
+                    if highest.is_none_or(|(_, _, _, seen)| top < seen) {
+                        highest = Some((page, handle, what, top));
+                    }
+                }
+            }
+            assert!(
+                excused
+                    .iter()
+                    .all(|handle| !demo.commands_at(*handle).is_empty()),
+                "{page:?}: every excused node records something, or the exemption is \
+                 covering a node that draws nothing and the strip is emptier than the \
+                 assertion below thinks"
+            );
+        }
+
+        let (page, handle, what, top) = highest.expect("every page records some command");
+        assert_eq!(
+            top, CONTENT_TOP,
+            "{page:?}: the highest ink on any page is at {top}, and it is the {what}, \
+             so the tab bar's {CONTENT_TOP} pixels are exactly as tall as the \
+             reservation needs and not a pixel more"
+        );
+        assert_eq!(
+            handle,
+            laid_out_on(page).card().handle(),
+            "and the node at the top is the card of pads — the one node whose origin \
+             was implicit until this task gave it one. If this fails, something was \
+             moved up into the strip rather than the strip growing"
+        );
+    }
+
+    #[test]
+    fn the_band_is_at_the_bottom_of_the_window_and_its_overlap_with_the_gallery_is_cross_page() {
+        // **Requirement 3's two halves, and they are the two numbers this task's
+        // arithmetic turns on.** The band's top is derived from the window and its own
+        // height rather than typed in, so the keyboard's bottom edge is the window's
+        // own bottom edge instead of forty pixels below it; and the overlap the shift
+        // creates between the gallery and the band is between two pages, which is
+        // what makes the per-page collision tests the right assertion.
+        //
+        // **Measured off the laid-out nodes**, never recomputed from `BAND_TOP` and
+        // `BAND_HEIGHT` — a test that rebuilt the box out of the two constants would
+        // agree with them whatever they said, which is the whole of what the
+        // derivation replaced.
+        //
+        // **The equality below is what makes [`BAND_HEIGHT`] unfalsifiable-by-
+        // nudging**, and it is deliberate: the band's top is derived from it, so any
+        // change to that constant moves the keyboard's bottom edge with it and there
+        // is no value of it that this assertion tolerates. The second review of this
+        // task measured the sweep — s = 1 fails here alone, s = 8 also fails
+        // `no_two_placed_rects_overlap` — against an earlier report of "17 px of
+        // slack", which was wrong.
+        let demo = laid_out_on(Page::Input);
+        let keyboard = demo
+            .node_rect(demo.keyboard.handle())
+            .expect("a laid-out keyboard");
+        assert_eq!(
+            keyboard.y + keyboard.height,
+            WINDOW.height,
+            "the keyboard ends on the window's own bottom edge, so the band hangs off \
+         it rather than off a literal that happened to be right before the shift"
+        );
+        let band = Rect::new(0.0, BAND_TOP, WINDOW.width, BAND_HEIGHT);
+        for (what, handle) in [
+            ("keyboard", demo.keyboard.handle()),
+            ("text input", demo.text_input.handle()),
+            ("text readout", demo.text_readout.label.handle()),
+            ("submit readout", demo.submit_readout.label.handle()),
+        ] {
+            let rect = demo.node_rect(handle).expect("a laid-out node");
+            assert!(
+                inside(band, rect),
+                "the {what} at {rect:?} is inside the band at {band:?}"
+            );
+        }
+
+        // **The overlap is real and it is cross-page.** Sixteen rows of the progress
+        // bar and the keyboard are the same pixels, which is what
+        // `no_two_placed_rects_overlap` over the union used to forbid and what made
+        // this task more than one constant. Asserting that they overlap, and that
+        // the page table never shows both, is the pair of facts the per-page form
+        // rests on — and it is asserted rather than described because the
+        // description is what a reader would otherwise have to take on trust.
+        let bar = demo
+            .node_rect(demo.progress.handle())
+            .expect("a placed progress bar");
+        assert!(
+            touches(bar, keyboard),
+            "the progress bar at {bar:?} and the keyboard at {keyboard:?} overlap, which \
+         is the constraint the shift creates"
+        );
+        for (page, sees_bar, sees_keys) in
+            [(Page::Controls, true, false), (Page::Input, false, true)]
+        {
+            let demo = laid_out_on(page);
+            assert_eq!(
+                demo.shows(demo.progress.handle()),
+                sees_bar,
+                "{page:?} shows the progress bar"
+            );
+            assert_eq!(
+                demo.shows(demo.keyboard.handle()),
+                sees_keys,
+                "{page:?} shows the keyboard, and never both"
+            );
         }
     }
 
@@ -9834,6 +13103,48 @@ mod tests {
         }
     }
 
+    /// A finger press at `(x, y)`, the way SDL delivers a touch.
+    ///
+    /// **And not a drag**, which is why it is its own helper and not a reuse of
+    /// [`drag_on`]: `GestureRecognizer` reports a tap on the *release*, so a finger
+    /// down on its own is exactly the state the `FingerDown` arm answers — the
+    /// `slider_dragging` flag and the grabbed key are set there and nowhere else.
+    fn finger_down_at(x: f32, y: f32, ts: u64) -> Event {
+        let finger = 1;
+        Event::FingerDown {
+            timestamp: ts,
+            touch_id: finger,
+            finger_id: finger,
+            x,
+            y,
+            dx: 0.0,
+            dy: 0.0,
+            pressure: 1.0,
+            window_id: 0,
+        }
+    }
+
+    /// A finger release at `(x, y)`, the second half of a finger tap.
+    ///
+    /// **Its own helper rather than a reuse of [`finger_down_at`] with a different
+    /// variant**, and the reason is the one [`drag_on`] gives: the recogniser
+    /// decides a tap from the *pair*, so the release has to carry its own
+    /// timestamp or the pair is not a tap at all.
+    fn finger_up_at(x: f32, y: f32, ts: u64) -> Event {
+        let finger = 1;
+        Event::FingerUp {
+            timestamp: ts,
+            touch_id: finger,
+            finger_id: finger,
+            x,
+            y,
+            dx: 0.0,
+            dy: 0.0,
+            pressure: 0.0,
+            window_id: 0,
+        }
+    }
+
     /// A mouse motion with the **left button down**, which is the whole point:
     /// `GestureRecognizer` only reports a `Drag` for a pointer whose button
     /// state says it is held, so a test that forgets this is not testing a drag.
@@ -9864,7 +13175,7 @@ mod tests {
     /// — task 12's blocker was a unit mistake in exactly this field.
     #[test]
     fn a_mouse_drag_moves_the_slider_through_its_real_event_path() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let rect = demo.slider_rect().expect("the slider is placed");
         let y = rect.y + rect.height / 2.0;
 
@@ -9933,7 +13244,7 @@ mod tests {
     /// move while the pointer is still, and moves on the first motion after it.
     #[test]
     fn a_mouse_press_held_still_before_draging_still_drags() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         let rect = demo.slider_rect().expect("the slider is placed");
         let y = rect.y + rect.height / 2.0;
         demo.handle_event(mouse_down_at(rect.x + 10.0, y, 0));
@@ -10021,7 +13332,7 @@ mod tests {
     /// doc — the constant this test's allowance used to be is gone.
     #[test]
     fn no_node_is_clipped_and_the_chart_keeps_its_geometry_inside_its_own_rect() {
-        let mut demo = laid_out();
+        let mut demo = laid_out_on(Page::Data);
         let clips = demo.frame_clips();
         assert_eq!(
             clips.len(),
@@ -10109,6 +13420,58 @@ mod tests {
                     *name,
                     readout.y
                 );
+                // **The grown box, measured, with its bottom edge pinned.**
+                //
+                // **`Demo::new`'s guard is `grown(CHART_ORIGIN…, reach)` against
+                // `WINDOW.height`, and the second review of this task measured that
+                // this block could not fail**: deleting it left 196 tests green,
+                // restoring the guard's bound to `WINDOW.height - CONTENT_TOP` left
+                // them green, tightening *this* to 740 left them green, and deleting
+                // the guard left them green. **It is implied** — the test's box is
+                // the guard's own box, so anything the guard rejects this rejects
+                // first, and the guard fires at construction, before any test holds
+                // a `Demo`.
+                //
+                // **So the containment is written as `assert_eq!` on the number
+                // rather than as `assert!(inside(…))`, and that is the whole of the
+                // change.** A containment against `WINDOW.height` is 260 pixels of
+                // slack and says nothing; **760 is the number the guard compares, and
+                // pinning it means a change to `CHART_ORIGIN`, to `CHART_SIZE` or to
+                // the guard itself fails *here* as well as at construction.** The
+                // arithmetic is published so the figure is checkable in one command:
+                // `CHART_ORIGIN.1` 240 + [`CONTENT_TOP`] 64 = 304, plus
+                // `CHART_SIZE.height` 450 = 754, plus `Chart::stroke_reach` 6 = 760.
+                //
+                // **What this does not do**, and the review was right about it: it is
+                // not a second line of defence against a chart drawn off the bottom,
+                // and the comment above used to say it was. The property is held by
+                // composition — `the_chart_sits_in_the_column_the_list_occupied_and_is_
+                // the_box_it_asks_for` pins the chart's exact `y` and size,
+                // `every_placed_rect_is_inside_the_window` pins its node against the
+                // window on its own page, and [`Demo::new`] refuses to construct a
+                // demo whose grown box leaves it. **This adds a published number to
+                // that chain and nothing else.**
+                let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
+                let stroked = grown(rect, reach);
+                assert_eq!(
+                    stroked.y + stroked.height,
+                    760.0,
+                    "in the {} shape, {frames} frames in, the chart's node is {rect:?} \
+                     and its stroke reaches {reach} px past it, so its ink ends at {} \
+                     — {CHART_ORIGIN_1} plus {CONTENT_TOP} is the node's top, plus \
+                     {CHART_SIZE_H} is its bottom, plus the {reach} px \
+                     `Chart::stroke_reach` reports is the number \
+                     `Demo::new`'s guard compares against {WINDOW_H}",
+                    *name,
+                    stroked.y + stroked.height,
+                    CHART_ORIGIN_1 = CHART_ORIGIN.1,
+                    CHART_SIZE_H = CHART_SIZE.height,
+                    WINDOW_H = WINDOW.height
+                );
+                assert!(
+                    inside(window, stroked),
+                    "and {stroked:?} is inside the {WINDOW:?}"
+                );
             }
         }
     }
@@ -10186,7 +13549,7 @@ mod tests {
         // below — `a_theme_switch_reaches_the_chart_and_its_readout_in_every_shape`
         // — because it has a *series* to animate as well as five colours, and a
         // test that only watched the colours would be watching half of it.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Controls);
         // It starts on the **dark** theme, which is the half of the claim that is
         // easy to leave out: a widget built with the neutral defaults
         // `Toggle::new` and `Progress::new` write is aimed at nothing, and it
@@ -10230,15 +13593,20 @@ mod tests {
         // the reader a control is selected with no mark on it. Their readouts say
         // so in words, which is the whole of what a widget with no focus state of
         // its own can be given.
-        let mut demo = dialog_closed();
-        for _ in 0..4 {
+        // **On each widget's own page, and that is what the pages changed here.**
+        // Before them the two were the fourth and the second stop of one five-stop
+        // walk; now the bar is the third stop of `controls` and the image the only
+        // stop of `data`, so they need a demo each and the counts follow from the
+        // page rather than being written down beside it.
+        let mut demo = dialog_closed_on(Page::Controls);
+        for _ in 0..tabs_onto(Page::Controls, 2) {
             demo.handle_event(key(Keycode::Tab));
         }
         assert_eq!(
             demo.focused,
             Some(demo.progress.handle()),
-            "four Tabs from the top is the progress bar: the slider, the image, the \
-             toggle and then it"
+            "the controls page's third own stop is the progress bar: the slider, \
+             the toggle and then it, behind the six tab buttons"
         );
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(
@@ -10247,11 +13615,10 @@ mod tests {
             "and its readout says so"
         );
 
-        // The other one is the **second** stop, so a fresh demo rather than a
-        // walk from the progress bar: the order is the slider, the image, the
-        // toggle, the bar and the field.
-        let mut demo = dialog_closed();
-        for _ in 0..2 {
+        // The other one, on a fresh demo and a fresh page: the image is `data`'s
+        // only stop.
+        let mut demo = dialog_closed_on(Page::Data);
+        for _ in 0..tabs_onto(Page::Data, 0) {
             demo.handle_event(key(Keycode::Tab));
         }
         assert_eq!(demo.focused, Some(demo.image.handle()));
@@ -10536,7 +13903,7 @@ mod tests {
     /// `input::route`, and back — rather than by calling the widget directly.
     #[test]
     fn a_key_on_the_keyboard_inserts_its_character_into_the_field() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Input);
         let (x, y) = key_center(&demo, KeyAction::Char('q'));
 
         demo.handle_event(mouse_down_at(x, y, 0));
@@ -10563,7 +13930,7 @@ mod tests {
 
     #[test]
     fn a_run_of_keys_accumulates_in_order_and_the_field_starts_empty() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Input);
         assert_eq!(
             demo.text_input.text.get(),
             "",
@@ -10588,7 +13955,7 @@ mod tests {
 
     #[test]
     fn backspace_on_the_keyboard_deletes_the_character_before_the_caret() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Input);
         demo.text_input.insert_text("road");
         demo.text_input.move_caret(4);
 
@@ -10605,7 +13972,7 @@ mod tests {
 
     #[test]
     fn enter_on_the_keyboard_submits_and_the_readout_says_so() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Input);
         demo.text_input.insert_text("hamburg");
 
         demo.frame(WINDOW, Duration::from_millis(16));
@@ -10630,7 +13997,7 @@ mod tests {
 
     #[test]
     fn a_tap_on_the_field_focuses_it_and_puts_the_caret_where_the_pointer_was() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Input);
         demo.text_input.insert_text("hamburg");
         let field = demo.text_input_rect().expect("the field has been laid out");
 
@@ -10654,7 +14021,7 @@ mod tests {
 
     #[test]
     fn a_key_lights_on_the_press_and_goes_out_on_the_release() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Input);
         let (x, y) = key_center(&demo, KeyAction::Char('a'));
 
         // Before any press, nothing is lit.
@@ -10679,7 +14046,7 @@ mod tests {
 
     #[test]
     fn a_press_that_misses_every_key_lights_nothing() {
-        let mut demo = laid_out();
+        let mut demo = laid_out_on(Page::Input);
         let rect = demo
             .keyboard_rect()
             .expect("the keyboard has been laid out");
@@ -10700,7 +14067,7 @@ mod tests {
 
     #[test]
     fn a_character_typed_on_a_hardware_keyboard_reaches_the_field() {
-        let mut demo = laid_out();
+        let mut demo = laid_out_on(Page::Input);
         demo.set_focus(Some(demo.text_input.handle()));
 
         demo.handle_event(Event::TextInput {
@@ -10719,7 +14086,7 @@ mod tests {
 
     #[test]
     fn tab_reaches_the_field_and_lights_its_border() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Input);
         let field = demo.text_input.handle();
 
         for _ in 0..40 {
@@ -10736,25 +14103,169 @@ mod tests {
         );
     }
 
-    /// The focus order the demo offers, in the order `focus_navigation` puts the
-    /// controls in and the tree then lays out.
+    /// The focus order the demo offers on `page`, in the order `focus_navigation`
+    /// puts the controls in and the tree then lays out.
     ///
     /// Written out rather than read off the walk, because the walk is what is
     /// under test: a list *derived* from the walk would agree with any order the
     /// walk produced, which is the whole reason the walk needs a test of its own.
     /// Each entry names its handle getter, so the failure says which control moved.
     ///
-    /// **Five, since the list went on 2026-10-02.** The list was the fifth stop
-    /// and the field the sixth; the rest keep their order, which is what makes this
-    /// a removal rather than a re-laying.
-    fn expected_focus_order(demo: &Demo) -> Vec<(&'static str, Handle)> {
-        vec![
-            ("slider", demo.slider.node()),
-            ("image", demo.image.handle()),
-            ("toggle", demo.toggle.handle()),
-            ("progress bar", demo.progress.handle()),
-            ("text field", demo.text_input.handle()),
-        ]
+    /// **A `match` on the page, and that is the difference from [`GALLERY_SHORTCUTS`]
+    /// having to avoid one.** This is the *expected* answer rather than the
+    /// mechanism: requirement 2's one-table rule is about the production code, and a
+    /// test that read the answer out of the table under test would agree with any
+    /// table — which is the reason this list is spelled out at all.
+    ///
+    /// **Six tab buttons and five controls, on every one of the six pages.** Before
+    /// task 24.3 the five controls were five stops of one walk; they are now three
+    /// stops on `controls`, the image the only one on `data` and the field the only
+    /// one on `input`, and **the six tab buttons lead every walk** because they are
+    /// on every page. Three pages have no control of their own, and each for a
+    /// reason its contents give: a pad is pressed by the space bar and by
+    /// [`Demo::pad_at`], a label is not a control, and the dialog's two buttons are
+    /// in the order only while it is showing — which is
+    /// `the_dialog_replaces_the_tab_order_while_it_is_showing`'s subject rather than
+    /// this helper's.
+    ///
+    /// **The six names are `tab_name`'s and the six handles are read out of
+    /// [`Demo::tabs`]**, so the two halves cannot drift; what *is* written out is
+    /// the order, which is the claim under test.
+    fn expected_focus_order(demo: &Demo, page: Page) -> Vec<(&'static str, Handle)> {
+        // **The six tab buttons in front of every page's own controls, and that is
+        // requirement 6's whole content.** They are on every page, so every page's
+        // walk begins with them; the order is `Page::ALL`'s, which is also the
+        // order the bar lays them out in and the order `--help` prints their names
+        // in.
+        let mut order: Vec<(&'static str, Handle)> = demo
+            .tab_focusables()
+            .into_iter()
+            .zip(Page::ALL)
+            .map(|(_, page)| (tab_name(page), tab_handle(demo, page)))
+            .collect();
+        order.extend(page_focusables(demo, page));
+        order
+    }
+
+    /// Returns how many `Tab` presses walk from nothing onto the `index`th stop of
+    /// `page`'s order.
+    ///
+    /// **`Page::ALL`'s six plus `index`, and derived rather than written** at each
+    /// of the six call sites: five tests pressed `Tab` a written number of times to
+    /// reach a page's own control, and task 24.3 moved every one of those numbers by
+    /// six without changing what the tests were about. A derived count is the fix
+    /// `.ai/NEVERAGAIN.md`'s *a deleted `#[test]` attribute is a green suite with a
+    /// hole in it* argues for at the other end — **a number that can go stale is a
+    /// hole whether it is in an attribute or in a loop bound**, and this one was
+    /// found by five red tests rather than by reading a diff.
+    ///
+    /// `index` is zero-based over [`page_focusables`], so `0` is the page's first
+    /// own control. **The extra one** is `Focus::step`'s rule: with nothing focused
+    /// a forward step takes the *first* stop, so landing on stop `n` is `n + 1`
+    /// presses — the arithmetic is `input::Focus::focus_next`'s, not this file's.
+    fn tabs_onto(page: Page, index: usize) -> usize {
+        debug_assert!(
+            index < page_focusables_count(page),
+            "{page:?} has no stop {index}"
+        );
+        Page::ALL.len() + index + 1
+    }
+
+    /// Returns how many stops `page` contributes of its own, below the six buttons.
+    fn page_focusables_count(page: Page) -> usize {
+        match page {
+            Page::Controls => 3,
+            Page::Data | Page::Input => 1,
+            Page::Pads | Page::Text | Page::Overlays => 0,
+        }
+    }
+
+    /// Returns the `Tab` order's name for a tab button, written out.
+    ///
+    /// **Six literals and not `Page::name()`, and that is deliberate**: the walk
+    /// test's failure message has to name the stop, and the name it wants is
+    /// *"the pads button"*. Deriving it from `Page::name` would give `pads` in the
+    /// middle of a sentence about buttons. The two spellings are held in step by
+    /// `six_tab_buttons_are_laid_out_in_page_order_and_labelled_with_their_page_
+    /// names`, which reads the button's own label — which *is* `Page::name` — and
+    /// this table, side by side.
+    fn tab_name(page: Page) -> &'static str {
+        match page {
+            Page::Pads => "the pads tab button",
+            Page::Text => "the text tab button",
+            Page::Input => "the input tab button",
+            Page::Controls => "the controls tab button",
+            Page::Data => "the data tab button",
+            Page::Overlays => "the overlays tab button",
+        }
+    }
+
+    /// Returns the handle of the bar's button for `page`.
+    fn tab_handle(demo: &Demo, page: Page) -> Handle {
+        demo.tabs.iter().find(|tab| tab.page == page).map_or_else(
+            || panic!("no tab button for {page:?}"),
+            |tab| tab.button.handle(),
+        )
+    }
+
+    /// Returns the active page's own `Tab` stops, after the six buttons.
+    ///
+    /// **Three pages contribute nothing, and that is unchanged by task 24.3** — the
+    /// bar is on every page, so it does not make a page with no controls of its own
+    /// into a page with a control. `pads` is a press animation, `text` a column of
+    /// labels and `overlays` a modal panel.
+    fn page_focusables(demo: &Demo, page: Page) -> Vec<(&'static str, Handle)> {
+        match page {
+            // The controls layer's paint order, and so the walk's.
+            Page::Controls => vec![
+                ("slider", demo.slider.node()),
+                ("toggle", demo.toggle.handle()),
+                ("progress bar", demo.progress.handle()),
+            ],
+            // One: the image, because the gauge and the chart answer no event.
+            Page::Data => vec![("image", demo.image.handle())],
+            // One: the field.
+            Page::Input => vec![("text field", demo.text_input.handle())],
+            Page::Pads | Page::Text | Page::Overlays => Vec::new(),
+        }
+    }
+
+    /// Returns whether the control `what` shows that it holds focus, by whichever
+    /// means that control has.
+    ///
+    /// **Three properties and two words**, and the split is the widgets' own: the
+    /// slider, the toggle and the field carry `focused` and draw a ring from it,
+    /// while the bar and the image have none and say so in their readouts instead.
+    /// `the_two_widgets_with_no_focus_state_say_where_focus_is` is that decision's
+    /// own test, and this helper is how the walk below can ask the question of every
+    /// stop rather than of two of them.
+    fn shows_focus(demo: &Demo, what: &str) -> bool {
+        match what {
+            // **Six names and one arm, from `tab_name`'s table.** A `Button` has a
+            // `focused` property and draws a ring from it, so a tab button shows
+            // focus the same way the slider does; the table is what says which
+            // handle each name means, and `tab_walks_the_six_buttons_before_the_
+            // pages_own_controls` walks them on every page, so a stop that showed
+            // nothing would fail there rather than here.
+            "the pads tab button"
+            | "the text tab button"
+            | "the input tab button"
+            | "the controls tab button"
+            | "the data tab button"
+            | "the overlays tab button" => Page::ALL
+                .into_iter()
+                .zip(demo.tab_focusables())
+                .find(|(page, _)| tab_name(*page) == what)
+                .is_some_and(|(_, handle)| {
+                    demo.tab_button(handle).is_some_and(|b| b.focused.get())
+                }),
+            "slider" => demo.slider.widget.focused.get(),
+            "toggle" => demo.toggle.focused.get(),
+            "progress bar" => demo.progress_focused.get(),
+            "image" => demo.image_focused.get(),
+            "text field" => demo.text_input.focused.get(),
+            _ => false,
+        }
     }
 
     #[test]
@@ -10772,70 +14283,125 @@ mod tests {
         // which nodes are *focusable*, and the order comes from the walk over the
         // tree. A control that was added to the layer out of order would pass an
         // array-order test and fail this one.
-        let mut demo = dialog_closed();
-        let order = expected_focus_order(&demo);
-        assert_eq!(order.len(), 5, "five controls take focus in this demo");
+        //
+        // **On every page, and that is what requirement 6 asks for**: the six tab
+        // buttons lead every walk, and the five focusables of 2026-10-03 sit behind
+        // them — three on `controls`, one on `data`, one on `input`.
+        for page in Page::ALL {
+            let mut demo = dialog_closed_on(page);
+            let order = expected_focus_order(&demo, page);
 
-        // Forward, one `Tab` at a time, and the whole lap twice over: a walk that
-        // visited them in a different order, or stopped early, or cycled two at a
-        // time, is caught by the first pass and the second is what says the last
-        // one wraps to the first.
-        for lap in 0..2 {
-            for (index, (what, handle)) in order.iter().enumerate() {
-                demo.handle_event(key_event(Keycode::Tab));
-                assert_eq!(
-                    demo.focused,
-                    Some(*handle),
-                    "lap {lap}: Tab {index} is the {what}"
-                );
+            // Forward, one `Tab` at a time, and the whole lap twice over: a walk
+            // that visited them in a different order, or stopped early, or cycled
+            // two at a time, is caught by the first pass and the second is what
+            // says the last one wraps to the first.
+            for lap in 0..2 {
+                for (index, (what, handle)) in order.iter().enumerate() {
+                    demo.handle_event(key_event(Keycode::Tab));
+                    assert_eq!(
+                        demo.focused,
+                        Some(*handle),
+                        "{page:?} lap {lap}: Tab {index} is the {what}"
+                    );
+                    // And every one of them *lights up*, which is a different claim
+                    // from being the current node: three of the five have a
+                    // `focused` property and two say so in words, and a stop where
+                    // nothing shows is a stop a reader cannot see.
+                    assert!(
+                        shows_focus(&demo, what),
+                        "{page:?} lap {lap}: and the {what} shows that it holds focus"
+                    );
+                }
             }
+
+            // And one `Tab` past the lap, which is the wrap: a walk of `len` leaves
+            // focus on its **last** stop, so the next step is the first one.
+            //
+            // **And that first stop is a tab button on every one of the six
+            // pages**, which is the claim requirement 6 is about: the walk wraps
+            // round to the top of the bar and not to the page's own first control,
+            // and on `pads`, `text` and `overlays` the bar is the whole of it.
+            demo.handle_event(key_event(Keycode::Tab));
+            assert_eq!(
+                demo.focused,
+                order.first().map(|(_, handle)| *handle),
+                "{page:?}: one more Tab from the end of a {}-stop walk is its first \
+                 stop again, and that is the first tab button",
+                order.len()
+            );
         }
 
-        // And every one of them *lights up*, which is a different claim from being
-        // the current node: three of the five have a `focused` property and two say
-        // so in words, and a stop where nothing shows is a stop a reader cannot see.
-        demo.handle_event(key_event(Keycode::Tab));
-        assert!(demo.slider.widget.focused.get(), "the slider's ring");
-        for _ in 0..3 {
-            demo.handle_event(key_event(Keycode::Tab));
-        }
-        assert!(demo.progress_focused.get(), "the bar's readout says so");
+        let demo = dialog_closed();
+        assert_eq!(
+            Page::ALL
+                .iter()
+                .map(|page| expected_focus_order(&demo, *page).len())
+                .sum::<usize>(),
+            Page::ALL.len() * 6 + 5,
+            "six tab buttons on each of the six pages, plus the same five focusables \
+             the demo had as one walk, spread over three of the six pages"
+        );
     }
 
     #[test]
     fn shift_tab_walks_the_same_order_backwards() {
         // The other direction, from nothing focused: `Focus::focus_prev` with no
         // current node takes the **last** control rather than the first, so the
-        // backwards walk starts at the field. That asymmetry is the input module's
-        // rule and it is worth a test of its own, because a `Shift+Tab` that went
-        // forwards would still reach all five.
-        let mut demo = dialog_closed();
-        let order = expected_focus_order(&demo);
-        let back = |demo: &mut Demo| {
-            demo.handle_event(key_event_with(Keycode::Tab, Mod::LSHIFTMOD));
-        };
+        // backwards walk starts at the page's last control of its own — the bar's
+        // own geometry makes that an interesting question, because the last stop is
+        // the *last page* the walk visits and not the last button on screen.
+        // That asymmetry is the input module's rule and it is worth a test of its
+        // own, because a `Shift+Tab` that went forwards would still reach them all.
+        //
+        // **On every page**, and **no page has an empty order any more.** Task
+        // 24.1's version had a `Shift+Tab` with nothing to walk land nowhere, and
+        // that branch covered the three pages with no control of their own; the
+        // bar is on every page, so **every walk is six stops long and the branch is
+        // unreachable**. It was deleted rather than left as a test that cannot run,
+        // and what replaced it is the assertion below that no order is empty — which
+        // is the same fact, checked rather than assumed.
+        for page in Page::ALL {
+            let mut demo = dialog_closed_on(page);
+            let order = expected_focus_order(&demo, page);
+            let back = |demo: &mut Demo| {
+                demo.handle_event(key_event_with(Keycode::Tab, Mod::LSHIFTMOD));
+            };
 
-        back(&mut demo);
-        assert_eq!(
-            demo.focused,
-            Some(order[4].1),
-            "Shift+Tab from nothing focused is the last control, the field"
-        );
-        for index in (0..4).rev() {
+            assert!(
+                !order.is_empty(),
+                "{page:?}: the bar is on every page, so every page offers a walk"
+            );
+            assert_eq!(
+                order.len(),
+                Page::ALL.len() + page_focusables_count(page),
+                "{page:?}: six tab buttons and the page's own stops"
+            );
+            let last = order.len() - 1;
+
             back(&mut demo);
             assert_eq!(
                 demo.focused,
-                Some(order[index].1),
-                "and one more back is the {}",
-                order[index].0
+                Some(order[last].1),
+                "{page:?}: Shift+Tab from nothing focused is the last control, the {}",
+                order[last].0
+            );
+            for index in (0..last).rev() {
+                back(&mut demo);
+                assert_eq!(
+                    demo.focused,
+                    Some(order[index].1),
+                    "{page:?}: and one more back is the {}",
+                    order[index].0
+                );
+            }
+            back(&mut demo);
+            assert_eq!(
+                demo.focused,
+                Some(order[last].1),
+                "{page:?}: which wraps to the {} again rather than stopping",
+                order[last].0
             );
         }
-        back(&mut demo);
-        assert_eq!(
-            demo.focused,
-            Some(order[4].1),
-            "which wraps to the field again rather than stopping"
-        );
     }
 
     #[test]
@@ -10850,8 +14416,8 @@ mod tests {
         // about every stop and not about the one after the last: a control that was
         // appended to the tree would be reached on the wrap, which is exactly where
         // a test that only checks the first five looks away.
-        let mut demo = dialog_closed();
-        let order = expected_focus_order(&demo);
+        let mut demo = dialog_closed_on(Page::Controls);
+        let order = expected_focus_order(&demo, Page::Controls);
         let gauge = demo.gauge.handle();
         assert!(
             !order.iter().any(|(_, handle)| *handle == gauge),
@@ -10896,8 +14462,8 @@ mod tests {
     /// where a control appended to the tree would be reached.
     #[test]
     fn the_chart_is_not_in_the_focus_order() {
-        let mut demo = dialog_closed();
-        let order = expected_focus_order(&demo);
+        let mut demo = dialog_closed_on(Page::Controls);
+        let order = expected_focus_order(&demo, Page::Controls);
         let chart = demo.chart.handle();
         assert!(
             !order.iter().any(|(_, handle)| *handle == chart),
@@ -10931,7 +14497,7 @@ mod tests {
         // ceiling being retested. This is the retest, and it is cheap: the knob at
         // the **top** of the range is the one that reaches furthest right, and the
         // node's own height is what has to clear the toggle below it.
-        let mut demo = laid_out();
+        let mut demo = laid_out_on(Page::Controls);
         demo.handle_event(key_event(Keycode::_1));
         demo.frame(WINDOW, Duration::from_millis(16));
         let rect = demo.slider_rect().expect("a laid-out slider");
@@ -10954,6 +14520,13 @@ mod tests {
         // column's budget is the drop plus the line, and it is checked against the
         // toggle the same way `the_new_widgets_sit_clear_of_the_things_already_in_
         // the_window` checks the drawn rects.
+        //
+        // **`CONTENT_TOP` is on the right-hand side of that subtraction and on
+        // neither of the rects**, which is the whole of the shift as far as this
+        // test is concerned: the expected origin and the drawn rect both moved
+        // down by the same 64, so the two relationships this asserts — the
+        // readout's drop and the toggle's clearance — are unchanged and their
+        // headroom arithmetic below still comes out at eight pixels.
         let readout = demo
             .node_rect(demo.slider_readout.label.handle())
             .expect("a laid-out readout");
@@ -10961,7 +14534,7 @@ mod tests {
             .node_rect(demo.toggle.handle())
             .expect("a laid-out toggle");
         assert!(
-            (readout.y - (SLIDER_ORIGIN.1 + SLIDER_READOUT_DROP)).abs() < 0.01,
+            (readout.y - (SLIDER_ORIGIN.1 + SLIDER_READOUT_DROP + CONTENT_TOP)).abs() < 0.01,
             "the readout hangs off the origin at {readout:?}, not off the node's \
              bottom"
         );
@@ -10991,7 +14564,7 @@ mod tests {
 
     #[test]
     fn the_field_draws_its_placeholder_only_while_it_is_empty() {
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Input);
         let field = demo.text_input_rect().expect("the field has been laid out");
         let advance = |ch: char| demo.metrics.advance(ch, TEXT_INPUT_FONT);
 
@@ -11058,39 +14631,90 @@ mod tests {
     #[test]
     fn the_gallery_above_the_band_is_where_it_was() {
         // The whole argument for growing the window instead of re-laying the demo
-        // was that **nothing above the band moves**. This is what checks it, and
-        // it is the test that makes the claim checkable rather than a sentence in
-        // a doc comment.
+        // was that **nothing above the band moves**. Task 24.2 is the one thing that
+        // moved it, and it moved **all of it by one number**: the gallery went down
+        // [`CONTENT_TOP`] to make room for the tab bar and nothing went down by
+        // anything else. This is what checks that, and it is the test that makes the
+        // claim checkable rather than a sentence in a doc comment.
+        //
+        // **The name is historical, and it is kept on purpose.**
+        // `TASK_UI_PRIM_24.2.md` requirement 5 names this test, so renaming it would
+        // make the task file's own checklist un-greppable and the next reader would
+        // have to trust a mapping. What the gallery is "where it was" now means *where
+        // it was plus [`CONTENT_TOP`]*, and the numbers below say so.
+        //
+        // **The assertion this one used to carry and cannot is gone**, and it is
+        // recorded here rather than left as a hole: every gallery rect ending above
+        // [`BAND_TOP`] stopped being true the moment the gallery went down and the
+        // band's box came up into the same 64 pixels — the toggle now ends at 700
+        // against a band top of 680. What replaced it is the claim that is true on
+        // every page, that nothing at all is above the tab bar, and the per-page
+        // collision tests for the pairs that do share a page.
         let demo = laid_out();
-        let task_19 = ["text input", "text readout", "submit readout", "keyboard"];
+        let band = ["text input", "text readout", "submit readout", "keyboard"];
 
         for (what, rect) in demo.placed_rects() {
-            if task_19.contains(&what) {
+            assert!(
+                rect.y >= CONTENT_TOP,
+                "the {what} at {rect:?} is in the tab bar's {CONTENT_TOP} pixels, which \
+             task 24.3 draws and nothing else may"
+            );
+            if band.contains(&what) {
                 assert!(
                     rect.y >= BAND_TOP,
-                    "the {what} at {rect:?} is inside the gallery rather than \
-                     below the band"
-                );
-            } else {
-                assert!(
-                    rect.y + rect.height <= BAND_TOP,
-                    "the {what} at {rect:?} reaches into the band, so the window \
-                     did not grow — it moved something"
+                    "the {what} at {rect:?} is inside the gallery rather than below \
+                 the band, which begins at {BAND_TOP}"
                 );
             }
         }
 
-        // And the two figures that would move if the root's own box had changed,
-        // written out rather than derived: the gallery's tallest leaf is the
-        // progress bar at 668..712 and the frame-rate readout is at y 684.
+        // **The three figures that would move if the shift were not uniform**, written
+        // out rather than derived: the gallery's tallest leaf is the progress bar,
+        // which was at 668 and is now at 732; the frame-rate readout, whose **x**
+        // is the number that must not have moved at all; and **the card of pads
+        // and the first line of the text column, which is the pair this test did
+        // not have and had to be given.**
+        //
+        // That last clause is a finding from the mutation sweep rather than an
+        // edit made for tidiness: dropping [`CONTENT_TOP`] from the text column's
+        // own `set_position` — one of the six sites the shift is written at — left
+        // **every one of the 1817 tests green**, because the column's labels only
+        // ever claimed to be *below the frame-rate readout* and 501 is below 748
+        // as surely as 565 is. `.ai/NEVERAGAIN.md`'s *a sweep of a mechanism's
+        // call sites is not a sweep of the data it is built from* is the same
+        // shape one level down: the sweep ran all six sites and the column was in
+        // it, and **nothing was asserting what the column is for**.
         let at = |handle: Handle| demo.node_rect(handle).expect("a laid-out node");
+        let card = at(demo.card().handle());
+        assert_eq!(
+            (card.x, card.y),
+            (0.0, CONTENT_TOP),
+            "the card of pads is the one node whose origin was implicit, and it is \
+             at the tab bar's height and nowhere else"
+        );
+        let first_label = at(*demo.label_nodes.first().expect("seven labels"));
+        assert_eq!(
+            (first_label.x, first_label.y),
+            (TEXT_PANEL_ORIGIN.0, TEXT_PANEL_ORIGIN.1 + CONTENT_TOP),
+            "and the text column starts below the bar and below the card, which is \
+             what put the column's own placement in this list"
+        );
         let bar = at(demo.progress.handle());
-        assert_eq!(bar.y, PROGRESS_ORIGIN.1, "the progress bar did not move");
+        assert_eq!(
+            (bar.x, bar.y),
+            (PROGRESS_ORIGIN.0, PROGRESS_ORIGIN.1 + CONTENT_TOP),
+            "the progress bar moved down by exactly the tab bar's height"
+        );
+        assert_eq!(
+            bar.y, 732.0,
+            "which is 668 plus the 64 the bar is paid for, written out so a reader \
+         can check the arithmetic without running anything"
+        );
         let fps = at(demo.fps_readout.label.handle());
         assert_eq!(
             (fps.x, fps.y),
-            (FPS_READOUT_ORIGIN.0, FPS_READOUT_ORIGIN.1),
-            "the frame-rate readout did not move"
+            (FPS_READOUT_ORIGIN.0, FPS_READOUT_ORIGIN.1 + CONTENT_TOP),
+            "and the frame-rate readout moved the same way, with its x untouched"
         );
     }
 
@@ -11115,7 +14739,7 @@ mod tests {
 
     #[test]
     fn a_theme_switch_reaches_the_field_and_the_keyboard() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Input);
         let field_before = demo.text_input.background.get();
         let key_before = demo
             .commands_at(demo.keyboard.handle())
@@ -11417,8 +15041,16 @@ mod tests {
     /// The twin of [`dialog_closed`], and the same argument: three whole spans of
     /// the widget's 300 ms, which is two spans of slack, and the assertions below
     /// are about a panel at rest rather than about a bounce in flight.
-    fn shown_dialog() -> Demo {
-        let mut demo = laid_out();
+    /// Returns a demo with the dialog **showing and arrived at**, on `page`.
+    ///
+    /// **There is no no-argument form and there cannot be one**: `Demo::new`
+    /// presents the dialog only on the page that shows it, so a demo on `pads` has
+    /// no dialog to show and the assertion below would fail. Every test that needs
+    /// a *showing* dialog names `Page::Overlays`, and that is not tidiness — a
+    /// showing dialog on any other page is an invisible scrim that swallows every
+    /// tap and every key.
+    fn shown_dialog_on(page: Page) -> Demo {
+        let mut demo = laid_out_on(page);
         for _ in 0..3 {
             demo.frame(WINDOW, Duration::from_millis(300));
         }
@@ -11608,10 +15240,18 @@ mod tests {
     /// keypress calls, so the fixture and the gesture under test are one code path
     /// rather than two.
     fn shortcut_fixture(dialog_up: bool) -> Demo {
+        shortcut_fixture_on(Page::DEFAULT, dialog_up)
+    }
+
+    /// [`shortcut_fixture`] on `page`.
+    ///
+    /// **The page is a parameter because `dialog_up` is only true on one of the
+    /// six**, for [`shown_dialog_on`]'s reason.
+    fn shortcut_fixture_on(page: Page, dialog_up: bool) -> Demo {
         let mut demo = if dialog_up {
-            shown_dialog()
+            shown_dialog_on(page)
         } else {
-            dialog_closed()
+            dialog_closed_on(page)
         };
         demo.set_slider_value(SLIDER_MIN + SLIDER_STEP);
         demo
@@ -11672,11 +15312,13 @@ mod tests {
         let mut effects = Vec::new();
         for keycode in [Keycode::Plus, Keycode::Equals] {
             assert!(
-                GALLERY_SHORTCUTS.iter().any(|(_, key, _)| *key == keycode),
+                GALLERY_SHORTCUTS
+                    .iter()
+                    .any(|(_, key, _, _)| *key == keycode),
                 "{keycode:?} has a row in the table, which is the object the modal \
                  guard wraps"
             );
-            let mut demo = shortcut_fixture(false);
+            let mut demo = shortcut_fixture_on(Page::Text, false);
             let before = demo.text_size;
             demo.handle_event(key_event(keycode));
             settle(&mut demo);
@@ -11714,7 +15356,7 @@ mod tests {
         // events so on screen there is not one, and a reader reproducing it with two
         // `handle_event` calls has exactly one. A frame here would test
         // [`Demo::sync_dialog_focus`] alone and let the routing half rot.
-        let shown = shown_dialog();
+        let shown = shown_dialog_on(Page::Overlays);
         assert!(
             shown.dialog.actions[0].button.focused.get(),
             "`OK` holds focus and shows its ring while the dialog is up, which is \
@@ -11738,7 +15380,7 @@ mod tests {
             ("a tap on OK", Some(OK_BUTTON), true),
             ("a tap on Cancel", Some(CANCEL_BUTTON), false),
         ] {
-            let mut demo = shown_dialog();
+            let mut demo = shown_dialog_on(Page::Overlays);
             let dark_before = demo.dark;
             match button {
                 None => demo.handle_event(key_event(Keycode::Escape)),
@@ -11781,7 +15423,7 @@ mod tests {
         // with both halves would also do, but a failure would then not say which
         // half moved — and this half is the one that can pass by `Enter` being
         // broken everywhere.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         assert!(
             demo.dialog.actions[0].button.focused.get(),
             "the demo opens with focus on its first action"
@@ -11819,7 +15461,7 @@ mod tests {
         // **The half of the fix with a visible consequence.** The record is no
         // longer what stops the key — `Button::activatable` is — and that is what
         // lets the record survive long enough for the ring to fade with the panel.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         demo.handle_event(key_event(Keycode::Escape));
         assert_eq!(
             demo.focused,
@@ -11886,7 +15528,7 @@ mod tests {
         // the first frame for three routes and on the event for the fourth, and a
         // test that ran no frame would see all four agreeing for the wrong reason.
         for route in ["Escape", "a tap on the scrim", "a tap on Cancel", "D"] {
-            let mut demo = shown_dialog();
+            let mut demo = shown_dialog_on(Page::Overlays);
             match route {
                 "Escape" => demo.handle_event(key_event(Keycode::Escape)),
                 "D" => demo.handle_event(key_event(DIALOG_KEY)),
@@ -11939,7 +15581,7 @@ mod tests {
         // having run. Only here is `focused` a `Some` naming a button of a dialog
         // that is no longer there, which is the state that could strand the pads.
         for route in ["Escape", "a tap on the scrim", "a tap on Cancel", "D"] {
-            let mut demo = shown_dialog();
+            let mut demo = shown_dialog_on(Page::Overlays);
             match route {
                 "Escape" => demo.handle_event(key_event(Keycode::Escape)),
                 "D" => demo.handle_event(key_event(DIALOG_KEY)),
@@ -12003,7 +15645,7 @@ mod tests {
         // `PRESS_DURATION` is 150, so the second pad is 90 ms in and the third 30 ms
         // in — the measured triple is in the message so a reader can see all three.
         for route in ["Escape", "a tap on the scrim", "a tap on Cancel", "D"] {
-            let mut demo = shown_dialog();
+            let mut demo = shown_dialog_on(Page::Overlays);
             match route {
                 "Escape" => demo.handle_event(key_event(Keycode::Escape)),
                 "D" => demo.handle_event(key_event(DIALOG_KEY)),
@@ -12052,13 +15694,25 @@ mod tests {
         // **It cannot pass by the table and the dispatch having drifted**, because
         // there is nothing to drift from: `handle_event` looks the key up in this
         // very array.
+        //
+        // **`K` is still invisible here, and it is now invisible twice over.** The
+        // reason below is that a `GalleryState` holds no toasts; since the pages
+        // landed it holds no *page* either, so the one key above the guard this test
+        // presses changes both a card and a page and the test sees neither.
+        // `the_two_keys_above_the_guard_activate_the_page_that_shows_what_they_raise`
+        // and `a_toast_is_raised_by_its_own_key_in_both_states` are what cover it,
+        // and both are named here so the next reader does not take this test for the
+        // whole of that key's behaviour.
         let mut checked = 0_usize;
         let mut unaccounted: Vec<Keycode> = Vec::new();
         for raw in 0..=KEYCODE_PRINTABLE_END {
             let Some(keycode) = Keycode::from_u32(raw) else {
                 continue;
             };
-            if GALLERY_SHORTCUTS.iter().any(|(_, key, _)| *key == keycode) {
+            if GALLERY_SHORTCUTS
+                .iter()
+                .any(|(_, key, _, _)| *key == keycode)
+            {
                 continue;
             }
             checked += 1;
@@ -12097,11 +15751,11 @@ mod tests {
         assert!(
             !GALLERY_SHORTCUTS
                 .iter()
-                .any(|(_, key, _)| *key == DIALOG_KEY),
+                .any(|(_, key, _, _)| *key == DIALOG_KEY),
             "and `D` is not one of them, because `D` is the dialog's own and is \
              matched above the guard"
         );
-        for (what, keycode, _) in GALLERY_SHORTCUTS {
+        for (what, keycode, _, _) in GALLERY_SHORTCUTS {
             let mut demo = shortcut_fixture(false);
             let before = gallery_state(&demo);
             demo.handle_event(key_event(keycode));
@@ -12128,11 +15782,11 @@ mod tests {
         // `the_gallery_shortcut_list_holds_every_key_the_table_has` instead, where
         // the closed-dialog half is what matters, and its arm is still inside the
         // guard because the condition is about focus rather than about modality.
-        for (what, keycode, _) in GALLERY_SHORTCUTS
+        for (what, keycode, _, _) in GALLERY_SHORTCUTS
             .into_iter()
-            .filter(|(_, key, _)| *key != Keycode::Space)
+            .filter(|(_, key, _, _)| *key != Keycode::Space)
         {
-            let mut demo = shortcut_fixture(true);
+            let mut demo = shortcut_fixture_on(Page::Overlays, true);
             let before = gallery_state(&demo);
             demo.handle_event(key_event(keycode));
             settle(&mut demo);
@@ -12156,7 +15810,7 @@ mod tests {
         // `.ai/NEVERAGAIN.md` § *A drawn control with nothing behind it*, applied to
         // a keyboard shortcut: name the gesture that operates the thing, and assert
         // the gesture moves it.
-        for (what, keycode, _) in GALLERY_SHORTCUTS {
+        for (what, keycode, _, _) in GALLERY_SHORTCUTS {
             let mut demo = shortcut_fixture(false);
             let before = gallery_state(&demo);
             demo.handle_event(key_event(keycode));
@@ -12175,7 +15829,7 @@ mod tests {
         // anything that has to work *while the dialog is up* must be matched above
         // it. `D` is the one such key and this is what holds it there: if `D`'s arm
         // were moved back into the table, this fails.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         assert!(demo.dialog.visible.get(), "the dialog opens showing");
         demo.handle_event(key_event(DIALOG_KEY));
         assert!(
@@ -12183,7 +15837,7 @@ mod tests {
             "`D` closes it from inside the guard's scope"
         );
 
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Overlays);
         assert!(!demo.dialog.visible.get(), "and it starts closed");
         demo.handle_event(key_event(DIALOG_KEY));
         assert!(
@@ -12194,25 +15848,43 @@ mod tests {
 
     #[test]
     fn a_pointer_press_behind_the_scrim_operates_nothing() {
-        // **The same guard, on the three arms that reach the gallery without
+        // **The same guard, on the two arms that reach the gallery without
         // routing.** `handle_event`'s `MouseButtonDown` and `FingerDown` arms call
-        // `pad_at`, `slider_at` and `keyboard_at` themselves, so the tap-side
-        // filter in `route_input_event` never sees them: a press on a pad with the
-        // dialog showing lit the pad, and only the *tap* on the release was ever
-        // offered to the dialog. All three targets are outside the panel — asserted
-        // here rather than assumed, because a target under the panel would be
-        // swallowed by the panel and this test would pass for the wrong reason.
+        // `pad_at`, `slider_at` and `keyboard_at` themselves, so the tap-side filter
+        // in `route_input_event` never sees them: a press on a pad with the dialog
+        // showing lit the pad, and only the *tap* on the release was ever offered to
+        // the dialog. All three targets are outside the panel, asserted here rather
+        // than assumed, because a target under the panel would be swallowed by the
+        // panel and this test would pass for the wrong reason.
         //
-        // Three gestures, three controls, each with the closed-dialog control
-        // beside it, for the reason the entry above is named after — and **three
-        // fresh demos, one per control**, because a *release* on the scrim is a
-        // dismissal: `Dialog::on_event` consumes a tap anywhere in its box and
-        // closes on one that misses the panel, which is correct and which would
-        // leave the second and third controls being tested with nothing in the
-        // way. The first control's release is therefore its own last act.
+        // Three gestures, three controls, each with the closed-dialog control beside
+        // it, for the reason the entry above is named after, and **three fresh
+        // demos, one per control**, because a *release* on the scrim is a dismissal:
+        // `Dialog::on_event` consumes a tap anywhere in its box and closes on one
+        // that misses the panel, which is correct and which would leave the second
+        // and third controls being tested with nothing in the way.
+        //
+        // **WHAT THIS TEST NO LONGER HOLDS DOWN, recorded 2026-10-04 because it is a
+        // loss and a comment that hides one is worse than no comment.** Before the
+        // pages every widget shared the dialog's page, so deleting the
+        // `dialog_is_modal()` guard from the `MouseButtonDown` arm killed *this*
+        // test: the press reached the pad. **The pages made that impossible, and the
+        // reason is structural rather than a matter of where an assertion was put.**
+        // The dialog is only ever presented on `overlays`; the three targets of these
+        // arms are on `pads`, `controls` and `input`; so on the only page where a
+        // modal exists, **the page gate and the modal guard are redundant for these
+        // three controls**, and neither the dismissal assertion nor the
+        // closed-dialog control can tell which of the two did the blocking.
+        //
+        // The guard is held down by the **pair**, and what holds the pair down is the
+        // compound mutation in this round's hand-over: removing `dialog_is_modal()`
+        // from this arm **and** the page guard from the three helpers kills this
+        // test, while removing either one alone leaves it green. What would close the
+        // gap properly is a control on `overlays` that these two arms can reach, and
+        // there is none.
 
         // **The pad: a press over its own centre.**
-        let probe = shown_dialog();
+        let probe = shown_dialog_on(Page::Overlays);
         let pad = probe.node_rect(probe.pads[0].node).expect("a laid-out pad");
         let (px, py) = (pad.x + pad.width / 2.0, pad.y + pad.height / 2.0);
         assert!(
@@ -12220,7 +15892,7 @@ mod tests {
             "the pad's centre at ({px}, {py}) is outside the panel at {PANEL:?}, so \
              this is a press on the scrim"
         );
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         demo.handle_event(mouse_down_at(px, py, 0));
         settle(&mut demo);
         assert_eq!(
@@ -12232,14 +15904,40 @@ mod tests {
             "no pad is pressing"
         );
         assert_eq!(demo.mouse_pressed, None, "and no pad is armed for release");
+        // **The release, so the block ends the way a real press does** — and the
+        // dismissal it causes is asserted because a tap that misses the panel *is*
+        // a dismissal, which is what says the tap reached the dialog rather than
+        // the floor. **It is the release that dismisses and not the press**, because
+        // `Dialog::on_event` reports a tap rather than a press.
+        demo.handle_event(mouse_up_at(px, py, 40_000_000));
+        assert!(
+            !demo.dialog.visible.get(),
+            "and the scrim swallowed it, as a dismissal on the release does"
+        );
 
-        // **The slider: a press over its own centre, which is the gesture that
-        // starts a drag.**
-        let mut demo = shown_dialog();
+        // **The slider: a press over its own right-hand end, which is the gesture
+        // that starts a drag and the one point of it that is outside the panel.**
+        // The slider runs from x 664 to 964 and the panel ends at 850, so its centre
+        // is *under* the panel — where a release is swallowed by the panel itself
+        // and nothing observable follows. The right end is the same control and the
+        // scrim, and it is asserted rather than assumed for the pad's reason.
+        let mut demo = shown_dialog_on(Page::Overlays);
         let slider = demo.slider_rect().expect("a laid-out slider");
         let (sx, sy) = (
-            slider.x + slider.width / 2.0,
+            slider.x + slider.width - SLIDER_THUMB_RADIUS,
             slider.y + slider.height / 2.0,
+        );
+        assert!(
+            sx > PANEL.x + PANEL.width,
+            "the slider's right end at ({sx}, {sy}) is clear of the panel at {PANEL:?}, \
+             so a release there is a dismissal and the press can be shown to have \
+             gone to the scrim"
+        );
+        assert!(
+            over_rect(slider, sx, sy),
+            "and the point is still over the slider's own rect, or the press would \
+             prove nothing — asked of the rect rather than of `slider_at`, which \
+             answers `None` here for the reason the whole test is about"
         );
         demo.handle_event(mouse_down_at(sx, sy, 0));
         assert!(
@@ -12247,44 +15945,121 @@ mod tests {
             "the drag never started, at ({sx}, {sy})"
         );
         demo.handle_event(mouse_up_at(sx, sy, 40_000_000));
+        assert!(
+            !demo.dialog.visible.get(),
+            "and the scrim swallowed it rather than the page gate alone — the slider \
+             is on `controls` and this is the `overlays` page"
+        );
 
         // **The keyboard: a press over one key's own centre, which is the gesture
         // that lights it.**
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         let (kx, ky) = key_center(&demo, KeyAction::Char('a'));
+        assert!(
+            !inside(PANEL, Rect::new(kx - 1.0, ky - 1.0, 2.0, 2.0)),
+            "`a`'s own centre at ({kx}, {ky}) is outside the panel at {PANEL:?}, so \
+             this is a press on the scrim for the pad's reason"
+        );
         demo.handle_event(mouse_down_at(kx, ky, 0));
         assert!(
             !demo.keyboard.is_key_grabbed(),
             "no key lit at ({kx}, {ky}), which is `a`'s own centre"
         );
+        demo.handle_event(mouse_up_at(kx, ky, 40_000_000));
+        assert!(
+            !demo.dialog.visible.get(),
+            "and the scrim swallowed the tap, which is what says the dialog was
+             given it rather than the floor"
+        );
 
-        // **The three controls, with the dialog closed.** Without this the whole
-        // test is satisfied by three broken controls.
-        let mut demo = dialog_closed();
-        let pad = demo.node_rect(demo.pads[0].node).expect("a laid-out pad");
-        demo.handle_event(mouse_down_at(
+        // **And the finger, which is the other arm this guard is on.** A car has no
+        // mouse, so `FingerDown` reaches the same three helpers as the mouse does and
+        // carries its own `dialog_is_modal()` guard for the same reason. **This gap
+        // predates the pages and is not a regression of them** — it is closed here
+        // because it costs four lines and the arm is otherwise untested with a modal
+        // up, and the *finger path itself* is not touched by anything in this change.
+        //
+        // **It is the same pair that holds it down**, on the same structural grounds
+        // as the three above: the finger's targets are on `pads`, `controls` and
+        // `input`, and the modal only exists on `overlays`. So what this block
+        // asserts is that a touch is inert while the panel is up, and the test that
+        // would separate the guard from the page gate does not exist and cannot be
+        // written without a control on `overlays` these arms can reach.
+        let mut demo = shown_dialog_on(Page::Overlays);
+        let (kx, ky) = key_center(&demo, KeyAction::Char('a'));
+        assert!(
+            !inside(PANEL, Rect::new(kx - 1.0, ky - 1.0, 2.0, 2.0)),
+            "the key is outside the panel at {PANEL:?}, for the mouse arm's reason"
+        );
+        demo.handle_event(finger_down_at(kx, ky, 0));
+        assert!(
+            !demo.keyboard.is_key_grabbed(),
+            "a finger down on a key behind the scrim grabs nothing"
+        );
+        demo.handle_event(Event::FingerUp {
+            timestamp: 40_000_000,
+            touch_id: 1,
+            finger_id: 1,
+            x: kx,
+            y: ky,
+            dx: 0.0,
+            dy: 0.0,
+            pressure: 0.0,
+            window_id: 0,
+        });
+        assert!(
+            !demo.dialog.visible.get(),
+            "and the lift was the dismissal, so the touch reached the dialog"
+        );
+
+        // **The three controls, with the dialog closed, each on its own page.**
+        // Without this the whole test is satisfied by three broken controls, and
+        // "its own page" is not tidiness: the three are on `pads`, `controls` and
+        // `input`, and a press on a control whose page is not showing does nothing
+        // whatever the dialog is doing.
+        let mut pads = dialog_closed();
+        let pad = pads.node_rect(pads.pads[0].node).expect("a laid-out pad");
+        pads.handle_event(mouse_down_at(
             pad.x + pad.width / 2.0,
             pad.y + pad.height / 2.0,
             0,
         ));
-        demo.frame(WINDOW, Duration::from_millis(50));
+        pads.frame(WINDOW, Duration::from_millis(50));
         assert!(
-            demo.pads[0].press.get() > 0.0,
+            pads.pads[0].press.get() > 0.0,
             "the pad presses when the dialog is closed"
         );
-        demo.handle_event(mouse_up_at(
+        pads.handle_event(mouse_up_at(
             pad.x + pad.width / 2.0,
             pad.y + pad.height / 2.0,
             40_000_000,
         ));
 
-        let (kx, ky) = key_center(&demo, KeyAction::Char('a'));
-        demo.handle_event(mouse_down_at(kx, ky, 0));
+        let mut controls = dialog_closed_on(Page::Controls);
+        let slider = controls.slider_rect().expect("a laid-out slider");
+        controls.handle_event(mouse_down_at(
+            slider.x + slider.width / 2.0,
+            slider.y + slider.height / 2.0,
+            0,
+        ));
         assert!(
-            demo.keyboard.is_key_grabbed(),
+            controls.slider_dragging,
+            "and the drag starts, which is the gesture the arm above is about"
+        );
+        controls.handle_event(mouse_up_at(
+            slider.x + slider.width / 2.0,
+            slider.y + slider.height / 2.0,
+            40_000_000,
+        ));
+
+        let mut input = dialog_closed_on(Page::Input);
+        let (kx, ky) = key_center(&input, KeyAction::Char('a'));
+        input.handle_event(mouse_down_at(kx, ky, 0));
+        assert!(
+            input.keyboard.is_key_grabbed(),
             "and the key lights, which is what `is_key_grabbed` is for"
         );
-        demo.handle_event(mouse_up_at(kx, ky, 40_000_000));
+        input.handle_event(mouse_up_at(kx, ky, 40_000_000));
     }
 
     #[test]
@@ -12294,7 +16069,7 @@ mod tests {
         // so the dialog opens, release `Space`. A guard on the releases would
         // leave three pads at 1.0 behind the scrim with nothing left to bring them
         // back, and the demo has no other gesture that would.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Overlays);
         demo.handle_event(key_event(Keycode::Space));
         for _ in 0..6 {
             demo.frame(WINDOW, Duration::from_millis(50));
@@ -12337,7 +16112,7 @@ mod tests {
         // `OK_BUTTON` and `CANCEL_BUTTON` are written out from the arithmetic in
         // their own docs, and the window's own size is a literal here rather than
         // `WINDOW`, so a fixture that read the constants back could not fail.
-        let demo = shown_dialog();
+        let demo = shown_dialog_on(Page::Overlays);
 
         let window = Rect::new(0.0, 0.0, 1280.0, 1020.0);
         assert_eq!(
@@ -12435,7 +16210,7 @@ mod tests {
         // name is a widget that is never on the screen however correct its own
         // paint is. The dialog's subtree is **appended** to that order rather than
         // attached to the gallery's root, and this is what holds the append down.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         let dialog = demo.dialog.handle();
         let first_action = demo.dialog.actions[0].handle();
 
@@ -12497,7 +16272,7 @@ mod tests {
         // comes out of the recorded paint and not out of `Dialog::action_rect`,
         // because asking the widget where it draws a button and then pressing
         // there is asking it twice.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         let actions = painted_action_rects(&demo);
         assert_eq!(actions, vec![OK_BUTTON, CANCEL_BUTTON]);
         let middle = |rect: Rect| (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
@@ -12539,7 +16314,7 @@ mod tests {
         // **The control beside it: `Cancel` does not switch the theme.** Without
         // this, "a tap fires the button under it" is satisfied by a chain that
         // fires the first button whatever was pressed.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         let cancel = painted_action_rects(&demo)[1];
         let (x, y) = middle(cancel);
         let (down, up) = click_at(x, y);
@@ -12555,7 +16330,7 @@ mod tests {
         // the panel and on nobody: a press there fires nothing and is not a
         // dismissal either. A test that pressed "near a button" would pass without
         // this and prove nothing about the button.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         let cancel = painted_action_rects(&demo)[1];
         let (down, up) = click_at(cancel.x - 1.0, cancel.y + cancel.height / 2.0);
         demo.handle_event(down);
@@ -12580,7 +16355,7 @@ mod tests {
         // not on the panel. A press on the slider or the toggle would have been
         // swallowed by the panel — the panel covers the middle of the gallery,
         // which the operator accepted — and would have proved less.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         let field = demo.text_input_rect().expect("the field is placed");
         assert!(
             field.y > PANEL.y + PANEL.height,
@@ -12610,8 +16385,10 @@ mod tests {
              have moved"
         );
 
-        // **The control: the identical press with the dialog closed.**
-        let mut demo = dialog_closed();
+        // **The control: the identical press with the dialog closed, on the input
+        // page** — the field is page content there and not on the overlays page, so
+        // the control half has to be where the field is drawn.
+        let mut demo = dialog_closed_on(Page::Input);
         let field = demo.text_input_rect().expect("the field is placed");
         let (x, y) = (field.x + field.width / 2.0, field.y + field.height / 2.0);
         let (down, up) = click_at(x, y);
@@ -12632,7 +16409,7 @@ mod tests {
         // keyboard is the one control in the window whose tap is *reported* rather
         // than applied, so a press behind the scrim that still inserted a
         // character would be a hole the field's focus assertion could not see.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         let (x, y) = key_center(&demo, KeyAction::Char('a'));
         let (down, up) = click_at(x, y);
         demo.handle_event(down);
@@ -12650,9 +16427,17 @@ mod tests {
              modal branch returns rather than falling through to the chain that \
              drains it"
         );
+        assert!(
+            !demo.dialog.visible.get(),
+            "and the press reached the scrim rather than the floor, which is what \
+             makes the two assertions above about the modal: the keyboard is on \
+             `input`, so on its own they would also hold for a page that is not \
+             showing it"
+        );
 
-        // The control: the same press with the dialog closed does insert.
-        let mut demo = dialog_closed();
+        // The control: the same press with the dialog closed does insert, **on the
+        // page the keyboard is drawn on**.
+        let mut demo = dialog_closed_on(Page::Input);
         let (x, y) = key_center(&demo, KeyAction::Char('a'));
         let (down, up) = click_at(x, y);
         demo.handle_event(down);
@@ -12672,7 +16457,7 @@ mod tests {
         // from the node under the pointer to the root and knows nothing about a
         // modal, so a caller that offers to the chain it returns has offered to
         // the gallery.
-        let demo = shown_dialog();
+        let demo = shown_dialog_on(Page::Overlays);
         let mut in_dialog = vec![demo.dialog.handle()];
         in_dialog.extend(demo.dialog.actions.iter().map(|action| action.handle()));
 
@@ -12725,9 +16510,27 @@ mod tests {
         // of it — a property of the demo's own tree that predates this change and
         // is the reason [`Demo::pad_at`] exists at all. Two positions the module
         // cannot reach are not two positions a caller may offer to.
-        let closed = dialog_closed();
-        for (what, handle, rect) in &positions {
+        //
+        // **And each one on its own page**, which is the pages' doing: `input::route`
+        // honours `LayoutState::set_visible`, so a demo whose page does not show a
+        // control cannot route to it — and a control half that quietly stopped
+        // reaching its control would make the first half's claim true for the wrong
+        // reason. The nine pages are `pads`, `text`, `data`, `controls`, `data`,
+        // `controls`, `data`, `input`, `input`, read beside the names above.
+        let pages = [
+            Page::Pads,
+            Page::Text,
+            Page::Data,
+            Page::Controls,
+            Page::Controls,
+            Page::Data,
+            Page::Data,
+            Page::Input,
+            Page::Input,
+        ];
+        for ((what, handle, rect), page) in positions.iter().zip(pages) {
             if !matches!(*what, "the first pad" | "a text panel label") {
+                let closed = dialog_closed_on(page);
                 let (x, y) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
                 let event = InputEvent::new(InputEventKind::Tap, Some(Offset::new(x, y)));
                 let chain = {
@@ -12736,9 +16539,9 @@ mod tests {
                 };
                 assert!(
                     chain.contains(handle),
-                    "{what}: `input::route` reaches it at ({x}, {y}) when nothing is \
-                     in the way, so the assertion above is about the modal and not \
-                     about a control the module cannot see"
+                    "{what}: on its own page ({page:?}) `input::route` reaches it at \
+                     ({x}, {y}) when nothing is in the way, so the assertion above is \
+                     about the modal and not about a control the module cannot see"
                 );
             }
         }
@@ -12751,7 +16554,7 @@ mod tests {
         // is the one a reader presses: a `Button` declines `Escape`, so this only
         // works because the demo offers the key to the *dialog* before it offers
         // it to the focused button.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         demo.handle_event(key_event(Keycode::Escape));
         assert!(
             !demo.dialog.visible.get(),
@@ -12761,14 +16564,14 @@ mod tests {
 
         // **The control beside it**: the same key with the dialog closed reaches
         // nothing and changes nothing, so the assertion above is about the dialog.
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Overlays);
         demo.handle_event(key_event(Keycode::Escape));
         assert!(!demo.dialog.visible.get(), "still closed");
         assert!(demo.dark, "and the theme did not switch");
 
         // And a dialog is not left open by a key it does not answer: `Tab` is
         // declined by `Dialog::on_event` and then becomes the navigation key's.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         demo.handle_event(key_event(Keycode::Escape));
         for _ in 0..3 {
             demo.frame(WINDOW, Duration::from_millis(300));
@@ -12794,7 +16597,7 @@ mod tests {
     /// dialog's `duration` or `easing`, or the easing's own curve.
     #[test]
     fn the_focus_ring_fades_out_with_the_panel_instead_of_popping() {
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
 
         assert_eq!(
             dialog_shape_alphas(&demo, PANEL_RADIUS),
@@ -12863,7 +16666,7 @@ mod tests {
 
     #[test]
     fn the_dialog_key_opens_a_closed_dialog() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Overlays);
         assert!(!demo.dialog.is_drawn(), "it starts closed");
 
         demo.handle_event(key_event(DIALOG_KEY));
@@ -12897,7 +16700,7 @@ mod tests {
         // claims and the second is the one that catches a key wired to `present`
         // only — which would open the dialog, close nothing, and leave a `D` that
         // appeared to do nothing on the second press.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         assert!(demo.dialog.visible.get(), "it starts open");
 
         demo.handle_event(key_event(DIALOG_KEY));
@@ -12935,7 +16738,7 @@ mod tests {
         // commands**, and through the demo's own frame loop rather than by asking
         // the widget: a test that called `Dialog::paint` would not know whether
         // the demo ever asked it.
-        let demo = shown_dialog();
+        let demo = shown_dialog_on(Page::Overlays);
         assert_eq!(
             dialog_run_weights(&demo),
             vec![
@@ -12957,7 +16760,7 @@ mod tests {
         // **The theme switch keeps it bold**, because `set_palette` rewrites three
         // colours and a palette that reached the panel without reaching the weight
         // would be a themed dialog with a plain title.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         demo.handle_event(key_event(Keycode::T));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert_eq!(
@@ -12974,20 +16777,22 @@ mod tests {
         // is out of the order" is only a claim if the dialog's buttons are in it,
         // and "the buttons are in the order" is only a claim if the five are
         // reachable the moment the dialog closes.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         let actions: Vec<Handle> = demo.dialog.actions.iter().map(|a| a.handle()).collect();
         assert_eq!(actions.len(), 2, "`OK` and `Cancel`");
-        let background = [
-            demo.slider.node(),
-            demo.image.handle(),
-            demo.toggle.handle(),
-            demo.progress.handle(),
-            demo.text_input.handle(),
-        ];
 
         // A full lap in **both** directions, three times round, because a control
         // appended to the tree would be reached on the wrap — which is exactly where
         // a test that only checks the first two stops looking.
+        //
+        // **The "and never on one of the five behind the overlay" half is now the
+        // first half's `expect`**, and the reason is the pages rather than a
+        // shortening: the gallery's five focusables live on three pages and the
+        // dialog's on `overlays`, so a walk that leaked out of the modal would land
+        // on a node the walk cannot even see — `assert!(actions.contains(&landed))`
+        // would fail, which is the claim. The old form, a list of five handles
+        // checked against, had nothing left to check once the walk could not
+        // produce them.
         for lap in 0..3 {
             for (key, name) in [
                 (key_event(Keycode::Tab), "Tab"),
@@ -13002,10 +16807,6 @@ mod tests {
                         actions.contains(&landed),
                         "lap {lap}: {name} stays inside the dialog, on {landed:?}"
                     );
-                    assert!(
-                        !background.contains(&landed),
-                        "lap {lap}: and never on one of the five behind the overlay"
-                    );
                 }
             }
         }
@@ -13015,7 +16816,7 @@ mod tests {
         // Without this, "focus is somewhere among the two" would be satisfied by a
         // set that also held the five and by a walk that visited them in the wrong
         // order.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         assert_eq!(
             demo.focused,
             Some(actions[0]),
@@ -13047,13 +16848,27 @@ mod tests {
             "while the other one does not"
         );
 
-        // **And the other half: closed, the five are back**, in their own order and
-        // wrapping — which `tab_walks_every_focusable_control_in_order_and_wraps`
-        // also checks, and is repeated here as the **control beside** the first
-        // half's claim rather than as a second opinion about that test.
-        let mut demo = dialog_closed();
-        let order = expected_focus_order(&demo);
-        assert_eq!(order.len(), 5, "the gallery's own five");
+        // **And the other half: closed, the page's own controls are back**, in their
+        // own order and wrapping — which `tab_walks_every_focusable_control_in_
+        // order_and_wraps` also checks, and is repeated here as the **control
+        // beside** the first half's claim rather than as a second opinion about
+        // that test.
+        //
+        // **On `controls`, and the page is the whole of the change.** The overlays
+        // page has no focusable control of its own — the dialog's two buttons are
+        // in the order only while it is showing, and the toast host answers no
+        // event — so "closed, the background controls are back" has nothing to come
+        // back to *there*. It is asked on the page that has three, which is what
+        // makes the first half a claim about modality rather than about an empty
+        // set.
+        let mut demo = dialog_closed_on(Page::Controls);
+        let order = expected_focus_order(&demo, Page::Controls);
+        assert_eq!(
+            order.len(),
+            Page::ALL.len() + 3,
+            "the six tab buttons and the controls page's own three — and **not** \
+             three, because the bar is on every page"
+        );
         for lap in 0..2 {
             for (index, (what, handle)) in order.iter().enumerate() {
                 demo.handle_event(key_event(Keycode::Tab));
@@ -13068,8 +16883,8 @@ mod tests {
         // **And the dialog's two buttons are out of it**, on a fresh demo and a full
         // lap plus one in **both** directions: a control appended to the tree would
         // be reached on the wrap, which is exactly where a test that only checks
-        // the first five stops looking.
-        let mut demo = dialog_closed();
+        // the first few stops looking.
+        let mut demo = dialog_closed_on(Page::Controls);
         let buttons: Vec<Handle> = demo.dialog.actions.iter().map(|a| a.handle()).collect();
         for (key, name) in [
             (key_event(Keycode::Tab), "Tab"),
@@ -13095,7 +16910,7 @@ mod tests {
         // `Escape` to the one action that holds focus, and `Button::on_event`
         // refuses an activation key unless **that** button is focused. `Tab` has
         // just moved focus to `Cancel`, so this must fire `Cancel` and not `OK`.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         demo.handle_event(key_event(Keycode::Tab));
         demo.frame(WINDOW, Duration::from_millis(16));
         assert!(
@@ -13142,7 +16957,7 @@ mod tests {
         }
         // And the line height really is one number for all three: 18 times the
         // stand-in's 1.2, which is what makes the fixture's panel 172.8 tall.
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Overlays);
         assert!(
             (demo.dialog_line_height() - 21.6).abs() < 0.01,
             "so the panel's height in `PANEL`'s doc is this arithmetic and not a \
@@ -13207,8 +17022,16 @@ mod tests {
     /// cards are painted at rest and still there. The dialog has to be closed for
     /// the *press* tests, because a modal swallows the tap before it can reach
     /// anything — which is the dialog's acceptance criterion, not a workaround.
-    fn gallery_with_toasts() -> Demo {
-        let demo = dialog_closed();
+    /// Returns a demo with the dialog closed and the toast host's launch cards
+    /// still up, on `page`.
+    ///
+    /// **No no-argument form, for the same reason [`shown_dialog_on`] has none**:
+    /// the toast host is page content on `overlays`, so every test that reads a
+    /// painted card names that page — the paint gate empties the cards of the five
+    /// pages that are not showing them, and a test that asked one where it is would
+    /// find nothing.
+    fn gallery_with_toasts_on(page: Page) -> Demo {
+        let demo = dialog_closed_on(page);
         assert!(
             demo.toasts.is_drawn(),
             "the toasts raised at launch are still up after the dialog's 900 ms"
@@ -13252,7 +17075,7 @@ mod tests {
     /// that put it there.
     #[test]
     fn the_demo_opens_with_two_toasts_stacked_and_the_newest_is_the_lowest() {
-        let demo = gallery_with_toasts();
+        let demo = gallery_with_toasts_on(Page::Overlays);
         assert_eq!(
             demo.toasts.len(),
             TOASTS_AT_LAUNCH,
@@ -13314,7 +17137,7 @@ mod tests {
     /// screen.
     #[test]
     fn every_toasts_commands_arrive_through_its_own_node() {
-        let demo = gallery_with_toasts();
+        let demo = gallery_with_toasts_on(Page::Overlays);
         let host = demo.toasts.handle();
         assert!(
             demo.order.contains(&host),
@@ -13348,7 +17171,7 @@ mod tests {
     /// fact that makes it true, and the gesture that shows it is true.
     #[test]
     fn a_tap_inside_a_drawn_toast_reaches_the_control_under_it() {
-        let demo = gallery_with_toasts();
+        let demo = gallery_with_toasts_on(Page::Overlays);
         let card = painted_toast_rect(&demo, 1).expect("the newest card, painted");
         close_rect("the newest card", Some(card), TOAST_CARD);
 
@@ -13403,36 +17226,1044 @@ mod tests {
                 && !chain.contains(&demo.toasts.handle()),
             "and nothing in the chain is a toast or its host: {chain:?}"
         );
+
+        // Half two: **the same gesture with a toast over it and with none**, and the
+        // claim is that the two chains are the same list. It used to be "the
+        // keyboard is in the chain", and it cannot be that any more: the toast host
+        // is page content on `overlays` and the keyboard is page content on
+        // `input`, so a card drawn over a key means a card on a page where the key
+        // is not shown — and `input::route` honours `LayoutState::set_visible`, so
+        // **there is no demo in which a toast covers a routed control at all.**
+        //
+        // **That is a real loss and it is the operator's to waive rather than the
+        // implementer's to paper over.** What this half still holds is the negative
+        // claim it was always half of: a toast node never enters the chain, and the
+        // chain with a card over it is the chain with none.
+        //
+        // **It is not "stronger than naming one node", and an earlier version of
+        // this comment said so.** Measured on `overlays` both lists are the
+        // always-painted containers — the controls layer and the root, which answer
+        // no event — so the equality compares two degenerate lists and would not
+        // change if `input::route` stopped reaching every page-content node. The
+        // positive half lives in
+        // `the_demo_never_offers_an_event_outside_the_dialog_while_it_is_showing`,
+        // which asserts `input::route` reaches each of nine controls **on that
+        // control's own page**; between the two, the claim "a toast blocks nothing"
+        // is covered and the claim "the route reaches the controls" is covered there
+        // and not here.
+        let bare = {
+            let mut bare = gallery_with_toasts_on(Page::Overlays);
+            for _ in 0..40 {
+                bare.frame(WINDOW, Duration::from_millis(200));
+            }
+            assert!(bare.toasts.is_empty(), "the toasts have gone by now");
+            bare
+        };
+        let bare_chain = {
+            let nodes = bare.nodes.borrow();
+            input::route(
+                &nodes,
+                bare.root,
+                &InputEvent::new(InputEventKind::Tap, Some(Offset::new(kx, ky))),
+            )
+        };
+        assert_eq!(
+            chain, bare_chain,
+            "the chain under the toast is the chain with no toast, so the card blocks \
+             nothing — and both are non-empty, or there would be nothing to compare"
+        );
         assert!(
-            chain.contains(&demo.keyboard.handle()),
-            "while the keyboard underneath it is in the chain: {chain:?}"
+            !bare_chain.is_empty(),
+            "and that chain is not empty: {bare_chain:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Task 24.1: `Page`, `--tab=`, and the three gates. Every acceptance
+    // criterion of `doc/ui/TASK_UI_PRIM_24.1.md` that a unit test can answer
+    // is answered here; the two that need a window are the frame rate and the
+    // capture, and both are in the handoff.
+    // ---------------------------------------------------------------------
+
+    /// Returns `words` as the argument list a process would hand the parser.
+    fn args(words: &[&str]) -> Vec<String> {
+        words.iter().map(|word| String::from(*word)).collect()
+    }
+
+    #[test]
+    fn a_page_is_reachable_by_its_own_name() {
+        assert_eq!(Page::ALL.len(), 6, "six pages, as requirement 1 names them");
+        for page in Page::ALL {
+            assert_eq!(
+                Page::from_name(page.name()),
+                Some(page),
+                "`{}` is the name `--tab=` accepts for it",
+                page.name()
+            );
+        }
+        assert_eq!(Page::from_name(""), None, "and an empty name is not one");
+        assert_eq!(Page::from_name("nope"), None, "nor is a name that is not");
+        assert_eq!(
+            Page::from_name("Data"),
+            None,
+            "and the names are case-sensitive: `--tab=PADS` and `--tab=pads` would \
+             be two spellings of one page, and every spelling is a second list of the \
+             six"
+        );
+    }
+
+    #[test]
+    fn the_tab_argument_opens_the_demo_on_each_of_the_six_pages() {
+        assert_eq!(
+            request_from(&args(&[])),
+            Request::Open(Page::DEFAULT),
+            "no argument is the default page, and `pads` is what requirement 3 names"
+        );
+        assert_eq!(Page::DEFAULT, Page::Pads, "which is `pads`");
+        for page in Page::ALL {
+            assert_eq!(
+                request_from(&args(&[&format!("--tab={}", page.name())])),
+                Request::Open(page),
+                "--tab={} opens that page",
+                page.name()
+            );
+            assert_eq!(
+                demo_on(page).page,
+                page,
+                "and the demo it builds is on it, before its first frame"
+            );
+        }
+        assert_eq!(
+            request_from(&args(&["--tab=text", "--tab=data"])),
+            Request::Open(Page::Data),
+            "and the last `--tab=` wins, so the answer is a function of the whole \
+             argument list rather than of an accident about which one was typed twice"
+        );
+    }
+
+    #[test]
+    fn an_unknown_page_name_is_refused_and_the_message_names_the_six() {
+        let request = request_from(&args(&["--tab=nope"]));
+        assert!(
+            matches!(&request, Request::UnknownPage(name) if name == "nope"),
+            "an unknown page is refused rather than ignored: {:?}",
+            request
+        );
+        let message = request.message().expect("a refusal carries its message");
+        for page in Page::ALL {
+            assert!(
+                message.contains(page.name()),
+                "the message names `{}`, so a reader who mistyped one learns the \
+                 spellings from the refusal rather than from the source: {message}",
+                page.name()
+            );
+        }
+
+        // An argument the demo does not take is refused the same way, and for the
+        // same reason — the parent task's *"a silently ignored argument is a test
+        // that passes against nothing"*.
+        let unknown = request_from(&args(&["--widget=pads"]));
+        assert!(
+            matches!(unknown, Request::UnknownArgument(_)),
+            "{unknown:?}"
+        );
+        let message = unknown.message().expect("a refusal carries its message");
+        for page in Page::ALL {
+            assert!(message.contains(page.name()), "{message}");
+        }
+        assert_eq!(
+            request_from(&args(&["--tab data"])),
+            Request::UnknownArgument(String::from("--tab data")),
+            "and the parser does not guess: one spelling, or a second list of them"
+        );
+    }
+
+    #[test]
+    fn the_help_text_names_the_six_pages_and_the_usage() {
+        assert_eq!(request_from(&args(&["--help"])), Request::Help, "`--help`");
+        assert_eq!(request_from(&args(&["-h"])), Request::Help, "and `-h`");
+        assert_eq!(
+            request_from(&args(&["--tab=data", "--help"])),
+            Request::Help,
+            "and `--help` wins over a `--tab=`, because a reader who asked how the \
+             program is run did not also ask it to run"
+        );
+        assert!(
+            usage().contains("--tab="),
+            "the usage says how the argument is spelled"
+        );
+        for page in Page::ALL {
+            assert!(
+                usage().contains(page.name()),
+                "and it names `{}`, which is the last place to leave the list out",
+                page.name()
+            );
+        }
+        assert!(
+            usage().contains(RUN_SECONDS_VAR) && usage().contains(ASSET_DIR_VAR),
+            "and it names the two environment variables, because they are the demo's \
+             other two settings and `--tab=` is not a replacement for them"
+        );
+    }
+
+    /// An argument that is not valid Unicode is refused, not a panic.
+    ///
+    /// **And the whole claim is testable without a process**, which is why
+    /// [`arguments_from`] is a function over an iterator rather than a statement in
+    /// `main`: the interesting half is the `args_os` to `String` step, and a test that
+    /// had to spawn `ui_demo` to reach it would be a test about the binary rather
+    /// than about the code. The bytes are built with `OsStringExt::from_vec`, which
+    /// is how a non-Unicode argument is made at all — there is no portable way to
+    /// write one, and `ui_demo` is a unix program.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_unicode_argument_is_refused_rather_than_panicking() {
+        use std::os::unix::ffi::OsStringExt;
+
+        // **The step itself, and this is what `std::env::args` would have panicked
+        // on.** `0xff 0xfe` is not valid UTF-8 in any position.
+        let untextable = std::ffi::OsString::from_vec(vec![0xff, 0xfe]);
+        assert_eq!(
+            arguments_from([untextable.clone()]),
+            vec![String::from(NOT_TEXT)],
+            "an argument that is not text becomes the marker rather than an error"
+        );
+        assert_eq!(
+            arguments_from([untextable.clone(), std::ffi::OsString::from("--help")]),
+            vec![String::from(NOT_TEXT), String::from("--help")],
+            "and the arguments beside it are untouched, so one bad byte does not lose \
+             the rest of the command line"
         );
 
-        // Half two: the gesture. **The press goes through the demo's own event
-        // path**, so this is `handle_event` and not a call to the keyboard.
-        let mut demo = demo;
+        // **And the refusal**, which is what `main` turns into exit 1.
+        let request = request_from(&arguments_from([untextable.clone()]));
+        assert_eq!(
+            request,
+            Request::UnknownArgument(String::from(NOT_TEXT)),
+            "the parser refuses it exactly as it refuses any argument it does not take"
+        );
+        let message = request.message().expect("a refusal carries its message");
+        assert!(
+            message.contains(NOT_TEXT),
+            "and the message says which argument: {message}"
+        );
+        for page in Page::ALL {
+            assert!(message.contains(page.name()), "{message}");
+        }
+
+        // **And a non-text argument in a `--tab=`** — the case that exited 101 —
+        // is refused as an unknown *argument*, not as an unknown page, because the
+        // marker replaces the whole of it and `--tab=` went with the bytes. That is
+        // the shape the review asked for and it is the simpler one: the refusal says
+        // the argument is not one this demo takes and names the six pages, which is
+        // everything a reader who typed it can act on.
+        assert_eq!(
+            request_from(&arguments_from([std::ffi::OsString::from_vec(vec![
+                b'-', b'-', b't', b'a', b'b', b'=', 0xff
+            ])])),
+            Request::UnknownArgument(String::from(NOT_TEXT)),
+            "and the two refusals a non-text argument can produce are one, not two"
+        );
+    }
+
+    /// Returns the nodes that are on **every** page, in paint order.
+    ///
+    /// **Twelve: the five of 2026-10-04 and the tab bar's seven.** The fifth of the
+    /// five was the toast host, which is deliberately absent from
+    /// [`Demo::page_members`] — it records no commands of its own, and a row for it
+    /// would overwrite the `PaintState::new()` the walk gives it with a dirty empty
+    /// state on every frame — but it is still a node in `order` that no gate sees, so
+    /// it belongs in this list or the completeness assertion it serves compares
+    /// against a set with a hole in it. The other seven arrived with task 24.3 for
+    /// the same structural reason and no new one: a [`PageMember`] carries **one
+    /// page per row** and cannot express "all six", so the bar and its six buttons
+    /// are here and **not** in the table. Six rows for the bar would be six objects
+    /// that can disagree about the same node, which is the hazard the table exists
+    /// to prevent.
+    ///
+    /// **The order is paint order**, because that is what the assertion it serves
+    /// compares: `root, background, tab bar, its six buttons, …, controls layer, …
+    /// fps readout, …, toast host`. `paint_order` is a parent-first walk, the
+    /// gallery's root is the tree's root, and `Demo::new` attaches the bar **second**
+    /// — which is requirement 1's *"first child so it paints over the background"*
+    /// and is also why the six lead the `Tab` order, since `Focus::focus_order`
+    /// walks the same list forwards.
+    ///
+    /// **And the answer is written out rather than derived**, for the reason
+    /// [`expected_focus_order`] is: this is the *expected* answer to "what is not page
+    /// content", and the test it serves compares the table against it. Deriving it
+    /// from the table would make the assertion agree with whatever the table says,
+    /// which is the whole thing it exists to catch.
+    fn always_painted_handles(demo: &Demo) -> Vec<Handle> {
+        let mut handles = vec![demo.root, demo.background, demo.tab_bar().handle()];
+        handles.extend(demo.tab_focusables());
+        handles.extend([
+            demo.controls_layer().handle(),
+            demo.fps_readout.label.handle(),
+            demo.toasts.handle(),
+        ]);
+        handles
+    }
+
+    #[test]
+    fn every_page_lists_at_least_one_node_and_no_node_is_on_two_pages() {
+        let demo = demo();
+
+        // **The completeness half, and it is the one that matters.** Every node in
+        // `Demo::order` that is **not** a row of the table must be one of the
+        // **twelve** `always_painted_handles` names — twelve, not the five the list
+        // held before the tab bar, because the bar and its six buttons are always
+        // painted and are on no page's own. One `Vec` difference, and it kills
+        // *every* row-deletion mutation rather than one.
+        //
+        // **And it could not be done by `a_page_records_no_command_on_a_node_that_
+        // is_not_its_own`, which is why it lives here.** That test computes
+        // `let always = !demo.is_page_content(*handle);` and asserts `own || always`,
+        // so **a node missing from the table is trivially "always-painted"** and the
+        // assertion passes. It can see a node on the wrong page; it is structurally
+        // unable to see one that is not in the table at all — and a missing row leaks
+        // *two* ways, because the paint gate's post-pass only walks the table and
+        // the hit-test gate only writes `set_visible` for what the table names.
+        let unlisted: Vec<Handle> = demo
+            .order
+            .iter()
+            .copied()
+            .filter(|handle| !demo.page_members.iter().any(|m| m.handle == *handle))
+            .collect();
+        assert_eq!(
+            unlisted,
+            always_painted_handles(&demo),
+            "every node in the paint order that the table does not name is one of the \
+             twelve a node on every page belongs to — the root, the background, the \
+             tab bar and its six buttons, the controls layer, the frame-rate readout \
+             and the toast host. A node here that is not on that list is a node no \
+             gate can see: it is drawn on every page, `set_visible` is never written \
+             for it, and deleting one row of `Demo::new`'s table is all it takes"
+        );
+
+        for page in Page::ALL {
+            assert!(
+                demo.page_members.iter().any(|member| member.page == page),
+                "{page:?} lists at least one node, or it is a page that shows nothing"
+            );
+        }
+        let mut seen: Vec<Handle> = Vec::new();
+        // **This loop's second assertion is an invariant, and until the prune beside
+        // `Toasts::tick` in [`Demo::frame`] it was only true of a demo that had never
+        // raised a toast.** `raise_toast` appends a row as well as a node and nothing
+        // took the row back, so a live demo's table named handles the arena had
+        // already reclaimed, and `a_switch_refreshes_the_hit_test_gate` had to write
+        // `else { continue }` to cope — which it no longer does. **So if this fires on
+        // a row being absent from the paint order, the fix is to restore the prune,
+        // not to relax the assertion**: the premise is maintained, and
+        // `the_page_table_does_not_grow_as_toasts_come_and_go` is the test that says
+        // so.
+        for member in &demo.page_members {
+            assert!(
+                !seen.contains(&member.handle),
+                "{:?} is on two pages, so no gate could answer for it",
+                member.handle
+            );
+            assert!(
+                demo.order.contains(&member.handle),
+                "{:?} is in the paint order, or a gate over `order` cannot see it",
+                member.handle
+            );
+            seen.push(member.handle);
+        }
+        assert_eq!(
+            demo.page_members.iter().filter(|m| m.focusable).count(),
+            5,
+            "and five of them are `Tab` stops, which is the number the demo had as \
+             one walk before the pages split it three ways"
+        );
+    }
+
+    #[test]
+    fn a_page_records_no_command_on_a_node_that_is_not_its_own() {
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+            let painted: Vec<Handle> = demo
+                .order
+                .iter()
+                .copied()
+                .filter(|handle| !demo.commands_at(*handle).is_empty())
+                .collect();
+            assert!(
+                !painted.is_empty(),
+                "{page:?} draws something, or the assertion below is vacuous"
+            );
+            for handle in &painted {
+                // **Asked of the table rather than of `on_show`**, because
+                // `on_show` is the predicate under test and reading the answer out
+                // of it would be this test agreeing with itself.
+                let own = demo
+                    .page_members
+                    .iter()
+                    .any(|member| member.handle == *handle && member.page == page);
+                let always = !demo.is_page_content(*handle);
+                assert!(
+                    own || always,
+                    "{page:?}: {handle:?} recorded a draw command and is neither one \
+                     of its own nodes nor on the always-painted set. Painted: \
+                     {painted:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn commands_at_is_empty_and_not_stale_for_a_node_on_another_page() {
+        let mut demo = laid_out_on(Page::Data);
+        let gauge = demo.gauge.handle();
+        assert!(
+            !demo.commands_at(gauge).is_empty(),
+            "the gauge draws on the page that shows it"
+        );
+
+        demo.show_page(Page::Controls);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        // **Read three times, and what they are is a claim about the recorded
+        // vector.** The acceptance criterion asks for empty and not stale, and
+        // `commands_at` reads `PaintState::commands`, which is empty in **both**
+        // forms of the empty state — so this test asserts that the vector is empty
+        // and stays empty across frames, and it **cannot** tell a dirty empty state
+        // from a non-dirty one. Nor can anything else in this repository: there is
+        // no per-node command cache for a stale batch to live in, and the pixels
+        // come out the same either way. `Demo::empty_off_page_paint`'s doc has the
+        // whole of that, and the deliberate break that swaps the two forms survives
+        // for the same reason.
+        assert!(
+            demo.commands_at(gauge).is_empty(),
+            "an off-page node's recorded commands are empty"
+        );
+        assert!(
+            demo.commands_at(gauge).is_empty(),
+            "and still empty on a second read, so the first read did not consume \
+             them"
+        );
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.commands_at(gauge).is_empty(),
+            "and after another frame, so nothing put them back"
+        );
+
+        demo.show_page(Page::Data);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            !demo.commands_at(gauge).is_empty(),
+            "and the gauge comes back when its page does, so the gate is a gate and \
+             not a deletion"
+        );
+    }
+
+    #[test]
+    fn a_press_on_an_off_page_control_changes_nothing() {
+        // Five controls, five blocks, and each with its own control beside it: the
+        // assertion "the press did nothing" is satisfied by a broken control just
+        // as happily as by a hidden one, so every block says the same press works
+        // on the page the control is drawn on.
+        //
+        // **Every press goes through [`Demo::handle_event`]**, which is the point:
+        // three of the five reach the demo through `pad_at`, `slider_at` and
+        // `keyboard_at` without routing at all, and this is the path a real press
+        // takes.
+
+        // **The pad.** `pads` is the default page, so the hidden half is any other.
+        let mut demo = laid_out_on(Page::Text);
+        let pad = demo.node_rect(demo.pads[0].node).expect("a laid-out pad");
+        let (px, py) = (pad.x + pad.width / 2.0, pad.y + pad.height / 2.0);
+        demo.handle_event(mouse_down_at(px, py, 0));
+        demo.frame(WINDOW, Duration::from_millis(50));
+        assert_eq!(
+            demo.pads
+                .iter()
+                .map(|pad| pad.press.get())
+                .collect::<Vec<f32>>(),
+            vec![0.0, 0.0, 0.0],
+            "a press over a pad on another page presses nothing"
+        );
+        assert_eq!(demo.mouse_pressed, None, "and arms nothing for a release");
+        demo.handle_event(mouse_up_at(px, py, 40_000_000));
+
+        let mut own = laid_out();
+        let pad = own.node_rect(own.pads[0].node).expect("a laid-out pad");
+        own.handle_event(mouse_down_at(
+            pad.x + pad.width / 2.0,
+            pad.y + pad.height / 2.0,
+            0,
+        ));
+        own.frame(WINDOW, Duration::from_millis(50));
+        assert!(
+            own.pads[0].press.get() > 0.0,
+            "and on its own page the same press presses it"
+        );
+        own.handle_event(mouse_up_at(
+            pad.x + pad.width / 2.0,
+            pad.y + pad.height / 2.0,
+            40_000_000,
+        ));
+
+        // **The slider**, which is both a direct helper for the drag and a routed
+        // tap for the value.
+        let mut demo = dialog_closed_on(Page::Text);
+        let slider = demo.slider_rect().expect("a laid-out slider");
+        let (sx, sy) = (slider.x + 10.0, slider.y + slider.height / 2.0);
+        let before = demo.slider.widget.value.get();
+        demo.handle_event(mouse_down_at(sx, sy, 0));
+        assert!(!demo.slider_dragging, "no drag starts on another page");
+        demo.handle_event(mouse_up_at(sx, sy, 40_000_000));
+        assert_eq!(
+            demo.slider.widget.value.get(),
+            before,
+            "and the release does not jump the value there either"
+        );
+
+        let mut own = dialog_closed_on(Page::Controls);
+        let slider = own.slider_rect().expect("a laid-out slider");
+        own.handle_event(mouse_down_at(
+            slider.x + 10.0,
+            slider.y + slider.height / 2.0,
+            0,
+        ));
+        assert!(
+            own.slider_dragging,
+            "and on its own page the drag does start"
+        );
+        own.handle_event(mouse_up_at(
+            slider.x + 10.0,
+            slider.y + slider.height / 2.0,
+            40_000_000,
+        ));
+
+        // **The toggle**, which is routed and nothing else.
+        let mut demo = dialog_closed_on(Page::Text);
+        let (tx, ty) = demo.toggle_rect().map_or((0.0, 0.0), |rect| {
+            (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0)
+        });
+        let (down, up) = click_at(tx, ty);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        assert!(
+            !demo.toggle.checked.get(),
+            "a tap on a toggle on another page switches nothing"
+        );
+
+        let mut own = dialog_closed_on(Page::Controls);
+        let (tx, ty) = own.toggle_rect().map_or((0.0, 0.0), |rect| {
+            (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0)
+        });
+        let (down, up) = click_at(tx, ty);
+        own.handle_event(down);
+        own.handle_event(up);
+        assert!(
+            own.toggle.checked.get(),
+            "and on its own page the same tap switches it"
+        );
+
+        // **The field**, which is routed and is the control whose focus is the
+        // visible consequence.
+        let mut demo = dialog_closed_on(Page::Text);
+        let field = demo.text_input_rect().expect("the field is placed");
+        let (fx, fy) = (field.x + field.width / 2.0, field.y + field.height / 2.0);
+        let (down, up) = click_at(fx, fy);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        assert!(
+            !demo.text_input.focused.get(),
+            "a tap on a field on another page focuses nothing"
+        );
+        assert!(
+            demo.focused.is_none(),
+            "and leaves no focus record, which is what `set_focus` writes for the \
+             three that have a `focused` property"
+        );
+
+        let mut own = dialog_closed_on(Page::Input);
+        let field = own.text_input_rect().expect("the field is placed");
+        let (fx, fy) = (field.x + field.width / 2.0, field.y + field.height / 2.0);
+        let (down, up) = click_at(fx, fy);
+        own.handle_event(down);
+        own.handle_event(up);
+        assert!(
+            own.text_input.focused.get(),
+            "and on its own page the same tap focuses it"
+        );
+
+        // **A key**, which is the third of the three helpers that bypass the router
+        // and the largest thing a finger can land on.
+        let mut demo = dialog_closed_on(Page::Text);
+        let (kx, ky) = key_center(&demo, KeyAction::Char('a'));
         demo.handle_event(mouse_down_at(kx, ky, 0));
         assert!(
-            demo.keyboard.is_key_grabbed(),
-            "so a press under a toast lights the key that is under it, which is \
-             the whole of \"does not block input\""
+            !demo.keyboard.is_key_grabbed(),
+            "a press on a key on another page lights nothing"
         );
         demo.handle_event(mouse_up_at(kx, ky, 40_000_000));
 
-        // And the control: **the same press with no toast anywhere**, so the half
-        // above cannot be satisfied by a keyboard that lights under anything.
-        let mut bare = dialog_closed();
-        for _ in 0..40 {
-            bare.frame(WINDOW, Duration::from_millis(200));
-        }
-        assert!(bare.toasts.is_empty(), "the toasts have gone by now");
-        bare.handle_event(mouse_down_at(kx, ky, 0));
+        let mut own = dialog_closed_on(Page::Input);
+        let (kx, ky) = key_center(&own, KeyAction::Char('a'));
+        own.handle_event(mouse_down_at(kx, ky, 0));
         assert!(
-            bare.keyboard.is_key_grabbed(),
-            "and the key lights with no toast over it as well, so the assertion \
-             above is about the toast and not about the keyboard"
+            own.keyboard.is_key_grabbed(),
+            "and on its own page the same press lights it"
         );
-        bare.handle_event(mouse_up_at(kx, ky, 40_000_000));
+        own.handle_event(mouse_up_at(kx, ky, 40_000_000));
+    }
+
+    #[test]
+    fn a_switch_retires_the_focus_the_page_left_was_holding() {
+        let mut demo = dialog_closed_on(Page::Controls);
+        for _ in 0..tabs_onto(Page::Controls, 0) {
+            demo.handle_event(key_event(Keycode::Tab));
+        }
+        let slider = demo.slider.node();
+        assert_eq!(demo.focused, Some(slider), "the slider holds focus");
+        assert!(
+            demo.slider.widget.focused.get(),
+            "and its ring is drawn, which is what the record is for"
+        );
+
+        demo.show_page(Page::Data);
+        assert_eq!(
+            demo.focused, None,
+            "a switch retires the record: a control on the page just left must not \
+             keep its focus ring"
+        );
+        assert!(
+            !demo.slider.widget.focused.get(),
+            "and the ring is out, which is `set_focus(None)`'s other half"
+        );
+        assert!(!demo.toggle.focused.get(), "and so is the toggle's");
+        assert!(
+            !demo.progress_focused.get(),
+            "and the bar's readout says nothing"
+        );
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            !demo.slider.widget.focused.get(),
+            "and a frame does not put it back, which is what would happen if the \
+             retirement were written on the widget rather than on the record"
+        );
+
+        // And the way back: nothing is focused on arrival, and the page's own
+        // controls are reachable from there — **behind the six tab buttons**, which
+        // is the whole of the change to this test: the walk to the slider was one
+        // `Tab` before task 24.3 and is seven now.
+        demo.show_page(Page::Controls);
+        assert_eq!(demo.focused, None, "a switch to a page focuses nothing");
+        for _ in 0..tabs_onto(Page::Controls, 0) {
+            demo.handle_event(key_event(Keycode::Tab));
+        }
+        assert_eq!(
+            demo.focused,
+            Some(slider),
+            "and Tab reaches the slider again from the top of its own page"
+        );
+    }
+
+    #[test]
+    fn every_shortcut_works_from_every_page_and_lands_on_its_own() {
+        for page in Page::ALL {
+            for (what, keycode, target, _) in GALLERY_SHORTCUTS {
+                // **The primed fixture, not a plain one**, for the reason
+                // `shortcut_fixture`'s own doc gives: the demo *starts* at the
+                // slider's minimum, so `0` would be a no-op from the launch state
+                // and a shortcut that cannot move what it names proves nothing.
+                let mut demo = shortcut_fixture_on(page, false);
+                let before = gallery_state(&demo);
+                demo.handle_event(key_event(keycode));
+                settle(&mut demo);
+                assert_ne!(
+                    gallery_state(&demo),
+                    before,
+                    "{what} acts from {page:?}, and lands on {target:?} or stays put"
+                );
+                match target {
+                    Some(target) => assert_eq!(
+                        demo.page, target,
+                        "{what} lands on the page its widget is on, from {page:?}"
+                    ),
+                    None => assert_eq!(
+                        demo.page, page,
+                        "{what} has no widget of its own, so it leaves the page alone"
+                    ),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_shortcut_with_no_widget_of_its_own_stays_on_the_page_it_was_pressed_from() {
+        let stay: Vec<&str> = GALLERY_SHORTCUTS
+            .iter()
+            .filter(|(_, _, page, _)| page.is_none())
+            .map(|(what, ..)| *what)
+            .collect();
+        assert_eq!(
+            stay,
+            vec!["T, which switches the theme"],
+            "and there is exactly one of them: the theme reaches every colour in the \
+             demo through the property graph, so it has no widget and therefore no \
+             page — which is why the parent task declines to make it one"
+        );
+        for page in Page::ALL {
+            let mut demo = dialog_closed_on(page);
+            demo.handle_event(key_event(Keycode::T));
+            settle(&mut demo);
+            assert_eq!(
+                demo.page, page,
+                "and the theme switch stays on the page it was pressed from"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_keys_above_the_guard_activate_the_page_that_shows_what_they_raise() {
+        // **`K`, and this is the requirement-6 consequence the table cannot carry.**
+        // The toast host is page content on `overlays`, so a card raised on another
+        // page is a card the paint gate empties: a notification with no route to the
+        // screen. `K` is not a row of `GALLERY_SHORTCUTS` and `TOAST_KEY`'s own doc
+        // says it never will be, so it activates its page here.
+        let mut demo = dialog_closed_on(Page::Controls);
+        let before = demo.toasts.len();
+        demo.handle_event(key_event(TOAST_KEY));
+        assert_eq!(
+            demo.page,
+            Page::Overlays,
+            "a notification arrives on the page that shows the toast host"
+        );
+        assert_eq!(demo.toasts.len(), before + 1, "and one was raised");
+        settle(&mut demo);
+        assert!(
+            painted_toast_rect(&demo, demo.toasts.len() - 1).is_some(),
+            "and it is **painted**, which is the whole of the requirement: a card \
+             that exists and draws nothing is not a notification"
+        );
+
+        // **`D`, for the same reason about the same kind of thing.** A modal dialog
+        // on a page that does not show it is a window where every tap and every key
+        // is swallowed by a scrim nobody can see.
+        let mut demo = dialog_closed_on(Page::Controls);
+        demo.handle_event(key_event(DIALOG_KEY));
+        assert_eq!(
+            demo.page,
+            Page::Overlays,
+            "and the panel arrives on the page that shows it"
+        );
+        assert!(demo.dialog.visible.get(), "and shows it");
+        settle(&mut demo);
+        assert!(
+            !demo.commands_at(demo.dialog.handle()).is_empty(),
+            "and the frame loop paints it"
+        );
+    }
+
+    #[test]
+    fn the_dialog_is_presented_on_launch_only_on_the_page_that_shows_it() {
+        assert!(
+            demo_on(Page::Overlays).dialog.visible.get(),
+            "the overlays page opens with the dialog up, which is what the module \
+             doc's \"opens showing rather than waiting to be opened\" is for — a \
+             capture of that page needs no seed and no instrument"
+        );
+        for page in [
+            Page::Pads,
+            Page::Text,
+            Page::Input,
+            Page::Controls,
+            Page::Data,
+        ] {
+            let mut demo = demo_on(page);
+            assert!(
+                !demo.dialog.visible.get(),
+                "{page:?} opens with no modal, or every tap and every key is \
+                 swallowed by a scrim nobody can see"
+            );
+            assert_eq!(
+                demo.focused, None,
+                "and with no focus record inside a dialog that is not there"
+            );
+
+            // **A frame first, and that is the whole of what these two assertions
+            // are.** `commands_at` reads what the last frame recorded, so on a demo
+            // that has never run one it answers `None` for *every* node and the
+            // assertion would be satisfied by the absence of a paint pass. It is the
+            // gate under test, so it has to come after a frame.
+            demo.frame(WINDOW, Duration::from_millis(16));
+            assert!(
+                demo.commands_at(demo.dialog.handle()).is_empty(),
+                "and after a frame the panel has drawn nothing"
+            );
+            // **The toast cards, and these are the assertion that is about the
+            // gate.** The panel above is not presented on this page, so `Dialog::
+            // paint` records nothing on its own account and the page gate is not
+            // what empties it — two reasons, and the test only needs one. The two
+            // cards raised at construction *are* up, `Toasts::paint_toast` would
+            // record for them on any page, and the page gate is the only thing
+            // between them and the screen.
+            assert_eq!(demo.toasts.len(), TOASTS_AT_LAUNCH, "and both cards are up");
+            for index in 0..TOASTS_AT_LAUNCH {
+                let handle = demo.toasts.toast_handle(index).expect("a launch card");
+                assert!(
+                    demo.commands_at(handle).is_empty(),
+                    "{page:?}: card {index} is up and drew nothing, which is the \
+                     paint gate rather than the widget declining to paint it"
+                );
+            }
+            assert!(
+                !demo.commands_at(demo.fps_readout.label.handle()).is_empty(),
+                "while the always-painted set drew on that same frame, so the two \
+                 assertions above are about the gate and not about an empty frame"
+            );
+            demo.handle_event(key_event(DIALOG_KEY));
+            settle(&mut demo);
+            assert!(
+                demo.dialog.visible.get(),
+                "{page:?}: `D` brings it up wherever the run started"
+            );
+            assert_eq!(demo.page, Page::Overlays, "and brings its page with it");
+        }
+    }
+
+    #[test]
+    fn the_frame_rate_readout_and_the_background_are_painted_on_every_page() {
+        // Requirement 8, and the operator's 2026-10-02 instruction it is written
+        // for: *"Keep fps label"*. Both of these nodes are in no page's list, which
+        // is what "always painted" means — see [`Demo::on_show`].
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+            assert!(
+                !demo.commands_at(demo.fps_readout.label.handle()).is_empty(),
+                "{page:?}: the frame-rate readout is on every page"
+            );
+            assert!(
+                !demo.commands_at(demo.background).is_empty(),
+                "{page:?}: and so is the window's background"
+            );
+        }
+    }
+
+    #[test]
+    fn every_page_places_every_rect_where_the_gallery_placed_it() {
+        // **The criterion this whole sub-task is measured against**, and the reason
+        // 24.2 could be split off: a page decides *which* rectangles are drawn, not
+        // where any of them is. `placed_rects` is the set a reader can see, so
+        // comparing it across all six pages is the comparison the acceptance
+        // criterion asks for.
+        let gallery = laid_out().placed_rects();
+        assert!(!gallery.is_empty(), "the gallery places rects");
+        for page in Page::ALL {
+            assert_eq!(
+                laid_out_on(page).placed_rects(),
+                gallery,
+                "{page:?} places every rect where the gallery placed it"
+            );
+        }
+        // And the window itself, which is the one number the parent's first measured
+        // fact is about: it cannot grow on this host, and a page is not a licence to
+        // ask it to.
+        assert_eq!(
+            (WINDOW.width, WINDOW.height),
+            (1280.0, 1020.0),
+            "and the window is still the window the gallery was laid out for"
+        );
+    }
+
+    /// A switch refreshes the hit-test gate, and the refreshed flag is what a
+    /// routed tap on the page just arrived at meets.
+    ///
+    /// **Every switch here goes through a key press, never through a fixture**, and
+    /// that is the whole point of the test. Every fixture needing a page's controls
+    /// visible — `demo_on`, `laid_out_on`, `dialog_closed_on`,
+    /// `gallery_with_toasts_on`, `shortcut_fixture_on` — reaches the gate through
+    /// `Demo::new`'s own `sync_page_visibility()`, which is a **different call site**
+    /// from `Demo::show_page`'s. A test built out of fixtures would hold down the
+    /// constructor and leave the switch untested, which is exactly the hole
+    /// `.ai/NEVERAGAIN.md` § *A paint order computed once does not contain a node
+    /// created later* found in `raise_toast`: one gate, two call sites, and only one
+    /// of them under test. Each case below therefore builds a fixture **on one page**
+    /// and switches to **another** with a real key.
+    ///
+    /// **Two observables, and they are two different questions.** `set_visible` is
+    /// the gate's own write and is assertable for *every* node, including the pads
+    /// and the text labels that `input::route` cannot reach at all. The routed tap is
+    /// the consequence a finger would meet and is assertable only for the controls
+    /// the router reaches. A test with one of them would be a weaker test and would
+    /// read as if it covered the other.
+    #[test]
+    fn a_switch_refreshes_the_hit_test_gate() {
+        // Five switches, and the pairs are chosen so that **no case's start page is
+        // its own**: a switch that did not move would otherwise pass the visibility
+        // half without exercising anything.
+        for (start, key, wanted) in [
+            (Page::Pads, Keycode::Comma, Page::Data),
+            (Page::Pads, Keycode::_0, Page::Controls),
+            (Page::Pads, Keycode::Plus, Page::Text),
+            (Page::Data, Keycode::Space, Page::Pads),
+            (Page::Controls, Keycode::F, Page::Data),
+        ] {
+            // The dialog is closed rather than shown, so the modal cannot be what
+            // stops a tap and the gate is the only candidate.
+            let mut demo = shortcut_fixture_on(start, false);
+            demo.handle_event(key_event(key));
+            settle(&mut demo);
+            assert_eq!(
+                demo.page, wanted,
+                "{key:?} from {start:?} lands on {wanted:?}, through `Demo::show_page`"
+            );
+
+            // **The gate's own write, over the whole table.**
+            {
+                let nodes = demo.nodes.borrow();
+                for member in &demo.page_members {
+                    // **No `else { continue }` here, and that is the point.** This
+                    // loop used to skip a row whose node the arena had taken back,
+                    // while `every_page_lists_at_least_one_node_and_no_node_is_on_two_
+                    // pages` asserted the opposite as an invariant: two consumers of
+                    // one table disagreeing about whether a dead row can exist, and
+                    // only the assertion's fixture kept it from being noticed. The
+                    // prune beside `Toasts::tick` in [`Demo::frame`] means a row
+                    // always has a node, so this fails loudly if that ever stops
+                    // being true instead of quietly skipping the row that says so.
+                    let Some(node) = nodes.get(member.handle) else {
+                        panic!(
+                            "{:?} is a row of the page table with no node behind it, so \
+                             the table is out of step with the arena — the prune beside \
+                             `Toasts::tick` in `Demo::frame` is what keeps that from \
+                             happening",
+                            member.handle
+                        );
+                    };
+                    assert_eq!(
+                        node.layout().visible(),
+                        member.page == wanted,
+                        "{key:?} from {start:?}: {:?} is on {:?}, so it is {}",
+                        member.handle,
+                        member.page,
+                        if member.page == wanted {
+                            "visible"
+                        } else {
+                            "hidden"
+                        }
+                    );
+                }
+            }
+
+            // **And the consequence, where the router reaches one.**
+            let Some((what, handle, rect)) = routed_probe(&demo, wanted) else {
+                continue;
+            };
+            let event = InputEvent::new(
+                InputEventKind::Tap,
+                Some(Offset::new(
+                    rect.x + rect.width / 2.0,
+                    rect.y + rect.height / 2.0,
+                )),
+            );
+            let chain = {
+                let nodes = demo.nodes.borrow();
+                input::route(&nodes, demo.root, &event)
+            };
+            assert!(
+                chain.contains(&handle),
+                "{key:?} from {start:?}: `input::route` reaches the {what} on the page \
+                 just arrived at, so a tap there is not swallowed by a stale flag — \
+                 {chain:?}"
+            );
+        }
+    }
+
+    /// Returns a control on `page` that `input::route` can reach, with its laid-out
+    /// rect, or `None` when the page has none the router can reach.
+    ///
+    /// **And `None` for `pads` and `text`, which is a property of the demo's own
+    /// tree rather than of the page model.** The controls layer is given the whole
+    /// window and is the deepest node under every point to the left of it, so a tap
+    /// over a pad or a text label routes to the layer rather than to the node — the
+    /// fact `Demo::pad_at` exists because of, and the reason the modal test names
+    /// nine positions and skips two. Those two pages are covered by the visibility
+    /// half of `a_switch_refreshes_the_hit_test_gate`, which asserts the flag for
+    /// **every** row of the table rather than for a router's answer.
+    fn routed_probe(demo: &Demo, page: Page) -> Option<(&'static str, Handle, Rect)> {
+        match page {
+            Page::Controls => Some(("slider", demo.slider.node(), demo.slider_rect()?)),
+            Page::Data => Some((
+                "gauge",
+                demo.gauge.handle(),
+                demo.node_rect(demo.gauge.handle())?,
+            )),
+            _ => None,
+        }
+    }
+
+    /// The page table's row for a toast raised after `Demo::new`, and what it is
+    /// for.
+    ///
+    /// **A card the table does not name is not page content, and page content is
+    /// what the paint gate empties.** `Demo::raise_toast` therefore appends a row
+    /// beside the node it appends to `order`, and without it a card raised by `K`
+    /// would be painted on **every** page — the notification would follow you off
+    /// `overlays` and onto `pads`. This is `.ai/NEVERAGAIN.md` § *A paint order
+    /// computed once does not contain a node created later*, which shipped once here
+    /// in task 23 and which the widget's own tests cannot catch: they ask the widget
+    /// what it records, and the defect is that the frame loop never asks the widget.
+    #[test]
+    fn a_toast_raised_after_construction_is_page_content_like_any_other() {
+        let mut demo = dialog_closed_on(Page::Controls);
+        assert_eq!(
+            demo.toasts.len(),
+            TOASTS_AT_LAUNCH,
+            "the two launch cards are up"
+        );
+
+        // **`K` first, from a page that is not `overlays`.** The key activates its
+        // own page (`the_two_keys_above_the_guard_activate_the_page_that_shows_
+        // what_they_raise`), so the card is on show and must be painted — the
+        // control half, without which the assertions below would hold for a card
+        // that draws nowhere.
+        demo.handle_event(key_event(TOAST_KEY));
+        assert_eq!(
+            demo.page,
+            Page::Overlays,
+            "`K` arrives on the overlays page"
+        );
+        settle(&mut demo);
+        let raised = demo.toasts.len() - 1;
+        let handle = demo.toasts.toast_handle(raised).expect("the third card");
+        assert!(
+            painted_toast_rect(&demo, raised).is_some(),
+            "and the card is painted where it stands, which is the control for the \
+             two assertions below"
+        );
+
+        // **Then leave the page**, and the gate has to reach a node that did not
+        // exist when the table was built.
+        demo.handle_event(key(Keycode::Comma));
+        assert_eq!(demo.page, Page::Data, "`,` is the gauge's page");
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.commands_at(handle).is_empty(),
+            "the raised card draws nothing on another page, which is the paint gate \
+             and not the widget declining to paint it — `Toasts::paint_toast` is \
+             asked for this node every frame and records for it"
+        );
+
+        // **And back.** A gate that emptied a node permanently would satisfy the
+        // assertion above and leave a page with a hole in it.
+        demo.handle_event(key_event(DIALOG_KEY));
+        demo.handle_event(key_event(TOAST_KEY));
+        assert_eq!(
+            demo.page,
+            Page::Overlays,
+            "`D` then `K` returns to overlays"
+        );
+        settle(&mut demo);
+        assert!(
+            painted_toast_rect(&demo, raised).is_some(),
+            "and the card is painted again, so the gate hid it rather than deleting \
+             it"
+        );
     }
 
     /// The toast key, above the modal guard, and why it has to be.
@@ -13441,14 +18272,14 @@ mod tests {
         assert!(
             !GALLERY_SHORTCUTS
                 .iter()
-                .any(|(_, key, _)| *key == TOAST_KEY),
+                .any(|(_, key, _, _)| *key == TOAST_KEY),
             "`K` is not a row of the gallery's table, for the reason \
              `GALLERY_SHORTCUTS`' doc gives: it is not the gallery's own action"
         );
 
         // **With the dialog showing**, which is the state the demo opens in and
         // the one the guard would otherwise swallow.
-        let mut demo = shown_dialog();
+        let mut demo = shown_dialog_on(Page::Overlays);
         let before = demo.toasts.len();
         demo.handle_event(key_event(TOAST_KEY));
         assert_eq!(
@@ -13464,7 +18295,7 @@ mod tests {
         );
 
         // And with it closed, which is the other direction of the same arm.
-        let mut demo = gallery_with_toasts();
+        let mut demo = gallery_with_toasts_on(Page::Overlays);
         let before = demo.toasts.len();
         demo.handle_event(key_event(TOAST_KEY));
         assert_eq!(demo.toasts.len(), before + 1);
@@ -13517,7 +18348,7 @@ mod tests {
     /// correctly and was never ticked would pass every test in `ui_core`.
     #[test]
     fn a_toast_leaves_the_demo_after_its_duration_and_the_frame_loop_takes_it() {
-        let mut demo = gallery_with_toasts();
+        let mut demo = gallery_with_toasts_on(Page::Overlays);
         assert_eq!(
             demo.toasts.len(),
             TOASTS_AT_LAUNCH,
@@ -13568,7 +18399,7 @@ mod tests {
     /// the prune did nothing the second reading would be four longer.
     #[test]
     fn the_paint_order_does_not_grow_as_toasts_come_and_go() {
-        let mut demo = gallery_with_toasts();
+        let mut demo = gallery_with_toasts_on(Page::Overlays);
         let opening = demo.order.len();
         assert!(
             !demo.toasts.is_empty(),
@@ -13621,6 +18452,139 @@ mod tests {
         assert_eq!(stale, 0, "so nothing in it points at a node that is gone");
     }
 
+    /// **The page table does not grow as toasts come and go either**, which is the
+    /// sibling of [`the_paint_order_does_not_grow_as_toasts_come_and_go`] and the
+    /// same prune.
+    ///
+    /// `raise_toast` appends a row as well as a node, and the rows were the half
+    /// that did not get pruned: the paint order was measured and the table was not,
+    /// so every toast the demo had ever raised left a row naming a node the arena
+    /// had taken back. **It is not a leak of memory** — a stale handle resolves to
+    /// nothing, and no gate writes through it — it is a table that has quietly
+    /// stopped describing the demo. Two of its consumers disagreed about whether
+    /// that could happen: [`every_page_lists_at_least_one_node_and_no_node_is_on_two_
+    /// pages`] asserts every row's handle is in the paint order as an **invariant**,
+    /// and `a_switch_refreshes_the_hit_test_gate` wrote `else { continue }` and so
+    /// **tolerated** a row that is not. The prune makes the first one's premise true
+    /// rather than true only of a fixture that has never raised a toast.
+    ///
+    /// **The second half is the one that matters, because a prune can be wrong in
+    /// both directions.** The first toast is raised 3 s before the second, so there
+    /// is a moment where one has run its countdown and the other has not: the first
+    /// row must be gone and the second row must still be there. A prune that dropped
+    /// rows for any reason other than the arena taking the node back would pass the
+    /// counting half of this and fail here.
+    #[test]
+    fn the_page_table_does_not_grow_as_toasts_come_and_go() {
+        let mut demo = gallery_with_toasts_on(Page::Overlays);
+        let opening = demo.page_members.len();
+
+        // **One toast on its own**, so that its row can be named and watched rather
+        // than counted. `raise_toast` reads the index before the show, because the
+        // host appends, so the card just raised is the last one.
+        demo.handle_event(key_event(TOAST_KEY));
+        let first = demo
+            .toasts
+            .toast_handle(demo.toasts.len() - 1)
+            .expect("the card just raised has a node");
+        assert!(
+            demo.page_members.iter().any(|m| m.handle == first),
+            "raising a toast adds a row: {:?} is in {opening} -> {}",
+            first,
+            demo.page_members.len()
+        );
+
+        // **Half a toast's life, then a second one**, so the two run out about 3 s
+        // apart and there is a moment where one is gone and the other is not. The
+        // two launch toasts run out during the first half, which is why the count
+        // below is 1 and not 2.
+        for _ in 0..15 {
+            demo.frame(WINDOW, Duration::from_millis(200));
+        }
+        demo.handle_event(key_event(TOAST_KEY));
+        let second = demo
+            .toasts
+            .toast_handle(demo.toasts.len() - 1)
+            .expect("the second card has a node too");
+        //
+        // **One frame at a time through the window where the first toast dies**,
+        // rather than a fixed batch. A prune placed *before* `Toasts::tick` would
+        // leave that toast's row behind for the frame in which it died, and a batch
+        // of frames would step over the evidence: the next frame's prune would put
+        // it right and the assertion below would never see the lag. The loop stops
+        // on the frame the count drops, so the two row assertions below are reading
+        // the state **that frame** left behind.
+        let mut frames = 0;
+        while demo.toasts.len() > 1 {
+            demo.frame(WINDOW, Duration::from_millis(200));
+            frames += 1;
+            assert!(
+                frames < 40,
+                "and it did drop within 8 s of the second toast"
+            );
+        }
+        assert_eq!(
+            demo.toasts.len(),
+            1,
+            "past the first toast's arrival, its {} ms and its departure, and short \
+             of the second's — so there is one live toast and one dead one, which is \
+             the state the two row assertions below need",
+            TOAST_DURATION.as_millis(),
+        );
+        assert!(
+            !demo.page_members.iter().any(|m| m.handle == first),
+            "the dead toast's row is gone: {:?} is not in {}",
+            first,
+            demo.page_members.len()
+        );
+        assert!(
+            demo.page_members.iter().any(|m| m.handle == second),
+            "and the live toast's row is still there ({:?}), because the prune drops \
+             what the arena has taken back and nothing else",
+            second
+        );
+
+        // Past the second one, so every toast this test raised is gone.
+        for _ in 0..15 {
+            demo.frame(WINDOW, Duration::from_millis(200));
+        }
+        assert!(
+            demo.toasts.is_empty(),
+            "and now it has run its countdown too: {} are left",
+            demo.toasts.len()
+        );
+        assert_eq!(
+            demo.page_members.len(),
+            opening - TOASTS_AT_LAUNCH,
+            "so the table is back to its opening length less the two launch toasts' \
+             own rows — the same subtraction the paint order makes, because the prune \
+             drops every row whose node the arena has taken back rather than only the \
+             rows just raised. Without it the length would be {}, not {}",
+            opening + 2,
+            opening - TOASTS_AT_LAUNCH,
+        );
+
+        // **And the invariant the completeness assertion assumes, on a demo that has
+        // run a countdown** — which is the premise that was false until the prune.
+        for member in &demo.page_members {
+            assert!(
+                demo.order.contains(&member.handle),
+                "{:?} is in the paint order, or a gate over `order` cannot see it",
+                member.handle
+            );
+        }
+        let stale_rows = demo
+            .page_members
+            .iter()
+            .filter(|member| demo.nodes.borrow().get(member.handle).is_none())
+            .count();
+        assert_eq!(
+            stale_rows, 0,
+            "and no row names a node that is gone, which is what the two consumers \
+             above were disagreeing about"
+        );
+    }
+
     /// A theme switch reaches the toasts already on screen.
     ///
     /// The demo opens with two toasts showing, so this is the switch that the
@@ -13629,7 +18593,7 @@ mod tests {
     /// floating in it.
     #[test]
     fn a_theme_switch_reaches_the_toasts_already_on_screen() {
-        let mut demo = gallery_with_toasts();
+        let mut demo = gallery_with_toasts_on(Page::Overlays);
         let before = painted_toast_fill(&demo, 0).expect("a painted card");
         // **The premultiplied literals, not the palette's own colours**: the dark
         // theme's Surface is `30 30 30`, and the widget multiplies every channel
@@ -13671,5 +18635,1449 @@ mod tests {
             "and so is the next one raised, from the host's palette rather than \
              from the cards already on screen"
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Task 24.3: the tab bar. Every acceptance criterion of
+    // `doc/ui/TASK_UI_PRIM_24.3.md` that a unit test can answer is answered
+    // here; the three that need a window are the two captures and the frame
+    // rate, and all three are in the hand-over.
+    // ---------------------------------------------------------------------
+
+    /// Returns the centre of the bar's button for `page`, as window coordinates.
+    ///
+    /// **Read off the node's own laid-out rect**, and that is the whole of the
+    /// rule: a test that asked `Demo::tab_at` where the buttons are and then
+    /// pressed there would be asking the demo twice and checking that the two
+    /// agree with each other. The press has to land in the box the button is
+    /// *drawn* in, which is the box `input::route` hit-tests against and the box
+    /// this reads.
+    fn tab_center(demo: &Demo, page: Page) -> (f32, f32) {
+        let rect = demo
+            .node_rect(tab_handle(demo, page))
+            .unwrap_or_else(|| panic!("the {page:?} tab button is laid out"));
+        (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0)
+    }
+
+    /// Returns the background a container recorded for its own box.
+    fn painted_container_fill(demo: &Demo, handle: Handle) -> Option<Color> {
+        demo.commands_at(handle)
+            .into_iter()
+            .find_map(|command| match command {
+                DrawCommand::RoundedRect { color, .. } => Some(color),
+                _ => None,
+            })
+    }
+
+    /// Returns the background and the label of one tab button, as the last frame
+    /// recorded them.
+    fn painted_tab(demo: &Demo, page: Page) -> (Option<Color>, Option<String>) {
+        let commands = demo.commands_at(tab_handle(demo, page));
+        let fill = commands.iter().find_map(|command| match command {
+            DrawCommand::RoundedRect { color, .. } => Some(*color),
+            _ => None,
+        });
+        let label = commands.iter().find_map(|command| match command {
+            DrawCommand::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        (fill, label)
+    }
+
+    /// Returns the rounded rectangles a tab button recorded, in order.
+    ///
+    /// **Every one of them and not just the first**, because a button records its
+    /// focus ring *before* its background when it is focused — so a test reading
+    /// "the background" as `commands[0]` reads the ring's colour on a focused
+    /// button and passes or fails for the wrong reason.
+    fn tab_rounded_rects(demo: &Demo, page: Page) -> Vec<(Rect, Color)> {
+        demo.commands_at(tab_handle(demo, page))
+            .into_iter()
+            .filter_map(|command| match command {
+                DrawCommand::RoundedRect { rect, color, .. } => Some((rect, color)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Returns the colour a tab button's **background** is drawn in, read off the
+    /// rounded rectangle that matches the button's own laid-out box.
+    ///
+    /// **Matched on the rect and not on the position in the list**, and that is the
+    /// reason this helper exists beside [`painted_tab`]: a focused button records a
+    /// focus ring first, which is a *larger* rectangle of a different colour, and a
+    /// reader who took the first rounded rectangle would be reading the ring.
+    fn tab_fill(demo: &Demo, page: Page) -> Option<Color> {
+        let own = demo.node_rect(tab_handle(demo, page))?;
+        tab_rounded_rects(demo, page)
+            .into_iter()
+            .find(|(rect, _)| *rect == own)
+            .map(|(_, color)| color)
+    }
+
+    /// A mouse move to `(x, y)`, which is what a hover arrives as.
+    ///
+    /// **The button mask is empty**, so a move is a move and not a press: a
+    /// `mousestate` carrying the left button would be a drag, and the test that
+    /// hovers a button would be pressing it as well.
+    fn mouse_motion_at(x: f32, y: f32) -> Event {
+        Event::MouseMotion {
+            timestamp: 0,
+            window_id: 0,
+            which: 0,
+            mousestate: sdl3::mouse::MouseState::from_sdl_state(0),
+            x,
+            y,
+            xrel: 0.0,
+            yrel: 0.0,
+        }
+    }
+
+    // ------------------------------------------------------------ acceptance
+
+    /// **AC 1** — six buttons, in [`Page::ALL`] order, each labelled with its
+    /// page's name.
+    #[test]
+    fn six_tab_buttons_are_laid_out_in_page_order_and_labelled_with_their_page_names() {
+        let demo = laid_out();
+        assert_eq!(
+            demo.tabs.len(),
+            Page::ALL.len(),
+            "one button per page, in Page::ALL's order"
+        );
+        // **Left to right and in that order**, over the laid-out rects: a row that
+        // laid its children out in some other order would satisfy the count and
+        // fail the reader, and the order *is* the acceptance criterion.
+        let mut previous_right = f32::NEG_INFINITY;
+        for (index, page) in Page::ALL.into_iter().enumerate() {
+            let tab = &demo.tabs[index];
+            assert_eq!(
+                tab.page, page,
+                "the {index}th button is the one for {page:?}"
+            );
+            let rect = demo
+                .node_rect(tab.button.handle())
+                .expect("a laid-out tab button");
+            assert!(
+                rect.x > previous_right,
+                "{page:?} at {rect:?} does not start to the right of the button \
+                 before it at {previous_right}"
+            );
+            previous_right = rect.x + rect.width;
+            // **The label is `Page::name` and it is read off the button's own
+            // property**, so this is the widget's answer and not a copy of the
+            // table beside it.
+            assert_eq!(
+                tab.button.label.get(),
+                page.name(),
+                "and it is labelled with the page's own name"
+            );
+            // **And it is drawn**, because a button with the right label that
+            // records no text is a label nothing can see. This is the
+            // "a drawn control with nothing behind it" entry one level up: the
+            // property is not the picture.
+            assert_eq!(
+                painted_tab(&demo, page).1.as_deref(),
+                Some(page.name()),
+                "{page:?}: and the name is what the frame recorded on the button's node"
+            );
+        }
+        assert_eq!(
+            demo.tabs[0].page,
+            Page::DEFAULT,
+            "and the first is the default page's, so a run with no argument opens on \
+             the button that is filled in"
+        );
+    }
+
+    /// **AC 2** — every button at least 44 tall, **over the laid-out rects**.
+    ///
+    /// **The floor is `Button`'s own, and it is asked of the widget rather than
+    /// written here**, so this cannot drift from what the widget enforces:
+    /// `Button::size` is `content_size` floored at `MIN_TOUCH_TARGET` in both
+    /// dimensions. Asserting `rect.height >= 44.0` against a literal would be the
+    /// second copy of a number the widget keeps private, and this file has three
+    /// such copies already and a `NEVERAGAIN` entry about the fourth.
+    #[test]
+    fn every_tab_button_is_at_least_the_touch_target_floor_tall() {
+        for page in Page::ALL {
+            let demo = laid_out();
+            let handle = tab_handle(&demo, page);
+            // **The widget's own answer for the floor**, computed from the same
+            // `content_size` the demo measured the width with, so the comparison
+            // below is the one a caller would make.
+            let asked = demo.tabs[0]
+                .button
+                .size(&tab_advance(&demo.metrics), tab_line_height(&demo.metrics));
+            let floor = asked.height.min(asked.width.min(asked.height));
+            assert!(
+                floor >= 44.0,
+                "the widget's own floor is {floor} on this fixture, which is what the \
+                 comparison below is against"
+            );
+            let rect = demo
+                .node_rect(handle)
+                .unwrap_or_else(|| panic!("the {page:?} tab button is laid out"));
+            assert!(
+                rect.height >= floor,
+                "{page:?}: the button is {rect:?}, {floor} tall is the floor the \
+                 widget enforces on itself"
+            );
+            assert_eq!(
+                rect.height, TAB_BUTTON_TALL,
+                "{page:?}: and this demo asks for exactly that height rather than \
+                 taking the floor, which is requirement 2's number"
+            );
+        }
+    }
+
+    /// **The 64 pixels are the bar and the bar is 64**, and the bar's box is the
+    /// whole strip.
+    ///
+    /// **The equality below is unfalsifiable-by-nudging and that is the point:**
+    /// [`TAB_BAR_HEIGHT`] is handed to the bar as a tight constraint, so this
+    /// cannot fail without the layout changing — and the companion assertion that
+    /// the bar's height is *its padding plus its buttons* is what says 64 was
+    /// chosen rather than measured after the fact.
+    #[test]
+    fn the_bar_is_exactly_as_tall_as_its_padding_and_its_buttons() {
+        let demo = laid_out();
+        let bar = demo
+            .node_rect(demo.tab_bar().handle())
+            .expect("a laid-out bar");
+        assert_eq!(
+            (bar.x, bar.y, bar.width),
+            (0.0, 0.0, WINDOW.width),
+            "the bar is the whole width of the window at its own top left, and \
+             carries no CONTENT_TOP: the shift is what moved the gallery down past \
+             this strip"
+        );
+        assert_eq!(bar.height, TAB_BAR_HEIGHT, "and 64 tall");
+        assert_eq!(
+            TAB_BAR_PADDING * 2.0 + TAB_BUTTON_TALL,
+            bar.height,
+            "which is exactly its padding above and below plus its buttons, so 64 \
+             was chosen rather than left over"
+        );
+        {
+            let nodes = demo.nodes.borrow();
+            assert_eq!(
+                nodes
+                    .get(demo.tab_bar().handle())
+                    .expect("the bar's node")
+                    .layout()
+                    .padding(),
+                Padding::all(TAB_BAR_PADDING),
+                "and the padding is the requirement's visible one, on all four sides"
+            );
+        }
+        // **And the buttons are inside it, at y 10** — requirement 2's number,
+        // measured rather than derived from the padding.
+        for page in Page::ALL {
+            let rect = demo
+                .node_rect(tab_handle(&demo, page))
+                .unwrap_or_else(|| panic!("the {page:?} tab button is laid out"));
+            assert!(
+                inside(bar, rect),
+                "{page:?}: the button at {rect:?} is inside the bar at {bar:?}"
+            );
+            assert_eq!(
+                rect.y, TAB_BAR_PADDING,
+                "{page:?}: and at y 10, which is the padded top edge of a row's inner box"
+            );
+            assert!(
+                rect.height <= bar.height - TAB_BAR_PADDING * 2.0,
+                "{page:?}: and the padding is still visible below it"
+            );
+        }
+    }
+
+    /// **AC 3** — the active page's button has the theme's active pair and every
+    /// other the rest pair.
+    ///
+    /// **Both halves of the pair and not just the background**, because a button
+    /// whose label went the wrong way on the selected tab is a selected tab nobody
+    /// can read.
+    ///
+    /// **The pairs are the theme's own tokens and not literals**, so the assertion
+    /// is about `tab_palette` agreeing with the theme rather than about two
+    /// numbers. `Theme::dark()` is named because the demo starts on it and
+    /// `demo.handle_event(toggle_theme_event())` would move the theme under the
+    /// comparison.
+    #[test]
+    fn the_active_pages_button_carries_the_selected_pair_and_every_other_the_rest_pair() {
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+            let theme = Theme::dark();
+            let active = ButtonPalette::from_theme(&theme);
+            let rest = tab_palette(&theme, false);
+            assert_ne!(
+                active.background, rest.background,
+                "the two pairs really do differ, or the assertion below is vacuous"
+            );
+            for (index, button_page) in Page::ALL.into_iter().enumerate() {
+                let tab = &demo.tabs[index];
+                let wanted = if button_page == page { &active } else { &rest };
+                assert_eq!(
+                    tab.button.background.get(),
+                    wanted.background,
+                    "{page:?}: the {button_page:?} button's background is the {}",
+                    if button_page == page {
+                        "active"
+                    } else {
+                        "rest"
+                    }
+                );
+                assert_eq!(
+                    tab.button.foreground.get(),
+                    wanted.foreground,
+                    "{page:?}: and so is its label's colour"
+                );
+                assert_eq!(
+                    tab.button.palette(),
+                    *wanted,
+                    "{page:?}: read off the widget's own palette, which is what \
+                     `animate_to_state` aims at"
+                );
+            }
+            // **And the painted background is the pair's**, so this is about pixels
+            // and not about a property nothing draws.
+            assert_eq!(
+                tab_fill(&demo, page),
+                Some(active.background),
+                "{page:?}: the selected button's own background is drawn in the \
+                 theme's active colour"
+            );
+        }
+    }
+
+    /// **AC 4** — a switch *animates* the two buttons that changed.
+    ///
+    /// **Asserted through `Button::is_animating` after the switch and not after
+    /// the animation ends**, which is the acceptance criterion's own wording and
+    /// the only form of it that can tell an animation from a jump: both states are
+    /// reached either way, and only the middle one differs.
+    #[test]
+    fn a_page_switch_animates_the_two_buttons_that_changed() {
+        let mut demo = laid_out_on(Page::Pads);
+        // **Settle first**, so the launch frame's own state is not what is being
+        // read: `snap_to_state` at construction leaves nothing running, and this
+        // says so rather than assuming it.
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.tabs.iter().all(|tab| !tab.button.is_animating()),
+            "nothing is animating at rest, or the assertion below means nothing"
+        );
+
+        demo.show_page(Page::Data);
+
+        assert!(
+            demo.tabs[0].button.is_animating(),
+            "the button that *was* selected is animating away from the active pair"
+        );
+        assert!(
+            demo.tabs[4].button.is_animating(),
+            "and the one that now is is animating into it"
+        );
+        assert!(
+            demo.tabs[1..4].iter().all(|tab| !tab.button.is_animating()),
+            "**and the other four are not**, which is what says the aim is written \
+             for the two that changed rather than for all six: a bar where every \
+             button restarts its clock on every switch is six clocks restarted for \
+             nothing, and a mutation dropping the `changed` filter would pass \
+             without it"
+        );
+        // **Both properties still read their *old* colours on the frame of the
+        // switch**, and that is the whole of "animates rather than jumps":
+        // `animate_to_state` starts a transition toward `Button::style`, it does not
+        // write the target. A property that read its target here would be a write,
+        // and the assertion above that `is_animating` is what tells the two apart.
+        assert_eq!(
+            demo.tabs[0].button.background.get(),
+            ButtonPalette::from_theme(&Theme::dark()).background,
+            "the button that left still reads the *active* colour, and is animating \
+             toward the rest pair"
+        );
+        assert_eq!(
+            demo.tabs[4].button.background.get(),
+            tab_palette(&Theme::dark(), false).background,
+            "and the one that arrived still reads the *rest* colour, and is \
+             animating toward the active pair"
+        );
+
+        // **And it arrives.** Past [`tab_motion`]'s own duration and a frame, which
+        // is the other half of "animates rather than jumps".
+        demo.frame(WINDOW, Duration::from_millis(400));
+        assert!(
+            demo.tabs.iter().all(|tab| !tab.button.is_animating()),
+            "and after the transition every button has arrived"
+        );
+        assert_eq!(
+            tab_fill(&demo, Page::Data),
+            Some(ButtonPalette::from_theme(&Theme::dark()).background),
+            "so the selected button is *painted* in the active pair"
+        );
+        assert_eq!(
+            tab_fill(&demo, Page::Pads),
+            Some(tab_palette(&Theme::dark(), false).background),
+            "and the one that left it in the rest pair"
+        );
+    }
+
+    /// The motion a tab button runs on, and **the task file's 300 ms measured
+    /// against the code's 150**.
+    ///
+    /// `TASK_UI_PRIM_24.3.md` requirement 4 says the aim is
+    /// `animate_to_state(Motion::from_theme(&theme))` **and** that it is "over
+    /// `THEME_TRANSITION`'s 300 ms", in one sentence. **Those are two different
+    /// numbers**: `Motion::from_theme` reads `DurationFast`, which both themes hold
+    /// at 150 ms, and `THEME_TRANSITION` is the theme's *token* transition at 300.
+    ///
+    /// **The call is what the code uses**, because the call is what the requirement
+    /// names twice — here and in the parent's requirement 2 — and a deliberate
+    /// break that replaces `Motion::from_theme` with a fixed `Motion` only makes
+    /// sense if the duration *is* `from_theme`'s. This test pins which of the two
+    /// the code actually got, so the file cannot be read either way, and
+    /// [`tab_motion`]'s doc records the discrepancy in as many words.
+    #[test]
+    fn a_selection_change_runs_on_the_themes_fast_duration() {
+        let theme = Theme::dark();
+        let fast = match theme.get(ThemeToken::DurationFast) {
+            PropertyValue::Duration(duration) => duration,
+            other => panic!("DurationFast holds {other:?} rather than a duration"),
+        };
+        assert_eq!(
+            fast,
+            Duration::from_millis(150),
+            "both themes hold `DurationFast` at 150 ms, which is `tab_motion`'s \
+             duration — and **not** THEME_TRANSITION's 300"
+        );
+        assert_eq!(
+            tab_motion(&theme).duration,
+            fast,
+            "so the aim is the theme's fast duration"
+        );
+        assert_ne!(
+            tab_motion(&theme).duration,
+            Duration::from_millis(u64::from(THEME_TRANSITION)),
+            "and the task file's 300 ms is a different number; the record is in \
+             `tab_motion`'s doc and in the hand-over, not here"
+        );
+
+        // **And a switch really runs on it** rather than on some other duration,
+        // which is the part a comment cannot say: half the motion arrives the
+        // button half way between the two pairs' backgrounds.
+        let mut demo = laid_out_on(Page::Pads);
+        demo.show_page(Page::Data);
+        demo.frame(WINDOW, fast / 2);
+        let midway = demo.tabs[4].button.background.get();
+        assert_ne!(
+            midway,
+            ButtonPalette::from_theme(&Theme::dark()).background,
+            "half way through the transition the arriving button is not yet at its \
+             target, which is what makes it an animation rather than a write"
+        );
+        assert_ne!(
+            midway,
+            tab_palette(&Theme::dark(), false).background,
+            "and not yet back where it started either"
+        );
+    }
+
+    /// **AC 5** — clicking a button switches to its page, **through
+    /// [`Demo::handle_event`]**.
+    ///
+    /// **A real press and a real release at the button's own centre**, so the event
+    /// takes the route a finger takes: `handle_event` → the press arm →
+    /// `pressed`, then the recogniser's tap on the release → `input::route` →
+    /// `offer_to` → `Button::on_event` → the click → `pending_page` → the drain.
+    /// **Every button, on a fresh demo each**, because "the click switched the page"
+    /// is satisfied by one working button and one broken one if only one is tried.
+    #[test]
+    fn clicking_a_tab_button_switches_to_that_page() {
+        for target in Page::ALL {
+            let mut demo = laid_out_on(Page::DEFAULT);
+            assert_eq!(
+                demo.page,
+                Page::DEFAULT,
+                "the fixture starts on the default"
+            );
+            let (x, y) = tab_center(&demo, target);
+            let (down, up) = click_at(x, y);
+
+            // **The press first and the page not yet moved**, because a switch that
+            // happened on the press would be one that moved rects while an event was
+            // still being routed — which is requirement 5's reason for the drain.
+            demo.handle_event(down);
+            assert_eq!(
+                demo.page,
+                Page::DEFAULT,
+                "{target:?}: a press alone does not switch — the click fires on the \
+                 release"
+            );
+            assert!(
+                demo.tabs
+                    .iter()
+                    .find(|tab| tab.page == target)
+                    .is_some_and(|tab| tab.button.pressed.get()),
+                "{target:?}: and the press is on screen as the button's own pressed \
+                 state"
+            );
+
+            demo.handle_event(up);
+            assert_eq!(
+                demo.page, target,
+                "{target:?}: the release's tap switched to it, through handle_event"
+            );
+            // **And the selection moved with it**, in the same call — which is what
+            // says the drain really reached `show_page` rather than setting a field
+            // some later frame reads.
+            assert!(
+                demo.tabs
+                    .iter()
+                    .find(|tab| tab.page == target)
+                    .is_some_and(|tab| {
+                        tab.button.palette().background
+                            == ButtonPalette::from_theme(&Theme::dark()).background
+                    }),
+                "{target:?}: and the clicked button now holds the *active* palette. \
+                 The **palette** and not the `background` property, because the \
+                 property is mid-transition on the frame of the switch — that is \
+                 what `a_page_switch_animates_the_two_buttons_that_changed` is \
+                 about, and asking for the property's value here would be asking \
+                 two tests the same question"
+            );
+        }
+    }
+
+    /// **AC 6** — `Space` and `Enter` activate the focused tab button and switch
+    /// page.
+    ///
+    /// **Both keys and all six buttons**, and each one on a fresh demo, because a
+    /// single activation proves that *a* button works.
+    ///
+    /// **The `Space` case carries a second assertion**, and it is the one the task
+    /// file points at: `Demo::press_pads_if_unfocused` already guards `Space` on
+    /// [`Demo::focus_is_live`], so a focused tab button must **not** also press the
+    /// three pads. The guard was **not** re-added anywhere — it was read, and this
+    /// is the assertion that says the reading was right.
+    #[test]
+    fn space_and_enter_activate_the_focused_tab_button() {
+        for (index, target) in Page::ALL.into_iter().enumerate() {
+            for (keycode, name) in [(Keycode::Space, "Space"), (Keycode::Return, "Enter")] {
+                let mut demo = laid_out_on(Page::DEFAULT);
+                // **Walk to the button rather than naming it as focused**: the point
+                // of the criterion is that `Tab` reaches it, and `Focus::focus`
+                // would put it there without a walk.
+                for _ in 0..(index + 1) {
+                    demo.handle_event(key_event(Keycode::Tab));
+                }
+                assert_eq!(
+                    demo.focused,
+                    Some(tab_handle(&demo, target)),
+                    "{name} on the {target:?} button: Tab {index} is the button's own \
+                     stop, and nothing else"
+                );
+                assert!(
+                    demo.tab_button(demo.focused.expect("a focus"))
+                        .is_some_and(|button| button.focused.get()),
+                    "{name} on the {target:?} button: and it holds its `focused` \
+                     property, which is what draws the ring"
+                );
+
+                demo.handle_event(key_event(keycode));
+                assert_eq!(
+                    demo.page, target,
+                    "{name} on the {target:?} button switched the page"
+                );
+                assert_eq!(
+                    demo.pads
+                        .iter()
+                        .map(|pad| pad.press.get())
+                        .collect::<Vec<f32>>(),
+                    vec![0.0, 0.0, 0.0],
+                    "{name} on the {target:?} button: and `Space` did **not** also \
+                     press the three pads, because `press_pads_if_unfocused` asks \
+                     whether a live control holds focus and one did"
+                );
+            }
+        }
+    }
+
+    /// **AC 7** — `Tab` walks the six buttons and then the page's own controls, in
+    /// that order, **both directions**, and nothing else.
+    ///
+    /// **The name is task 24.3's and the walk is
+    /// `tab_walks_every_focusable_control_in_order_and_wraps`'s**, which is the
+    /// test that does it; what this adds is the claim the criterion is actually
+    /// about — that the *bar* leads. Two tests rather than one rewritten test, and
+    /// the reason is that the second is the one that fails if someone marks the
+    /// buttons focusable *after* the page's own instead of before them, which the
+    /// walk cannot see.
+    #[test]
+    fn tab_walks_the_six_buttons_before_the_pages_own_controls() {
+        for page in Page::ALL {
+            let demo = dialog_closed_on(page);
+            let order = expected_focus_order(&demo, page);
+            let (buttons, own) = order.split_at(Page::ALL.len());
+            assert_eq!(
+                buttons.iter().map(|(what, _)| *what).collect::<Vec<&str>>(),
+                Page::ALL.into_iter().map(tab_name).collect::<Vec<&str>>(),
+                "{page:?}: the first six stops are the six buttons, in Page::ALL's \
+                 order and with their names in it"
+            );
+            assert_eq!(
+                own.iter().map(|(what, _)| *what).collect::<Vec<&str>>(),
+                page_focusables(&demo, page)
+                    .iter()
+                    .map(|(what, _)| *what)
+                    .collect::<Vec<&str>>(),
+                "{page:?}: and what follows them is the page's own"
+            );
+            // **The bar's position in the tree is the reason**, so it is asserted
+            // rather than assumed: the walk re-derives its order from
+            // `paint_order`, so a bar that led this list while sitting *later* in
+            // the tree than the controls layer would be a list disagreeing with the
+            // walk — which is what the walk tests would then catch, one layer down.
+            //
+            // **Three of the six pages have no control of their own** and there is
+            // nothing for the bar to precede, which is stated rather than turned
+            // into an `expect`: `pads` is a press animation, `text` a column of
+            // labels and `overlays` a modal panel.
+            if let Some(first) = own
+                .iter()
+                .find_map(|(_, handle)| demo.order.iter().position(|candidate| candidate == handle))
+            {
+                let bar_at = demo
+                    .order
+                    .iter()
+                    .position(|handle| *handle == demo.tab_bar().handle())
+                    .expect("the bar is in the paint order");
+                assert!(
+                    bar_at < first,
+                    "{page:?}: the bar is at {bar_at} in the paint order and the \
+                     page's first own control at {first}, so `Tab` reaches the bar \
+                     first"
+                );
+            } else {
+                assert_eq!(
+                    own.len(),
+                    0,
+                    "{page:?}: a page with no own control has an empty tail, and the \
+                     bar is the whole of its walk"
+                );
+            }
+        }
+    }
+
+    /// **AC 8** — the bar is unreachable while the dialog is showing, and reachable
+    /// the moment it closes.
+    ///
+    /// **Two halves and both are positive**, which is the shape
+    /// `.ai/NEVERAGAIN.md`'s *hiding a widget makes every test that crosses the
+    /// boundary vacuous* demands: "nothing happened" is satisfied by a broken bar,
+    /// so the second half is the same click on the same button with the dialog
+    /// closed.
+    ///
+    /// **A real press and release on a bar button in both halves**, and the dialog
+    /// is presented at construction by `shown_dialog_on` rather than opened with a
+    /// key, so the state under test is one a `--tab=overlays` capture photographs.
+    #[test]
+    fn the_bar_is_unreachable_while_the_dialog_is_showing() {
+        // **Half one: the dialog is up.**
+        let mut demo = shown_dialog_on(Page::Overlays);
+        assert!(demo.dialog_is_modal(), "and it is modal");
+        let (x, y) = tab_center(&demo, Page::Pads);
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        assert_eq!(
+            demo.page,
+            Page::Overlays,
+            "a press on the bar under the scrim switches nothing"
+        );
+        assert!(
+            demo.tabs.iter().all(|tab| !tab.button.pressed.get()),
+            "and lights nothing: the press arms are behind the same modal guard as \
+             the pads', the slider's and the keyboard's"
+        );
+        demo.handle_event(up);
+        assert_eq!(
+            demo.page,
+            Page::Overlays,
+            "and the release's tap switches nothing either — `route_input_event` \
+             takes its modal branch before any offer is made"
+        );
+        assert_eq!(
+            demo.pending_page.get(),
+            None,
+            "so the click property was never written"
+        );
+        // **And the tap was answered by the dialog, which is the positive half of
+        // the claim above**: a tap on the scrim dismisses it, so the dialog is no
+        // longer modal one event after a press on the bar did nothing to the page.
+        // "Nothing happened" and "it went somewhere else" are different facts and
+        // only the second one says the modal guard is what stopped it.
+        assert!(
+            !demo.dialog.visible.get(),
+            "the tap was consumed by the dialog — a tap on the scrim dismisses it, \
+             which is the positive half of \"the bar was not reached\""
+        );
+
+        // **And `Tab` does not walk onto the bar either**: the walk's root is the
+        // dialog's own node, which is a second root in the arena, so the bar is not
+        // in the tree it can reach. **On a fresh dialog**, because the tap above
+        // closed the one this demo had and a closed dialog's walk is the gallery's.
+        let mut demo = shown_dialog_on(Page::Overlays);
+        for _ in 0..(Page::ALL.len() + 1) {
+            demo.handle_event(key_event(Keycode::Tab));
+        }
+        assert!(
+            demo.dialog
+                .actions
+                .iter()
+                .any(|action| Some(action.handle()) == demo.focused),
+            "after a lap of `Tab` focus is still on a dialog button, not on a tab \
+             button that the scrim covers"
+        );
+        assert!(
+            !demo
+                .tab_focusables()
+                .iter()
+                .any(|handle| Some(*handle) == demo.focused),
+            "and never on one of the six"
+        );
+
+        // **Half two: the dialog is closed, and the same gesture works.**
+        let mut demo = shown_dialog_on(Page::Overlays);
+        demo.handle_event(key_event(DIALOG_KEY));
+        for _ in 0..3 {
+            demo.frame(WINDOW, Duration::from_millis(300));
+        }
+        assert!(!demo.dialog_is_modal(), "the dialog is closed");
+        let (x, y) = tab_center(&demo, Page::Pads);
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        assert_eq!(
+            demo.page,
+            Page::Pads,
+            "and the same click on the same button switches to `pads` — so half \
+             one's `nothing happened` was the modal and not a broken bar"
+        );
+    }
+
+    /// **AC 9** — the bar's background follows `T`.
+    ///
+    /// **Asserted on the recorded paint and not on the property**, for the reason
+    /// `a_theme_switch_reaches_the_toasts_already_on_screen` gives: the bar's
+    /// background is a `Property::bind` over the theme, and a property is not a
+    /// picture.
+    ///
+    /// **One frame before the paint is read**, because the frame loop is what
+    /// records the container's background — asking on the frame the switch happened
+    /// would read the bar as it was.
+    #[test]
+    fn the_tab_bar_follows_a_theme_switch() {
+        let mut demo = laid_out();
+        assert_eq!(
+            painted_container_fill(&demo, demo.tab_bar().handle()),
+            Some(Color::new(30, 30, 30, 255)),
+            "the bar starts on the dark theme's Surface, which is what the card of \
+             pads is on too"
+        );
+
+        demo.handle_event(toggle_theme_event());
+        // **Read `is_animating` before any frame**, because a frame is what runs a
+        // transition out and this is the only moment at which "all six are
+        // animating" is true.
+        assert!(
+            demo.tabs.iter().all(|tab| tab.button.is_animating()),
+            "all six buttons are animating on the frame of the switch, because a \
+             theme switch moves every pair and aiming only the selected one would \
+             leave the other five chasing a palette that has already been replaced"
+        );
+        // **Four 100 ms frames**, not one 16 ms one, and the difference is the point:
+        // the theme's own tokens *animate* over `THEME_TRANSITION`, so a single
+        // frame reads the bar at `31 31 31` — thirty of the way from 30 to 245 is
+        // not thirty of the way from 0 to 245, and a reader who asserted after one
+        // frame would be asserting the middle of a transition. Measured, not
+        // assumed: this is what the first run of this test read.
+        for _ in 0..4 {
+            demo.frame(WINDOW, Duration::from_millis(100));
+        }
+        assert_eq!(
+            painted_container_fill(&demo, demo.tab_bar().handle()),
+            Some(Color::new(245, 245, 245, 255)),
+            "one `T` re-themes it, with nothing told: the background is a \
+             `Property::bind` over `theme.property(Surface)`, so the graph carries \
+             the switch on its own"
+        );
+        // **And the six buttons came with it**, on the other mechanism — a palette
+        // is a private field behind a setter and not a bound property, so the demo
+        // announces the new one and aims at it like every other themed widget.
+        assert_eq!(
+            demo.tabs[0].button.background.get(),
+            tab_palette(&Theme::light(), true).background,
+            "the selected button is on the light theme's active pair"
+        );
+        assert_eq!(
+            demo.tabs[1].button.background.get(),
+            tab_palette(&Theme::light(), false).background,
+            "and every other one is on the light theme's rest pair"
+        );
+
+        // **And back again**, so the assertion is not one-directional.
+        demo.handle_event(toggle_theme_event());
+        for _ in 0..4 {
+            demo.frame(WINDOW, Duration::from_millis(100));
+        }
+        assert_eq!(
+            painted_container_fill(&demo, demo.tab_bar().handle()),
+            Some(Color::new(30, 30, 30, 255)),
+            "and a second `T` puts it back"
+        );
+    }
+
+    // -------------------------------------------------------- press and hover
+
+    /// A press on a bar button is **on screen**, which is the one thing the button
+    /// row of 2026-10-01 took away and this task puts back.
+    ///
+    /// **Asserted through the widget's own `scale` and through the recorded paint**,
+    /// because those are two different claims: `scale` is the widget's answer and
+    /// the painted rectangle is what a reader would see. `Button::paint` applies the
+    /// scale to the rectangle it draws and not to the node's rect, so the painted
+    /// box is **smaller than the laid-out one** — which is exactly the evidence that
+    /// the scale reached the screen rather than being a property.
+    #[test]
+    fn a_tab_button_presses_under_a_pointer_and_releases_again() {
+        let mut demo = laid_out_on(Page::Controls);
+        let target = Page::Data;
+        let (x, y) = tab_center(&demo, target);
+        let rest = demo
+            .node_rect(tab_handle(&demo, target))
+            .expect("a laid-out button");
+        assert_eq!(demo.tabs[4].button.scale.get(), 1.0, "at rest it is at 1.0");
+
+        demo.handle_event(mouse_down_at(x, y, 0));
+        assert!(
+            demo.tabs[4].button.pressed.get(),
+            "the press arm writes the button's own `pressed`"
+        );
+        assert!(
+            demo.tabs[4].button.is_animating(),
+            "and aims it, so the press is a transition rather than a write"
+        );
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert!(
+            !demo.tabs[4].button.is_animating(),
+            "the press arrives rather than being restarted every frame"
+        );
+        assert_eq!(
+            demo.tabs[4].button.scale.get(),
+            0.95,
+            "and it is drawn smaller, which is `Button`'s own pressed scale"
+        );
+        let painted = tab_rounded_rects(&demo, target);
+        let background = painted
+            .iter()
+            .find(|(rect, _)| *rect != grown(rest, 2.0))
+            .map(|(rect, _)| *rect)
+            .or_else(|| painted.first().map(|(rect, _)| *rect))
+            .expect("a background");
+        assert!(
+            background.width < rest.width,
+            "and the rectangle it recorded is narrower than its laid-out {rest:?} — \
+             the scale is applied to what is drawn, so this is the pixels and not \
+             the property"
+        );
+
+        demo.handle_event(mouse_up_at(x, y, 40_000_000));
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert!(!demo.tabs[4].button.pressed.get(), "the release clears it");
+        assert_eq!(
+            demo.tabs[4].button.scale.get(),
+            1.0,
+            "and the scale comes back"
+        );
+        assert!(
+            tab_rounded_rects(&demo, target)
+                .iter()
+                .map(|(rect, _)| *rect)
+                .any(|rect| rect == rest),
+            "so the painted background is its own laid-out box again"
+        );
+
+        // **A release that never had a press does nothing**, which is the
+        // `Demo::release_all` asymmetry and is asserted here because the tab bar
+        // has the same shape: a pointer that goes down on the scrim and up over a
+        // button must not light it.
+        let other = laid_out_on(Page::Controls);
+        let (ox, oy) = tab_center(&other, Page::Text);
+        let mut demo = other;
+        demo.handle_event(mouse_up_at(ox, oy, 40_000_000));
+        assert!(
+            demo.tabs.iter().all(|tab| !tab.button.pressed.get()),
+            "a release with no press behind it starts nothing"
+        );
+    }
+
+    /// `Button`'s `PRESS_DARKEN`: how far a pressed background moves toward black.
+    ///
+    /// **A copy of a constant `button.rs` keeps private, and it is the only number
+    /// copied** — the arithmetic is [`Color::interpolate`]'s, which is the function
+    /// the widget's own `shade` calls, so the two cannot differ in how they round.
+    /// `Button::style` is what the press is derived through, and this is the one
+    /// step of it a caller can reproduce.
+    const BUTTON_PRESS_DARKEN: f32 = 0.18;
+
+    /// Returns the colour a press paints a palette's background in.
+    ///
+    /// **`Button::style`'s own arithmetic, re-run**: `shade(background, -
+    /// PRESS_DARKEN)` is `Color::interpolate(&background, &black, PRESS_DARKEN)`,
+    /// and that is what this is. **Read off the palette rather than remembered**, so
+    /// the two ends of the assertion in
+    /// [`a_press_paints_a_colour_strictly_between_the_two_ends`] cannot go stale
+    /// against a theme or a widget change.
+    fn arrived_press(pair: &ButtonPalette) -> Color {
+        Color::interpolate(
+            &pair.background,
+            &Color::new(0, 0, 0, pair.background.a),
+            BUTTON_PRESS_DARKEN,
+        )
+    }
+
+    /// **A press paints a colour strictly between the two ends, mid-transition.**
+    ///
+    /// This is the acceptance criterion's *"a **pressed** button mid-transition"*
+    /// written the way `.ai/NEVERAGAIN.md` asks after `PRESS_SHADOW_ALPHA`:
+    /// **assert the number the word fixes**, because a capture cannot. The capture
+    /// of this task caught a mid-transition frame on 2 of 130 samples — the interval
+    /// between samples is 161 ms against a 150 ms window, so it cannot be repeated
+    /// to get more — and at that interval the intermediate sat 22 % of the way from
+    /// one end to the other. **The pixels are the evidence; this is the
+    /// measurement**, and the two are kept rather than swapped.
+    ///
+    /// **The painted background and not the `background` property**, for the reason
+    /// every other paint claim in this file gives: `Button::paint` draws whatever
+    /// the property has *reached*, so the property is a transition and the command
+    /// is a picture. Read at `tab_motion`'s **half**, which is where
+    /// `Easing::EaseInOut` is furthest from both ends — the whole reason the
+    /// criterion names this state rather than "part way through".
+    ///
+    /// **The page on show is [`Page::Data`] and the button is its own**, so the
+    /// button is the *selected* one and **nothing aims it but [`Demo::press_tab`]**:
+    /// a click's `show_page` would aim it on the way out of the press, which is
+    /// what hid this from the test beside it until the review of this task.
+    #[test]
+    fn a_press_paints_a_colour_strictly_between_the_two_ends() {
+        let target = Page::Data;
+        let mut demo = laid_out_on(target);
+        let theme = Theme::dark();
+        let motion = tab_motion(&theme);
+        let half = motion.duration / 2;
+        // **The selected pair, because the button belongs to the page on show.**
+        let pair = tab_palette(&theme, true);
+        let arrived_colour = arrived_press(&pair);
+
+        let at_rest = painted_tab(&demo, target)
+            .0
+            .expect("the button paints a background");
+        assert_eq!(
+            at_rest, pair.background,
+            "at rest the painted background is the selected pair's own colour"
+        );
+
+        let (x, y) = tab_center(&demo, target);
+        demo.handle_event(mouse_down_at(x, y, 0));
+        demo.frame(WINDOW, half);
+        let midway = painted_tab(&demo, target)
+            .0
+            .expect("the button paints a background mid-press");
+
+        // **Strictly between, which is the whole of the word.** A jump to either end
+        // fails this; a transition that runs to the wrong target passes it and fails
+        // the arrival assertion below, which is what makes the two halves one test.
+        let low = at_rest.r.min(arrived_colour.r);
+        let high = at_rest.r.max(arrived_colour.r);
+        assert!(
+            midway.r > low && midway.r < high,
+            "half way through the {motion:?} the press painted {midway:?}, which is \
+             strictly between the at-rest {at_rest:?} and the arrived \
+             {arrived_colour:?}: a press that jumped would be at one end and a \
+             press that transitioned would be between them"
+        );
+        // **Every channel, not just red.** One channel between two numbers is a
+        // statement about a coordinate; a press that turned the violet button grey
+        // would satisfy it and be wrong. `Color::interpolate` moves all four
+        // together, so all four land between their own ends.
+        for (channel, rest, arrived, seen) in [
+            ("red", at_rest.r, arrived_colour.r, midway.r),
+            ("green", at_rest.g, arrived_colour.g, midway.g),
+            ("blue", at_rest.b, arrived_colour.b, midway.b),
+        ] {
+            let low = if rest < arrived { rest } else { arrived };
+            let high = if rest > arrived { rest } else { arrived };
+            assert!(
+                seen > low && seen < high,
+                "{channel} is {seen}, outside the {low}..={high} its own two ends span, \
+                 so the press moved one channel between them and left another out"
+            );
+        }
+
+        // **And it arrives**, which is what makes the first half a transition rather
+        // than a value that happened to be between two numbers on one frame.
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        let arrived = painted_tab(&demo, target)
+            .0
+            .expect("the button paints a background once the press has arrived");
+        assert_eq!(
+            arrived, arrived_colour,
+            "and after the transition the painted background is the pressed colour \
+             `Button` derives for itself from its own PRESS_DARKEN"
+        );
+        assert_ne!(
+            arrived, midway,
+            "which is a different colour from the one half way through, so the \
+             intermediate was a position on a path rather than a value that stood \
+             still"
+        );
+    }
+
+    /// **A release on the button of the page already on show comes back to rest,
+    /// and that is the one release nothing else aims.**
+    ///
+    /// The test above releases a button belonging to a **different** page, so the
+    /// click's own [`Demo::show_page`] aims it on the way through
+    /// [`Demo::aim_tab_buttons`] — and the release's own aim is redundant there.
+    /// **Press and release the button of the page that is already showing and
+    /// `show_page` early-returns**, so nothing aims the button except
+    /// [`Demo::release_tab`].
+    ///
+    /// **The review of this task found that by mutation**, not by reading:
+    /// dropping `tab.button.animate_to_state(motion)` from `release_tab` left the
+    /// whole suite green, and a probe reading `scale` on this state read **0.95** —
+    /// a tab button stuck at the pressed scale for ever, with `pressed` already
+    /// `false` and no gesture left that could bring it back. That is
+    /// `.ai/NEVERAGAIN.md`'s *a drawn control with nothing behind it* in its
+    /// sharpest form: a control whose state is unreachable, rather than merely
+    /// unwritten.
+    ///
+    /// **`Page::Data` and not `Page::Pads`** so that the test reads the same way as
+    /// its neighbour and the two are one story: the neighbour presses a button
+    /// belonging to another page, this one presses its own.
+    #[test]
+    fn a_tab_button_of_the_page_already_on_show_comes_back_to_rest() {
+        let target = Page::Data;
+        let mut demo = laid_out_on(target);
+        assert_eq!(
+            demo.page, target,
+            "the fixture opens on {target:?}, so the click's own page switch is the \
+             early return and nothing aims this button but the release"
+        );
+        let index = Page::ALL
+            .iter()
+            .position(|page| *page == target)
+            .expect("every page has a button");
+        let (x, y) = tab_center(&demo, target);
+
+        demo.handle_event(mouse_down_at(x, y, 0));
+        assert!(
+            demo.tabs[index].button.pressed.get(),
+            "the press arm writes the button's own `pressed`"
+        );
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert_eq!(
+            demo.tabs[index].button.scale.get(),
+            0.95,
+            "and it arrives at the pressed scale, so the release has somewhere to \
+             come back from"
+        );
+
+        // **The release, and the whole of the claim.** `show_page` returns at once
+        // because the page is already the one on show, so nothing but
+        // `release_tab` aims this button — and the aim is the thing that is written
+        // there.
+        demo.handle_event(mouse_up_at(x, y, 40_000_000));
+        assert!(
+            !demo.tabs[index].button.pressed.get(),
+            "the release clears the flag"
+        );
+        assert_eq!(
+            demo.page, target,
+            "and the tap it routes found no page to switch to"
+        );
+        assert!(
+            demo.tabs[index].button.is_animating(),
+            "**and the button is animating**, which is what says the release aimed it \
+             rather than only clearing a flag: a release with no aim leaves the \
+             scale where the press put it and nothing running"
+        );
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert_eq!(
+            demo.tabs[index].button.scale.get(),
+            1.0,
+            "so the button comes back to rest — the number a release with no aim \
+             leaves at 0.95 for ever"
+        );
+        assert!(
+            demo.tabs.iter().all(|tab| !tab.button.pressed.get()),
+            "and no button was left pressed"
+        );
+    }
+
+    /// **A finger presses the bar too, and that is a separate code path.**
+    ///
+    /// `handle_event` has a `MouseButtonDown` arm and a `FingerDown` arm, and they
+    /// are written out separately rather than folded together — the same reason the
+    /// slider and the keyboard are pressed in both. **A car has no mouse**, so the
+    /// finger arm is the one that matters for the direction this project is aimed
+    /// at, and a bar that only answers the mouse is a bar half built.
+    ///
+    /// **Found by a mutation, not by reading**: deleting the finger arm from
+    /// `handle_event` left **every one of the suite green**, and the sweep that
+    /// found it is in the hand-over. The press test above is the mouse half and
+    /// this is the other one.
+    #[test]
+    fn a_finger_presses_a_tab_button_the_same_way_a_mouse_does() {
+        let mut demo = laid_out_on(Page::Controls);
+        let target = Page::Data;
+        let (x, y) = tab_center(&demo, target);
+
+        demo.handle_event(finger_down_at(x, y, 0));
+        assert!(
+            demo.tabs[4].button.pressed.get(),
+            "a finger down on the button presses it"
+        );
+        demo.handle_event(finger_up_at(x, y, 40_000_000));
+        assert!(
+            !demo.tabs[4].button.pressed.get(),
+            "and the finger's release lets it go"
+        );
+        // **And the release's tap switched the page**, which is the half that is
+        // easy to get wrong: `FingerUp` reports a `Tap` and the tap is routed, so a
+        // finger tap has to reach the button rather than being dropped beside it.
+        // The finger arm of `handle_event` is the only place the *press* is written,
+        // so the click and the press are two separate code paths for one gesture.
+        assert_eq!(
+            demo.page, target,
+            "so the same finger gesture the mouse test above performs switches to \
+             the button's page"
+        );
+        assert!(
+            demo.tabs[4].button.is_animating(),
+            "and animates the selection, because the click reached the same drain"
+        );
+    }
+
+    /// **Every button is exactly as wide as its own label needs, and the six
+    /// widths are six different numbers.**
+    ///
+    /// **Requirement 2's *"widths come from `Button::content_size`, measured
+    /// through the demo's `TextMetrics` rather than guessed, so a longer name is
+    /// never cut"* — and both halves of that are assertions.** The width being
+    /// `content_size`'s is asserted against the widget's own answer; the six
+    /// differing is what makes a single constant unable to satisfy it, which is
+    /// what a mutation that hard-codes `80.0` needs and what nothing else in the
+    /// suite was holding down.
+    ///
+    /// **And the padding is in it**: `content_size` adds `padding_h` twice to the
+    /// label's own width, so dropping `TAB_BUTTON_PADDING_H` makes every button
+    /// fourteen pixels narrower and nothing else notices. The third assertion is the
+    /// one that says so.
+    #[test]
+    fn every_tab_button_is_wide_enough_for_its_own_name_and_no_wider() {
+        let demo = laid_out();
+        let advance = tab_advance(&demo.metrics);
+        let line_height = tab_line_height(&demo.metrics);
+        let mut widths: Vec<f32> = Vec::new();
+        for page in Page::ALL {
+            let tab = &demo.tabs[Page::ALL.iter().position(|p| *p == page).unwrap_or(0)];
+            let asked = tab.button.content_size(&advance, line_height);
+            let laid = demo
+                .node_rect(tab.button.handle())
+                .unwrap_or_else(|| panic!("the {page:?} tab button is laid out"));
+            assert_eq!(
+                laid.width, asked.width,
+                "{page:?}: the button is {laid:?} and `Button::content_size` asks for \
+                 {asked:?} — so the width is the widget's measurement of its own \
+                 label and its own padding"
+            );
+            // **The label's own width, with the padding taken off twice.** Written
+            // as the sum `content_size` itself is written as, so the assertion and
+            // the widget agree by construction and disagree the moment one of them
+            // changes.
+            let label_width: f32 = page
+                .name()
+                .chars()
+                .map(|ch| demo.metrics.advance(ch, TAB_BUTTON_FONT))
+                .sum();
+            assert!(
+                (asked.width - label_width - TAB_BUTTON_PADDING_H * 2.0).abs() < 0.001,
+                "{page:?}: `{}` is {label_width} wide at {TAB_BUTTON_FONT} px and the \
+                 padding is {TAB_BUTTON_PADDING_H} either side, so the button is \
+                 {asked:?}",
+                page.name()
+            );
+            widths.push(laid.width);
+        }
+        let mut sorted = widths.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.dedup();
+        assert!(
+            sorted.len() >= 2,
+            "and the six widths are not one number: {widths:?}. `controls` and \
+             `overlays` are eight characters and `pads` is four, so a constant width \
+             would cut one name or pad the other — which is the whole of \
+             requirement 2's reason for measuring"
+        );
+        assert_eq!(
+            widths.iter().filter(|w| **w == widths[0]).count(),
+            widths
+                .iter()
+                .zip(Page::ALL)
+                .filter(|(w, _)| **w == widths[0])
+                .count(),
+            "and the first width belongs to a page and is not a shared default"
+        );
+    }
+
+    /// A pointer over a bar button hovers it, and only it.
+    ///
+    /// **The hover tint is the second of the five things the button row took away**
+    /// — the press and release transition, the hover tint, the focus ring and the
+    /// click callback — and `Button::hovered` is a property nothing in the
+    /// repository wrote to between 2026-10-01 and this task. Nothing else in the
+    /// demo reaches `Button`, so this is the only route to it.
+    ///
+    /// **Two properties and not one**: a pointer that hovers the *third* button
+    /// and not the first is what says the six are told apart, and a bar where one
+    /// button hovers and five others light up would satisfy the weaker form.
+    #[test]
+    fn a_pointer_over_a_tab_button_hovers_it_and_nothing_else() {
+        let mut demo = laid_out_on(Page::Controls);
+        assert!(
+            demo.tabs.iter().all(|tab| !tab.button.hovered.get()),
+            "nothing is hovered with the pointer nowhere"
+        );
+
+        let (x, y) = tab_center(&demo, Page::Text);
+        demo.handle_event(mouse_motion_at(x, y));
+        assert!(
+            demo.tabs[1].button.hovered.get(),
+            "a pointer over the second button hovers it"
+        );
+        assert!(
+            demo.tabs
+                .iter()
+                .enumerate()
+                .all(|(i, tab)| tab.button.hovered.get() == (i == 1)),
+            "and no other: the six are told apart by their own boxes, not by a \
+             single shared flag"
+        );
+        assert!(
+            demo.tabs[1].button.is_animating(),
+            "and the tint is a transition, not a write"
+        );
+        // **Past the transition before the pixels are read**, for the same reason
+        // the theme test runs four frames: `Button::paint` draws whatever
+        // `background` has *reached*, and one frame after the aim it has reached
+        // nothing. The tint is therefore asserted on the arrived colour and the
+        // transition is asserted on `is_animating` above, which is the pair.
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        let rest_fill = tab_palette(&Theme::dark(), false).background;
+        let hovered_fill = tab_fill(&demo, Page::Text).expect("a painted button");
+        assert_ne!(
+            hovered_fill, rest_fill,
+            "the hovered background really is different from the rest one"
+        );
+        assert!(
+            hovered_fill.r > rest_fill.r
+                && hovered_fill.g > rest_fill.g
+                && hovered_fill.b > rest_fill.b,
+            "and lighter in all three channels — 12% toward white, which is \
+             `Button`'s own `HOVER_LIGHTEN`: {rest_fill:?} hovered to {hovered_fill:?}"
+        );
+
+        // **Moving off it clears it**, and the clearance is aimed rather than
+        // snapped, so the tint fades instead of jumping.
+        demo.handle_event(mouse_motion_at(x, y + 400.0));
+        assert!(
+            demo.tabs.iter().all(|tab| !tab.button.hovered.get()),
+            "a pointer below the bar hovers nothing"
+        );
+        assert!(
+            demo.tabs[1].button.is_animating(),
+            "and the button that was hovered is animating back to its rest colour"
+        );
+    }
+
+    // ----------------------------------------------- what holds the new nodes up
+
+    /// **The bar's seven nodes are the always-painted set, and the strip tests and
+    /// the completeness assertion all read the same written-out list.**
+    ///
+    /// This is the test that says the seven are *in the strip on purpose* rather
+    /// than excused to make two tests stop failing, which is the positive half
+    /// `.ai/NEVERAGAIN.md` demands of an assertion phrased over what is **not**
+    /// there: `strip_excused` names the bar and its buttons, and a list that excused
+    /// seven nodes which drew nothing would be a list covering nothing.
+    #[test]
+    fn the_bar_and_the_background_are_the_only_thing_in_the_strip() {
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+            let excused = strip_excused(&demo);
+            let bar = demo.tab_bar().handle();
+            assert!(
+                excused.contains(&bar),
+                "{page:?}: the bar is in the strip — it is the whole of what the \
+                 strip is for"
+            );
+            assert!(
+                !demo.commands_at(bar).is_empty(),
+                "{page:?}: and it records its background, so the exemption covers \
+                 something that draws"
+            );
+            for button in demo.tab_focusables() {
+                assert!(
+                    excused.contains(&button),
+                    "{page:?}: and so is each of its six buttons"
+                );
+                assert!(
+                    !demo.commands_at(button).is_empty(),
+                    "{page:?}: which records its own background and label, so the \
+                     exemption covers something that draws"
+                );
+                let rect = demo.node_rect(button).expect("a laid-out button");
+                assert!(
+                    rect.y < CONTENT_TOP,
+                    "{page:?}: and it really is *in* the strip at {rect:?}, which is \
+                     what makes excusing it a fact about the demo rather than a \
+                     blanket"
+                );
+            }
+            // **And nothing else is in there.** This is the half that keeps the
+            // seven from becoming a licence: every node that is *not* excused puts
+            // all of its ink below the strip, which the two strip tests assert over
+            // every command — and this says the set is exactly these.
+            let in_strip: Vec<Handle> = demo
+                .order
+                .iter()
+                .copied()
+                .filter(|handle| {
+                    demo.node_rect(*handle).is_some_and(|rect| {
+                        rect.width > 0.0 && rect.height > 0.0 && rect.y < CONTENT_TOP
+                    }) && !demo.commands_at(*handle).is_empty()
+                })
+                .collect();
+            assert_eq!(
+                in_strip,
+                excused,
+                "{page:?}: which is the background, the bar, its six buttons{}",
+                if page == Page::Overlays {
+                    " and the dialog's scrim"
+                } else {
+                    ""
+                }
+            );
+        }
+    }
+
+    /// **A tap over a bar button is not in the routed chain — which is the premise
+    /// [`Demo::route_input_event`]'s fallback guard rests on.**
+    ///
+    /// **The guard cannot be tested and this is its premise.** The review of this
+    /// task mutated `!event.consumed()` away and the suite stayed green, which is
+    /// not a weak test: it is what *"unreachable"* means seen from the other side.
+    /// Nothing is in the strip but the bar, so nothing in the tree can consume a
+    /// tap over a bar button, so the guard has no case to decide. **What a future
+    /// widget entering the strip would break is the premise, not the guard** — and
+    /// the premise is what this asserts.
+    ///
+    /// **The chain is read from `input::route` itself**, on the real laid-out tree,
+    /// and on every page: it is the same call [`Demo::route_input_event`] makes, so
+    /// a future widget that started answering taps in the strip would appear in the
+    /// chain here and this would say which page and which handle.
+    #[test]
+    fn a_tap_over_a_bar_button_is_not_in_the_routed_chain() {
+        for page in Page::ALL {
+            let demo = dialog_closed_on(page);
+            let buttons = demo.tab_focusables();
+            for (index, &handle) in buttons.iter().enumerate() {
+                let (x, y) = tab_center(&demo, Page::ALL[index]);
+                let chain = {
+                    let nodes = demo.nodes.borrow();
+                    input::route(
+                        &nodes,
+                        demo.root,
+                        &InputEvent::new(InputEventKind::Tap, Some(Offset::new(x, y))),
+                    )
+                };
+                assert!(
+                    !chain.contains(&handle),
+                    "{page:?}: the routed chain for a tap on the {} button is {chain:?} \
+                     and it contains the button itself — so `input::route` reaches it, \
+                     the fallback in `route_input_event` is dead code, and its \
+                     `!event.consumed()` guard has a case to decide after all",
+                    Page::ALL[index].name()
+                );
+                assert_eq!(
+                    chain.len(),
+                    2,
+                    "{page:?}: and the chain is the container plus the root, which is \
+                     what makes the fallback necessary: {} controls the point and \
+                     answers nothing",
+                    chain
+                        .first()
+                        .map_or_else(|| "a container".to_string(), |first| format!("{first:?}"))
+                );
+            }
+        }
+    }
+
+    /// **No page's own rectangle is in the strip**, which is the collision-test
+    /// coverage the bar's exemption costs.
+    ///
+    /// `no_two_placed_rects_overlap` cannot see the bar at all — it compares
+    /// `page_rects`, the bar is in `undrawn_leaf_exemptions`, and adding it to
+    /// `placed_handles` would fail against the card of pads on a shared edge. **So
+    /// the property that would otherwise be covered is asserted here instead**: every
+    /// rectangle the demo places is entirely at or below the strip, on all six
+    /// pages.
+    ///
+    /// **Not derived from the strip tests' own excuse list**, or it would be them
+    /// agreeing with themselves; it is asked of [`Demo::page_rects`], which is the
+    /// list the collision tests read.
+    #[test]
+    fn nothing_the_demo_places_reaches_into_the_strip() {
+        for (page, rects) in rects_by_page() {
+            assert!(
+                !rects.is_empty(),
+                "{page:?}: places at least one box, or this page is not being walked"
+            );
+            for (what, rect) in rects {
+                assert!(
+                    rect.y >= CONTENT_TOP,
+                    "{page:?}: the {what} at {rect:?} reaches into the tab bar's \
+                     {CONTENT_TOP} pixels"
+                );
+                assert!(
+                    inside(Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height), rect),
+                    "{page:?}: the {what} at {rect:?} is inside the window"
+                );
+            }
+        }
     }
 }

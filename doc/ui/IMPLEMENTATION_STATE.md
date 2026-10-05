@@ -8,19 +8,165 @@ and this file gets corrected.
 **Spec:** `doc/ui/PRIMITIVES.md`, `doc/ui/PRIMITIVES_ARCHITECTURE.md`, and
 `doc/ui/TASK_UI_PRIM_01..32.md`.
 
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-05
 
 ## Current position
 
-**Status: task 23 (Toast) implemented, reviewed three times, uncommitted —
-awaiting the operator's commit.** Task 22 is done, committed as `22356f6` on
+**Status: task 24 (Demo Application) is complete — all three sub-tasks
+implemented, reviewed through 5 + 4 + 3 rounds, and uncommitted. 24.1, 24.2 and
+24.3 sit in one tree at the operator's decision, and the operator's verdict on
+task 24 is the last gate.** Task 23 (Toast) is done, committed as `1fed4b6` on
+2026-10-04, in a commit whose message reads
+*`doc/ui/TASK_UI_PRIM_22.md done`*. Task 22 is done, committed as `22356f6` on
 2026-10-03; task 21 as `64d2b97`, task 20 as `79941cd`, task 19 as `b4a2db8`,
-tasks 15–18 as `d7240c8`, the frame-rate readout as `3ddf5fa`. Task 22's row said
-*reviewed, uncommitted* and a second, stray `pending` row sat under it; both were
-corrected before task 23 began, because this file may not contradict its artefact.
-**Task 24.1 is the next task to start** — see *Task table* for the split.
+tasks 15–18 as `d7240c8`, the frame-rate readout as `3ddf5fa`.
 
-**Task 23 (Toast) is done, reviewed three times and uncommitted.** Two types rather than
+**The suite went 1796 → 1839 across task 24** (1404 + 217 + 218), and
+`ui/src/ui_demo/src/main.rs` went **13 675 lines and 164 tests → 20 083 and
+207**, with **every one of the 164 pre-existing tests still present** — verified
+by parsing every `#[test]` body at `HEAD` and now.
+
+### The tab bar exists, and what it took to get there
+
+**`ui_demo` now opens on one of six pages, chosen by `--tab=<name>` or by
+clicking one of six buttons across the top of the window.** The bar is a
+`Container` in `LayoutMode::row()` holding six `Button`s, 44 tall at y 10, their
+widths measured through `Button::content_size` rather than guessed, the active
+page's button carrying the theme's active `background`/`foreground` pair and the
+other five the rest pair. **It puts back on screen the five things the demo's own
+module doc records as lost on 2026-10-01** — the press transition, the release
+transition, the hover tint, the focus ring and the click callback — and a
+**pressed** button was captured mid-transition, which the task file calls *"the
+one thing this task puts back that nothing else on screen demonstrates."*
+
+**Nothing moved.** 24.1 moved no pixel at all; 24.2 shifted the gallery down 64
+and made the band page-local, which is what made room; 24.3 filled the room.
+**Across all three, 0 of 108 existing `const` values changed** and the only two
+added are `Page::DEFAULT` and `NOT_TEXT`.
+
+### The finding that ran through all twelve review rounds
+
+**Twenty-one findings on 24.1, ten on 24.2, eleven on 24.3 — and the majors are
+one finding, four times over: a gate with no test.** Every one was found by
+mutation and **none by reading**. The instances, in order:
+
+| # | Sub-task | The gate | How it was found |
+|---|---|---|---|
+| 1 | 24.1 | `raise_toast`'s `page_members.push` — a raised card was page content by comment alone | deleting it: **0 failed / 1811** |
+| 2 | 24.1 | `show_page`'s `sync_page_visibility()` — requirement 5's *"refreshed on a switch"* | deleting it: **0 failed / 1813** |
+| 3 | 24.1 | **`Demo::new`'s page table had no completeness assertion at all** | one dropped row: **0 failed / 1814**, and the text column drawn on the wrong page |
+| 4 | 24.1 | `raise_toast`'s table row grew a lifecycle leak — the table was pruned nowhere | after `K`×4: **`page_members` 38 against `order` 37**, six rows naming dead handles |
+| 5 | 24.2 | `Demo::placed_handles` had no completeness assertion — the *same* finding on the table 24.2 introduced | one dropped row: **0 failed / 1817** |
+| 6 | 24.3 | `release_tab`'s `animate_to_state` — press and release on the button of the page **already on show** | `left: 0.95, right: 1.0`, a button stuck at the pressed scale |
+
+**Four of them would have become waived acceptance criteria**, because in each
+case a test named for the criterion existed, passed, and **could not see the
+defect**. Number 3 is the sharpest: the test computed
+`let always = !demo.is_page_content(*handle);` and asserted `own || always`, so
+**a node missing from the table is trivially "always-painted" and the assertion
+passes.** It could see a node on the wrong page and was *structurally unable* to
+see one that was not in the table at all.
+
+**The lesson is now the file's own, in three entries rather than one:** *a sweep
+of a mechanism's call sites is not a sweep of the data it is built from*, *a
+survivor is a missing assertion*, and — the one that generalises furthest —
+**the complement, not the members**: `assert_every_drawn_leaf_is_named_or_excused`
+was written because completeness assertions catch a row deleted and a row added
+and **cannot catch a widget that was never added**, which the three pads were.
+
+### Three premises that measurement refuted, and what each cost
+
+**This is the sequence's third appearance of the pattern — a task file
+describing a mechanism this pipeline does not have** — and each is now amended in
+place, dated, because a task file owns its requirements:
+
+1. **24.1's central trap: a stale page cannot survive a frame.** The task file
+   said `PaintState::new()` leaves *"the batch it already submitted … in the
+   frame"*. **There is no per-node command cache**: `begin_frame` clears the GL
+   buffer and `batcher.reset()`s, `draw_node_clipped` records only into this
+   frame's batcher. **So the two forms are equivalent on screen, and no capture
+   distinguishes them** — which is the opposite of what the file's Context and
+   *Deliberate break 2* required. The requirement's literal form was kept; the
+   deliberate break's survival is now evidence of *equivalence*, not a warning.
+2. **24.2's pads card: `set_position` on a `Stack` child is a no-op.** The write
+   compiled and the card stayed at `y: 0`. **The root became
+   `LayoutMode::Absolute`**, one token in `ui_demo`, which is behaviour-preserving
+   for its other three children because `arrange_stack` and `arrange_absolute`
+   differ in exactly one field — the origin — and an unpositioned child sits at
+   the parent's origin in both modes. **The alternative, an `Absolute` wrapper
+   node, would have needed a row in `page_members`**, which is failure mode 3
+   above.
+3. **24.3's requirement 4 named a call and a duration that are different
+   numbers.** `Motion::from_theme` reads `DurationFast` — **150 ms** — and
+   `THEME_TRANSITION` is **300 ms**. The call landed, pinned by an `assert_ne!`.
+
+### What the operator still has to decide
+
+**Six decisions, and none is a defect.** All are recorded in the task files with
+their reasons, and the first three are the ones a commit message should carry.
+
+1. **`fps-check.sh` cannot name a page.** It runs the binary with no `"$@"`, and
+   the demo reads only `ROADOS_RUN_SECONDS` and `ROADOS_ASSET_DIR` — so it can
+   only ever measure `pads`. **All six pages were measured by hand** with the
+   same report line parsed by field against the same floor of 55, and **the
+   criterion is explicitly not waived**. **Forwarding `"$@"` is owed** and is an
+   `.ai/` change no task may make.
+2. **Six weakened assertions from 24.1's migration**, of which **two are recorded
+   losses** in-file and four satisfy `NEVERAGAIN`'s own positive-half rule.
+   **Offered for acceptance, not waived.**
+3. **150 ms or 300 ms for the selection change.** 150 ms is what every widget in
+   the crate uses. **The consequence nobody has seen on screen** — `T` cannot be
+   injected here — is that **on a theme switch the bar's own `Surface` arrives
+   150 ms after its six buttons**, because the bar's background is a bound
+   property on the animating theme. **It is the one argument for the number.**
+4. **The 300 ms dialog fade window.** `dialog_is_modal()` is keyed on `visible`,
+   which `dismiss()` clears at once, so inside the fade a shortcut moves the page
+   and the scrim and the focus ring go in one frame. Cosmetic, one frame, and a
+   **6 start pages × {`D`,`K`} × 6 table rows × 3 timings sweep found no
+   reachable bad state.** Closing it is the operator's call with the tab bar now
+   designed.
+5. **A repeated `--tab=` silently discards an unknown name.** `--tab=nope` exits
+   1 and names all six; `--tab=pads --tab=nope` exits 1; and **`--tab=nope
+   --tab=pads` runs the demo**, because the rule is *last wins* and only the
+   winner is validated. **Against the parent's own stated reason for refusing
+   one** — *"a silently ignored argument is a test that passes against nothing."*
+6. **`the_plot_is_the_nodes_own_width_and_its_height_less_the_widgets_x_gutter`
+   and ten other geometry tests are byte-identical**, and that is the right
+   answer rather than a gap: a uniform shift cannot make a test that compares two
+   measured rects vacuous. **Seven of the twelve were read to establish it.**
+
+### What is NOT claimed
+
+- **Nothing about the 150-vs-300 ms divergence on `T`.** Structurally derived,
+  never seen: keyboard injection delivers one event in this project's history
+  and pointer injection none.
+- **Nothing about the pressed capture's reproducibility.** `press_29.png` and
+  `press_30.png` measure **3068 px of `srgb(49,49,49)` where the rest fill is
+  `(51,51,51)` and the arrived fill is `(42,42,42)`** — 2/9 = **22 %** of the way,
+  on the same node in the same gesture — but it needed a **temporary, reverted**
+  seed, because `magick import` is slower than a 150 ms transition and XTEST
+  delivered nothing (`XQueryPointer` reported the pointer unmoved with mask 0
+  against a held request). **`grep -c SEED24` is 0** and the tree was
+  md5-verified. **At a 161 ms sampling interval against a 150 ms window this
+  evidence class cannot be repeated** — which is why the shipped verification is
+  an assertion on the painted colour strictly between the two ends, and the
+  capture is the at-rest/pressed pair it can actually support.
+- **Nothing about `SURFACE_OPACITY`, or about task 23's findings** — see above.
+- **`cargo audit` has not run on this host** for the eighth task running.
+
+## A second amendment, 2026-10-04, and it is one page's contents.** The
+2026-10-03 amendment put the `Dialog` alone on `overlays` and gave the reason
+
+**Two rows of this file were wrong about task 23's commit and were corrected on
+2026-10-04**, before task 24.1 began: *Current position* and the task table both
+said *uncommitted* on a tree where `ui/src/ui_core/src/widgets/toast.rs` was
+tracked and clean, which `git ls-files` and `git show --stat 1fed4b6` settle.
+**The rule this file is written under is that it may not contradict its
+artefact**, and this is the second time in this sequence that a *uncommitted*
+claim outlived the commit it was waiting for — the earlier one was tasks 19 and
+20. It is recorded here because the pattern, not the two rows, is what recurs.
+
+**Task 23 (Toast) is done, reviewed three times and committed.** Two types rather than
 the one the task file names — a `Toast` and a `Toasts` host — and **one finding
 this sequence has not produced before**: the batcher cannot express a translucent
 surface with opaque content on it, and the arrival order the task file's own
@@ -59,13 +205,214 @@ one (7 fixed, 1 recorded as a dated follow-up), 4 in round two, 3 in round three
 every one of them closed, and not one of them a behaviour change.** See *Task 23 —
 what it decided*.
 
-**Task 24 was amended on 2026-10-03 and split into 24.1, 24.2 and 24.3; none of
-them is started.** It had been marked superseded since 2026-09-30. The gallery
+**Task 24 was amended on 2026-10-03 and split into 24.1, 24.2 and 24.3; 24.1 is
+implemented and the other two are not started.** The gallery
 is kept, grouped into six pages behind a tab bar at the **top** of the window,
 with `--tab=<name>` to land on a page without clicking. See § *Task table* for
 the split and the three measured facts behind it. **24.1 is next, and it is the
 one that makes the other two addressable** — it is what makes a page reachable
 without a pointer, which is this host's only capture route.
+
+## Task 24.1 — what it decided, and what it found
+
+**One operator decision before any code** — the `overlays` page carries the
+`Toasts` host as well as the `Dialog`, recorded in *Current position* and
+amended into `TASK_UI_PRIM_24.md` in place. Everything else below was the
+implementer's, and the two that shaped the task most are here.
+
+### The finding that made this five rounds: every major was a gate with no test
+
+**Four majors across four rounds, and they are one finding.** A mechanism is
+implemented, nothing holds it down, and the suite is green:
+
+| # | Round | The gate | How it was found |
+|---|---|---|---|
+| 1 | 1 | `raise_toast`'s `page_members.push` — a raised card was page content by comment alone | deleting it: **0 failed / 1811** |
+| 2 | 2 | `show_page`'s `sync_page_visibility()` — requirement 5's *"refreshed on a switch"* | deleting it: **0 failed / 1813** |
+| 3 | 3 | the paint gate's call site in `Demo::frame` | deleting it: **5 failed** (already covered) |
+| 4 | 3 | **`Demo::new`'s page table had no completeness assertion at all** | deleting one row: **0 failed / 1814**, and the text column drawn on the wrong page |
+
+**The fourth is the one that matters, and its mechanism is worth naming because
+it is reusable.** The test written for the acceptance criterion —
+*"a page records no draw command on a node that is not its own"* — computes
+`let always = !demo.is_page_content(*handle);` and asserts `own || always`.
+**A node missing from the table is trivially "always-painted", so the assertion
+passes.** It could see a node in the table on the wrong page; it was
+*structurally unable* to see one that is not in the table at all. The fix is a
+set difference against a **written-out** list of the always-painted nodes —
+deriving it from the table would make the assertion agree with whatever the
+table says, which is the whole thing it exists to catch.
+
+**The fix's list is five, and the reviewer's own sketch said four.** The fifth
+is **the toast host**: it is deliberately absent from `page_members` (a row for
+it would overwrite the `PaintState::new()` the frame walk gives it with a dirty
+empty state every frame) **and still a node in `order` that no gate sees.**
+Adding a row for it kills the assertion, which is how the fifth was pinned from
+both directions.
+
+**And the lesson, now in `NEVERAGAIN.md`:** *a sweep of a mechanism's call sites
+is not a sweep of the data it is built from.* The implementer's 34-mutation
+sweep tested every gate's call site and **never the table's construction** —
+the same class of gap one level up, and the sweep was the very thing that
+should have caught it.
+
+### A second gate with no test, found the same way, in the other direction
+
+`raise_toast` appends a `PageMember` and **nothing ever removed one**: two
+`push` sites, no `retain`. Measured after `K`×4 and 6 s — **`order = 37`,
+`page_members = 38`, 6 rows naming handles the arena had taken back.** Two
+consumers of one table disagreed about whether that was possible: the
+completeness assertion asserted `demo.order.contains(&member.handle)` as an
+**invariant** while `a_switch_refreshes_the_hit_test_gate` wrote
+`else { continue }` and **tolerated** a dead row. So the assertion's premise was
+false for any demo that had run a toast's countdown, and it passed only because
+its fixture was fresh — **the next person to run it over a live demo would have
+got a failure about the assertion's own premise, and "fixed" it by relaxing it.**
+
+Now pruned beside `order.retain(…)`, with the generation argument
+(`Arena::remove` bumps the slot's generation, `arena.get` compares it) making it
+impossible to drop a live row, and the `else { continue }` replaced by a
+`panic!` that names the invariant. **It also fixed a cost, not just
+correctness:** `empty_off_page_paint` scans the table for every node in `order`
+every frame, and `order` was already pruned while the table grew without bound,
+so the per-frame product grew with the number of presses ever made.
+
+### The task file's central trap had a premise that did not hold
+
+The task file's Context, its requirement 4 and its *Deliberate break 2* all rest
+on one claim: that `PaintState::new()` (non-dirty) leaves *"the batch it
+already submitted … in the frame"*, so **the old page stays on screen** while
+every test reading a recorded command still finds an empty one, and **the
+capture is therefore required**.
+
+**Measured from the source, 2026-10-04: there is no such mechanism.**
+`Renderer::begin_frame` (`render.rs:1843`) does `gl.clear(GL_COLOR_BUFFER_BIT)`
+**and** `self.batcher.reset()`; `Batcher::reset` (`batch.rs:257`) clears `open`
+and `sealed`; `draw_node_clipped` (`render.rs:1895`) returns early on a
+non-dirty node and otherwise `take_commands()`s into **this frame's** batcher;
+and `Renderer`'s field list holds **no per-node command cache**. A non-dirty
+node contributes nothing and nothing stale survives the clear, so the two forms
+are equivalent **on screen** as well as in every assertion — `commands` is empty
+either way, and `commands_at` reads `commands()`, not `take_commands()`.
+**No capture distinguishes them.** The deliberate break survives, which is now
+evidence of *equivalence* rather than a warning about a latent defect.
+
+**Requirement 4's literal form was kept**, and the choice is the operator's; what
+would close the difference is a renderer caching commands per node between
+frames, which is a `ui_core` change and out of scope. **`TASK_UI_PRIM_24.1.md`
+is amended in place, dated, with the four facts** — a task file owns its
+requirements, and this one shipped a rationale that measurement refuted.
+
+### The decisions the implementer made that the spec left open
+
+- **The dialog is presented at construction only on `overlays`.** Taken literally,
+  `ui_demo` with no argument would open with a **modal that is invisible on the
+  page showing it** — every tap and key swallowed by a scrim nobody can see, and
+  all eighteen shortcuts failing. `D` brings its page with it, and so does `K`.
+- **`K` activates `overlays` in its own arm**, because it is deliberately not a
+  row of `GALLERY_SHORTCUTS` — so requirement 6's *"a shortcut activates its own
+  page, then acts"* reaches the eighteen table rows through the table's page
+  field and reaches `K` through the arm.
+- **`GALLERY_SHORTCUTS`' page field is `Option<Page>`**, `None` on `T` alone: `T`
+  has no widget, so a page would make it jump pages.
+- **The paint gate is one pass over `order`**, not a guard in each of a dozen
+  arms, so a future widget cannot forget it. The cost is that off-page widgets
+  are painted and then emptied — which is why all six pages measure the same
+  frame rate rather than a faster one.
+- **`show_page` retires focus conditionally**, on `on_show`, not unconditionally:
+  unconditional would drop the ring inside a modal when `K` switches *to* the
+  dialog's own page. **The refinement is currently unobservable** — the two forms
+  agree on every reachable state — and that is recorded rather than claimed as
+  behaviour.
+- **Geometry tests were not migrated.** They read rects, which this task
+  guarantees do not move, so they are page-independent by construction.
+
+### What was measured, and how
+
+- `cargo fmt --check`, `cargo build --all-targets --all-features`,
+  `cargo clippy --all-targets --all-features -- -D warnings` and `cargo doc
+  --no-deps` clean, re-run by the reviewer independently at every round.
+  **`cargo test --all-features`: 1404 + 193 + 218 = 1815**, from **1796** at task
+  23's end. **`cargo audit` is not installed** on this host, for the fifth task
+  running.
+- **The suite grew from 164 to 183 `#[test]` in `main.rs`, and all 164
+  pre-existing ones are still present** — 0 removed, 19 added. Verified by
+  parsing every `#[test]` body at `HEAD` and now, name by name. **119 of the 164
+  changed**, of which **100 are pure fixture-call rewrites** and **19 changed by
+  more than a fixture line**; that 19 is the list the acceptance criterion asks
+  for, and **every other reviewer who recomputed it got the same 19**.
+- **No rect moved, verified two ways**: the diff adds exactly two constants
+  (`Page::DEFAULT`, `NOT_TEXT`) and changes **0 of 108** existing ones, and
+  `every_page_places_every_rect_where_the_gallery_placed_it` compares all six
+  pages against the gallery.
+- **Frame rate**, release, `fps-check.sh`, floor 55: **61.3, 62.7, 62.8, 62.4,
+  62.1, 61.6 and 61.7 fps** across five rounds on the default page. Per page, 8–10 s
+  each: `pads` 61.8–63.5, `text` 62.4–62.9, `input` 62.5–63.4, `controls`
+  62.6–63.3, `data` 62.2–62.6, `overlays` 61.1–61.9. **Every page is inside the
+  recorded band and above the floor, and no page is separated from any other.**
+- **Captures of all six pages**, no seed and no instrument, window id re-read and
+  `pgrep -a -x ui_demo` in the same call as each `magick import`. Two captures
+  differed from their predecessor only inside the fps readout's own band — 405
+  pixels, and **AE 0 over y 80–680** — which is what a no-change looks like for
+  the rest of the window.
+- **Six entries were added to `.ai/NEVERAGAIN.md`,** three of them about the
+  mutation harness rather than the product.
+
+### The two decisions that are the operator's
+
+1. **How many weakened assertions are being accepted: six, of which two are
+   recorded losses.** `a_pointer_press_behind_the_scrim_operates_nothing` can no
+   longer tell the modal guard from the page gate — **verified by compound
+   mutation**: the guard alone survives, the page guards alone are killed by a
+   different test, all four together kill it. It *gained* a positive observable,
+   so it is stronger on modality and weaker on attribution.
+   `a_tap_inside_a_drawn_toast_reaches_the_control_under_it` lost its positive
+   half outright, and **structurally**: a toast is on `overlays`, the keyboard on
+   `input`, and `hit_test` honours `set_visible`, so no demo can have a card over
+   a routed control. **Four more tests** moved the same way and are not recorded
+   as losses — each gained the positive half `NEVERAGAIN`'s own rule demands,
+   and two of them also assert the press *reached* the dialog. **The count is
+   checkable from the code and it is six, not two.**
+2. **A repeated `--tab=` silently discards an unknown name.** `--tab=nope` exits
+   1 and names all six pages; `--tab=pads --tab=nope` exits 1; and
+   **`--tab=nope --tab=pads` runs the demo**, because the parser's documented
+   rule is *last wins* and only the winner is validated. **No review round found
+   this** — it was measured by the orchestrator before round 1 and re-measured
+   after round 5. It sits against the parent's stated reason for refusing an
+   unknown name at all: *"a silently ignored argument is a test that passes
+   against nothing."* **Left as it is, because the acceptance criterion is met
+   for the single-argument case and changing the parser is a behaviour change
+   the task file does not ask for.**
+
+### What is NOT claimed
+
+- **Nothing about `from_commands(Vec::new())` versus `PaintState::new()` on
+  screen.** Nothing distinguishes them, and the capture is not evidence about it.
+- **Nothing about the 24.3 modal hazard as a reachable state.** A sweep over 6
+  start pages × {`D`,`K`} × 6 table rows × 3 timings found **no** page on show
+  with a dialog it does not show. What remains is a **300 ms window** after
+  `dismiss()`, where `visible` is false and the panel is still drawn; it is
+  cosmetic, one frame, and `show_page`'s doc carries it.
+- **Nothing about the four prose corrections the last round returned.** They are
+  unfixed and none is a gate: two are bookkeeping about how many places the
+  always-painted set is written out, one is three unreconcilable counts in a
+  `NEVERAGAIN` entry, and one is *"the toast host"* where the code means *its
+  cards*.
+- **Nothing about key or pointer injection.** None was attempted; every shortcut
+  and modality claim is covered through `Demo::handle_event` in tests, which is
+  what the parent's third Context fact prescribes.
+
+## A second amendment, 2026-10-04, and it is one page's contents.** The
+2026-10-03 amendment put the `Dialog` alone on `overlays` and gave the reason
+that **`toast` is task 23 and is not written**. Task 23 landed as `1fed4b6`, so
+the reason is gone, and the **operator's decision is that `overlays` carries the
+`Toasts` host as well.** `TASK_UI_PRIM_24.md` is amended in place with the
+decision dated, because a task file owns its requirements and a stale one sends
+the next reader to a page that does not exist. **The toast's key `K` is
+deliberately not a row of `GALLERY_SHORTCUTS`** — `handle_event`'s own comment
+says so and gives the reason — so requirement 6's *"a shortcut activates its own
+page, then acts"* reaches it as a consequence of this decision rather than
+through the table, and the implementer needs to know that.
 
 **Task 22 was the largest task in this sequence by a wide margin, and it is
 mostly not a widget.** Four **sequential** sub-tasks under
@@ -3856,11 +4203,11 @@ verified. A blank cell is unknown, not "none".
 | 20 | Widget — Gauge | done | `79941cd` | **none — committed without review** | **Requirement 5's anti-aliasing half was NOT met at the time and was not waived** — the renderer had no SDF for curves and no MSAA; the widget's module doc said so and the hard edges were seen in a capture. **That is no longer true**: 4x MSAA landed with task 21 and the gauge's doc has been superseded in place. **AC 3's "needle as a triangle"** required a new filled `Polygon` draw command, which the operator approved. The needle's spring is asserted by tests, not seen mid-flight. ACs 1, 2, 4 and 5 are capture-verified and unit-tested — see *Task 20 — what it decided* |
 | 21 | Widget — Chart | done | `64d2b97` | **2 passes**, both in a session separate from the author's. Round 1: *approve with required changes*, 1 blocker + 6 minors, all 7 fixed. Round 2: *approve with required changes*, blocker **closed and verified by mutation**, **5 minors waived 2026-10-02 with recorded reasons** — not "fixed"; see *The two review rounds* | **AC 5 is covered by tests through the demo's real event path, not by a capture** — keyboard injection does not reach the window on this host (the positive control `T` moved 212 px) and pointer injection never did. ACs 1, 2, 3, 4 and 6 are capture-verified **and measured**, the bar and area ones through two reverted temporary releases. `y_labels` are empty by design, so AC 4's labels are proved by the x labels and the two axes. **No acceptance criterion is waived**; the 5 waived findings are review findings, not criteria — two stale citations, one coverage claim, one omission and one run count, none of which can change a pixel. See *Task 21 — what it decided* |
 | 22 | Widget — Dialog | done | `22356f6` | **1 pass**, in a session separate from all four subagents and from the integration. *Approve with required changes*: **3 majors + 3 minors, all six fixed**, plus 5 disagreements of which 2 corrected this file. The reviewer **reproduced the author side's pixel measurements independently** (panel, both button rects, three colours at exactly half, 693 vs 541 ink, 711/0 differing, 11 px ramp, 61.8 fps) and **independently reproduced the surviving mutation**. See *The one review round* | **Four ACs are capture-verified and measured** (1, 2, 6, 7) — AC 7 by a capture that **needed no seed and no instrument**, the only one in this task. **ACs 3, 4 and 5 are covered by tests through the demo's own event path, not by a capture**: the action buttons, the dismissal, Escape and modality all need a key or a pointer, and injection does not reach the window on this host. **Requirement 5's "content behind dialog is not re-rendered" is DEVIATED, not met** — the operator decided it should be read as the paint cache, and the sentence this file first offered as evidence was **false** and is corrected above. **Requirements 2 and 5 needed pipeline work first** — a second FreeType face and an FBO blur — both operator decisions. **No acceptance criterion is waived; one is deviated with the reason recorded** |
-| 23 | Widget — Toast | **done, uncommitted, changes requested and fixed three times; widget settled** | — | **3 passes**, all in sessions separate from the author's, **15 findings in total and no blocker or major in any of them**. **Round 1: *Approve with required changes* — 8 findings, 7 fixed and 1 recorded as a dated follow-up in `paint.rs`'s scope rather than fixed.** The reviewer **re-derived the paint-order override from `batch.rs` and `render.rs`**, confirmed the submission test has teeth independently by mutating only the disc's alpha, and verified two of the author's own mutations rather than reading them. **Round 2: *Approve with required changes* — 4 findings: three of them this record's own arithmetic failing to reconcile with the logs behind it, and one a false claim in `toast.rs` about `List`'s three reclaims.** **Round 3: *Approve with required changes* — 3 findings: two here (a false account of two mutation runs' call sites, and four status sentences that misdescribed the rounds) and one a missing `.ai/NEVERAGAIN.md` entry, now written.** **Every round was closed with prose: no behaviour change, no new test, no signature change, and the count unmoved at 1796 throughout.** See *Task 23 — what it decided* | **AC 3's fade and slide are unit-tested and sampled on screen through a reverted temporary seed**, because `magick import` is slower than the 150 ms transition it photographs; **AC 4 (does not block input) is proved structurally plus by a real press through `Demo::handle_event`**, not by a capture; **AC 6 (the demo shows a toast) is capture-verified and needed no seed and no instrument** — the two toasts are raised in `Demo::new`, as the dialog is presented there. **No acceptance criterion is waived.** One requirement is **met by arrangement the task file does not describe**: requirement 2's translucent surface with opaque content on it is not expressible in this pipeline as the task file's order would have it — see *Task 23 — what it decided* |
-| 24 | Demo Application | **amended 2026-10-03, split into 24.1–24.3, none started** | — | — | — |
-| 24.1 | `Page`, `--tab=`, and the three gates | pending | | | |
-| 24.2 | `CONTENT_TOP`, and the band goes page-local | pending | | | |
-| 24.3 | The tab bar | pending | | | |
+| 23 | Widget — Toast | done | `1fed4b6` | **3 passes**, all in sessions separate from the author's, **15 findings in total and no blocker or major in any of them**. **Round 1: *Approve with required changes* — 8 findings, 7 fixed and 1 recorded as a dated follow-up in `paint.rs`'s scope rather than fixed.** The reviewer **re-derived the paint-order override from `batch.rs` and `render.rs`**, confirmed the submission test has teeth independently by mutating only the disc's alpha, and verified two of the author's own mutations rather than reading them. **Round 2: *Approve with required changes* — 4 findings: three of them this record's own arithmetic failing to reconcile with the logs behind it, and one a false claim in `toast.rs` about `List`'s three reclaims.** **Round 3: *Approve with required changes* — 3 findings: two here (a false account of two mutation runs' call sites, and four status sentences that misdescribed the rounds) and one a missing `.ai/NEVERAGAIN.md` entry, now written.** **Every round was closed with prose: no behaviour change, no new test, no signature change, and the count unmoved at 1796 throughout.** See *Task 23 — what it decided* | **AC 3's fade and slide are unit-tested and sampled on screen through a reverted temporary seed**, because `magick import` is slower than the 150 ms transition it photographs; **AC 4 (does not block input) is proved structurally plus by a real press through `Demo::handle_event`**, not by a capture; **AC 6 (the demo shows a toast) is capture-verified and needed no seed and no instrument** — the two toasts are raised in `Demo::new`, as the dialog is presented there. **No acceptance criterion is waived.** One requirement is **met by arrangement the task file does not describe**: requirement 2's translucent surface with opaque content on it is not expressible in this pipeline as the task file's order would have it — see *Task 23 — what it decided* |
+| 24 | Demo Application | **COMPLETE — amended 2026-10-03, 2026-10-04 and 2026-10-05, split into 24.1–24.3; all three implemented, reviewed and uncommitted in one tree, awaiting the operator's verdict** | — | **12 rounds** | **Six decisions for the operator, none a defect** — see *Current position* |
+| 24.1 | `Page`, `--tab=`, and the three gates | **done, reviewed five rounds, uncommitted** | — | **5 passes**, each in a session separate from the author's and from each other. **21 findings: 4 majors + 7 minors, 1 + 5, 1 + 6, 0 majors + 3 minors, then approve.** **All four majors were one finding — a gate with no test — and every one was found by mutation, none by reading**: `raise_toast`'s table row (0 failed / 1811), `show_page`'s `sync_page_visibility` (0 failed / 1813), and **`Demo::new`'s page table having no completeness assertion at all** (one dropped row → 0 failed / 1814 and the text column on the wrong page). **Five rounds because each round's sweep found the next one; the lesson is now `NEVERAGAIN`'s**: *a sweep of a mechanism's call sites is not a sweep of the data it is built from.* Round 5 returned **approve, no blocker and no major**. See *Task 24.1 — what it decided* | **11 of 12 criteria met.** **AC 12 (*"green with no assertion weakened"*) is NOT met and is offered for the operator's acceptance rather than waived: six tests moved, two recorded as losses in-file and four satisfying `NEVERAGAIN`'s positive-half rule.** **The task file's central trap had a premise that did not hold** — there is no per-node command cache, so `PaintState::new()` cannot leave a stale page on screen and **no capture distinguishes the two forms**; `TASK_UI_PRIM_24.1.md` is amended in place with the four source facts. **AC 4's *"empty, not stale"* survives as a test about the recorded vector, not about the dirty flag.** *"Every test the migration touched is listed by name"* is met under the rule the file states (19 named of 119 touched, 100 mechanical) — a reviewer's ~151 could not be reproduced by any method tried. **No criterion rests on a waiver.** One edge case is left as-is and recorded: **a repeated `--tab=` silently discards an unknown name** |
+| 24.2 | `CONTENT_TOP`, and the band goes page-local | **done, reviewed four rounds, uncommitted** | — | **4 passes**: 2 majors + 8 minors, 0 + 9, 0 + 1, approve. **The major was 24.1's round-3 finding reproduced on `placed_handles`**, the table this change introduced — 0 failed / 1817 with a row dropped, and the reviewer's compound (a fattened progress bar *plus* the deleted row) green across all 1817. Round 3 also found the round-1 fix had landed in a failure message and **not in the doc that said the same thing the other way.** | **Two assertions retired**, one *withdrawn outright* (the gallery/band bound is false per-page) and one *replaced* (`inside(window, chart)` plus the `Data` neighbour loop), both recorded in the file with the arithmetic. **AC 6 amended**: `fps-check.sh` cannot select a page, so the six pages were measured by `ROADOS_RUN_SECONDS=<n> … --tab=<page>` — **not waived**. The root became `LayoutMode::Absolute` because `set_position` on a `Stack` child is a no-op |
+| 24.3 | The tab bar | **done, reviewed three rounds, uncommitted** | — | **3 passes**: 1 major + 7 minors, 0 + 6, **approve**. The major was `release_tab`'s `animate_to_state` held down by nothing on the ordinary gesture — press and release the button of the page **already on show** leaves `show_page` early-returning, measured `left: 0.95, right: 1.0`, a button stuck at the pressed scale with 1836 green. Round 2's six minors were prose, and its reviewer **found the orchestrator's own amendment asserting a false mechanism about `ui_core`** — "at most one `InputEvent` per SDL event", refuted by a four-line probe | **All twelve criteria met.** AC 11 (a pressed button mid-transition) needed a **temporary, reverted seed** — XTEST delivered nothing — and the arithmetic was corrected from a false 96 % to a measured **22 %**. **Requirement 4's call and duration are different numbers**: `Motion::from_theme` is 150 ms, not `THEME_TRANSITION`'s 300, pinned with an `assert_ne!`, and **on `T` the bar and its buttons arrive 150 ms apart, which nobody has seen.** Deliberate break 2 is **not expressible** (`Callback` is `Fn`) |
 | — | Tesla-like demo application | pending | | | see `doc/ui/DEMO_APPLICATION.md` |
 
 **Task 24 was superseded on 2026-09-30 and un-superseded on 2026-10-03.** The
@@ -4175,6 +4522,58 @@ operator's rule, none of these is treated as satisfied.
   `.ai/NEVERAGAIN.md` gained **three entries**: a filtered mutation run, a cache
   invalidated in the wrong order, and `open(path, "w")` truncating before its
   argument is evaluated.
+- 2026-10-05 — **task 24 (Demo Application) COMPLETE — all three sub-tasks
+  implemented, reviewed through 5 + 4 + 3 rounds, uncommitted in one tree.**
+  **The tab bar exists**: six buttons across the top, 44 tall at y 10, widths
+  measured through `Button::content_size`, the active page carrying the theme's
+  active pair — and **it puts back the press transition, the release transition,
+  the hover tint, the focus ring and the click callback**, all five of which the
+  demo's module doc records as lost on 2026-10-01. **Suite 1796 → 1839**;
+  `main.rs` 13 675 lines / 164 tests → **20 083 / 207**, every pre-existing test
+  still present.
+  **Twelve rounds, 42 findings, and the majors are one finding four times over:
+  a gate with no test, every one found by mutation and none by reading.** Four
+  would have become **waived acceptance criteria**, because in each case a test
+  named for the criterion existed, passed, and could not see the defect — the
+  sharpest being a page table whose own criterion test computed
+  `always = !is_page_content(handle)`, so **a node missing from the table read as
+  trivially "always-painted" and the assertion passed.**
+  **Three task-file premises were refuted by measurement and each is now amended
+  in place, dated**: a stale page cannot survive a frame (**no per-node command
+  cache**, so no capture distinguishes the two paint states); `set_position` on a
+  `Stack` child is a no-op (**the root became `Absolute`**); and requirement 4
+  named a call and a duration that are different numbers (**150 ms, not 300**).
+  **Six decisions are the operator's and none is a defect** — `fps-check.sh`
+  cannot name a page and never could; **six weakened assertions** from 24.1's
+  migration, offered for acceptance not waived; **150 vs 300 ms**, whose
+  consequence on `T` nobody has seen; the **300 ms dialog fade** window; a
+  **repeated `--tab=` silently discarding an unknown name**, against the parent's
+  own reason for refusing one; and the commit itself. See *Current position*.
+- 2026-10-04 — **task 24.1 (`Page`, `--tab=`, the three gates) implemented,
+  reviewed five rounds, uncommitted.** One operator decision before any code:
+  **the `overlays` page carries the `Toasts` host as well as the `Dialog`**,
+  because the 2026-10-03 amendment had excluded the toast only because it did not
+  exist. **`164 → 183` tests in `main.rs`, all 164 pre-existing ones still
+  present**, and the suite at **1815**.
+  **Five rounds and 21 findings, and the reason is the finding rather than the
+  churn: all four majors were a gate with no test, and every one was found by
+  mutation and none by reading.** The last is the one that would have become a
+  waiver — **the test written for the acceptance criterion computes
+  `always = !is_page_content(handle)`, so a node missing from the page table is
+  trivially "always-painted" and the assertion passes.** One dropped row put the
+  whole text column on the `pads` page with **0 failures across 1814 tests**.
+  **The task file's central trap had a premise that did not hold**: there is no
+  per-node command cache, so `PaintState::new()` cannot leave a stale page on
+  screen, the deliberate break's survival is evidence of *equivalence* rather
+  than a latent defect, and **no capture distinguishes the two forms** —
+  `TASK_UI_PRIM_24.1.md` is amended in place with the four source facts.
+  **Six tests lost ground, two recorded as losses and four satisfying the
+  file's own positive-half rule; AC 12 is offered for the operator's acceptance,
+  not waived.** A repeated `--tab=` silently discarding an unknown name is
+  recorded and left alone. **Six `NEVERAGAIN.md` entries**, three of them about
+  the mutation harness rather than the product — including one written after the
+  orchestrator's own instruction to snapshot at the start of a round made the
+  harness restore the pre-edit state and delete the round's work.
 - 2026-10-04 — **task 23 (Toast) implemented, reviewed three times, uncommitted.**
   Two types rather than the one the task file names — `Toast` and a `Toasts`
   host — because requirement 2's placement has nowhere to live on a bare widget.

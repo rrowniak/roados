@@ -18,12 +18,22 @@ withdrawn for the widget gallery.** `doc/ui/DEMO_APPLICATION.md` § *Relationshi
 to task 24* recorded this task as *"superseded … will not be started in its
 current form"*, and the reasoning was sound: a widget gallery is not a demo
 application. **What changed is that the gallery is what tasks 11–22 have been
-building, widget by widget, and it is finished rather than replaced.** (Task 23,
-Toast, is not written — see requirement 1.) The
+building, widget by widget, and it is finished rather than replaced.** The
 Tesla direction is untouched and stays in `DEMO_APPLICATION.md`; the operator's
 decision of the same date is that the Tesla application will eventually be
 **one more tab** rather than a replacement for this, and that question is not
 settled here.
+
+**Amended 2026-10-04 by the operator: the `overlays` page is the `Dialog`
+*and* the `Toast`.** Task 23 landed as `1fed4b6`, so this file's three
+sentences saying `toast` *"is not written"* — in this Context, in requirement 1
+and in *Out of scope* — are **void, and are superseded here rather than left to
+be found false**. The operator's reason is that the amendment above excluded the
+toast **only because it did not exist**, and that reason is gone. **The other
+two absences in requirement 1 stand**, and each for the same kind of reason —
+the widget the screen needs is one the crate cannot build yet: *Home screen*
+needs an app-launcher grid and `LayoutMode::Grid` lays out no
+children, and *Navigation screen* needs a `List` the demo no longer has.
 
 **What this amendment replaces, so the original can still be audited:**
 
@@ -112,20 +122,19 @@ than positions.
    | `input` | `TextInput`, the on-screen `Keyboard`, the text and submit readouts |
    | `controls` | `Slider`, `Toggle`, `Progress` and their three readouts |
    | `data` | `Gauge`, `Chart`, `Image` and their three readouts |
-   | `overlays` | the `Dialog` |
+   | `overlays` | the `Dialog` and the `Toast` host — amended 2026-10-04, see the Context |
 
-   **Three of the original seven screens are not in this list, and each is
+   **Two of the original seven screens are not in this list, and each is
    absent because it cannot be built yet rather than because it was dropped.**
    *Home screen* needs an app-launcher grid and **`LayoutMode::Grid` lays out no
    children** (the `LayoutMode::Grid` arm of `Layout::arrange` returns `Vec::new()`);
    *Navigation screen* needs a `List`, which the demo no longer has
-   (removed 2026-10-02); *Overlays* keeps the dialog but loses the toast,
-   because **`toast` is task 23 and is not written**
-   (the `pub mod` list in `ui/src/ui_core/src/widgets/mod.rs` holds fourteen
-   modules, and toast is not among them). *Theme switcher* is not a page
-   because the theme is global: `T` reaches every colour in the demo through
-   the property graph, so a page holding only the theme switcher would be a
-   page holding nothing that is not everywhere.
+   (removed 2026-10-02). *Overlays* **loses the toast no longer** — it was
+   written for this table's sake on 2026-10-04; the 2026-10-03 text that said
+   otherwise is superseded in the Context and named there. *Theme switcher* is
+   not a page because the theme is global: `T` reaches every colour in the demo
+   through the property graph, so a page holding only the theme switcher would be
+   a page holding nothing that is not everywhere.
 
 2. **A tab bar at the top**, and **no bottom navigation bar**. Built from a
    `Container` in `LayoutMode::row()` holding one `Button` per page — which is
@@ -147,6 +156,16 @@ than positions.
      theme's active pair, and `animate_to_state(Motion::from_theme(&theme))`
      carries the change over `THEME_TRANSITION`, the same 300 ms a theme switch
      uses. `Button` has no `selected` property (see Context).
+
+     **Amended 2026-10-04: the call and the duration in that sentence are
+     different numbers, and 24.3 uses the call — 150 ms, not 300.**
+     `Motion::from_theme` reads `DurationFast`; `THEME_TRANSITION` is the demo's
+     *theme-token* duration. 150 ms is what every widget in the crate animates
+     over. **The consequence is that on `T` the bar and its buttons arrive 150 ms
+     apart** — the bar's own `Surface` is a bound property on the animating theme
+     and moves over 300 ms, the buttons reach their colours at 150 — and **nobody
+     has seen that on screen**, because `T` cannot be injected on this host. See
+     `TASK_UI_PRIM_24.3.md` requirement 4's amendment.
 
 3. **`--tab=<name>` lands on a page without a click.** The one spelling is
    `--tab=`, because it selects a **page** and `--widget=` would imply one
@@ -255,8 +274,9 @@ than positions.
 - **Restructuring the shortcuts.** The table stays as it is; requirement 6 adds
   a field to a row.
 - **Migrating `ROADOS_RUN_SECONDS` and `ROADOS_ASSET_DIR` to arguments.**
-- **Widgets the crate does not have**: `toast` (task 23), a `List` back on
-  screen, an app-launcher grid, drag-to-dismiss, horizontal scrolling.
+- **Widgets the crate does not have**: a `List` back on screen, an app-launcher
+  grid, drag-to-dismiss, horizontal scrolling. **`toast` is no longer on this
+  list** — it landed with task 23 and the `overlays` page carries it.
 
 ## Sub-tasks
 

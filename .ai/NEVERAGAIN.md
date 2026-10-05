@@ -600,6 +600,31 @@ circles have no notch" is one line of arithmetic; check it rather than reason
 about it. **And measure a rendered thing in pixels before its doc comment says it
 is smooth** — the doc is the claim, and the capture is the evidence.
 
+**Second mechanism, 2026-10-05: the false belief is a recollection of the design
+rather than an inherited brief, and it lands in a prose paragraph nobody re-checks.**
+Task 24.3's `press_pads_if_unfocused` was given a doc paragraph recording a
+shortcut interaction — which page wins, whether the pads press, where the page is
+drained — and **all four factual claims in it were wrong while every one read
+plausibly**: the row's page does not win, the pads do not press, the property is
+written once, and the drain is in `handle_event` rather than `frame`. They were
+wrong because the paragraph was written from memory of the design instead of from
+the three sites in execution order, and the reviewer's own test contradicted the
+comment two thousand lines away. **`cargo test` was green throughout**, because
+`ui_demo` has no doctests, `cargo doc --no-deps` cannot see inside
+`#[cfg(test)]`, and clippy and rustfmt parse these lines without reading them —
+**so for a prose claim about behaviour, the test count is not evidence at all.**
+A plausible comment is worse than a missing one, because it removes the reader's
+reason to check. **The worked artefact is the corrected paragraph itself, at
+`ui/src/ui_demo/src/main.rs:7433`-`7478`: a numbered list of the interaction's
+sites in execution order — the key `match`, the routing loop, the drain — each step
+naming the call and citing the test that reads the outcome, and the paragraph
+saying which of its earlier claims were wrong.** That is a form better than a rule
+sentence, because a reviewer can check each step against the line it names. So:
+when a doc comment describes an interaction,
+sequence the interaction's sites in execution order and cite each one by line, and
+when the claims are behavioural, say in the handoff that the test suite does not
+cover them.
+
 ## 2026-10-02 — A debug build reads as a performance regression
 
 The operator reported *"some performance degradation, sometimes the fps drops to
@@ -922,3 +947,335 @@ not overwrite. And **a reported total is only reportable if every part of it is
 re-derivable from a file that still exists** — where one is not, the honest output is
 the per-run evidence plus the gap, which is what
 `doc/ui/IMPLEMENTATION_STATE.md` § *What was measured and how* now does.
+
+## 2026-10-04 — Hiding a widget makes every test that crosses the boundary vacuous
+
+Task 24.1 gave `ui_demo` pages, and the migration moved 119 of its 164 tests. Nineteen
+of those changed by more than a fixture line, and the split is **6 + 5 + 2 + 6 = 19**:
+
+- **six** were the `GALLERY_SHORTCUTS` tuple gaining a page field, so a destructuring
+  pattern's arity changed and nothing else:
+  `no_printable_key_acts_without_a_row_in_the_shortcut_table`,
+  `the_gallery_shortcut_list_holds_every_key_the_table_has`,
+  `a_gallery_shortcut_acts_again_once_the_dialog_is_closed`,
+  `a_gallery_shortcut_does_nothing_while_the_dialog_is_showing`,
+  `a_toast_is_raised_by_its_own_key_in_both_states`,
+  `the_two_plus_keys_are_both_rows_and_do_the_same_thing`;
+- **five** were focus walks that lost their one five-stop order, because the five
+  focusables now sit on three pages and no page has all of them:
+  `tab_walks_every_focusable_control_in_order_and_wraps` and
+  `shift_tab_walks_the_same_order_backwards` (both rewritten to walk every page's own
+  written-out order), `the_two_widgets_with_no_focus_state_say_where_focus_is`
+  (one demo per widget's page), `a_key_switches_the_toggle_once_it_holds_focus` (its
+  `Tab` count 3 → 2, now `controls`' second stop), and
+  `the_dialog_replaces_the_tab_order_while_it_is_showing` (its "closed, the background
+  controls are back" half moved to `controls`);
+- **two** were not focus walks at all: `the_gauge_is_not_in_the_focus_order` and
+  `the_chart_is_not_in_the_focus_order` each changed **two lines** — the fixture's
+  page and one extra argument to a helper that already existed — and were moved to
+  `controls` because a page with three focusables gives a longer lap for "never lands
+  on it" than `data`'s one;
+- **six** were tests of a **relationship between two things on different pages**, and
+  those are the subset that went *weak*:
+  `a_pointer_press_behind_the_scrim_operates_nothing`,
+  `a_tap_outside_the_panel_does_not_reach_the_gallery_behind_it`,
+  `a_tap_on_a_key_behind_the_scrim_inserts_nothing`,
+  `a_tap_inside_a_drawn_toast_reaches_the_control_under_it`,
+  `the_demo_never_offers_an_event_outside_the_dialog_while_it_is_showing`,
+  `the_demo_has_the_widgets_the_later_tasks_added`.
+
+**An earlier version of this entry said "nine", and it was the one number that could
+not be reconciled with anything**: nineteen changed by more than a fixture line,
+**thirteen** of them for reasons with nothing to do with pages, and **six** of them
+because pages changed what they were testing. Carrying 19, 13 and 9 for one thing is
+how the error survived a whole review round — the next reader went looking for nine,
+found nineteen, and had no way to tell which set the nine was meant to be.
+
+**Why the last six went weak**, and this is the part the rule below is about. The
+paint gate, the `set_visible` gate and the page guards all answer "nothing
+happened" for a cross-page relationship, so those assertions went on passing — **for a
+second reason that has nothing to do with what they were written to check.** `a_tap_inside_a_drawn_toast_
+reaches_the_control_under_it` could not be repaired at all: a toast is on `overlays` and
+the keyboard is on `input`, so there is no demo in which a card covers a routed control.
+
+The trap is that the suite was *green* throughout, so there is no failure to notice.
+What exposed it was counting rather than running: grouping the tests by subject showed
+three dozen whose subject was off the default page while their fixture named it, and
+each of those needed reading, not running.
+
+**Rule:** when a change makes part of the tree unreachable, **every test whose subject
+crosses that boundary has to be re-read, and one that cannot be expressed any more has
+to be replaced rather than kept.** A test that asserts "nothing happened" needs a
+**positive** half on the far side of the boundary — the same gesture succeeding with the
+boundary elsewhere, or the whole chain compared with and without the hidden thing — or
+an assertion about the mechanism that is page-independent (a modal *dismissing* proves it
+was reached; a press that did nothing does not). And **say which assertions were
+weakened in the hand-over**, because "the suite is green" is exactly what a batch of
+quietly vacuous tests looks like.
+
+## 2026-10-04 — A build that reports `Finished in 0.0xs` did not rebuild
+
+Task 24.1's round-2 reviewer built `HEAD`'s `main.rs` into `ui/target` to compare two
+captures, then ran `cargo build --release` on the working tree. It printed **`Finished
+in 0.03s`** and left HEAD's binary in place — **two source trees sharing one
+`CARGO_TARGET_DIR`**, and the second build's fingerprint matched the first's because
+nothing it depended on had changed as far as cargo was concerned. Two captures taken
+in that window were **HEAD's launch state, not the pages**.
+
+It was caught by the symptom rather than by the log: **`--tab=pads` showed the whole
+gallery instead of one page**, which is what a binary that never read the argument
+looks like. That is the shape of a run that is not talking to you — the argument was
+accepted and ignored, exactly as an injector that delivered nothing was read three
+reviews ago as a product defect.
+
+The rule belongs beside the `cp -p` entry above, because it is the same mechanism
+(**a build cache lied about the state of the tree**) and the same family as *On a
+shared tree, the suite you ran is not your suite*. What is new here is that the lie
+was in a **build**, not in a restore, and so it survived `diff` against a pristine
+snapshot: the source was right and the binary was not.
+
+**Rule:** before capturing, **force the rebuild and confirm the binary is the one you
+built** — `cargo build --release` and read what it printed, and if the time is under
+about a second, assume nothing was rebuilt until something has changed. `touch` the
+source, or `cargo clean -p <crate>`, and watch the compile happen. **A `Finished in
+0.0xs` line is a claim about the cache, not about the tree**, and a capture is evidence
+about a binary.
+
+## 2026-10-04 — A sweep of a mechanism's call sites is not a sweep of the data it is
+## built from
+
+Task 24.1 gave `ui_demo` six pages, and the mutation sweep that closed task 24.1's
+round 3 ran **34 mutations across every call site of all three gates** — every
+`sync_page_visibility`, every `empty_off_page_paint`, every page guard, the focus
+filter, the shortcut dispatch, the argument parser. **Four findings, one per round,
+and every one of them was a gate or a call site with no test.** And then the round-3
+reviewer deleted **one line of `Demo::new`**, the `for &handle in &label_nodes` loop
+that adds the seven text labels to the page table, and the whole suite stayed green
+while the entire text column was drawn on the `pads` page.
+
+The four, in order, because the shape is the lesson and not the instances:
+
+1. **`Demo::raise_toast`'s `page_members.push`** — a node created after the table was
+   built, with no row. A card raised by `K` was painted on every page.
+2. **`Demo::show_page`'s `sync_page_visibility`** — the same gate, a second call site.
+   Every fixture reached it through `Demo::new`'s, so no test went through a *switch*.
+3. **`on_show`'s always-painted clause** — defensible, unexercised, argued rather than
+   tested (that one was a survivor, not a finding; it is listed because the sweep
+   found it and I had to answer for it).
+4. **The `page_members` table's own construction** — a row that was never added.
+
+**The rule:** a sweep answers *"is each call site of this mechanism reached by a
+test?"*, and a mechanism built from a table is only as complete as the table. **Sweep
+the data as well as the call sites** — for a table, that means mutating rows and not
+only the code that reads them, and it means an assertion over the *complement* (what is
+**not** in the table) rather than one over its members, because a row that is missing
+is trivially "not one of the members" and every assertion phrased over membership
+passes. `a_page_records_no_command_on_a_node_that_is_not_its_own` is the exact shape:
+it asked whether a node with commands was `own || always`, and a missing row is
+`always` by definition.
+
+**And all four were found by mutation and none by reading**, across four rounds of a
+change whose prose was argued line by line. A gate's *absence* is not something a
+reviewer reads off a diff: what a diff shows is the code that exists.
+
+## 2026-10-04 — A guard built from a name and a size, described as a guard on the bytes
+
+The row-deletion sweep's no-op detector hashed each candidate test binary's **filename
+and byte length**, and the report called it a byte-level guard that rejects a
+semantically neutral mutation before running it. It was neither. Fixed to hash the
+binary's bytes, the "no-op" mutation `X || false || Y` was **not** rejected: it
+compiled to a different binary and survived, exactly as a textual comparison would have
+reported.
+
+Measured, on the two expressions alone:
+
+- **opt-level 0** — identical instruction sequences, differing only in basic-block
+  label numbers (`.LBB0_*` vs `.LBB1_*`).
+- **opt-level 1** — byte-identical after normalising labels.
+- **opt-level ≥ 2** — LLVM merges the two functions into a single symbol, `mutd = base`.
+
+**Rule:** a fingerprint of a compiled artifact must hash the artifact's **bytes**, and
+**byte identity is not behavioural identity** — it tracks the optimiser's decisions
+about symbols, labels and dedup, so it is not a no-op detector at any opt level. Never
+infer "this mutation changed nothing" from "this binary did not change". The sound
+substitute is a declared expectation per row plus a differential comparison against the
+base build's own failure set, so "0 failed" is read against a **measured baseline** and a
+run that disagrees with what the row was supposed to be is the finding. A name-and-size
+hash is worse than no guard: a same-length binary collides with the base and hides a
+kill.
+
+## 2026-10-04 — One snapshot file asked to be two things, and the round's work was deleted
+
+The mutation harness kept a snapshot and restored from it on exit. In rounds 1–4
+the snapshot was the *final* state, so restoring it was right. The operator then asked
+for a **start-of-round** snapshot to measure against, and the same file was reused for
+that — so the harness's exit handler overwrote the working tree with the state from
+**before** the round's eight edits. One `md5sum` found it; all eight edits were lost
+and had to be replayed. The abort-if-not-applied guard is what surfaced it, by refusing
+to report results for anchors that had stopped matching.
+
+**Rule:** a snapshot used to *measure* a round and a snapshot used to *restore* the
+tree answer different questions, and they must be different files — `r5.base.rs` for
+"what did this round change", `r5.work.rs` for "put the tree back". They coincided only
+as long as the round's fix was also its final state, which is a coincidence with an
+expiry date. **Take the measurement snapshot at the start of a round and the restore
+snapshot immediately before running any mutation**, and check the restore target's
+`md5sum` against the tree after the sweep — which is what the sweep already prints.
+
+## 2026-10-04 — A guard that reported *why* only when the why was the easy one
+
+The same harness reports `NO BINARY CHANGE` when a mutation's compiled binary matches
+the base's. That verdict is wrong in two ways that both presented as it, and both
+happened here:
+
+- **cargo's output was discarded, so its exit status was never checked.** A mutation
+  that fails to compile leaves the *previous* binary as the newest file in `deps/`, and
+  an unchanged fingerprint is then read as "this mutation changed nothing".
+- **A row whose edits cancel is indistinguishable from a row that changed nothing.**
+  A hoisted copy plus a positional deletion does exactly that, because `replace(x, y,
+  1)` takes the *first* match — so the deletion removed the copy the insertion had just
+  made, the file came out equal to the base, and the binary matched. This row reported
+  `NO BINARY CHANGE` twice before it was found.
+
+**Rule:** a verdict must name its own cause, and a negative result needs its own
+alternatives excluded rather than assumed away. **Check the build's exit status rather
+than discarding its output, and assert that the mutated text differs from the base
+before fingerprinting it** — the second check is two lines and it is the one that
+separates "the mutation is a no-op" from "my row did nothing".
+
+## 2026-10-04 — A position API that only one parent mode reads
+
+`TASK_UI_PRIM_24.2.md` said, as the reason the card of pads needed work, that it
+is *"a `Stack` child with no `set_position`, so it sits at the origin by
+default"*, and asked for an explicit `Offset::new(0.0, CONTENT_TOP)`. **`set_position`
+on a `Stack` child does nothing**: `arrange_stack` places every child at
+`Offset::ZERO` and never reads `position`, and `LayoutState::position`'s own doc
+(`layout.rs:835`) says *"Returns the position an `Absolute` parent places this node
+at, if it declares one."* — **quoted exactly**, because the second version of this
+entry had it as a paraphrase in quotation marks and the third review caught that,
+which is the same class of error as the wrong citation above it.
+The write compiled, the demo ran, and the card sat at `y: 0.0` — caught only
+because a test asserted the strip was empty.
+
+**The first version of this entry cited the wrong proof**, and the review caught
+it: `stack_places_every_child_at_the_origin` places two **unpositioned** leaves,
+so it shows that a `Stack` puts its children at the origin — not that the setter
+is ignored. The claim is proved by reading the two arms against each other:
+`arrange_stack` never reads `position`, `arrange_absolute` (`layout.rs:1380`)
+does, and `absolute_places_a_child_where_it_asked` shows the setter working.
+
+**Rule:** a setter that a *parent* consumes is not honoured by every parent, and
+the compiler will not say so. Before writing a placement, read **the parent's
+`LayoutMode` arm** rather than the setter's name — one grep of `arrange_*` settles
+it — and where the parent is the wrong mode, ask whether changing the mode is
+cheaper than adding a wrapper node. `LayoutMode::Absolute` places an unpositioned
+child at the parent's origin exactly as `Stack` does, so for a root whose other
+children declare no position the switch is one token and moves nothing else.
+
+## 2026-10-04 — A survivor is a missing assertion, and only a sweep finds it
+
+Task 24.2's shift is written at six sites. The mutation sweep ran all six, and
+**dropping `CONTENT_TOP` from the text column's own `set_position` left all 1817
+tests green**: the column's labels only ever claimed to be *below the frame-rate
+readout*, and 501 is below 748 as surely as 565 is. The other five sites were
+each killed by two to eight tests. Nothing about the surviving mutation looked
+like a weak test — it looked like a site nobody had asked about.
+
+**Rule:** a surviving mutation is a finding about **the assertions**, and the fix
+is an assertion, not a wider sweep. When a change is written at several sites,
+the sweep's survivors name the sites nothing holds down, one for one — so run it
+even when the change "obviously" moves everything together, and treat a survivor
+as a hole in the suite rather than as a fact about the code. Writing the missing
+anchor down (a rect's own `y` beside its constant) is usually one line.
+
+## 2026-10-04 — An acceptance criterion that names an instrument which cannot
+## produce the evidence is not met by producing the evidence another way
+
+`TASK_UI_PRIM_24.2.md` requirement 6 and its acceptance criterion both say the
+frame rate is measured *with `.ai/tools/fps-check.sh` on all six pages*. **The
+script cannot select a page**: `.ai/tools/fps-check.sh:71-72` runs
+`./target/release/ui_demo` with no `"$@"`, and the demo's page comes from
+`--tab=` with no environment variable that reaches it — so the tool can only ever
+measure `pads`. The five other pages' numbers in the hand-over are real and were
+produced by running the same command with the page named, **which is not the
+named instrument**, and forwarding `"$@"` is an `.ai/` change a task may not make.
+
+This has been sitting in the task files since task 24.
+
+**Rule:** an acceptance criterion names **an instrument**, and the evidence has to
+come from that instrument — a criterion met by a *different* measurement is met by
+nothing, however good the number is. So when a criterion names a tool, **read the
+tool's argument handling before quoting its output as the criterion's evidence**,
+and when it cannot produce what the criterion asks for, say so plainly in the
+hand-over and let the criterion be amended rather than quietly satisfied beside.
+The companion is `No evidence by assertion`: a number in a report is not a
+measurement until the thing that produced it is the thing that was named.
+
+## 2026-10-04 — A multi-edit patch script that writes once at the end loses every
+## edit before the one that failed
+
+Task 24.2's third review found a doc comment still asserting the opposite of the
+failure message three lines below it. Both had been edited in the same session,
+and the cause was in how the edits were applied, not in either text: the patch
+was a Python script holding three replacements, it **`open(p, 'w')`-ed once at the
+end**, and its `assert s.count(old) == 1` failed on the **second** edit — so the
+script raised, the write never happened, and the **first edit was discarded with
+it**. The reduced rerun I then wrote covered edits two and three, printed `ok`, and
+I reported all three as done.
+
+**Nothing in the session said so.** The edit that vanished was a doc comment, so
+`cargo test` was green, `cargo fmt --check` was clean, and `cargo clippy` had
+nothing to say: **`ui_demo` has no doctests and `cargo doc --no-deps` cannot see
+inside `#[cfg(test)]`, so for this file clippy and rustfmt are the only gates that
+read a doc comment at all** — and neither of them checks whether a doc comment is
+*true*. A reviewer comparing the doc against the code found it in one round.
+
+**Rule:** a patch script that makes **several** edits to one file must **write
+after each edit**, or **assert every anchor before touching anything** and abort
+loudly with the count of edits that would be lost. A bare `ok` from a script that
+raised partway through is not a result — and when a rerun is a *reduction* of the
+original, **the omitted edits are the ones nobody looks at.** If the text being
+edited is a claim rather than code, the check that finds out is a reader, not a
+tool: grep the old sentence before reporting the edit done.
+
+The sibling entry — `open(path, "w").write(expr)` truncating before `expr` runs —
+is the same hazard at the level of one write. This one is at the level of the
+**whole script**: N correct edits, one bad anchor, zero applied.
+
+## 2026-10-05 — A container that covers the window swallows every tap aimed at
+## anything behind it
+
+Task 24.3 put a tab bar at the top of the window, as the root's **second** child —
+which is what `TASK_UI_PRIM_24.3.md` requirement 1 asks for, *"as the first child
+so it paints over the background and under everything else"*. **`hit_test_from`
+(`ui_core::input`) walks a node's children in reverse**, because the later child
+covers the earlier — and two of the root's other children are boxes that start at
+the window's own origin: the controls layer is `tight(WINDOW)` and the text panel is
+`tight(TEXT_PANEL)`. So a tap over a bar button came back with the chain
+`[controls layer, root]`, `offer_to` answered `false` for both, and **the bar could
+not be clicked at all**: no page switch, `pending_page` still `None`, every unit
+test green until one asked.
+
+**Moving the bar does not fix it, and that is the part worth keeping.** The two
+readers of one child list run in opposite directions — `input::route` and
+`Focus::focus_order` walk it backwards and forwards respectively — so attaching the
+bar *last* makes it hit-tested first and puts the six buttons **last** in the `Tab`
+order. And trimming the controls layer's box cannot help at all: its origin has to
+stay at `0, 0` for the offsets inside it to be window coordinates, and **a box that
+starts at `y 0` covers the strip whatever its height is**. What was left was a
+second hit test, after `input::route` had declined — a fallback rather than a
+bypass, so anything a control in the tree consumed never reaches it.
+
+**Rule:** **a full-window (or origin-anchored) grouping node is a hit-test
+region, not an invisible one**, and putting a control behind one hides it from the
+pointer while leaving it painted. When a new control has to be *clickable* rather
+than merely drawn, **print the chain `input::route` returns for a press on it**
+before believing the tree is right — `input::route(&nodes, root, &tap)` in a test is
+two lines and it is the whole diagnosis. And where two mechanisms read one ordering
+in opposite directions, **check that they can both be satisfied before moving
+anything**: here the answer was that they could not, which is a fact the operator's
+brief did not contain and only the measurement produced.
+
+The sibling is *a drawn control with nothing behind it* in the other direction: a
+control with no code path that reads it. This one is a control with a code path that
+reads it and a tree that never delivers the event.

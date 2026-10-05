@@ -161,6 +161,23 @@ Four, each expected to fail before it is fixed back:
    helper tests still pass, which is the asymmetry requirement 5 exists for.
 4. `set_focus(None)` removed from the switch → the focus-retirement test fails.
 
+**Item 2's second clause is void, and it is void because the premise above it
+did not hold.** Measured 2026-10-04 from the source, after three review rounds:
+`Renderer::begin_frame` (`render.rs:1843`) does `gl.clear(GL_COLOR_BUFFER_BIT)`
+**and** `self.batcher.reset()`; `Batcher::reset` (`batch.rs:257`) clears `open`
+and `sealed`; `draw_node_clipped` (`render.rs:1895`) returns early on a
+non-dirty node and otherwise `take_commands()`s into **this frame's** batcher;
+and `Renderer`'s field list holds **no per-node command cache**. **A non-dirty
+node therefore contributes nothing and nothing stale survives the clear**, so
+the two forms are equivalent **on screen** as well as in every recorded-command
+assertion — `PaintState::commands` is empty either way, and `commands_at` reads
+`commands()` and not `take_commands()`. **No capture distinguishes them**, which
+is the opposite of what the Context's *"the commands would be stale, not absent"*
+argument requires. Requirement 4's literal form was kept; what would close the
+difference is a renderer caching commands per node between frames, which is a
+`ui_core` change and out of scope. **The capture is still required — for the page
+gate and for proving no rect moved, both of which it does do.**
+
 ## Out of Scope
 
 - **Moving anything.** 24.2 owns the geometry; this task's criterion is that it

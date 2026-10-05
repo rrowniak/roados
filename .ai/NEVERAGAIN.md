@@ -1282,6 +1282,9 @@ reads it and a tree that never delivers the event.
 
 ## 2026-10-05 — An environment variable the build never asks for fails silently
 
+*(task 33 — `cmake/sdl-options.cmake`; the variables are named in
+`CROSSBUILD.md` §4.1.)*
+
 `cmake` 0.1.58 resolves the SDL toolchain file from the environment, in four
 steps, and the third one is `format!("{}_{}", kind, var_base)` — so the name is
 **`HOST_CMAKE_TOOLCHAIN_FILE` or `TARGET_CMAKE_TOOLCHAIN_FILE`, with the kind
@@ -1322,6 +1325,8 @@ nothing happens.
 
 ## 2026-10-05 — A crate with no rerun-if-changed ignores every file you changed
 
+*(task 33 — `sdl3-sys`; the remedy is in `CROSSBUILD.md` §4.1.1.)*
+
 `sdl3-sys` 0.7.1's `build.rs` emits **no `rerun-if-changed` directive at all**.
 Cargo's fallback for a build script with no directives is "re-run if any file in
 the *package* changed" — and `cmake/sdl-options.cmake`,
@@ -1347,6 +1352,9 @@ cargo clean -p <pkg>          # then build, then grep the artefact
 value in the artefact: a cache entry, a generated header, a symbol count.
 
 ## 2026-10-05 — An object-tree size is not a binary-size saving
+
+*(task 28 — the near-miss was writing `du` figures into a design document;
+the figures that settled it were linked in `CROSSBUILD.md` §5.5.)*
 
 Task 28 measured the vendored SDL build per subsystem with `du` over
 `CMakeFiles/SDL3-static.dir/src/<subsystem>` — `render` 1.2 M, `gpu` 708 K,

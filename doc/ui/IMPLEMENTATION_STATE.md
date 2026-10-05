@@ -4283,6 +4283,7 @@ verified. A blank cell is unknown, not "none".
 | 24.1 | `Page`, `--tab=`, and the three gates | done | `e567634` | **5 passes**, each in a session separate from the author's and from each other. **21 findings: 4 majors + 7 minors, 1 + 5, 1 + 6, 0 majors + 3 minors, then approve.** **All four majors were one finding — a gate with no test — and every one was found by mutation, none by reading**: `raise_toast`'s table row (0 failed / 1811), `show_page`'s `sync_page_visibility` (0 failed / 1813), and **`Demo::new`'s page table having no completeness assertion at all** (one dropped row → 0 failed / 1814 and the text column on the wrong page). **Five rounds because each round's sweep found the next one; the lesson is now `NEVERAGAIN`'s**: *a sweep of a mechanism's call sites is not a sweep of the data it is built from.* Round 5 returned **approve, no blocker and no major**. See *Task 24.1 — what it decided* | **11 of 12 criteria met.** **AC 12 (*"green with no assertion weakened"*) is NOT met and is offered for the operator's acceptance rather than waived: six tests moved, two recorded as losses in-file and four satisfying `NEVERAGAIN`'s positive-half rule.** **The task file's central trap had a premise that did not hold** — there is no per-node command cache, so `PaintState::new()` cannot leave a stale page on screen and **no capture distinguishes the two forms**; `TASK_UI_PRIM_24.1.md` is amended in place with the four source facts. **AC 4's *"empty, not stale"* survives as a test about the recorded vector, not about the dirty flag.** *"Every test the migration touched is listed by name"* is met under the rule the file states (19 named of 119 touched, 100 mechanical) — a reviewer's ~151 could not be reproduced by any method tried. **No criterion rests on a waiver.** One edge case is left as-is and recorded: **a repeated `--tab=` silently discards an unknown name** |
 | 24.2 | `CONTENT_TOP`, and the band goes page-local | done | `e567634` | **4 passes**: 2 majors + 8 minors, 0 + 9, 0 + 1, approve. **The major was 24.1's round-3 finding reproduced on `placed_handles`**, the table this change introduced — 0 failed / 1817 with a row dropped, and the reviewer's compound (a fattened progress bar *plus* the deleted row) green across all 1817. Round 3 also found the round-1 fix had landed in a failure message and **not in the doc that said the same thing the other way.** | **Two assertions retired**, one *withdrawn outright* (the gallery/band bound is false per-page) and one *replaced* (`inside(window, chart)` plus the `Data` neighbour loop), both recorded in the file with the arithmetic. **AC 6 amended**: `fps-check.sh` cannot select a page, so the six pages were measured by `ROADOS_RUN_SECONDS=<n> … --tab=<page>` — **not waived**. The root became `LayoutMode::Absolute` because `set_position` on a `Stack` child is a no-op |
 | 24.3 | The tab bar | done | `e567634` | **3 passes**: 1 major + 7 minors, 0 + 6, **approve**. The major was `release_tab`'s `animate_to_state` held down by nothing on the ordinary gesture — press and release the button of the page **already on show** leaves `show_page` early-returning, measured `left: 0.95, right: 1.0`, a button stuck at the pressed scale with 1836 green. Round 2's six minors were prose, and its reviewer **found the orchestrator's own amendment asserting a false mechanism about `ui_core`** — "at most one `InputEvent` per SDL event", refuted by a four-line probe | **All twelve criteria met.** AC 11 (a pressed button mid-transition) needed a **temporary, reverted seed** — XTEST delivered nothing — and the arithmetic was corrected from a false 96 % to a measured **22 %**. **Requirement 4's call and duration are different numbers**: `Motion::from_theme` is 150 ms, not `THEME_TRANSITION`'s 300, pinned with an `assert_ne!`, and **on `T` the bar and its buttons arrive 150 ms apart, which nobody has seen.** Deliberate break 2 is **not expressible** (`Callback` is `Fn`) |
+| 33 | Set the SDL options no cargo feature can reach | nothing — **done 2026-10-05**, split out of task 28 | `doc/ui/TASK_UI_PRIM_33.md` | | none waived: 8 of 8 criteria verified, 6 by cache/header greps, 1 by the test suite, 1 by `fps-check.sh` |
 | — | Tesla-like demo application | pending | | | see `doc/ui/DEMO_APPLICATION.md` |
 
 **Task 24 was superseded on 2026-09-30 and un-superseded on 2026-10-03.** The
@@ -4374,10 +4375,27 @@ not the build.
 | 25 | Target Image and Sysroot | operator strategy decision; unblocks 26 | `doc/platform/TASK_CROSSPLATFORM_01.md` |
 | 26 | Head-Unit Video Driver | 25 | `doc/platform/TASK_CROSSPLATFORM_02.md` |
 | 27 | Target Runtime Library Audit | 25, 26 | `doc/platform/TASK_CROSSPLATFORM_03.md` |
-| 28 | Reconcile the SDL Configuration | nothing — **done 2026-10-05**, see below | `doc/ui/TASK_UI_PRIM_28.md`, amended in place |
+| 28 | Reconcile the SDL Configuration | nothing — **done 2026-10-05**, docs only | `doc/ui/TASK_UI_PRIM_28.md`, amended in place |
 | 29 | Head-Unit Smoke Test | 25, 26, 27 | `doc/platform/TASK_CROSSPLATFORM_04.md` |
 
-### Task 28 — done 2026-10-05, and it changed the build
+**Task 33 was created 2026-10-05 and numbered 33 deliberately.** `29` is
+`CROSSPLATFORM_04` and `25`–`27` are `CROSSPLATFORM_01`–`03`; reusing any of them
+in `doc/ui` would resurrect a number that means something else in this history.
+`30`, `31` and `32` were never written, and `33` is the next number above
+everything this sequence has used.
+
+### Task 28 — done 2026-10-05, documentation only
+
+**Scope: six documents. No Rust file, no manifest, no `.cmake` file.** That is
+worth stating plainly, because the task was first *implemented* as documentation
+plus a build change and the build half was split out into **task 33** once the
+boundary was looked at honestly. See § *History* for that, and for the fact that
+**both tasks then shipped in one commit, `f8a7f80`**, so the split is recorded
+rather than performed.
+
+The task file's own framing was that this is cheap: "documentation truth
+problems". It was. It was also **wrong about which problems**, in a way that
+mattered more than the size argument it was going to be settled by.
 
 The `Needs` column said *"item 5 must land before task 04"*. **Task 04 ran on
 2026-09-28** (`a8f3147`) and task 05 the same week (`8c3657b`), so the
@@ -4430,6 +4448,13 @@ variants, same order, matching `TOKEN_COUNT`), `Easing` (`Linear`, `EaseIn`,
 allocator with eviction. An earlier claim that `Easing::Spring` and `Easing::Bounce`
 did not exist was **wrong and was caught by reading it again** — a `rg -rn` flag
 parsed as `-r n` was silently replacing matches with the letter `n`.
+
+**What task 28 handed to task 33.** Reconciling the document is not the same as
+making the build agree with it, and this task stopped at the first. Three options
+that no cargo feature can reach — `SDL_VULKAN`, `SDL_OPENGL`, `SDL_TEST_LIBRARY`
+— were found still on, two of them contradicting a decision the project had
+already recorded. That is **`TASK_UI_PRIM_33.md`** — a separate task file, whose
+eight acceptance criteria are the ones the change was actually held to.
 
 **Three things were recorded as gating the cross-build requirement**, and they
 were not all in these tasks. All three are closed as of task 02, 2026-09-28.
@@ -4653,65 +4678,102 @@ operator's rule, none of these is treated as satisfied.
 
 ## History
 
-- 2026-10-05 — **task 28 done, and it was the documentation task that turned out
-  to need a build change.** Six documents changed and three files of build
-  configuration, and the shape of it was decided twice before any of it was
-  written. **The operator's ruling reshaped the task:** asked to choose which
-  subsystems to disable in order to save megabytes, the answer was that this
-  makes no sense — *we don't have to disable anything just to save a couple of
-  megabytes* — and that the question should not have been asked. Two things
-  followed from taking that seriously. First, the real defect in
-  `PRIMITIVES_ARCHITECTURE.md` is not size at all: it told the next agent to
-  disable **audio and camera**, which `IDEA.md` makes product requirements, and
-  **filesystem**, which has no switch in SDL. Second, the only build change worth
-  making was the one about *truth*, not bytes — three options that no cargo
-  feature can reach and that disagreed with the project's own recorded decisions.
-  **Four decisions are the operator's:** default subsystems stand (2026-09-28,
-  re-justified 2026-10-05 as product-wrong rather than blocked); megabytes are
-  not a reason to narrow capability; **the binary stays unstripped** — 825 KB of
-  `.symtab`/`.strtab` in a 6.5 MB binary, kept deliberately for a usable
-  head-unit backtrace; and the channel for the shared SDL options is a split
-  toolchain file reached through the environment rather than a second direct
-  `sdl3-sys` dependency, which settles the dependency-approval question by not
-  needing one.
-  **The build change, measured.** `cmake/sdl-options.cmake` now carries
-  `SDL_VULKAN`, `SDL_OPENGL` and `SDL_TEST_LIBRARY` off; the aarch64 toolchain
-  file `include()`s it; `.cargo/config.toml` § `[env]` reaches it natively
-  through `HOST_CMAKE_TOOLCHAIN_FILE` and the cross file through
-  `TARGET_CMAKE_TOOLCHAIN_FILE`. Release, x86_64: `libSDL3.a`
-  **7 623 342 → 6 819 806** (−803 536, −10.5 %), `ui_demo`
-  **6 546 728 → 6 137 376** (−409 352, −6.3 %), `libSDL3_test.a` gone (was
-  228 180), Vulkan objects 716 K → 20 K. Cross artifact 6 013 800 → 5 759 648.
-  **1 839 tests green** (1 404 + 217 + 218) and **61.9 fps, worst frame 24.3 ms,
-  0 frames over 33 ms** against a 61.6–61.9 baseline. The cross build was re-run
-  with `CMAKE_TOOLCHAIN_FILE` deliberately unset, to prove the `[env]` wiring
-  stands alone, and the artifact is `ARM aarch64` with `SDL_X11` off,
-  `SDL_UNIX_CONSOLE_BUILD` on, EGL and HIDAPI on — all unchanged.
-  **Three findings that were not in the task file, and each one was nearly
-  missed.** (1) `CROSSBUILD.md` §4.1 listed the two kind-scoped environment
-  variables as `CMAKE_TARGET_CMAKE_TOOLCHAIN_FILE` and
-  `CMAKE_HOST_CMAKE_TOOLCHAIN_FILE`; **neither is the name.** They are
-  `TARGET_CMAKE_TOOLCHAIN_FILE` and `HOST_CMAKE_TOOLCHAIN_FILE` — the **kind
-  comes first** — and getting it wrong is silent, because cargo delivers the
-  variable, the crate never asks for that name, and the build proceeds with
-  SDL's defaults. The spelling was read off `cargo build -vv`, which prints all
-  four probes, after the first attempt appeared to do nothing at all.
-  (2) `sdl3-sys`'s `build.rs` emits **no `rerun-if-changed` directive of any
-  kind**, so editing a `.cmake` file or `.cargo/config.toml` does not rebuild
-  SDL and `cargo build` reports success — the fix is
-  `cargo clean -p sdl3-sys`, and `CROSSBUILD.md` §4.1.1 now says so and §5.5
-  gives the greps that prove the options took. (3) `SDL_OPENGL` was `ON` in
-  **both** `CMakeCache.txt` files and came out undef only because `libgl-dev` is
-  not installed on this host, so the artefact depended on the dev machine's
-  package list — a successful build of a different artefact, the same shape as
-  §6.7's missing-`pkg-config` finding.
-  **`AGENTS.md`'s two line-number citations into this file were stale** (`:346`
-  and `:221`, both pointing at toast-animation text) and the paragraph was
-  rewritten to cite by section instead, with the reason recorded; its warning
-  that the feature list is incomplete is retired because the list is now
-  authoritative. Three `NEVERAGAIN` entries added — the silent env-name
-  mismatch, the object-tree size read as a binary saving, and the absent
-  rerun-if-changed.
+- 2026-10-05 — **task 33 done, and split out of task 28 rather than folded into
+  it.** Three build files and one new task file; no Rust file and no manifest.
+  **The boundary was the operator's**, and it was crossed first and corrected
+  after: task 28 had been scoped as *documentation plus a follow-up task*, and
+  the build change was initially done inside task 28 anyway.
+  **Both tasks shipped in one commit, `f8a7f80`, and that is not what was
+  intended.** The operator committed the tree at 12:50 while the split was being
+  made, and pushed it to `origin/main` — so rewriting it into two commits would
+  have meant force-pushing a shared branch, which is a far worse outcome than an
+  imperfectly-split history. The split is therefore **recorded here rather than
+  performed**, and `TASK_UI_PRIM_33.md` is a spec written after the fact for work
+  already in the tree: its eight acceptance criteria are the ones the change was
+  held to, and all eight were verified. `f8a7f80`'s message says "Doc updated",
+  which understates it — it changes the SDL build on both targets.
+  **What it sets:** `SDL_VULKAN`, `SDL_OPENGL` and `SDL_TEST_LIBRARY` off, on both
+  targets, through `cmake/sdl-options.cmake` — reached natively by
+  `HOST_CMAKE_TOOLCHAIN_FILE` and on the target by `TARGET_CMAKE_TOOLCHAIN_FILE`
+  in `.cargo/config.toml` § `[env]`, with `cmake/aarch64-toolchain.cmake`
+  `include()`ing it. **No new dependency**, which is the operator's channel
+  choice and also settles the dependency-approval question by not needing one.
+  The bare `CMAKE_TOOLCHAIN_FILE` is deliberately left unset so that an aarch64
+  build with the toolchain file forgotten still fails loudly instead of silently
+  configuring with the host compiler.
+  **Why it is not a size exercise**, which is the part the earlier framing got
+  wrong: `PRIMITIVES.md` *rejects* Vulkan and records that SDL's GPU API cannot
+  do GLES at all; and `SDL_OPENGL` was **`ON` in both `CMakeCache.txt` files**,
+  defeated only by `libgl-dev` being absent on this host — so the artifact
+  depended on the dev machine's package list, which is the same shape as §6.7's
+  missing-`pkg-config` finding.
+  **Measured, release, x86_64:** `libSDL3.a` **7 623 342 → 6 819 806**
+  (−803 536, −10.5 %), `ui_demo` **6 546 728 → 6 137 376** (−409 352, −6.3 %),
+  `libSDL3_test.a` gone (was 228 180), Vulkan objects 716 K → 20 K. Cross
+  artifact 6 013 800 → 5 759 648. **The two numbers are not proportional** —
+  803 KB off the archive is 409 KB off the binary — which is the object-tree
+  versus linker point stated with figures rather than asserted. A full
+  `cargo clean` rebuild reproduced both sizes **byte for byte**, so they are not
+  stale-state artifacts.
+  **Verified:** 1 839 tests green in debug and in release; `fps-check.sh`
+  **62.0 fps, worst frame 19.7 ms, 0 frames over 33 ms** against a 61.6–61.9
+  baseline; the cross build re-run with `CMAKE_TOOLCHAIN_FILE` deliberately unset
+  to prove the `[env]` wiring stands alone, artifact `ARM aarch64`, with
+  `SDL_X11` off, `SDL_UNIX_CONSOLE_BUILD` on, `SDL_VIDEO_OPENGL_EGL` and
+  `SDL_JOYSTICK_HIDAPI` on — every one unchanged by this task.
+  **Two traps found here, both of which failed silently, and both now in
+  `NEVERAGAIN`.** `CROSSBUILD.md` §4.1 listed the kind-scoped variables as
+  `CMAKE_TARGET_CMAKE_TOOLCHAIN_FILE` and `CMAKE_HOST_CMAKE_TOOLCHAIN_FILE`;
+  **neither is a name the crate looks for** — the kind comes *first*, so they are
+  `TARGET_CMAKE_TOOLCHAIN_FILE` and `HOST_CMAKE_TOOLCHAIN_FILE`. Cargo delivered
+  the variable, SDL configured, ~900 objects compiled, a binary linked, and all
+  three options were still **on**; only `cargo build -vv`, which prints all four
+  probes, settled it. And `sdl3-sys`'s `build.rs` emits **no `rerun-if-changed`
+  directive at all**, so editing any `.cmake` file or `.cargo/config.toml` does
+  not rebuild SDL and `cargo build` reports success.
+- 2026-10-05 — **task 28 done: the documentation reconciliation. Six documents,
+  and the finding that made it worth doing was not the one the task file
+  expected.** The operator's ruling reshaped the task before anything was
+  written. Asked to choose which subsystems to disable in order to save
+  megabytes, the answer was that this makes no sense — *we don't have to disable
+  anything just to save a couple of megabytes* — and that the question should
+  not have been asked. Taking that seriously moved the real defect into view:
+  it is not size. **`PRIMITIVES_ARCHITECTURE.md` told the next agent to disable
+  audio and camera, which `IDEA.md` makes product requirements, and filesystem,
+  which has no switch in SDL.** That paragraph would have been harmful if it had
+  been implementable.
+  **Files:** `PRIMITIVES_ARCHITECTURE.md`, `CROSSBUILD.md`, `TASK_UI_PRIM_04.md`,
+  `TASK_UI_PRIM_05.md`, `AGENTS.md`, this file, `.ai/NEVERAGAIN.md`. **No Rust
+  file, no manifest and no `.cmake` file changed**, so there was nothing to
+  compile and the verification was citation resolution — every `file:line` in the
+  amended text resolved by running the command that finds it.
+  **The document was wrong in more places than the task file knew about**, and
+  the task file's own acceptance criteria did not ask for any of them: the
+  *Module Layout* named a type that does not exist anywhere (`UiContext`) and
+  omitted five real modules; the `WidgetNode` sketch carried three fields that
+  were never built and a `PropertySet` that never existed; the ownership
+  rationale claimed no `Rc`/`RefCell` anywhere when `property.rs` has eighteen;
+  `LayoutMode::Flex { wrap }` was presented as working when `layout.rs` says it
+  is accepted and not honoured. And **two documents held opposite positions on
+  Vulkan** — the architecture doc said "additive later", `PRIMITIVES.md` said
+  "rejected" — resolved against `PRIMITIVES.md` with a revisit trigger recorded.
+  **What was checked and found correct, which is not obvious for a document this
+  drifted:** `ThemeToken` (all 33 variants, same order), `Easing` (all six),
+  `Handle`, `LayoutMode`, `ATLAS_SIZE`, and the fifteen-widget list. An earlier
+  claim that `Easing::Spring` and `Easing::Bounce` did not exist was **wrong**,
+  caught by re-reading: a `rg -rn` flag had parsed as `-r n` and was replacing
+  matches with the letter `n`.
+  **Two more corrections that were not this task's subject at all.**
+  `AGENTS.md`'s line-number citations into this file were stale — `:346` and
+  `:221`, both pointing at toast-animation text — so the paragraph now cites by
+  section and says why, and its warning that the feature list is incomplete is
+  retired because the list is now authoritative. And the task 04/05 seam was
+  struck in both files: `node.rs` came from **task 02**, both tasks had already
+  run, so nothing was ever at risk of two agents guessing differently.
+  One `NEVERAGAIN` entry added — the object-tree size read as a binary saving —
+  because an agent nearly wrote `du` figures into a design document as if they
+  were shipping costs. **The build change this task uncovered is task 33**, which
+  is a separate task with its own review.
 - 2026-10-03 — **task 22 (Dialog) implemented, reviewed once, uncommitted.** The
   largest task in the sequence, and **four sequential sub-tasks** rather than one
   agent: the task file asks for a blurred shadow, a bold title and a cached

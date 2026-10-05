@@ -1,4 +1,4 @@
-# TASK_UI_PRIM_26: Head-Unit Video Driver
+# TASK_CROSSPLATFORM_02: Head-Unit Video Driver
 
 ## Goal
 
@@ -42,7 +42,7 @@ The option is on; the backend test failed. Do not misread it.
    sysroot, and only then consider whether any forcing is wanted at all.
 
 2. **Make the backend test pass**, which means a target `pkg-config` that
-   resolves `libdrm` and `gbm` — that is task 25. Re-run the §6.4.2 procedure and
+   resolves `libdrm` and `gbm` — that is task 01. Re-run the §6.4.2 procedure and
    require `SDL_VIDEO_DRIVER_KMSDRM` to become a `#define` and `kmsdrm` to appear
    in the `Video drivers:` line.
 
@@ -66,7 +66,7 @@ The option is on; the backend test failed. Do not misread it.
 
 6. **Record the `SDL_DEPS_SHARED` tradeoff.** The default is ON, so the target
    `dlopen`s libdrm and libgbm at runtime and the *image* must ship them — see
-   task 27. Turning it OFF for static linking changes all of this and makes a
+   task 03. Turning it OFF for static linking changes all of this and makes a
    sysroot mandatory. If anyone proposes that, it needs a decision, not a
    commit.
 
@@ -86,7 +86,7 @@ The option is on; the backend test failed. Do not misread it.
 
 ## Out of Scope
 
-- The sysroot itself — task 25.
-- Which runtime libraries the image ships — task 27.
+- The sysroot itself — task 01.
+- Which runtime libraries the image ships — task 03.
 - Anything about the aarch64 CPU flags; `-march=armv8-a` is set already and the
   head unit SoC is not yet decided.

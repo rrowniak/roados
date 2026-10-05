@@ -6,20 +6,46 @@ requirements, and where this file and a task file disagree, the task file wins
 and this file gets corrected.
 
 **Spec:** `doc/ui/PRIMITIVES.md`, `doc/ui/PRIMITIVES_ARCHITECTURE.md`, and
-`doc/ui/TASK_UI_PRIM_01..32.md`.
+`doc/ui/TASK_UI_PRIM_01..24.md` with `_24.1`–`_24.3`, `_28` and `_30..32`.
+The platform and cross-compilation tasks are a separate sequence —
+`doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
+`doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-05 (task 24 recorded as `e567634`; nothing in flight)
 
 ## Current position
 
-**Status: task 24 (Demo Application) is complete — all three sub-tasks
-implemented, reviewed through 5 + 4 + 3 rounds, and uncommitted. 24.1, 24.2 and
-24.3 sit in one tree at the operator's decision, and the operator's verdict on
-task 24 is the last gate.** Task 23 (Toast) is done, committed as `1fed4b6` on
-2026-10-04, in a commit whose message reads
-*`doc/ui/TASK_UI_PRIM_22.md done`*. Task 22 is done, committed as `22356f6` on
-2026-10-03; task 21 as `64d2b97`, task 20 as `79941cd`, task 19 as `b4a2db8`,
-tasks 15–18 as `d7240c8`, the frame-rate readout as `3ddf5fa`.
+**Status: task 24 (Demo Application) is done and committed as `e567634` on
+2026-10-05** — all three sub-tasks in one commit, as the operator decided, so
+the sequence's *No uncommitted advance* gate was stepped over deliberately and
+recorded at the time rather than skipped quietly. **Task 24 is the last task of
+the `PRIM` sequence**, and the operator's instruction on 2026-10-05 was to record
+the progress and **not** to begin the next one, so nothing is in flight.
+Task 23 (Toast) is done, committed as `1fed4b6` on 2026-10-04, in a commit whose
+message reads *`doc/ui/TASK_UI_PRIM_22.md done`*. Task 22 is done, committed as
+`22356f6` on 2026-10-03; task 21 as `64d2b97`, task 20 as `79941cd`, task 19 as
+`b4a2db8`, tasks 15–18 as `d7240c8`, the frame-rate readout as `3ddf5fa`.
+
+**`e567634`'s message reads `doc/ui/TASK_UI_PRIM.md done`, and there is no such
+file** — the task files are `TASK_UI_PRIM_01.md` … `TASK_UI_PRIM_32.md` plus the
+three 24.x splits, and the parent is `TASK_UI_PRIM_24.md`. **It is recorded here
+because it is the second commit in this sequence whose message names a task file
+that does not exist or names the wrong one** — `1fed4b6` read
+*`TASK_UI_PRIM_22.md done`* while carrying task 23 — **and because a message
+naming a file that does not exist is the one kind of commit message a later
+`git log --grep` cannot find.** The SHA is what the table records, so nothing
+depends on the message.
+
+**What the six open decisions became.** They were all recorded as decisions and
+none was a defect, and **the commit carries them unresolved rather than
+silently settled**: `fps-check.sh` still cannot name a page and the criterion is
+explicitly not waived; six weakened assertions from 24.1's migration are accepted
+in the record rather than closed; 150 vs 300 ms stands with its unseen-on-screen
+consequence; the 300 ms dialog fade stands as cosmetic and unreachable in the
+feared form; and a repeated `--tab=` still discards an unknown name. **A fresh
+session resuming here reads all five in *What the operator still has to decide*
+below**, and the first and the last are the two a reader is most likely to meet
+by running the tool rather than reading the file.
 
 **The suite went 1796 → 1839 across task 24** (1404 + 217 + 218), and
 `ui/src/ui_demo/src/main.rs` went **13 675 lines and 164 tests → 20 083 and
@@ -100,10 +126,13 @@ place, dated, because a task file owns its requirements:
    numbers.** `Motion::from_theme` reads `DurationFast` — **150 ms** — and
    `THEME_TRANSITION` is **300 ms**. The call landed, pinned by an `assert_ne!`.
 
-### What the operator still has to decide
+### What the operator still has to decide — and what the commit carried
 
-**Six decisions, and none is a defect.** All are recorded in the task files with
-their reasons, and the first three are the ones a commit message should carry.
+**Six decisions, none of them a defect, and all six are still open in the
+commit `e567634` rather than settled by it.** They are recorded here and in the
+task files with their reasons, and they are in this section rather than a
+"closed" heading because none was closed — the operator committed the work with
+each one written down and unresolved, which is the honest state of them.
 
 1. **`fps-check.sh` cannot name a page.** It runs the binary with no `"$@"`, and
    the demo reads only `ROADOS_RUN_SECONDS` and `ROADOS_ASSET_DIR` — so it can
@@ -223,7 +252,10 @@ implementer's, and the two that shaped the task most are here.
 ### The finding that made this five rounds: every major was a gate with no test
 
 **Four majors across four rounds, and they are one finding.** A mechanism is
-implemented, nothing holds it down, and the suite is green:
+implemented, nothing holds it down, and the suite is green. **This is 24.1's
+half of the six-instance table in *Current position***, which carries the two
+from 24.2 and 24.3 as well — **so that table is the one to keep current if either
+half moves**; this one is the detail behind its first four rows.
 
 | # | Round | The gate | How it was found |
 |---|---|---|---|
@@ -2785,10 +2817,38 @@ here has been through a review, so it is written to be reviewed.
 
 ### Gates skipped, named rather than glossed
 
-`task-sequence.md` puts a review between the implementation and the operator's
-commit, and step 5 is "**Operator commits. Per task, not per batch.**" The
-operator decided on 2026-09-30 to batch all four into one changeset and to review
-afterwards. The gates that goes around, recorded so they are decisions:
+**Two batches have gone through here, and the second one kept every review
+gate.** The 2026-09-30 batch (tasks 15–18) gave up review as well as the
+per-task commit, and is written out below in full. **Task 24's batch
+(24.1–24.3, committed as `e567634` on 2026-10-05) gave up only the commit
+gate**, and the difference is the whole of what follows:
+
+- **One commit instead of three.** Step 5 is per task; this is one. **No
+  per-task revert point**: a defect found in 24.3 has to be fixed in a commit
+  that also contains 24.1 and 24.2. **The operator took this deliberately, on
+  2026-10-04, after being told what it costs** — the reason given was that
+  *"the tab bar is the main ask and 24.1 shipped no pixels"*, which is this
+  plan's own doing rather than the implementer's: the 2026-10-03 split put
+  *"the pixel-moving sub-task last"* so every capture from tasks 11–22 would
+  stay a capture of the same pixels, and **that rationale was spent by the time
+  24.1 landed** — those captures are taken and `--tab=` makes them addressable.
+- **The per-task operator stop (step 4) did not happen** between the three:
+  the instruction was to run 24.2 and 24.3 to completion and report once, so
+  task 24 could be judged whole.
+- **What did hold, and this is what separates the two batches:** step 1 ran
+  per sub-task in its own session, **step 2 ran per sub-task in a session
+  separate from its author — 5, 4 and 3 passes — and every finding was fixed or
+  waived with a recorded reason before the commit.** The whole verification
+  suite ran after integration.
+- **So the gate given up is a revert point, not a review.** Stated that way
+  because the order matters: a review that never happens loses defects, and a
+  missing revert point loses only the cheap way back.
+
+**The 2026-09-30 batch, for contrast.** `task-sequence.md` puts a review between
+the implementation and the operator's commit, and step 5 is "**Operator commits.
+Per task, not per batch.**" The operator decided on 2026-09-30 to batch all four
+into one changeset and to review afterwards. The gates that goes around,
+recorded so they are decisions:
 
 - **No self-review and no review at all.** Step 2 did not happen. Each task's
   `Review` cell above reads `none`, which is a fact and not a shrug.
@@ -3795,10 +3855,12 @@ stands in a transparent 320×192 image rather than taking the window down.
   `.ai/workflows/idea-to-code.md` stage 1 gate is satisfied by the operator for
   the whole sequence — no `idea-evaluator` pass per task. Work enters at
   stage 3, and the reviewer checks the change against the task file, not
-  against whether the task was the right idea. Tasks `25`–`29` and `30`–`32`
-  were added afterwards, each in its own section below with its own status;
-  they are **not** covered by that stage 1 waiver and each needs the operator's
-  ratification before work starts on it.
+  against whether the task was the right idea. Tasks `28` and `30`–`32` were
+  added afterwards, each in its own section below with its own status; tasks
+  `25`–`27` and `29` were added on the same date and have since moved to
+  `doc/platform/`, where they are `CROSSPLATFORM_01`–`04`. None of them is
+  covered by that stage 1 waiver, and each needs the operator's ratification
+  before work starts on it.
 - **An acceptance criterion that cannot be verified on this machine is waived
   with a recorded reason**, not silently dropped and not treated as a blocker.
   It goes in the `AC waived` column and its reason goes in *History*, so a
@@ -4204,10 +4266,10 @@ verified. A blank cell is unknown, not "none".
 | 21 | Widget — Chart | done | `64d2b97` | **2 passes**, both in a session separate from the author's. Round 1: *approve with required changes*, 1 blocker + 6 minors, all 7 fixed. Round 2: *approve with required changes*, blocker **closed and verified by mutation**, **5 minors waived 2026-10-02 with recorded reasons** — not "fixed"; see *The two review rounds* | **AC 5 is covered by tests through the demo's real event path, not by a capture** — keyboard injection does not reach the window on this host (the positive control `T` moved 212 px) and pointer injection never did. ACs 1, 2, 3, 4 and 6 are capture-verified **and measured**, the bar and area ones through two reverted temporary releases. `y_labels` are empty by design, so AC 4's labels are proved by the x labels and the two axes. **No acceptance criterion is waived**; the 5 waived findings are review findings, not criteria — two stale citations, one coverage claim, one omission and one run count, none of which can change a pixel. See *Task 21 — what it decided* |
 | 22 | Widget — Dialog | done | `22356f6` | **1 pass**, in a session separate from all four subagents and from the integration. *Approve with required changes*: **3 majors + 3 minors, all six fixed**, plus 5 disagreements of which 2 corrected this file. The reviewer **reproduced the author side's pixel measurements independently** (panel, both button rects, three colours at exactly half, 693 vs 541 ink, 711/0 differing, 11 px ramp, 61.8 fps) and **independently reproduced the surviving mutation**. See *The one review round* | **Four ACs are capture-verified and measured** (1, 2, 6, 7) — AC 7 by a capture that **needed no seed and no instrument**, the only one in this task. **ACs 3, 4 and 5 are covered by tests through the demo's own event path, not by a capture**: the action buttons, the dismissal, Escape and modality all need a key or a pointer, and injection does not reach the window on this host. **Requirement 5's "content behind dialog is not re-rendered" is DEVIATED, not met** — the operator decided it should be read as the paint cache, and the sentence this file first offered as evidence was **false** and is corrected above. **Requirements 2 and 5 needed pipeline work first** — a second FreeType face and an FBO blur — both operator decisions. **No acceptance criterion is waived; one is deviated with the reason recorded** |
 | 23 | Widget — Toast | done | `1fed4b6` | **3 passes**, all in sessions separate from the author's, **15 findings in total and no blocker or major in any of them**. **Round 1: *Approve with required changes* — 8 findings, 7 fixed and 1 recorded as a dated follow-up in `paint.rs`'s scope rather than fixed.** The reviewer **re-derived the paint-order override from `batch.rs` and `render.rs`**, confirmed the submission test has teeth independently by mutating only the disc's alpha, and verified two of the author's own mutations rather than reading them. **Round 2: *Approve with required changes* — 4 findings: three of them this record's own arithmetic failing to reconcile with the logs behind it, and one a false claim in `toast.rs` about `List`'s three reclaims.** **Round 3: *Approve with required changes* — 3 findings: two here (a false account of two mutation runs' call sites, and four status sentences that misdescribed the rounds) and one a missing `.ai/NEVERAGAIN.md` entry, now written.** **Every round was closed with prose: no behaviour change, no new test, no signature change, and the count unmoved at 1796 throughout.** See *Task 23 — what it decided* | **AC 3's fade and slide are unit-tested and sampled on screen through a reverted temporary seed**, because `magick import` is slower than the 150 ms transition it photographs; **AC 4 (does not block input) is proved structurally plus by a real press through `Demo::handle_event`**, not by a capture; **AC 6 (the demo shows a toast) is capture-verified and needed no seed and no instrument** — the two toasts are raised in `Demo::new`, as the dialog is presented there. **No acceptance criterion is waived.** One requirement is **met by arrangement the task file does not describe**: requirement 2's translucent surface with opaque content on it is not expressible in this pipeline as the task file's order would have it — see *Task 23 — what it decided* |
-| 24 | Demo Application | **COMPLETE — amended 2026-10-03, 2026-10-04 and 2026-10-05, split into 24.1–24.3; all three implemented, reviewed and uncommitted in one tree, awaiting the operator's verdict** | — | **12 rounds** | **Six decisions for the operator, none a defect** — see *Current position* |
-| 24.1 | `Page`, `--tab=`, and the three gates | **done, reviewed five rounds, uncommitted** | — | **5 passes**, each in a session separate from the author's and from each other. **21 findings: 4 majors + 7 minors, 1 + 5, 1 + 6, 0 majors + 3 minors, then approve.** **All four majors were one finding — a gate with no test — and every one was found by mutation, none by reading**: `raise_toast`'s table row (0 failed / 1811), `show_page`'s `sync_page_visibility` (0 failed / 1813), and **`Demo::new`'s page table having no completeness assertion at all** (one dropped row → 0 failed / 1814 and the text column on the wrong page). **Five rounds because each round's sweep found the next one; the lesson is now `NEVERAGAIN`'s**: *a sweep of a mechanism's call sites is not a sweep of the data it is built from.* Round 5 returned **approve, no blocker and no major**. See *Task 24.1 — what it decided* | **11 of 12 criteria met.** **AC 12 (*"green with no assertion weakened"*) is NOT met and is offered for the operator's acceptance rather than waived: six tests moved, two recorded as losses in-file and four satisfying `NEVERAGAIN`'s positive-half rule.** **The task file's central trap had a premise that did not hold** — there is no per-node command cache, so `PaintState::new()` cannot leave a stale page on screen and **no capture distinguishes the two forms**; `TASK_UI_PRIM_24.1.md` is amended in place with the four source facts. **AC 4's *"empty, not stale"* survives as a test about the recorded vector, not about the dirty flag.** *"Every test the migration touched is listed by name"* is met under the rule the file states (19 named of 119 touched, 100 mechanical) — a reviewer's ~151 could not be reproduced by any method tried. **No criterion rests on a waiver.** One edge case is left as-is and recorded: **a repeated `--tab=` silently discards an unknown name** |
-| 24.2 | `CONTENT_TOP`, and the band goes page-local | **done, reviewed four rounds, uncommitted** | — | **4 passes**: 2 majors + 8 minors, 0 + 9, 0 + 1, approve. **The major was 24.1's round-3 finding reproduced on `placed_handles`**, the table this change introduced — 0 failed / 1817 with a row dropped, and the reviewer's compound (a fattened progress bar *plus* the deleted row) green across all 1817. Round 3 also found the round-1 fix had landed in a failure message and **not in the doc that said the same thing the other way.** | **Two assertions retired**, one *withdrawn outright* (the gallery/band bound is false per-page) and one *replaced* (`inside(window, chart)` plus the `Data` neighbour loop), both recorded in the file with the arithmetic. **AC 6 amended**: `fps-check.sh` cannot select a page, so the six pages were measured by `ROADOS_RUN_SECONDS=<n> … --tab=<page>` — **not waived**. The root became `LayoutMode::Absolute` because `set_position` on a `Stack` child is a no-op |
-| 24.3 | The tab bar | **done, reviewed three rounds, uncommitted** | — | **3 passes**: 1 major + 7 minors, 0 + 6, **approve**. The major was `release_tab`'s `animate_to_state` held down by nothing on the ordinary gesture — press and release the button of the page **already on show** leaves `show_page` early-returning, measured `left: 0.95, right: 1.0`, a button stuck at the pressed scale with 1836 green. Round 2's six minors were prose, and its reviewer **found the orchestrator's own amendment asserting a false mechanism about `ui_core`** — "at most one `InputEvent` per SDL event", refuted by a four-line probe | **All twelve criteria met.** AC 11 (a pressed button mid-transition) needed a **temporary, reverted seed** — XTEST delivered nothing — and the arithmetic was corrected from a false 96 % to a measured **22 %**. **Requirement 4's call and duration are different numbers**: `Motion::from_theme` is 150 ms, not `THEME_TRANSITION`'s 300, pinned with an `assert_ne!`, and **on `T` the bar and its buttons arrive 150 ms apart, which nobody has seen.** Deliberate break 2 is **not expressible** (`Callback` is `Fn`) |
+| 24 | Demo Application | **done** — amended 2026-10-03, 2026-10-04 and 2026-10-05, split into 24.1–24.3, **all three committed together** | `e567634` | **12 rounds**, 42 findings | **Six decisions for the operator, none a defect** — see *Current position* |
+| 24.1 | `Page`, `--tab=`, and the three gates | done | `e567634` | **5 passes**, each in a session separate from the author's and from each other. **21 findings: 4 majors + 7 minors, 1 + 5, 1 + 6, 0 majors + 3 minors, then approve.** **All four majors were one finding — a gate with no test — and every one was found by mutation, none by reading**: `raise_toast`'s table row (0 failed / 1811), `show_page`'s `sync_page_visibility` (0 failed / 1813), and **`Demo::new`'s page table having no completeness assertion at all** (one dropped row → 0 failed / 1814 and the text column on the wrong page). **Five rounds because each round's sweep found the next one; the lesson is now `NEVERAGAIN`'s**: *a sweep of a mechanism's call sites is not a sweep of the data it is built from.* Round 5 returned **approve, no blocker and no major**. See *Task 24.1 — what it decided* | **11 of 12 criteria met.** **AC 12 (*"green with no assertion weakened"*) is NOT met and is offered for the operator's acceptance rather than waived: six tests moved, two recorded as losses in-file and four satisfying `NEVERAGAIN`'s positive-half rule.** **The task file's central trap had a premise that did not hold** — there is no per-node command cache, so `PaintState::new()` cannot leave a stale page on screen and **no capture distinguishes the two forms**; `TASK_UI_PRIM_24.1.md` is amended in place with the four source facts. **AC 4's *"empty, not stale"* survives as a test about the recorded vector, not about the dirty flag.** *"Every test the migration touched is listed by name"* is met under the rule the file states (19 named of 119 touched, 100 mechanical) — a reviewer's ~151 could not be reproduced by any method tried. **No criterion rests on a waiver.** One edge case is left as-is and recorded: **a repeated `--tab=` silently discards an unknown name** |
+| 24.2 | `CONTENT_TOP`, and the band goes page-local | done | `e567634` | **4 passes**: 2 majors + 8 minors, 0 + 9, 0 + 1, approve. **The major was 24.1's round-3 finding reproduced on `placed_handles`**, the table this change introduced — 0 failed / 1817 with a row dropped, and the reviewer's compound (a fattened progress bar *plus* the deleted row) green across all 1817. Round 3 also found the round-1 fix had landed in a failure message and **not in the doc that said the same thing the other way.** | **Two assertions retired**, one *withdrawn outright* (the gallery/band bound is false per-page) and one *replaced* (`inside(window, chart)` plus the `Data` neighbour loop), both recorded in the file with the arithmetic. **AC 6 amended**: `fps-check.sh` cannot select a page, so the six pages were measured by `ROADOS_RUN_SECONDS=<n> … --tab=<page>` — **not waived**. The root became `LayoutMode::Absolute` because `set_position` on a `Stack` child is a no-op |
+| 24.3 | The tab bar | done | `e567634` | **3 passes**: 1 major + 7 minors, 0 + 6, **approve**. The major was `release_tab`'s `animate_to_state` held down by nothing on the ordinary gesture — press and release the button of the page **already on show** leaves `show_page` early-returning, measured `left: 0.95, right: 1.0`, a button stuck at the pressed scale with 1836 green. Round 2's six minors were prose, and its reviewer **found the orchestrator's own amendment asserting a false mechanism about `ui_core`** — "at most one `InputEvent` per SDL event", refuted by a four-line probe | **All twelve criteria met.** AC 11 (a pressed button mid-transition) needed a **temporary, reverted seed** — XTEST delivered nothing — and the arithmetic was corrected from a false 96 % to a measured **22 %**. **Requirement 4's call and duration are different numbers**: `Motion::from_theme` is 150 ms, not `THEME_TRANSITION`'s 300, pinned with an `assert_ne!`, and **on `T` the bar and its buttons arrive 150 ms apart, which nobody has seen.** Deliberate break 2 is **not expressible** (`Callback` is `Fn`) |
 | — | Tesla-like demo application | pending | | | see `doc/ui/DEMO_APPLICATION.md` |
 
 **Task 24 was superseded on 2026-09-30 and un-superseded on 2026-10-03.** The
@@ -4272,10 +4334,18 @@ Numeric order is a valid dependency order: the cross-references in the task
 files place 03 before 06 before 07, 05 before 08 and 09, 10 before the input
 widgets, and 24 last.
 
-## Tasks 25–29, added after the demo
+## Task 28, added after the demo; and tasks 25–27 and 29, which moved
 
 Created 2026-09-28, **pending the operator's ratification**. They exist so the
 deferred work is not lost, not because anything in 02–24 needs them.
+
+**Four of the five moved to `doc/platform/` on 2026-10-05** and are numbered
+`CROSSPLATFORM_01`–`04`; their state lives in
+`doc/platform/IMPLEMENTATION_STATE.md`, which is where a session resuming this
+work should start. **Only task 28 stayed here**, because its goal is making
+`PRIMITIVES_ARCHITECTURE.md` agree with reality and its item 5 is a seam inside
+this sequence (task 04/05). The table below is the original one, with the moved
+tasks' new homes in the last column.
 
 The trigger was a review question worth answering explicitly: *does the missing
 KMSDRM driver block tasks 02–24, given a successful cross build is required?*
@@ -4286,13 +4356,13 @@ at all**, exit 0. Every platform dependency degrades to `OFF` rather than
 already handles. What the missing driver breaks is *runtime video on the device*,
 not the build.
 
-| # | Task | Needs |
-|---|---|---|
-| 25 | Target Image and Sysroot | operator strategy decision; unblocks 26 |
-| 26 | Head-Unit Video Driver | 25 |
-| 27 | Target Runtime Library Audit | 25, 26 |
-| 28 | Reconcile the SDL Configuration | none — but item 5 must land **before task 04** |
-| 29 | Head-Unit Smoke Test | 25, 26, 27 |
+| # | Task | Needs | Now at |
+|---|---|---|---|
+| 25 | Target Image and Sysroot | operator strategy decision; unblocks 26 | `doc/platform/TASK_CROSSPLATFORM_01.md` |
+| 26 | Head-Unit Video Driver | 25 | `doc/platform/TASK_CROSSPLATFORM_02.md` |
+| 27 | Target Runtime Library Audit | 25, 26 | `doc/platform/TASK_CROSSPLATFORM_03.md` |
+| 28 | Reconcile the SDL Configuration | none — but item 5 must land **before task 04** | **unchanged** |
+| 29 | Head-Unit Smoke Test | 25, 26, 27 | `doc/platform/TASK_CROSSPLATFORM_04.md` |
 
 **Three things were recorded as gating the cross-build requirement**, and they
 were not all in these tasks. All three are closed as of task 02, 2026-09-28.
@@ -4522,8 +4592,11 @@ operator's rule, none of these is treated as satisfied.
   `.ai/NEVERAGAIN.md` gained **three entries**: a filtered mutation run, a cache
   invalidated in the wrong order, and `open(path, "w")` truncating before its
   argument is evaluated.
-- 2026-10-05 — **task 24 (Demo Application) COMPLETE — all three sub-tasks
-  implemented, reviewed through 5 + 4 + 3 rounds, uncommitted in one tree.**
+- 2026-10-05 — **task 24 (Demo Application) COMPLETE and committed as
+  `e567634`** — all three sub-tasks in one commit, as the operator decided on
+  2026-10-04, reviewed through 5 + 4 + 3 rounds.  **Task 24 was the last task of
+  the `PRIM` sequence**, and the operator's instruction was to record the
+  progress and not to begin the next one.
   **The tab bar exists**: six buttons across the top, 44 tall at y 10, widths
   measured through `Button::content_size`, the active page carrying the theme's
   active pair — and **it puts back the press transition, the release transition,
@@ -5350,3 +5423,18 @@ operator's rule, none of these is treated as satisfied.
   not. Recorded here rather than in `.ai/NEVERAGAIN.md` because that file's
   entries are observed *failures of a fix*, and this one is a hazard identified
   while writing prose — though it belongs there if it ever bites.
+- 2026-10-05 — **the platform and cross-compilation tasks moved out of this
+  sequence, and are deferred until the target platform is decided.** `TASK_UI_PRIM_25`,
+  `_26`, `_27` and `_29` are now `doc/platform/TASK_CROSSPLATFORM_01`–`_04`, moved
+  with `git mv` so the history follows them. **Task 28 stayed here**: its goal is
+  making `PRIMITIVES_ARCHITECTURE.md` agree with reality and its item 5 is a seam
+  inside this sequence. The operator's reason for moving them is that **the target
+  platform is not decided**, which is upstream of all four — `CROSSPLATFORM_01`'s
+  own requirement 1 is an operator decision (Debian multiarch vs Buildroot/Yocto)
+  and every later task depends on its answer. **Their state, the `25→01` mapping
+  and three findings that will be load-bearing when they resume are in
+  `doc/platform/IMPLEMENTATION_STATE.md`**; read that, not this file, to resume
+  them. **What this file no longer says:** that `doc/ui/TASK_UI_PRIM_01..32.md`
+  is the spec, and that tasks `25`–`29` are pending here. Both were true when
+  written and are superseded, not erased. The 2026-09-28 entries below that say
+  *"tasks 25–29 drafted"* are left as they stood.

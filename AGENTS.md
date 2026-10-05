@@ -96,6 +96,9 @@ Before performing non-trivial work, inspect:
   for
 - `.ai/workflows/` — engineering workflows
 - `doc/findings/` — research already done; check it before re-researching
+- `doc/platform/` — the target-platform and cross-compilation sequence,
+  `TASK_CROSSPLATFORM_01..04.md`, **deferred until the target platform is
+  decided**; its `IMPLEMENTATION_STATE.md` says so and is the place to resume it
 
 The `.ai/` directory is part of the project's engineering infrastructure.
 Do not modify its contents unless the task explicitly concerns the AI
@@ -124,9 +127,9 @@ starting with `idea-to-code.md`. Do not skip its gates — an unconfirmed
 verdict, an unverified build, or a waived finding are each a decision, not an
 oversight.
 
-For a `doc/ui/TASK_UI_PRIM_*.md` sequence, `task-sequence.md` is canonical and
-additionally owns the per-task loop and the operator-commit gate. It is not
-restated here.
+For a `doc/ui/TASK_UI_PRIM_*.md` or `doc/platform/TASK_CROSSPLATFORM_*.md`
+sequence, `task-sequence.md` is canonical and additionally owns the per-task loop
+and the operator-commit gate. It is not restated here.
 
 ## Planned, not yet written
 

@@ -1,4 +1,4 @@
-# TASK_UI_PRIM_29: Head-Unit Smoke Test
+# TASK_CROSSPLATFORM_04: Head-Unit Smoke Test
 
 ## Goal
 
@@ -30,7 +30,7 @@ smoke test rather than a development task: nothing new is built here.
    - The GLES context reports **3.1** or better. The host reports 3.2, which says
      nothing about the head unit's GPU. This is the one number the whole
      `PRIMITIVES_ARCHITECTURE.md` rests on.
-   - No `dlopen` failure at startup — the task 27 audit should have predicted
+   - No `dlopen` failure at startup — the task 03 audit should have predicted
      none, and this is where that prediction is checked.
 
 3. **Measure frame rate** and report it honestly, including what was measured

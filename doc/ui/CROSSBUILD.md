@@ -1483,8 +1483,9 @@ library with no scanout driver at all:
 ```
 
 That is §6.7's finding, now confirmed on a real target artifact. It is also why
-the forcing in task 26 is probably unnecessary — see that task's requirement 2,
-which asks for this to be checked before anything is changed.
+the forcing in `doc/platform/TASK_CROSSPLATFORM_02.md` is probably unnecessary —
+see that task's requirement 2, which asks for this to be checked before anything
+is changed.
 
 **The target links no runtime platform libraries, and the corrected count is
 zero.** `SDL_DEPS_SHARED=ON` is the default, so the interesting question is which
@@ -1518,7 +1519,8 @@ cross-compilation waiver: the build runs, the compiler is cross, the flag is
 valid for aarch64, and the artifact is `AArch64`. The one thing it did not
 close — "a `cargo build --target aarch64-unknown-linux-gnu` succeeds" — was
 closed the same day once the manifest existed (task 02); see §4.2. What it
-still does **not** give the target is a video driver (§6.7, task 26). No
+still does **not** give the target is a video driver (§6.7,
+`doc/platform/TASK_CROSSPLATFORM_02.md`). No
 runtime, no device, and no sysroot — this build needed none, and §6.4 explains
 why that is expected.
 
@@ -2013,8 +2015,9 @@ OFF)` at `CMakeLists.txt:375` defaults it `ON` for any Unix target, so the cache
 holds `SDL_KMSDRM:BOOL=ON` without the toolchain file touching it. The reason it
 still does not work is not an unreachable option — it is the *backend test*
 failing for want of a target `pkg-config` and target `libdrm`/`gbm`, which is
-§6.7. So the fix is the sysroot (task 25), not a forcing. Task 26's requirement
-2 says to check this before changing anything, and this is that check's result.
+§6.7. So the fix is the sysroot (`doc/platform/TASK_CROSSPLATFORM_01.md`), not a
+forcing. `TASK_CROSSPLATFORM_02.md`'s requirement 2 says to check this before
+changing anything, and this is that check's result.
 
 `cmake_vars!` is the whole reachable set. Everything else needs a channel that
 does not exist — there is no `CMAKE_ARGS` in `cmake` 0.1.54 and no

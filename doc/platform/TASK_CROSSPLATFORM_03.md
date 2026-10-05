@@ -1,4 +1,4 @@
-# TASK_UI_PRIM_27: Target Runtime Library Audit
+# TASK_CROSSPLATFORM_03: Target Runtime Library Audit
 
 ## Goal
 
@@ -43,9 +43,9 @@ will do so on the head unit rather than on the build machine.
    For the current target build the count is **0**, and that is the good case:
    every backend is either compiled in or absent, and the target `dlopen`s
    nothing. It is 0 *because* nothing was detected — KMSDRM failed, so it recorded
-   no soname either. The moment task 26 makes KMSDRM work, this count becomes
+   no soname either. The moment task 02 makes KMSDRM work, this count becomes
    non-zero and the image obligation appears. **Do not read 0 as "nothing to
-   ship" without re-running it after task 26.**
+   ship" without re-running it after task 02.**
 
 2. **Distinguish three kinds**, because they need different handling:
    - **Required at runtime** — e.g. `libdrm.so.2`, `libgbm.so.1` for KMSDRM.
@@ -88,6 +88,6 @@ will do so on the head unit rather than on the build machine.
 
 ## Out of Scope
 
-- Building the image or the sysroot — task 25.
-- Making KMSDRM work — task 26.
-- Booting the head unit — task 29.
+- Building the image or the sysroot — task 01.
+- Making KMSDRM work — task 02.
+- Booting the head unit — task 04.

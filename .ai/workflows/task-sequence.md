@@ -3,7 +3,8 @@
 **Owner: this file.** It is the single canonical description of the per-task
 implementation loop. If any other document states the loop, that document is
 wrong — including `AGENTS.md`, which routes here rather than restating it, and
-`doc/ui/IMPLEMENTATION_STATE.md`, which records progress and points here.
+each sequence's `IMPLEMENTATION_STATE.md`, which records progress and points
+here.
 
 The 2026-09-27 operator decision to keep `reviewer.md` as the only review
 document still holds. This file does not restate what a review is or how one is
@@ -75,13 +76,19 @@ prevent.
 
 ## State
 
-`doc/ui/IMPLEMENTATION_STATE.md` records status, decisions, waivers, blockers and
-history for a multi-task sequence, so a fresh session can resume without
-re-deriving it. It is **not** the source of the workflow, and it is not a source
-of evidence. A sidecar or state file that contradicts its artifact is wrong and
-gets fixed — see `AGENTS.md` on working context.
+Each sequence's `IMPLEMENTATION_STATE.md` records status, decisions, waivers,
+blockers and history for it, so a fresh session can resume without re-deriving
+it. Today there are two — `doc/ui/IMPLEMENTATION_STATE.md` and
+`doc/platform/IMPLEMENTATION_STATE.md` — and this workflow applies to both. A
+state file is **not** the source of the workflow, and it is not a source of
+evidence. A sidecar or state file that contradicts its artifact is wrong and gets
+fixed — see `AGENTS.md` on working context.
 
 ## Scope
 
-Applies to a task-file sequence: `doc/ui/TASK_UI_PRIM_*.md`. A single
-self-contained change does not need a loop; it needs a build and a test.
+Applies to a task-file sequence: `doc/ui/TASK_UI_PRIM_*.md` and
+`doc/platform/TASK_CROSSPLATFORM_*.md`. The `CROSSPLATFORM` sequence was created
+2026-10-05 by moving tasks 25, 26, 27 and 29 out of the `UI_PRIM` sequence, and
+is deferred until the operator decides the target platform; nothing in it is in
+flight. A single self-contained change does not need a loop; it needs a build and
+a test.

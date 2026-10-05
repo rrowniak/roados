@@ -80,5 +80,6 @@ was acceptable is that the alternative was blocked. Both facts need recording.
 ## Out of Scope
 
 - Any change to SDL's build — the mechanism questions belong to task 02's
-  manifest, and the driver forcing to task 26.
-- The sysroot, the image, and the head unit — tasks 25, 27 and 29.
+  manifest, and the driver forcing to `doc/platform/TASK_CROSSPLATFORM_02.md`.
+- The sysroot, the image, and the head unit — `doc/platform/TASK_CROSSPLATFORM_01.md`,
+  `TASK_CROSSPLATFORM_03.md` and `TASK_CROSSPLATFORM_04.md`.

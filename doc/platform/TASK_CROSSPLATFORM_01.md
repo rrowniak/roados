@@ -1,4 +1,4 @@
-# TASK_UI_PRIM_25: Target Image and Sysroot
+# TASK_CROSSPLATFORM_01: Target Image and Sysroot
 
 ## Goal
 
@@ -18,7 +18,7 @@ dependency degrades to `OFF` rather than failing. What a sysroot buys is not a
 passing build. It is:
 
 - `pkg-config` resolution for the target, which is the only route to
-  `CheckKMSDRM` (task 26 depends on this).
+  `CheckKMSDRM` (task 02 depends on this).
 - Correct multiarch library search paths, so a library is not silently resolved
   to the host's x86_64 copy — the failure mode `cmake/aarch64-toolchain.cmake`
   warns about at its `CMAKE_FIND_ROOT_PATH_MODE_*` section.
@@ -66,6 +66,6 @@ passing build. It is:
 
 ## Out of Scope
 
-- Forcing `SDL_KMSDRM=ON` — that is task 26.
-- Booting the image — task 29.
+- Forcing `SDL_KMSDRM=ON` — that is task 02.
+- Booting the image — task 04.
 - Any change to the Rust crates, which are unaffected by the sysroot choice.

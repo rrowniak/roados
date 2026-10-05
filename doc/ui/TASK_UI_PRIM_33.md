@@ -29,6 +29,20 @@ reachable from a cargo feature:
   code that nothing uses and no test notices — a successful build of a different
   artefact, the same failure shape `CROSSBUILD.md` §6.7 records for a missing
   `pkg-config`.
+
+  **This is the option with the most to prove**, because turning it off must not
+  break the GLES 3.1 context the whole project renders through. The argument for
+  that is at the **C level**, not the CMake level — and an earlier draft of this
+  file got it wrong by claiming `CheckOpenGL` and `CheckOpenGLES` have "no
+  dependency between them". They are coupled in the one macro that matters:
+  `CheckEGL` opens `if(SDL_OPENGL OR SDL_OPENGLES)` (`sdlchecks.cmake:861-862`).
+  The outcome survives, because `SDL_OPENGLES` stays on and the branch still
+  runs, but that is the fact to cite. The C-level evidence is in
+  `cmake/sdl-options.cmake`'s header: `SDL_VIDEO_OPENGL_EGL` gates
+  `SDL_egl.c:23` and the X11 driver's GLES entry points
+  (`SDL_x11video.c:217-233`), and with `SDL_VIDEO_OPENGL_GLX` undefined the
+  `SDL_HINT_VIDEO_FORCE_EGL` test inside it never runs, so **EGL becomes
+  unconditionally preferred** rather than merely unaffected.
 - **`SDL_TEST_LIBRARY`** — default **ON** (`CMakeLists.txt:399`), builds a
   static `SDL3_test` nothing in this workspace links, and runs
   `CheckLibUnwind`: a three-stage compile/link/`pkg-config` probe for a test-only

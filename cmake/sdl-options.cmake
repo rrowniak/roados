@@ -31,17 +31,38 @@
 # `SDL_VIDEO_VULKAN 1` and returns.
 #
 # **SDL_OPENGL.** Desktop OpenGL, reached through GLX. This project uses OpenGL
-# ES 3.1 through EGL (`PRIMITIVES.md` § *Backend*, `CROSSBUILD.md` §2.4), and the
-# two are separate SDL options: `CheckOpenGL` is gated on `SDL_OPENGL`
-# (`sdlchecks.cmake:884`) and `CheckOpenGLES` on `SDL_OPENGLES` (`:902`), with no
-# dependency between them, so turning this off cannot affect the GLES path.
+# ES 3.1 through EGL (`PRIMITIVES.md` § *Backend*, `CROSSBUILD.md` §2.4).
+#
+# *Why this cannot affect the GLES path* -- and the argument has to be at the C
+# level, not the CMake level, because that is where the risk is. Three facts:
+#
+#  1. `CheckEGL` (`sdlchecks.cmake:861-862`) opens `if(SDL_OPENGL OR
+#     SDL_OPENGLES)`, so the two options are **coupled** in the one macro that
+#     decides whether EGL is detected at all. An earlier draft of this file
+#     claimed "no dependency between them", which is false. The *outcome* is
+#     unaffected -- `SDL_OPENGLES` stays on, so the branch still runs -- but the
+#     independence claim was doing work it could not support.
+#  2. `CheckOpenGLES` (`:902-925`) is gated on `SDL_OPENGLES` alone and sets
+#     `HAVE_OPENGLES`, `SDL_VIDEO_OPENGL_ES2` and `SDL_VIDEO_RENDER_OGL_ES2`
+#     with no reference to `SDL_OPENGL`.
+#  3. In the C, the GLES path hangs off `SDL_VIDEO_OPENGL_EGL`, which comes from
+#     `SDL_OPENGLES`: `SDL_egl.c:23` is `#ifdef SDL_VIDEO_OPENGL_EGL`, and the X11
+#     driver installs its GLES entry points under that same guard
+#     (`SDL_x11video.c:217-233`). With `SDL_OPENGL` off, `SDL_VIDEO_OPENGL_GLX` is
+#     *not* defined, so the `SDL_HINT_VIDEO_FORCE_EGL` test nested inside
+#     `SDL_VIDEO_OPENGL_GLX` never runs and **EGL is unconditionally preferred** --
+#     not merely unaffected. And `SDL_video.c:4808` guards its GL types on
+#     `SDL_VIDEO_OPENGL || SDL_VIDEO_OPENGL_ES || SDL_VIDEO_OPENGL_ES2`, an OR, so
+#     the ES2 arm alone suffices. Checked in the shipped artefact as well:
+#     `nm` reports `T SDL_GL_CreateContext` and `T SDL_EGL_LoadLibrary`.
+#
 # **This is not a cosmetic setting.** `dep_option(SDL_OPENGL ... ON)` is ON by
 # default and it was ON in both `CMakeCache.txt` files; it came out undef only
 # because `FindOpenGLHeaders()` could not compile `<GL/gl.h>` on this host, i.e.
 # `libgl-dev` is not installed. Install that package and a native build silently
 # grows GLX code that nothing uses and no test notices -- a successful build of a
-# different artefact, which is the failure mode `CROSSBUILD.md` §6.7 records for
-# a missing `pkg-config`.
+# different artefact, which is the failure mode `CROSSBUILD.md` §6.7 records for a
+# missing `pkg-config`.
 #
 # **SDL_TEST_LIBRARY.** SDL builds a static `SDL3_test` library by default
 # (`CMakeLists.txt:399`) purely to hold its own test fixtures. Nothing in this

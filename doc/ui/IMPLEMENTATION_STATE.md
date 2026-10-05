@@ -4109,7 +4109,8 @@ sysroot mandatory.
   asymmetry in the mechanism, only in the file that existed.
   **What changed on 2026-10-05 is not this decision but its justification:** two
   of the four subsystems the document wanted off — audio and camera — are
-  product requirements (`IDEA.md` § *Audio and media`, and `IDEA.md:60,107,183`),
+  product requirements (`IDEA.md` § *Features* — the bold *Audio and media*
+  group — and `IDEA.md:60,107,183`),
   so the deviation is now "the document was product-wrong", not "the operator
   accepted a blocked alternative". The remaining unused subsystems stay on by the
   operator's ruling of 2026-10-05 that megabytes are not a reason to narrow what
@@ -4283,7 +4284,7 @@ verified. A blank cell is unknown, not "none".
 | 24.1 | `Page`, `--tab=`, and the three gates | done | `e567634` | **5 passes**, each in a session separate from the author's and from each other. **21 findings: 4 majors + 7 minors, 1 + 5, 1 + 6, 0 majors + 3 minors, then approve.** **All four majors were one finding — a gate with no test — and every one was found by mutation, none by reading**: `raise_toast`'s table row (0 failed / 1811), `show_page`'s `sync_page_visibility` (0 failed / 1813), and **`Demo::new`'s page table having no completeness assertion at all** (one dropped row → 0 failed / 1814 and the text column on the wrong page). **Five rounds because each round's sweep found the next one; the lesson is now `NEVERAGAIN`'s**: *a sweep of a mechanism's call sites is not a sweep of the data it is built from.* Round 5 returned **approve, no blocker and no major**. See *Task 24.1 — what it decided* | **11 of 12 criteria met.** **AC 12 (*"green with no assertion weakened"*) is NOT met and is offered for the operator's acceptance rather than waived: six tests moved, two recorded as losses in-file and four satisfying `NEVERAGAIN`'s positive-half rule.** **The task file's central trap had a premise that did not hold** — there is no per-node command cache, so `PaintState::new()` cannot leave a stale page on screen and **no capture distinguishes the two forms**; `TASK_UI_PRIM_24.1.md` is amended in place with the four source facts. **AC 4's *"empty, not stale"* survives as a test about the recorded vector, not about the dirty flag.** *"Every test the migration touched is listed by name"* is met under the rule the file states (19 named of 119 touched, 100 mechanical) — a reviewer's ~151 could not be reproduced by any method tried. **No criterion rests on a waiver.** One edge case is left as-is and recorded: **a repeated `--tab=` silently discards an unknown name** |
 | 24.2 | `CONTENT_TOP`, and the band goes page-local | done | `e567634` | **4 passes**: 2 majors + 8 minors, 0 + 9, 0 + 1, approve. **The major was 24.1's round-3 finding reproduced on `placed_handles`**, the table this change introduced — 0 failed / 1817 with a row dropped, and the reviewer's compound (a fattened progress bar *plus* the deleted row) green across all 1817. Round 3 also found the round-1 fix had landed in a failure message and **not in the doc that said the same thing the other way.** | **Two assertions retired**, one *withdrawn outright* (the gallery/band bound is false per-page) and one *replaced* (`inside(window, chart)` plus the `Data` neighbour loop), both recorded in the file with the arithmetic. **AC 6 amended**: `fps-check.sh` cannot select a page, so the six pages were measured by `ROADOS_RUN_SECONDS=<n> … --tab=<page>` — **not waived**. The root became `LayoutMode::Absolute` because `set_position` on a `Stack` child is a no-op |
 | 24.3 | The tab bar | done | `e567634` | **3 passes**: 1 major + 7 minors, 0 + 6, **approve**. The major was `release_tab`'s `animate_to_state` held down by nothing on the ordinary gesture — press and release the button of the page **already on show** leaves `show_page` early-returning, measured `left: 0.95, right: 1.0`, a button stuck at the pressed scale with 1836 green. Round 2's six minors were prose, and its reviewer **found the orchestrator's own amendment asserting a false mechanism about `ui_core`** — "at most one `InputEvent` per SDL event", refuted by a four-line probe | **All twelve criteria met.** AC 11 (a pressed button mid-transition) needed a **temporary, reverted seed** — XTEST delivered nothing — and the arithmetic was corrected from a false 96 % to a measured **22 %**. **Requirement 4's call and duration are different numbers**: `Motion::from_theme` is 150 ms, not `THEME_TRANSITION`'s 300, pinned with an `assert_ne!`, and **on `T` the bar and its buttons arrive 150 ms apart, which nobody has seen.** Deliberate break 2 is **not expressible** (`Callback` is `Fn`) |
-| 33 | Set the SDL options no cargo feature can reach | nothing — **done 2026-10-05**, split out of task 28 | `doc/ui/TASK_UI_PRIM_33.md` | | none waived: 8 of 8 criteria verified, 6 by cache/header greps, 1 by the test suite, 1 by `fps-check.sh` |
+| 33 | Set the SDL options no cargo feature can reach | nothing — **done 2026-10-05**, split out of task 28, **reviewed 2026-10-05** | `doc/ui/TASK_UI_PRIM_33.md` | | none waived: 8 of 8 verified — AC 1 and AC 2's native half by cache/header greps, AC 3 and AC 4 by grepping the same header for the settings that must *not* have moved, AC 2's cross half by a cross build, AC 5 and AC 6 by `ls` and `nm`, AC 7 by 1 839 tests plus three `fps-check.sh` runs, AC 8 by this review finding its command broken and it being fixed |
 | — | Tesla-like demo application | pending | | | see `doc/ui/DEMO_APPLICATION.md` |
 
 **Task 24 was superseded on 2026-09-30 and un-superseded on 2026-10-03.** The
@@ -4375,7 +4376,7 @@ not the build.
 | 25 | Target Image and Sysroot | operator strategy decision; unblocks 26 | `doc/platform/TASK_CROSSPLATFORM_01.md` |
 | 26 | Head-Unit Video Driver | 25 | `doc/platform/TASK_CROSSPLATFORM_02.md` |
 | 27 | Target Runtime Library Audit | 25, 26 | `doc/platform/TASK_CROSSPLATFORM_03.md` |
-| 28 | Reconcile the SDL Configuration | nothing — **done 2026-10-05**, docs only | `doc/ui/TASK_UI_PRIM_28.md`, amended in place |
+| 28 | Reconcile the SDL Configuration | nothing — **done and reviewed 2026-10-05**, docs only | `doc/ui/TASK_UI_PRIM_28.md`, amended in place. 4 of 5 criteria met; AC 5 met by striking both clauses in the task files, since tasks 04 and 05 had both already run |
 | 29 | Head-Unit Smoke Test | 25, 26, 27 | `doc/platform/TASK_CROSSPLATFORM_04.md` |
 
 **Task 33 was created 2026-10-05 and numbered 33 deliberately.** `29` is
@@ -4384,7 +4385,7 @@ in `doc/ui` would resurrect a number that means something else in this history.
 `30`, `31` and `32` were never written, and `33` is the next number above
 everything this sequence has used.
 
-### Task 28 — done 2026-10-05, documentation only
+### Task 28 — done 2026-10-05, documentation only, reviewed the same day
 
 **Scope: six documents. No Rust file, no manifest, no `.cmake` file.** That is
 worth stating plainly, because the task was first *implemented* as documentation
@@ -4416,7 +4417,7 @@ Of those four:
 
 | | verdict |
 |---|---|
-| audio | **wrong about the product** — `IDEA.md` § *Audio and media* is a headline feature (zones, ducking, FM/DAB+, USB playback, phone calls) |
+| audio | **wrong about the product** — `IDEA.md` § *Features*, the bold *Audio and media* group is a headline feature (zones, ducking, FM/DAB+, USB playback, phone calls) |
 | camera | **wrong about the product** — `IDEA.md:60,107,183`: automatic headlights from a camera, recognition behind it |
 | filesystem | **impossible** — SDL declares twelve subsystems and filesystem is not one; on Unix it is always compiled (`SDL/CMakeLists.txt:2112`), and only `SDL_FILESYSTEM_DUMMY` is a fallback (`:3619-3620`) |
 | render | correct and unused — `ui_core` draws through its own GLES pipeline and never reaches `sdl3::render` |
@@ -4435,7 +4436,7 @@ task file, and the task file's own acceptance criteria did not ask for it:
 | `mod.rs` — public API, `UiContext` | a filename that is `lib.rs`, and **a type that does not exist anywhere** | `lib.rs`; `UiContext` named as fictional |
 | module tree | missing `font.rs`, `texture.rs`, `render/{context,target,blur}.rs`, `ui_demo/{main,fps}.rs` | all present; **verified as an exact set match, 34 basenames** |
 | `WidgetNode` sketch | 7 fields, incl. `kind`, `properties`, `flags`, and a `PropertySet` | the 4 that exist; `PropertySet` recorded as a type that never existed |
-| ownership rationale | "no need for Rc/RefCell" | "no `Rc`/`RefCell` **in the tree**" — `node.rs`/`arena.rs` have zero, `property.rs` has 18 |
+| ownership rationale | "no need for Rc/RefCell" | "no `Rc`/`RefCell` **in the tree**" — `rg -c 'Rc<\|RefCell<\|Weak<'` is **0** in both `node.rs` and `arena.rs`, and **18 lines** in `property.rs` |
 | `Property<T>` sketch | `{ value, tracker }` | `Rc<PropertyInner<T>>` with `RefCell`/`Weak`, and why the property graph cannot avoid them while the tree can |
 | `LayoutMode::Flex { wrap }` | presented as working | **accepted and not honoured** — which `layout.rs` already said |
 | *Open Questions* | "Vulkan is additive" | contradicted `PRIMITIVES.md` § *Backend*, which **rejects** Vulkan; resolved, with a revisit trigger |
@@ -4678,6 +4679,72 @@ operator's rule, none of these is treated as satisfied.
 
 ## History
 
+- 2026-10-05 — **tasks 28 and 33 reviewed once each, in one session separate
+  from the author's — verdict *approve with required changes*, 2 majors and 8
+  minors, all fixed here.** The review's value was concentrated in two places,
+  and both were in the documentation rather than the code.
+  **Major 1: the verification command in `CROSSBUILD.md` §5.5 did not run.** One
+  path level too many — `$d` already *is* `…/out/build`, so `$d/../include-
+  config-release/…` resolved to a directory that does not exist and `grep` exited
+  2. **The section whose entire purpose is to be the durable, copy-pasteable
+  proof of the change contained a command that failed, and AC 8 rested on it.**
+  The *expected output* printed beside it was correct, so an equivalent command
+  had been run and the output transcribed — which is precisely how a broken
+  command survives review: the evidence is right and the recipe is wrong.
+  **Major 2: `CROSSBUILD.md` §5.3 contradicted §5.2.1 and said so nowhere.**
+  §5.3 is titled *"What the options come out as"*, reports
+  `SDL_AUDIO_DISABLED`/`SDL_RENDER_DISABLED`/`SDL_CAMERA_DISABLED`, and carries no
+  marker that it is a **diagnostic** configure with three subsystems forced off
+  from the command line. The shipping build has all twelve on. So the one
+  question §5.3 exists to answer — *is audio in the binary?* — was answered
+  wrongly, with nothing to signal it. That is the exact defect class task 28 was
+  chartered to eliminate, reintroduced in the document the change itself edited.
+  It now opens with a blockquote saying so, and §5.1's *"which is presumably the
+  intent"* is struck.
+  **The finding I disagree with least, because it is about my own reasoning:**
+  the claim that `SDL_OPENGL=OFF` cannot affect the GLES path rested on
+  `CheckOpenGL` and `CheckOpenGLES` having *"no dependency between them"*, and
+  **that is false** — `CheckEGL` opens `if(SDL_OPENGL OR SDL_OPENGLES)`
+  (`sdlchecks.cmake:861-862`), coupling them in the one macro that decides
+  whether EGL is detected at all. The *conclusion* holds, and now has the
+  load-bearing evidence: in the C, the GLES path hangs off `SDL_VIDEO_OPENGL_EGL`
+  (`SDL_egl.c:23`, `SDL_x11video.c:217-233`), which comes from `SDL_OPENGLES`;
+  with `SDL_VIDEO_OPENGL_GLX` undefined the `SDL_HINT_VIDEO_FORCE_EGL` test
+  nested inside it never runs, so **EGL becomes unconditionally preferred**
+  rather than merely unaffected. A CMake-level argument was one link short of
+  the claim, on the one option the task file itself called highest-risk.
+  **The 8 minors:** three new `§5.4` references that wanted §5.2.1 (all three
+  added lines, one pattern); the `property.rs` count of 18 stated without its
+  method — it counts matching **lines**, and 39 occurrences, so it is now
+  `rg -c`-with-the-pattern; two conflicting fps figures for the same work, now
+  three dated runs in one table; the `*vulkan*.o` row mixing `du` with byte-exact
+  figures, now two rows plus exact bytes (936 × 5 = 4 680); a HIDAPI mechanism
+  cited to `PRIMITIVES.md:96,200`, which **never mentions HID or USB anywhere** —
+  the requirement is cited to them and the mechanism to `SDL_HINT_JOYSTICK_HIDAPI`;
+  an "8 of 8" attribution whose buckets did not add up; `IDEA.md` § *Audio and
+  media* cited as a section when `IDEA.md:25` is a bold run-in label; and both
+  sidecars stale — `NEVERAGAIN.md.context.md` had claimed 22 entries against a
+  file with 60, and `AGENTS.md.context.md` still read *Last touched: 2026-09-28*.
+  Both fixed, and the NEVERAGAIN one noted that being untracked is why no diff
+  ever shows the drift.
+  **What the review could not verify, which matters more than the findings:** the
+  **before** sizes — the pre-change build is gone and nothing in the tree records
+  them, so the delta is supported by the *after* reproducing byte-exactly, not by
+  the before being re-checkable; both fps runs as it found them (it did not run
+  the demo); and **the aarch64 artifact, because my own `cargo clean` had deleted
+  `ui/target/aarch64-unknown-linux-gnu`.** That last one is mine: AC 2's cross
+  half was asserted and not inspectable. Rebuilt at review — same BuildID, same
+  5 759 648 bytes, options correct.
+  **Two process findings, both major, neither needing a code change:** the two
+  tasks shipped in one commit whose message (*"Doc updated"*) misdescribes a build
+  change — and the reviewer located the failure precisely at step 4, *present the
+  handoff, the verdict and the diff scope*, where a ten-file change was presented
+  under a documentation task's label; and the build change went inside a
+  documentation task against its own *Out of Scope*, when `developer.md` § *Scope
+  check* would have forced a split **before** anything was written. **The reviewer
+  also corrected my brief**: `.ai/NEVERAGAIN.md` has *no* rule about task size or
+  scope — I had asserted one — and the applicable rules are `developer.md` §
+  *Scope check* and § *Implementation/General*.
 - 2026-10-05 — **task 33 done, and split out of task 28 rather than folded into
   it.** Three build files and one new task file; no Rust file and no manifest.
   **The boundary was the operator's**, and it was crossed first and corrected
@@ -4715,10 +4782,13 @@ operator's rule, none of these is treated as satisfied.
   versus linker point stated with figures rather than asserted. A full
   `cargo clean` rebuild reproduced both sizes **byte for byte**, so they are not
   stale-state artifacts.
-  **Verified:** 1 839 tests green in debug and in release; `fps-check.sh`
-  **62.0 fps, worst frame 19.7 ms, 0 frames over 33 ms** against a 61.6–61.9
-  baseline; the cross build re-run with `CMAKE_TOOLCHAIN_FILE` deliberately unset
-  to prove the `[env]` wiring stands alone, artifact `ARM aarch64`, with
+  **Verified:** 1 839 tests green in debug and in release, and
+  **three `fps-check.sh` runs the same day** — 61.9 / 24.3 ms, 62.0 / 19.7 ms
+  and 61.6 / 18.7 ms, each 10 s with 0 frames over 33 ms, against a 61.6–61.9
+  baseline — all three tabulated once in `CROSSBUILD.md` §5.5 rather than in
+  two places here. The cross build was re-run with `CMAKE_TOOLCHAIN_FILE`
+  deliberately unset, to prove the `[env]` wiring stands alone, artifact
+  `ARM aarch64` — same BuildID and byte count as the first cross build — with
   `SDL_X11` off, `SDL_UNIX_CONSOLE_BUILD` on, `SDL_VIDEO_OPENGL_EGL` and
   `SDL_JOYSTICK_HIDAPI` on — every one unchanged by this task.
   **Two traps found here, both of which failed silently, and both now in
@@ -4752,7 +4822,8 @@ operator's rule, none of these is treated as satisfied.
   *Module Layout* named a type that does not exist anywhere (`UiContext`) and
   omitted five real modules; the `WidgetNode` sketch carried three fields that
   were never built and a `PropertySet` that never existed; the ownership
-  rationale claimed no `Rc`/`RefCell` anywhere when `property.rs` has eighteen;
+  rationale claimed no `Rc`/`RefCell` anywhere, when `property.rs` carries eighteen
+  matching lines;
   `LayoutMode::Flex { wrap }` was presented as working when `layout.rs` says it
   is accepted and not honoured. And **two documents held opposite positions on
   Vulkan** — the architecture doc said "additive later", `PRIMITIVES.md` said

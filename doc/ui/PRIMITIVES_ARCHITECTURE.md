@@ -55,13 +55,16 @@ available, which is exactly the aarch64 configuration — see `CROSSBUILD.md`
   why each is right to keep:
 
   - **video, events, joystick, gamepad, HIDAPI** — `SDL_Init` is asked for
-    exactly these three flags (`render/context.rs:190-192`), and a USB steering
-    wheel is a HID device, so HIDAPI is what turns one into named buttons and
-    axes (`PRIMITIVES.md:96,200`). `SDL_JOYSTICK_VIRTUAL` additionally makes a
-    gamepad injectable from code, which is the only input-injection route that
-    works on a host with no pointer device.
+    exactly these three flags (`render/context.rs:190-192`), and a steering wheel
+    is a documented input primitive arriving as an SDL gamepad
+    (`PRIMITIVES.md:96,200`). HIDAPI is what makes that work for a USB device:
+    `SDL_HINT_JOYSTICK_HIDAPI` defaults to `"1"` — *"whether the HIDAPI joystick
+    drivers should be used"* — and evdev (`SDL_JOYSTICK_LINUX`) alone would
+    leave such a device without named buttons and axes. `SDL_JOYSTICK_VIRTUAL`
+    additionally makes a gamepad injectable from code, which is the only
+    input-injection route that works on a host with no pointer device.
   - **audio** — a headline feature of the product rather than a preference:
-    `IDEA.md` § *Audio and media* asks for zones, source priority, ducking,
+    `IDEA.md` § *Features*, the bold *Audio and media* group asks for zones, source priority, ducking,
     radio and USB playback.
   - **camera** — also a named feature (`IDEA.md:60,107,183`): automatic
     headlights driven from a camera, and recognition behind it. The V4L2 driver

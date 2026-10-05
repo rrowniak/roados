@@ -753,7 +753,7 @@ file.
 `PRIMITIVES_ARCHITECTURE.md` used to say audio, render, camera and filesystem are
 disabled at build time, and that a named set of subsystems stays. **It no longer
 says that** — the paragraph was reconciled on 2026-10-05, and the reason is in
-§5.4. Two things still have to be established for anyone who wants to act on the
+§5.2.1. Two things still have to be established for anyone who wants to act on the
 old text, and the first is a blocker for the second.
 
 **`sdl3` 0.20.0 re-exports no subsystem features at all.** Its complete feature
@@ -837,8 +837,10 @@ What the allowlist does and does not cover:
   is the `GPU drivers: vulkan` line in §3, and it is unaffected by
   `no-sdl-gpu`.
 - `sdl-audio` is deliberately **not** in the allowlist. With the architecture
-  doc's list, SDL ends up with no audio backend at all, which is presumably the
-  intent; see §8 if the head unit is expected to make sound.
+  doc's list, SDL ends up with no audio backend at all. ~~which is presumably the
+  intent~~ — **that was wrong on two counts, 2026-10-05**: audio is a product
+  requirement (`IDEA.md` § *Features*), and the allowlist is not in use. See
+  §5.2.1.
 
 **The alternative: force the options from a toolchain file** — see §7.7. That
 needs no second dependency and keeps the configuration in one place, but an
@@ -853,7 +855,7 @@ which **both** targets read, the cross target through
 `cmake/aarch64-toolchain.cmake` and the native one directly.
 
 The subsystems themselves are still on SDL's defaults, and that is the
-operator's decision of 2026-09-28 with the channel blocked — see §5.4. What
+operator's decision of 2026-09-28 with the channel blocked — see §5.2.1. What
 changed on 2026-10-05 is that three options which no cargo feature can reach are
 now set on both targets. The allowlist above remains the way to reach the other
 twelve, and it remains undecided; the reason it is still undecided is not a
@@ -922,7 +924,7 @@ Two of the four subsystems the architecture document proposed to disable turned
 out to be **product requirements**, which is a stronger reason than the blocked
 channel:
 
-- **audio** — `IDEA.md` § *Audio and media* asks for zones, source priority,
+- **audio** — `IDEA.md` § *Features*, the bold *Audio and media* group asks for zones, source priority,
   ducking, FM/DAB+ and USB playback. It is a headline feature.
 - **camera** — `IDEA.md:60,107,183`: automatic headlights driven from a camera,
   and recognition behind it. The V4L2 driver compiles in.
@@ -937,9 +939,20 @@ ruling of 2026-10-05 is that trimming megabytes off a static archive is not a
 reason to narrow what the product can do, and that `power` in particular is a
 battery API (`SDL_GetPowerInfo`, the whole of the category) which a head unit on
 the vehicle's supply has no use for. `sensor` is the one genuinely undecided
-option; see §5.4.
+option; see §5.2.1.
 
 ### 5.3 What the options come out as
+
+> **This subsection is a diagnostic, not the shipping configuration.** It records
+> what SDL produced when three subsystems were forced off *on the command line*,
+> to show that the switches work at all. **The shipping build has all twelve
+> subsystems on** — see §5.2.1 — and the generated header in
+> `ui/target/release/` says `/* #undef SDL_AUDIO_DISABLED */`,
+> `/* #undef SDL_CAMERA_DISABLED */` and carries `SDL_CAMERA_DRIVER_V4L2` and two
+> `SDL_AUDIO_DRIVER_*` defines. Read the three lines below as *"these switches
+> respond to `-D`"*, not as *"these are off"*. Corrected 2026-10-05, where this
+> subsection was found contradicting the policy directly above it with nothing to
+> mark it as historical.
 
 The configure in §3, with `SDL_AUDIO=OFF SDL_RENDER=OFF SDL_CAMERA=OFF`, produced
 `SDL_AUDIO_DISABLED`, `SDL_RENDER_DISABLED` and `SDL_CAMERA_DISABLED` in the
@@ -1151,9 +1164,9 @@ grep -E '^SDL_(VULKAN|OPENGL|TEST_LIBRARY):' "$d/CMakeCache.txt"
 #   SDL_TEST_LIBRARY:BOOL=OFF
 #   SDL_VULKAN:BOOL=OFF
 
-# 2. and in the generated header
+# 2. and in the generated header  (note: no "../" — $d *is* .../out/build)
 grep -E 'SDL_(VIDEO_VULKAN|GPU_VULKAN|VIDEO_RENDER_VULKAN|VIDEO_OPENGL)\b' \
-    "$d/../include-config-release/build_config/SDL_build_config.h"
+    "$d/include-config-release/build_config/SDL_build_config.h"
 #   /* #undef SDL_VIDEO_RENDER_VULKAN */
 #   /* #undef SDL_VIDEO_OPENGL */
 #   /* #undef SDL_VIDEO_VULKAN */
@@ -1171,24 +1184,47 @@ compile to empty translation units. The check that matters is
 `nm --defined-only` on them — **0 defined symbols each**, against 716 KB of real
 objects before.
 
-**Measured, release, x86_64, same machine and toolchain:**
+**Measured, release, x86_64, same machine and toolchain.** Each row names the
+artifact it was measured on, because the three are not interchangeable:
 
-| | before | after | delta |
+| artifact measured | before | after | delta |
 |---|---|---|---|
-| `libSDL3.a` | 7 623 342 | 6 819 806 | **−803 536 (−10.5 %)** |
-| `ui_demo` | 6 546 728 | 6 137 376 | **−409 352 (−6.3 %)** |
-| `libSDL3_test.a` | 228 180 | gone | −228 180 |
-| `*vulkan*.o` | 716 K | 20 K, 0 symbols | −696 K |
+| `libSDL3.a` — archive bytes | 7 623 342 | 6 819 806 | **−803 536 (−10.5 %)** |
+| `ui_demo` — binary bytes | 6 546 728 | 6 137 376 | **−409 352 (−6.3 %)** |
+| `libSDL3_test.a` — archive bytes | 228 180 | gone | −228 180 |
+| `*vulkan*.o` — object bytes (`du`) | 716 K | 20 K | −696 K |
+| `*vulkan*.o` — object bytes (exact) | — | **4 680** (936 × 5) | — |
 
-The aarch64 cross artifact went 6 013 800 → 5 759 648 (−254 152). Note the two
-figures are not proportional — 803 KB off the archive is 409 KB off the binary —
+The last two rows are the same five files by two measures, and the gap between
+them is the point: `du` block-allocates, so 936 bytes of empty translation unit
+rounds to 4 K apiece. The **after** figures for the first three rows reproduce
+byte-exactly on a full `cargo clean` rebuild; the **before** figures are not
+re-derivable from the tree, because the pre-change build is gone — the delta is
+supported by the "after" reproducing, not by the "before" being re-checkable.
+
+The aarch64 cross artifact went 6 013 800 → 5 759 648 (−254 152). Note the first
+two rows are not proportional — 803 KB off the archive is 409 KB off the binary —
 which is the object-tree-versus-linker point from §5.2 in the only terms that
 settle it.
 
 **Also verified, and the reason to believe any of it:** 1 839 tests green
-(1 404 + 217 + 218), and `.ai/tools/fps-check.sh` at **61.9 fps, worst frame
-24.3 ms, 0 frames over 33 ms** over 10 s — against a recorded baseline of
-61.6–61.9 fps, so no frame-cost regression. The cross build was re-run with
+(1 404 + 217 + 218), and **three `fps-check.sh` runs on 2026-10-05**, all 10 s,
+all with **0 frames over 33 ms**:
+
+| run | when | fps | worst frame |
+|---|---|---|---|
+| 1 | before this section was written | 61.9 | 24.3 ms |
+| 2 | on the clean-slate `cargo clean` rebuild | 62.0 | 19.7 ms |
+| 3 | at review, after the §5.5 command was fixed | 61.6 | 18.7 ms |
+
+Three rather than one because a single run's number cannot be re-derived — see
+`.ai/NEVERAGAIN.md` § *One log path for a loop of runs is one run of evidence*.
+The recorded baseline is 61.6–61.9 fps, so all three sit inside or at the floor
+of it and **none is a regression**. Run 3 also re-established the aarch64
+artifact, which a full `cargo clean` had removed: rebuilt with
+`CMAKE_TOOLCHAIN_FILE` deliberately unset, it is `ARM aarch64` with the same
+BuildID and byte count (5 759 648) as before, so the cross build is reproducible
+and not just successful once. The cross build was re-run with
 `CMAKE_TOOLCHAIN_FILE` deliberately unset to prove §4.1's `[env]` wiring stands
 on its own, and the artifact is `ELF 64-bit LSB pie executable, ARM aarch64`
 with `SDL_X11` off, `SDL_UNIX_CONSOLE_BUILD` on, `SDL_VIDEO_OPENGL_EGL` and

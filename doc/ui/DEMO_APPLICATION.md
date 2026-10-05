@@ -3,8 +3,53 @@
 **Status:** Operator decision, 2026-09-30. *Screens* and *Layout* completed
 2026-10-01 from Tesla's own Owner's Manual and the operator's own photographs
 of a centre display. **Revised 2026-10-03** — see § *Relationship to task 24*.
+**Revised 2026-10-05** — the source-verified gap table was found to be **wrong
+in two rows at the time it was written**, the two numbered gap tables collided,
+and two operator decisions were taken. See § *Operator decisions (2026-10-05)*
+and § *Corrections to the second gap table*.
 **Category:** `TASK_UI_DEMO_n` (new)
-**Depends on:** All `TASK_UI_PRIM_n` tasks (12–23) complete
+**Depends on:** `TASK_UI_PRIM_11..23` — the shipped widgets, which is **Label**
+(11), Button, Container, Slider, Toggle, Image, Progress, List/Scroll, TextInput
+**and the on-screen keyboard** (19), Gauge, Chart, Dialog and Toast. Plus
+`TASK_UI_PRIM_24.1..3`, **done** in `e567634`: they built the page shell this
+application becomes a tab inside — `enum Page` and the three gates (paint, hit
+test, focus) from 24.1, `CONTENT_TOP` and the page-local content band from
+24.2, and the top tab bar from 24.3.
+
+### What a seventh page costs
+
+Recorded here rather than in § *Relationship to task 24*, because it is the
+mechanism a `TASK_UI_DEMO_n` task has to touch and the header is where a task
+author looks first. The six pages are `Pads` · `Text` · `Input` · `Controls` ·
+`Data` · `Overlays` — the card of pads and the `Space` cascade; the label column
+with its sizes, alignments, truncation and colour token; the text field and the
+on-screen keyboard; the slider, toggle and progress bar; the gauge, chart and
+image; and the dialog with the toast host.
+
+Adding a seventh is **not** a free addition, and `ui_demo/src/main.rs` says why
+in its own comments:
+
+- **`const ALL: [Page; 6]`** (`main.rs:1700`) — a fixed-size array, so the *type*
+  carries the count. A seventh changes it to `[Page; 7]`.
+- **`Page::name()`** (`main.rs:1728`) — its doc comment says *"The only place the
+  six names are written out"* (`:1722`). `from_name` and everything printable
+  derive from it, so one misspelling is a name that `--tab=` cannot resolve.
+- **`Demo::tabs`** — pairs the buttons with their pages, and the source calls the
+  order load-bearing three times: `--help`, the unknown-name message, and the
+  tab bar's own button order.
+- **The three gates** — paint, hit test and focus each need a row.
+- **The page-membership table in `Demo::new`** — **mutation-tested.** Task 24.1's
+  review produced four majors that were all one finding, *a mechanism with no
+  test*, found by mutation rather than by reading; the sharpest instance is
+  recorded in `IMPLEMENTATION_STATE.md` as *"`Demo::new`'s page table had no
+  completeness assertion at all"* — one dropped row gave **0 failed / 1814**, with
+  the text column drawn on the wrong page. **24.2 found the same class again** on
+  the table 24.2 introduced (`placed_handles`, 0 failed / 1817). A seventh row is
+  exactly where it recurs.
+- **`Page::DEFAULT` stays `Pads`** — deliberately, because it is *"the one page
+  every capture taken for tasks 11 to 22 contains, so a capture that used to need
+  no argument is still reproducible"* (`main.rs:1712-1716`). The demo tab must not
+  become the default.
 
 ## Goal
 
@@ -33,6 +78,25 @@ it rather than a replacement for it. See § *Relationship to task 24*.
 5. **Map emulation.** If a real map is too difficult, emulate it in a visually
    appealing way that preserves the Tesla look.
 
+## Operator decisions (2026-10-05)
+
+Taken while correcting this document. Both are recorded here rather than
+in-place at their point of use so that the point of use can cite them.
+
+1. **Dark theme ships first, and both themes are required.** § *Design
+   principles* had recorded dark as *removed*; that is retired. What survives it
+   is kept: the theme switch is a demonstration of the **existing animated
+   switch**, not a second visual design, and **both of the operator's
+   photographs are the light theme** — so light is where the first-hand evidence
+   is and dark is not. That asymmetry is now a cost to state rather than a
+   reason to drop a theme. See § *Design principles*.
+2. **Every library gap must be closed.** The 2026-10-03 decision to build the
+   page mechanism in `ui_demo` and leave gaps **#3** and **#7** open in
+   `ui_core` is **withdrawn**. Those two gaps are library work that blocks the
+   demo like any other. § *Library gaps* carries the consequence; the four files
+   that still record the withdrawn decision are listed in § *Relationship to
+   task 24*.
+
 ## Scope
 
 ### In scope
@@ -40,10 +104,14 @@ it rather than a replacement for it. See § *Relationship to task 24*.
 - All major Tesla infotainment screens
 - Mocked vehicle data (speed, battery, temperature, etc.)
 - Real icons and visual assets
-- Theme switching (dark/light)
+- **Both themes, with dark built first** — `Controls > Display > Appearance` is
+  Dark / Light / Auto [A], and the operator's decision of 2026-10-05 is that both
+  ship and dark is the one the demo leads with. See § *Operator decisions
+  (2026-10-05)* and § *Design principles* for why that is the harder order.
 - Smooth animations and transitions
 - 60 FPS target
-- All widgets from tasks 12–23 working together
+- All widgets from tasks 11–23 working together, **the on-screen keyboard
+  included**
 
 ### Out of scope
 
@@ -78,7 +146,10 @@ shell, and:
   system*) and gap #7 (*no `TabBar` widget*). The gallery's page shell is built
   **in `ui_demo`**, out of `Container` + `Button`, which is what gap #7
   prescribes for the dock. A `ui_core` tab controller is a library task with
-  its own cycle and was declined for now;
+  its own cycle and was declined for now. **Withdrawn 2026-10-05** — see
+  *Operator decisions (2026-10-05)* item 2. Both gaps must now be closed in
+  `ui_core`, so what `24.1..3` built is the demo-level mechanism and **not a
+  substitute** for the library one;
 - **`--tab=<name>`** lands on a page without a click, which is the only route to
   a capture of one page on this host: pointer injection has never delivered an
   event to the window, and keyboard injection delivered exactly one in this
@@ -92,6 +163,21 @@ switching between widget pages and says nothing about how the Tesla screens are
 navigated — so no override is needed here, and none is recorded. **It will need
 one** if a `TASK_UI_DEMO_n` task ever puts a tab bar on a Tesla surface, and that
 is the sentence to amend when it does.
+
+**Four places still record the withdrawn 2026-10-03 decision.** Recorded here so
+the divergence is visible rather than silent, per the repository's rule that the
+artifact a claim contradicts is the one that is wrong. **None of them is
+amended by this pass** — this direction is the owner and the others are history:
+
+| File | Records |
+|---|---|
+| `TASK_UI_PRIM_24.md:263-266`, *Out of Scope* | *"`DEMO_APPLICATION.md` gaps #3 and #7 stay open. Closing #3 is a library task with its own cycle, and the operator chose the demo-level route on 2026-10-03"* |
+| `TASK_UI_PRIM_24.3.md:13-21` and `:212-214`, *Context* and *Out of Scope* | *"The operator chose the demo-level route and gaps #3 and #7 stay open"* |
+| `IMPLEMENTATION_STATE.md:4336` and `:5606` | *"Two library gaps stay open by this decision"* / *"Three library gaps stay open by that decision"* |
+| `ui/src/ui_demo/src/main.rs:3247`, a comment on the tab bar | *"`DEMO_APPLICATION.md` gaps #3 and #7 stay open and this is what gap #7 prescribes"* |
+
+The last is **known-stale** and is left for a code task: it is a source comment
+asserting a decision that has been withdrawn.
 
 ## Design principles
 
@@ -108,22 +194,38 @@ is the sentence to amend when it does.
 **Revised 2026-10-01** against the research recorded below. Three of these
 were assumptions, and two of them were wrong:
 
-- **"Dark theme" was removed as a requirement.** Tesla ships both, and
-  `Controls > Display > Appearance` is Dark / Light / Auto [A]. **Both of the
-  operator's own photographs are the light theme** — a pale, low-contrast map
-  with white cards. The demo must therefore render light credibly too, and the
-  theme-switch requirement is a *demonstration of the existing animated theme
-  switch*, not a second visual design. Note what the light theme costs: white
-  cards on a near-white map, which is only legible because the map is washed
-  out to near-invisibility in `01`.
-- **"Bottom dock — media player and climate" is right for the wrong reason.**
-  The media player is a *card in the car-status pane's carousel*, not a dock
-  item; the dock's fixed items are Controls and the climate setpoint.
+- **"Dark theme" is required, and it ships first.** This reverses the
+  2026-10-01 correction recorded here before, which had removed it — see §
+  *Operator decisions (2026-10-05)* item 1. Tesla ships both, and
+  `Controls > Display > Appearance` is Dark / Light / Auto [A]. **What the
+  earlier correction got right survives it:** the theme switch is a
+  *demonstration of the existing animated theme switch*, not a second visual
+  design. And the evidence is still asymmetric — **both of the operator's own
+  photographs are the light theme**, a pale, low-contrast map with white cards —
+  so light is the theme with first-hand evidence behind it and dark is not. That
+  is a cost to state, not a reason to drop a theme: every value in a dark theme
+  is a first-principles choice, on the same footing as *"Tesla publishes no
+  design tokens at all"* below. Note too what the light theme costs, because it
+  is the one the photographs show: white cards on a near-white map, legible only
+  because the map is washed out to near-invisibility in `01`.
+- **"Bottom dock — media player and climate" is right for the wrong reason, and
+  the correction itself needed one.** The media **player surface** — the
+  strip ↔ panel — is *not* a dock item: it is a surface drawn over the map,
+  which § *Screens* already records, and its miniplayer is reached from the
+  car-status pane's carousel. **The media *shortcut* is a dock item**, though,
+  and the first version of this correction denied it: the manual's own 13 dock
+  regions name **region 7 as the "media player shortcut"**, and photograph `01`
+  shows the `▶` glyph in the dock — both reproduced in § *Bottom dock* below.
+  So the distinction this correction draws is **surface versus shortcut**, and
+  the enumeration of the dock's fixed items is the manual's 13 regions, not
+  *"Controls and the climate setpoint"*. Amended 2026-10-05; the original claim
+  is kept here because a demo that built the player into the dock would be
+  wrong, and the correction is what says so.
 - **"44dp touch targets" is this project's number, not Tesla's.** Nothing in
   Tesla's documentation states a touch-target size. Keep 44dp as a roados
   decision; do not attribute it to Tesla.
 - **Added: chrome is translucent over a live scene.** This is the single
-  structural fact the original principles missed, and it is why gap 1 is
+  structural fact the original principles missed, and it is why **L1** is
   critical. See composite widget 5.
 
 ## Asset requirements
@@ -157,27 +259,39 @@ Two consequences for this task:
 ## Library gaps
 
 Identified 2026-09-30 by comparing this document's requirements against the
-shipped widgets (tasks 1–13: Label, Button, Container) and the planned widgets
-(tasks 14–23: Slider, Toggle, Image, Progress, List/Scroll, TextInput, Gauge,
-Chart, Dialog, Toast). Each gap must be addressed — by a `TASK_UI_PRIM_n`
-amendment or a `TASK_UI_DEMO_n` task — before or during the demo implementation.
+shipped widgets (tasks 11–13: Label, Button, Container — tasks 1–10 are the
+arena, property system, render pipeline, layout, theme, animation and input) and
+the planned widgets (tasks 14–23: Slider, Toggle, Image, Progress, List/Scroll,
+TextInput **and the on-screen keyboard**, Gauge, Chart, Dialog, Toast). Each gap
+must be addressed — by a `TASK_UI_PRIM_n` amendment or a `TASK_UI_DEMO_n` task —
+before or during the demo implementation, **and as of 2026-10-05 none may be left
+open**: see § *Operator decisions (2026-10-05)* item 2.
 
 **Re-derived 2026-10-01** against the shipped code and against the completed
 *Layout* section below. The first eight rows are the original 2026-09-30
 assessment, kept so the original reasoning is auditable; **rows 5 and 8 were
-checked against the source and are wrong**, and are marked. Ten further gaps
-the Layout work exposed are in *Gaps this layout exposes in `ui_core`*,
-further down.
+checked against the source and are wrong**, and are marked. **Rows 3 and 7 were
+open by decision on 2026-10-03 and are no longer** — see § *Operator decisions
+(2026-10-05)*. Eleven further gaps the Layout work exposed are in *Gaps this
+layout exposes in `ui_core`*, further down.
+
+**These eight rows keep their numbering**, because four files outside this one
+cite it by number: `TASK_UI_PRIM_24.md:142` and `:270` cite rows 7 and 8,
+`TASK_UI_PRIM_24.3.md:15`, `:17`, `:21`, `:216` and `:218` cite rows 7, 3, 8
+and 4, `IMPLEMENTATION_STATE.md:4336` and `:5606` cite rows 3 and 7, and
+`ui/src/ui_demo/src/main.rs:3247` cites rows 3 and 7. The second table is
+therefore cited as **L1..L11** instead, so that a bare "gap N" in this document
+cannot mean two different rows — which it did, five times, before this pass.
 
 | # | Gap | Severity | Blocks |
 |---|---|---|---|
 | 1 | **Map widget** — no map renderer exists or is planned. The demo's centerpiece. | Critical | Map/navigation screen |
 | 2 | **Grid layout non-functional** — `Grid` mode lays out no children and reports no rects; `wrap` is accepted and not honoured. | High | App launcher screen |
-| 3 | **No screen/navigation system** — no screen stack, tab controller, or transition system in the library. **Still open 2026-10-03, and deliberately so**: `TASK_UI_PRIM_24.1` builds a page mechanism **in `ui_demo`** — `enum Page`, a page-membership table, and three gates (paint, hit test, focus) — because the operator chose the demo-level route over a library task. **That is not this gap closed**: the gap is about `ui_core` carrying a screen stack for an application, and what 24.1 delivers is one page switcher inside one binary. | High | Multi-screen app structure |
-| 4 | **No Icon widget** — `Image` (task 16) displays textures but icons need vector rendering, theme tinting, and uniform sizing. **Raised 2026-10-01 from Medium to High**: the completed Layout section needs an icon for every dock item, every top-bar status item, every tab row and every indicator light — and `Polygon` is convex-only with no bezier, so this is the largest unsupported item in the design. | High | Visual quality — "real icons" requirement |
+| 3 | **No screen/navigation system** — no screen stack, tab controller, or transition system in the library. **Was left open by decision on 2026-10-03; that decision is withdrawn 2026-10-05** — this gap must now be closed in `ui_core`, so it blocks the demo like any other. What `TASK_UI_PRIM_24.1` built is the *demo-level* mechanism — `enum Page`, a page-membership table, and three gates (paint, hit test, focus), inside one binary — and **that was never this gap closed**, as the row itself said at the time. | High | Multi-screen app structure |
+| 4 | **No Icon widget** — `Image` (task 16) displays textures but icons need vector rendering, theme tinting, and uniform sizing. **Raised 2026-10-01 from Medium to High**: the completed Layout section needs an icon for every dock item, every top-bar status item, every tab row and every indicator light — and `Polygon` is convex-only with no bezier (**L10**), so this is the largest unsupported item in the design. | High | Visual quality — "real icons" requirement |
 | 5 | **Clipping has no owner.** The clip rect *is* computed, carried on the batch and set on the GPU as a scissor — but the clip is supplied by the demo's frame loop for the `List` alone, so there is no per-node clipping in the widget system. Two doc comments assert the opposite of the code beside them. **Corrected 2026-10-01; the original "never set on the GPU" claim was false.** | High | Map viewport, scroll view clipping, card page edges |
 | 6 | **No Card widget** — `Container` can be stretched to cover this, but a dedicated card with elevation/shadow matches the Tesla design language better. | Low | Visual polish |
-| 7 | **No TabBar/Dock widget** — the bottom dock can be built from `Button` + `Container`, but a dedicated widget with active-state indication and icon+label layout is the right primitive. **Still open 2026-10-03, and this row is the prescription being followed**: `TASK_UI_PRIM_24.3` builds the gallery's top tab bar from exactly `Button` + `Container`. **The "active-state indication" half has no widget behind it either** — `Button` has `hovered`, `pressed`, `focused` and `disabled` and **no `selected`** (checked in `ui_core/src/widgets/button.rs` on 2026-10-03, a file that was being edited at the time), so the selected tab is a `background`/`foreground` swap the demo owns. A dedicated widget is still the right primitive for a dock that wants icon+label layout. | Low | Bottom dock implementation |
+| 7 | **No TabBar/Dock widget** — the bottom dock can be built from `Button` + `Container`, but a dedicated widget with active-state indication and icon+label layout is the right primitive. **Was left open by decision on 2026-10-03; withdrawn 2026-10-05** — the gap must now be closed in `ui_core`. What `TASK_UI_PRIM_24.3` built is the gallery's top tab bar from exactly `Button` + `Container`, which is the prescription this row states and **not a closure of it**. **The "active-state indication" half has no widget behind it either** — `Button` carries `hovered`, `pressed`, `disabled`, `focused` and `activatable` (the fifth exists because one bit cannot answer both "does it draw the ring" and "may it be activated") and **no `selected`**, so the selected tab is a `background`/`foreground` swap the demo owns. Checked in `ui_core/src/widgets/button.rs` on 2026-10-05. A dedicated widget is still the right primitive for a dock that wants icon+label layout. | Low | Bottom dock implementation |
 | 8 | **Transform transitions** — screen transitions need translation, scale, and opacity animation support. The animation system handles property interpolation but transforms are not implemented in the render pipeline. **Confirmed 2026-10-01, and worse than stated: `Transform` is `Interpolate`-able, so it can be animated and then never drawn. `DrawCommand` has no transform field and there is no matrix or `u_model` uniform.** | **Critical** | Screen transition animations |
 
 ## Task structure
@@ -192,33 +306,60 @@ tasks will be:
 Each task will follow the same workflow as `TASK_UI_PRIM_n`: developer →
 review → operator commit.
 
-Gap closure tasks (see *Library gaps* above) may be interleaved with demo
-tasks when a gap blocks a demo screen.
+Gap closure tasks (see *Library gaps* above) may be interleaved with demo tasks
+when a gap blocks a demo screen — but since 2026-10-05 they are **mandatory
+rather than discretionary**, and there are more of them than this document first
+suggested. Merging the duplicates across both gap tables (`#2` with **L3**,
+`#8` with **L2**), the library work this makes a precondition is roughly **ten
+`TASK_UI_PRIM_n` tasks**, five of them Critical or High:
+
+| Severity | Gaps | Nature |
+|---|---|---|
+| **Critical** | `#8`/`L2` transform, **L1** colour capture + backdrop API | render pipeline |
+| **High** | `#2`/`L3` grid, `#3` screen system, `#4` icon, `#5` clip ownership, **L4** `LongPress`/`Swipe`, **L5** horizontal scroll/momentum/snap, **L6b** cross-widget mode | layout, input, widget system |
+| **Low / Medium** | `#6` card, `#7` `TabBar`, **L7** margin/gap, **L8** text width, **L9** theme scoping, **L10** `Polygon` | widget vocabulary |
+
+Gap **#1**, the map widget, stays a `TASK_UI_DEMO_n` item — the map is the demo's
+own asset and no library owns it.
 
 ## Open questions
 
-1. What map data source to use for the emulation? (procedural, hand-drawn, or
+1. **Photo provenance — the first question because everything below rests on
+   it.** `tmp/tesla_screens/*.png` are the best evidence in this repository and
+   are **untracked**, undated, and their software version is not legible. Should
+   they be committed as a reference set, and should the demo be pinned to the
+   layout they show rather than to whichever software is current when the tasks
+   are written? Until this is answered no future agent can reproduce the primary
+   evidence for the whole *Layout* section below, and a re-derivation would
+   produce a different document.
+2. What map data source to use for the emulation? (procedural, hand-drawn, or
    simplified real data?)
-2. How to handle the Tesla logo and branding? (avoid trademark issues)
-3. What vehicle model to display in the status screen? (Passat B5.5 or a generic
+3. How to handle the Tesla logo and branding? (avoid trademark issues)
+4. What vehicle model to display in the status screen? (Passat B5.5 or a generic
    car?)
-4. **The car's body is a required asset, not an optional one.** The Layout
+5. **The car's body is a required asset, not an optional one.** The Layout
    section needs a rendered vehicle that hotspots anchor to, whose regions
    change colour in Track Mode, and that is *reflected on the floor* in the
    operator's own photographs. An SVG of a generic car, or a flat PNG, will not
    carry it. Which?
-5. **Photo provenance.** `tmp/tesla_screens/*.png` are the best evidence in
-   this repository and are untracked, undated, and their software version is
-   not legible. Should they be committed as a reference set, and should the
-   demo be pinned to the layout they show rather than to whichever software is
-   current when the tasks are written?
-6. **Light or dark first?** Both of the operator's photos are light, so the
-   demo's first screen is the one that is harder to get right. But Tesla's
-   dark theme is the better-known one. See *Design principles*.
-7. **Card carousel depth.** Two cards are visible side by side in photo `01`
+6. **What is the backdrop task's category?** Closing **L1** means an `GL_RGBA8`
+   colour attachment, a public entry point and a rect-scoped capture. That is
+   **render-pipeline work**, of exactly the kind task 22 already did once when it
+   built the FBO blur — so **`TASK_UI_PRIM_n` is the recommendation**, and
+   `TASK_UI_DEMO_n` only if the operator would rather keep it inside the demo
+   task. Since 2026-10-05 the gap cannot be deferred either way, so this is a
+   question of *which sequence owns it*, not *whether*.
+7. **What is the seventh page called, and its `--tab=` value?** What a seventh
+   page has to touch is recorded in the header; the name is a decision this
+   direction has no authority to make, and `Page::name()` is the single place the
+   spelling lives.
+8. **Card carousel depth.** Two cards are visible side by side in photo `01`
    with a 3-dot pager. Should the demo implement paging (the real behaviour)
    or a swipe-with-peek (cheaper, and what the photo's evidence supports
    equally well)?
+
+**Answered 2026-10-05 and removed from this list: *Light or dark first?*** Dark is
+required and ships first. See § *Operator decisions (2026-10-05)* item 1.
 
 ## Screens
 
@@ -279,9 +420,40 @@ Three classes of evidence, tagged per `.ai/protocols/evidence.md`:
   §Tire Care and the Model Y §Controls Overview were **opened and read**. The
   §Shifting quotes and the visualisation-resize sentence came from
   **tesla.com's own PDF text as surfaced in a search index**, quoted verbatim
-  but not read off a page I opened; they are marked `[A]` for being Tesla's
-  words and `[A*]` where the distinction matters. Nothing in this section is
-  third-party prose about Tesla's UI.
+  but not read off a page I opened. Nothing in this section is third-party prose
+  about Tesla's UI.
+
+  **Two corrections to how those two sentences are tagged, made 2026-10-05.**
+
+  First, the §Shifting quotes and the visualisation-resize sentence were
+  formerly marked **`[A*]`**, a tag defined nowhere in
+  `.ai/protocols/evidence.md` and used nowhere else in this repository. The
+  protocol defines `[A]`, `[B]` and `[C]`, and says the only permitted extra
+  qualifiers are inline — `staleness` and `support` — so a fourth letter-tag is
+  not available. `[A]` does not fit either, because it requires that *"the
+  evidence line names the file and the line"* and the rule adds *"Never upgrade a
+  tag without opening the source yourself"*, which was not done. **They are now
+  `[C]`**, whose definition begins *"unverified, or snippet-level. A search
+  result"*, and the protocol anticipates the case exactly: *"If the ladder cannot
+  be climbed, that is the finding — and the tag is `[C]` no matter how
+  authoritative the top of the ladder looks."*
+
+  Second, the **Model Y §Controls Overview was read through a third-party
+  mirror**, not from Tesla. It was tagged `[A]` and is now **`[B]`**, which is
+  defined as *"well-maintained project documentation … not re-verified against
+  the primary document"*. Its two citations are the *Corrections* row on the
+  car icon and the *Controls panel* section.
+
+  **The demotion is structural, not an oversight, and cannot be repaired from
+  this host.** Re-tested 2026-10-05: `tesla.com` returns **403**; and
+  `rollout-tesla.com` is a passthrough to the same CDN, so its directory paths
+  return **403** and a real GUID page returns **Akamai's "Access Denied"** page.
+  An *unknown* GUID path returns HTTP 200 and ~39 KB of HTML — but that content
+  is an **unrelated third-party site**, not the manual, which is a trap worth
+  recording: a reachability probe that reports 200 may have found nothing of
+  Tesla's at all. **There is no way to open these pages from here**, so any claim
+  resting on them stays `[C]` until someone with different network egress reads
+  them, or the corpus is mirrored locally.
 - **[A] photo** — `tmp/tesla_screens/01_welcome_screen.png` (1136×715) and
   `02_car_screen.png` (1141×642). **Photographs of a real display, not
   screen captures**: perspective-distorted, and no software version is
@@ -303,10 +475,10 @@ rather than silently overwritten.
 
 | First sketch | What it is | Evidence |
 |---|---|---|
-| Top bar: `PRND` first | **Right that it is a horizontal letter row and it is at the left. Wrong that it is a top-bar *control*.** The `P R N D` row is a **readout in the car-status cluster**, not chrome. The *selector* is a separate **vertical drive-mode strip on the left screen edge**, edge-swipe summoned, hidden at highway speed, and **Neutral is not on it** — it is a press-and-hold inside Controls. | [A*] manual §Shifting: *"Swipe up for Drive, swipe down for Reverse, or press the drive mode strip for Park… To shift into Neutral, open Controls, then press and hold the Neutral icon… the drive mode strip is hidden when driving at highway speeds."* [A] photo `02`: the strip is a dotted vertical track with a grey `↑`, visible at the left edge |
+| Top bar: `PRND` first | **Right that it is a horizontal letter row and it is at the left. Wrong that it is a top-bar *control*.** The `P R N D` row is a **readout in the car-status cluster**, not chrome. The *selector* is a separate **vertical drive-mode strip on the left screen edge**, edge-swipe summoned, hidden at highway speed, and **Neutral is not on it** — it is a press-and-hold inside Controls. | [C] manual §Shifting, snippet-level: *"Swipe up for Drive, swipe down for Reverse, or press the drive mode strip for Park… To shift into Neutral, open Controls, then press and hold the Neutral icon… the drive mode strip is hidden when driving at highway speeds."* Quoted verbatim from Tesla's own PDF text but **read in a search index, not off an opened page** — see § *Sources*. **The gesture semantics below rest on this alone.** [A] photo `02`: the strip is a dotted vertical track with a grey `↑`, visible at the left edge |
 | Bottom bar: `72` = "maybe temp in F" | **A temperature, but the cabin setpoint, not outside.** Outside temperature is a different widget in the top bar. `72` is setpoint; `65°F` in the same frame is ambient. The dock shows **no unit and no degree sign**. | [A] manual §Touchscreen: *"Climate controls (driver): Use the left and right arrows to decrease/increase cabin temperature."* [A] photo `01`: dock reads `< 72 >`, top bar reads `65°F` |
 | Bottom bar: calendar icon | **True of this vehicle, false as a fixed slot.** Calendar is an app the user pinned into *My Apps*. The dock's fixed slots do not include it. | [A] manual §Touchscreen's 13-region layout: slot 9 is *My Apps*, and Calendar is never a named region. [A] photo `01` shows it among the pinned app icons |
-| "Car screen gets squashed into left pane" | **Correct, and worth keeping — but it is the Controls *panel* that appears, and it is reached by the car icon or by an edge swipe.** | [A] manual §Controls Overview: *"Touch Controls on the bottom corner of the touchscreen… The Controls screen appears over the map… You can also access Controls by touching anywhere on the side of the touchscreen closest to the driver and swiping open."* [A] photo `02` |
+| "Car screen gets squashed into left pane" | **Correct, and worth keeping — but it is the Controls *panel* that appears, and it is reached by the car icon or by an edge swipe.** | [B] manual §Controls Overview (Model Y, **read through a third-party mirror, so not re-verified against the primary document** — see § *Sources*): *"Touch Controls on the bottom corner of the touchscreen… The Controls screen appears over the map… You can also access Controls by touching anywhere on the side of the touchscreen closest to the driver and swiping open."* [A] photo `02` |
 | Car-screen tabs, 12 names, no icons | **The set is close; the order is not the sketch's; every row has an icon; the list scrolls.** Observed order: Controls · Dynamics · Charging · Autopilot · Locks · Lights · Seats *(NEW badge)* · Display · Schedule · Safety · Service · Software · **Navigation** *(cut off — the list continues)*. The manual's own chapter ordering confirms Dynamics, Autopilot, Locks, Lights, Seats, Display, Schedule, Safety, Service, Software are all real top-level categories, and adds Mirrors, Navigation, Wi-Fi, Bluetooth, Audio, Outlets & Mods, Trips. | [A] photo `02`, read icon by icon. [A] manual cross-references. Renames worth knowing: *Pedals & Steering → Dynamics* (2024.14), *Autopilot → Self-Driving* (2026.2) — both [B] |
 | Left panel: "automatic lights on icon" | **There is no "automatic lights armed" indicator.** Exterior lights default to Auto every drive with no persistent tell-tale. The glyph in the photo is one of the *high-beam* states — blue beams + `A` = Adaptive Headlights armed and high beams on; grey = armed, dimmed because light is ahead. | [A] manual §Car Status lists the five lighting states; §Lights: *"Exterior lights… are set to AUTO each time you start Model 3… If you change to a different setting, lights always revert to AUTO on your next drive."* |
 | Left panel: "seatbelt not fasten red icon" | **Right, and it is one of three channels, not one.** A red occupant-with-belt indicator light in the cluster, **plus** a bottom popup whose text and per-seat tap-to-mute are separate, **plus** the "Fasten Seatbelt" label under the seatbelt graphic. Tapping the offending seat on the popup disables the reminder for the drive and **replaces the icon with a seat glyph**. | [A] manual §Car Status indicator list, §Touchscreen §Popup Messages, §Seat Belts |
@@ -393,11 +565,14 @@ rather than a row of buttons:
 Not chrome. A **vertical dotted-grid track** inset against the left screen
 edge, summoned by an edge swipe *"from the edge of the touchscreen towards
 the passenger"*, auto-hiding at highway speed, with a car silhouette, a grey
-`↑`, a grey `↓`, a bold `P`, and the word `HOLD` — [A*] the manual quotes for
-the gestures, [A] photo `02` for the form: a dotted vertical track with a grey
-`↑` against the left edge. **One axis, three targets, three different
-gestures** — swipe up, swipe down, press — plus press-and-hold for the
-emergency stop, plus a fourth gear reached somewhere else entirely.
+`↑`, a grey `↓`, a bold `P`, and the word `HOLD` — [C] the manual quotes for
+the gestures, **snippet-level, not read off an opened page** — and [A] photo
+`02` for the form: a dotted vertical track with a grey `↑` against the left
+edge. **One axis, three targets, three different gestures** — swipe up, swipe
+down, press — plus press-and-hold for the emergency stop, plus a fourth gear
+reached somewhere else entirely. **The whole gesture model is `[C]`** and rests
+on that one snippet; it must be re-verified against an opened page before a
+`TASK_UI_DEMO_n` task treats it as specified.
 
 #### The alert channel — the bottom slot
 
@@ -419,11 +594,14 @@ Left ~40% in photo `02`, resizable: *"You can expand/condense the
 visualization by dragging the car status area from side to side. Expanding the
 visualization displays more details about the roadway and its surroundings,
 including road markings, stop lights, objects (such as trash cans and poles).
-You can pinch to zoom in or out."* [A*] — Tesla's own wording, read in the
+You can pinch to zoom in or out."* **[C]** — Tesla's own wording, read in the
 indexed text of `tesla.com/ownersmanual/model3/en_us/Owners_Manual.pdf`
-rather than off an opened page. The **behaviour** is independently visible in
-photo `02`: the pane is narrower there than in photo `01`, because Controls is
-open.
+rather than off an opened page, and **the corpus is unreachable from this host**,
+so the demotion is structural; see § *Sources*. This sentence is the **only**
+source for **composite widget 16**, the two-axis reshape, which is therefore
+snippet-level rather than specified. The **behaviour** is independently visible
+at `[A]` in photo `02`: the pane is narrower there than in photo `01`, because
+Controls is open.
 
 **Vertical structure**, from photo `01` and `02`:
 
@@ -472,8 +650,9 @@ state machine with an externally-triggered reset, drawn in the chrome.
 
 **Two panes inside the panel, and no car in it.** *"1. List of available
 settings. When you select an item from this list, its associated settings
-display on the right side of the screen. 2. Settings area."* [A] Model Y
-manual §Controls Overview. The 3-D car is in the *car-status pane*, not here —
+display on the right side of the screen. 2. Settings area."* [B] Model Y
+manual §Controls Overview — **read through a third-party mirror**, so `[B]` and
+not `[A]`; see § *Sources*. The 3-D car is in the *car-status pane*, not here —
 the two are separate regions and conflating them is the mistake the first
 sketch made.
 
@@ -591,8 +770,8 @@ demonstrate `ui_core` can carry a real infotainment UI.
 | 1 | **Card carousel** | Swipeable pages at the foot of the car-status pane; a dot pager; **each card is itself two-level** (the Media card reveals a source list on swipe-up [B]); the carousel's *default page* is mode-dependent — *"the G-Meter displays as the default card whenever you engage Track Mode"* [B]; **the whole strip is dismissible and its recovery lives on a different affordance** [B] | Horizontal paging with snap + inertia; a page indicator; per-card internal scroll; a card host that can hand off its own gesture |
 | 2 | **Per-field staleness** | The Tire Pressure card carries **four readings positioned at the wheel they belong to, each with its own independent timestamp** — photo `01` shows `42 psi / 16 minutes ago` beside `42 psi / 15 minutes ago` on the same card, plus a `Recommended Front: 42 / Rear: 42` block with no timestamp | A value+unit+relative-time tuple rendered as one unit, repeated with independent state, at four positions |
 | 3 | **Callout hotspots** | Leader lines drawn from a rendered object out to labelled buttons (`Open Frunk`, `Open Trunk`), plus a free-floating lock glyph above the roof and a charge-port glyph at the rear-left | Hit targets anchored to positions on a picture, with leader lines and labels, revealed by a gesture on the picture |
-| 4 | **Mode-dependent controls** | Nine documented instances where one control changes meaning: the fan slider's **enumeration** changes in Auto [A]; the defroster is a 3-state button whose exit **restores three other controls** [A]; the map-orientation icon becomes route-overview *while navigating* [A]; the Maps dock icon hides the map when already on it [B]; the visualisation drag is a manual toggle **and** a persisted setting **and** an automatic FSD behaviour [B]; Track Mode recolours the car body by component temperature and tire grip [A] | The state that decides a control's *presentation* must be separate from the control's value. This is the single deepest structural gap — see gap 5 |
-| 5 | **Translucent chrome over a live scene** | The whole interface floats on the map; the car visualisation is a *lighting* context for everything above it; the media player's background is *"translucent, instead of a solid color… the vehicle animations subtly shine through"* [B] | An alpha-blended overlay layer over a continuously-rendering scene. **Stated as a product decision, not a source fact** — see gap 4 |
+| 4 | **Mode-dependent controls** | Nine documented instances where one control changes meaning: the fan slider's **enumeration** changes in Auto [A]; the defroster is a 3-state button whose exit **restores three other controls** [A]; the map-orientation icon becomes route-overview *while navigating* [A]; the Maps dock icon hides the map when already on it [B]; the visualisation drag is a manual toggle **and** a persisted setting **and** an automatic FSD behaviour [B]; Track Mode recolours the car body by component temperature and tire grip [A] | The state that decides a control's *presentation* must be separate from the control's value. **The per-widget half of this is already solved** — see **L6a** — so what is demanded here is the **cross-widget** half: see **L6b** |
+| 5 | **Translucent chrome over a live scene** | The whole interface floats on the map; the car visualisation is a *lighting* context for everything above it; the media player's background is *"translucent, instead of a solid color… the vehicle animations subtly shine through"* [B] | An alpha-blended overlay layer over a continuously-rendering scene. **Stated as a product decision, not a source fact** — see **L1**, which is where the pipeline work sits |
 | 6 | **Bidirectional power meter** | A bar with a **fixed zero in the middle**; draw above, regen below; *"Power being fed back to the Battery displays in green whereas power used by the regular braking system displays in gray"*; the draw half is *"black (or white if the display is dark)"* [A] — **so one half inverts with the theme and the other does not**. Four semantic states on one axis, no numeric scale | A signed axis whose two directions have independently theme-polarised colours |
 | 7 | **Proximity ramp** | *"Colored lines radiate from the image of your Model 3 as objects are detected… The location of the lines correspond to the location of the detected object. The color of the lines (white, yellow, orange, or red) represents the object's proximity"* [A] | Position and colour carrying two independent variables, emitted radially |
 | 8 | **Lane marker with changing identity** | One colour, four forms: a filled blue lane region, *"a single blue line"* under Navigate on Autopilot, a blue indicator line for Lane Departure Avoidance, and *"highlights the lane marking in red"* on Emergency Lane Departure [A] | The same visual channel switching representation class with a mode |
@@ -603,40 +782,88 @@ demonstrate `ui_core` can carry a real infotainment UI.
 | 13 | **Heterogeneous alert slot** | One slot, four different producers; dismissal by swipe only; `Learn More` **presence is data-dependent** (*"Not all alerts provide additional information at this time"* [A]); a bell-indexed archive behind it | A toast host that takes heterogeneous payloads and whose action affordance is conditional |
 | 14 | **Segmented + blue-action composite row** | A segmented control and a solid-colour action button in one row, e.g. exterior lights next to the fog-light button [A] photo `02` | Two control archetypes that must align on one baseline without merging |
 | 15 | **Coupled dock regions** | Recents' width is a **function of** My Apps occupancy, collapsing to one at full [A] | Two sibling regions whose layout depends on each other's content |
-| 16 | **The two-axis reshape** | Horizontal drag = a **discrete snap that also changes the content tier** (split ↔ full-screen reveals road markings and objects); pinch = continuous zoom [A] | One axis discrete-and-tiered, one axis continuous |
+| 16 | **The two-axis reshape** | Horizontal drag = a **discrete snap that also changes the content tier** (split ↔ full-screen reveals road markings and objects); pinch = continuous zoom **[C]** | One axis discrete-and-tiered, one axis continuous. **Its only source is the visualisation-resize sentence, which is `[C]`** — Tesla's own words read in a search index, not off an opened page, and the corpus is unreachable from this host. **Snippet-level, not specified**: a task must re-verify it before treating the tier change or the pinch as a requirement |
 | 17 | **Spatial audio pad** | Balance is *"drag the center circle to the location… where you want to focus the sound"* [A] | A 2-D drag target inside a fixed frame |
 
 ### Gaps this layout exposes in `ui_core`
 
-Verified against the source, not inferred. **Two of the eight gaps already
-recorded in this document are wrong** — see the corrected table below.
+Verified against the source, not inferred — **a claim this section made and then
+got wrong twice.** Rows **L1** and **L6** were checked against the source on
+2026-10-05 and found **false when written**, which is a different failure from
+being overtaken by a later commit; see § *Corrections to the second gap table*.
+The other nine rows hold.
+
+**These rows are cited as `L1..L11`, not `1..11`.** This document has two numbered
+gap tables and the first keeps its own numbering because four files cite it, so a
+bare "gap N" here is ambiguous. The prefix is the fix. Note that `L6` is split
+into **L6a** and **L6b**, which is why eleven rows are cited in eleven slots with
+one row removed and one added.
 
 | # | Gap | Severity | Blocks | Evidence |
 |---|---|---|---|---|
-| 1 | **No offscreen target, no layer, no alpha-blended chrome.** No FBO, renderbuffer or resolve pass anywhere in the crate; layering means draw order only. So there is no way to draw a translucent panel over a live scene and no way to blur one. | **Critical** | Every overlay: Controls, climate, media, app tray, alerts | `grep -i 'framebuffer\|renderbuffer\|FBO'` hits only two prose comments that say the pipeline *lacks* it (`render.rs:2701`, `gauge.rs:75`) |
-| 2 | **No transform reaches the GPU.** `Transform` is `Interpolate`-able so it can be animated, but `DrawCommand` has no transform field and there is no matrix or `u_model` uniform. | **Critical** | Panel slide-ins, card paging, the drive-mode strip's drag, any resize animation | `property.rs:337`; zero hits for `u_model`/`mat4`/matrix uniform in `render.rs` |
-| 3 | **`LayoutMode::Grid` unimplemented** — `LayoutMode::Grid { .. } => Vec::new()`, `columns` never read. `Flex.wrap` accepted and discarded by the `..`. | **Critical** | The Controls tile grid, the app tray grid | `layout.rs:1205`, `:1200` |
-| 4 | **`LongPress` and `Swipe` are emitted and consumed by no widget.** Checked per-widget over `fn on_event`: zero match arms in all thirteen widget modules. The only mentions are doc comments saying a widget *deliberately ignores* them, and tests that construct them. | **High** | Dock edit mode, card paging, alert dismissal, the drive-mode strip | per-widget `awk` over `on_event` → 0 everywhere; `toggle.rs:748` is a doc comment |
-| 5 | **No horizontal scrolling, no momentum, no snap.** `Scroll` and `List` are vertical-only; inertia is explicitly out of scope. | **High** | The card carousel, dock overflow, the widened wiper segmented control | `scroll.rs:90` |
-| 6 | **A control's presentation cannot depend on a mode.** Every widget's appearance derives from its own value; nothing carries "which mode am I in" as a separate input. | **High** | The fan slider, the defroster, the map icon, the car body colouring — composite row 4 is **nine widgets**, not one | no mode/enumeration concept anywhere in `widgets/` |
-| 7 | **No margin, no `flex-shrink`, no `flex-basis`, no cross-axis gap.** | Medium | Dense settings rows that must not overflow | `layout.rs` |
-| 8 | **No offscreen text measurement on the draw command.** `DrawCommand::Text` carries `x`, `y`, `text`, `color`, `font_size`, `extra_advance` — **no width** — so a half-visible row cannot be clipped. | Medium | Card content that overflows, the carousel's page edges | `paint.rs:148-165` |
-| 9 | **No theme scoping or inheritance.** One flat global token map; no tokens for focus, hover, pressed, shadow or z-order. | Medium | Any subtree that needs to differ from the global theme | `theme.rs:357` |
-| 10 | **`Polygon` is convex-only** — triangle fan, no ear-clipping, no stencil. No bezier, no fill rules. | Medium | Any concave silhouette; the proximity ramp; instrument arcs | `paint.rs:249`, `render.rs:786` |
+| L1 | **No colour capture and no public backdrop API.** **Rewritten 2026-10-05 — the previous row was false.** An FBO, a sigma-weighted separable Gaussian blur and a composite/resolve pass **all exist and run in production**: `render/target.rs` (`ShadowTarget`, `create_framebuffer`, two ping-ponged `GL_R8` textures, `check_framebuffer_status` completeness), `render/blur.rs` (`MAX_TAPS = 9`, `taps_for`, `gaussian`, `kernel`, `reach`), and in `render.rs` four programs plus `bind_default_target`. `Dialog` uses the whole path today. **What is actually missing is four things, and none is "no FBO":** (a) a **colour attachment** — `ShadowTarget` is `GL_R8`, one channel of coverage, chosen because a shadow's colour is one constant (`target.rs:109-116`), so it **cannot hold a scene**; the demo needs `GL_RGBA8`. (b) A **public entry point** — `draw_shadow_offscreen` is reachable only from `draw_shadow_batch`, i.e. only from a `DrawCommand::Shadow` segment, so no widget can ask for a backdrop. (c) **Rect-scoped capture** — `bind_for_write` disables the scissor test because it draws a window-sized quad. (d) A **bandwidth decision that inverts**: the `GL_R8` choice is an optimisation *because* a shadow is one colour; capturing full-window RGBA and blurring it every frame is a different order of cost, and the target is aarch64. | **Critical** | Every overlay: Controls, climate, media, app tray, alerts | `target.rs:129-276`; `blur.rs:60-180`; `render.rs:1402-1447`, `:2249-2360`, `:2383`; `dialog.rs:1009-1023` |
+| L2 | **No transform reaches the GPU.** `Transform` is `Interpolate`-able so it can be animated, but `DrawCommand` has no transform field — none of its nine variants carries one — and there is no matrix or `u_model` uniform. | **Critical** | Panel slide-ins, card paging, the drive-mode strip's drag, any resize animation | `property.rs:337`, `animation.rs:110-122`; zero hits for `u_model`/`mat4`/matrix in `render.rs` or `paint.rs` |
+| L3 | **`LayoutMode::Grid` unimplemented** — `LayoutMode::Grid { .. } => Vec::new()`, `columns` declared and never read. `Flex.wrap` accepted and discarded by the `..`. | **Critical** | The Controls tile grid, the app tray grid | `layout.rs:1205`, `:1200`, `columns` at `:510` |
+| L4 | **`LongPress` and `Swipe` are emitted and consumed by no widget.** Checked per-widget over `fn on_event`: zero match arms in **all fifteen** widget modules. `InputEventKind::Swipe` appears in no `on_event` body at all; the only mentions are doc comments saying a widget *deliberately ignores* them, and **tests that assert non-consumption** — `list.rs:3846`, `keyboard.rs:2670` — plus `toggle.rs:748`, a doc comment. | **High** | Dock edit mode, card paging, alert dismissal, the drive-mode strip | per-widget `awk` over `on_event` → 0 in all 8 `on_event` impls; `widgets/mod.rs:176-190` lists fifteen `pub mod` entries |
+| L5 | **No horizontal scrolling, no momentum, no snap.** `Scroll` and `List` are vertical-only — `scroll_offset` is a scalar `Property<f32>`, and left/right are explicitly rejected. No inertia identifier exists anywhere. `Scroll::snap_to_state` is **palette** snapping, not scroll snapping. | **High** | The card carousel, dock overflow, the widened wiper segmented control | `scroll.rs:378`, `:1178`, `:1362`, `:1498`; `list.rs:132` states momentum is out of scope; `list.rs:748` |
+| **L6a** | **A control's presentation *can* depend on a mode — SATISFIED, per widget.** The previous row claimed *"nothing carries 'which mode am I in' as a separate input"*, and that is false. `GaugeType` is declared in the crate's own words as *"a mode and not an appearance"*, deliberately behind a **setter rather than a `Property`** so it cannot change mid-frame and leave the mode disagreeing with the properties drawn. It selects three different primitive sets. `Severity` is a second such input and it changes **layout as well as colour** — no disc means the message starts at the panel's padding. **Twelve `pub enum`s exist in `widgets/`**, of which these two are the clearest; the rest are `TextAlign`, `WrapMode`, `Truncation`, `KeyAction`, `Page`, `Anchor`, `Orientation`, `ImageFit`, `ButtonState` and `ChartType`. | **—** | — | `gauge.rs:420-440`, `toast.rs:456-470`, `toast.rs:919-925`; twelve `pub enum`s across eight widget modules |
+| **L6b** | **But a mode cannot cross a widget boundary.** Three things are genuinely absent: (a) **no mode dimension in the theme** — `ThemeToken` is a flat 33-variant enum with no `Focus`, `Hover`, `Pressed`, `Shadow`, `ZOrder`, `Active` or `Selected` variant, so a mode cannot restyle a subtree; (b) **no cross-widget propagation** — all twelve enums are a field on one widget read at paint time from its own state, and the demo needs one mode to reach widgets it is not on: the defroster's third touch restores three *other* controls, Track Mode recolours the car body; (c) **no mode-dependent enumeration of a stored value** — `Slider` does let the domain change at runtime via `set_range`/`set_step`, but it is one linear value → one position with **no label or option set**, so a stored value cannot *survive* an enumeration change and be presented through the new one. | **High** | The defroster's restore, Track Mode's recolouring, the fan slider's Auto enumeration — composite row 4 | `theme.rs:78-148`; `slider.rs:160`, `:263`, `:486`, and `:481-485` for the step constraint |
+| L7 | **No margin, no `flex-shrink`, no `flex-basis`, no cross-axis gap.** All four hold, but **`Padding` does exist** and the previous row omitted it — a four-sided inset applied in `arrange` to every mode. A reader counting layout vocabulary from this row alone would under-count by the feature the demo uses most. | Medium | Dense settings rows that must not overflow | `Padding` at `layout.rs:579-588`, applied `:1198`, `:1212-1217`; `spacing` is main-axis only, `layout.rs:277` |
+| L8 | **No offscreen text measurement on the draw command.** `DrawCommand::Text` carries no width, so a half-visible row cannot be clipped. **The previous row's field list was also incomplete** — there are seven fields, not six: `weight: FontWeight` is the seventh and the single place a weight lives. | Medium | Card content that overflows, the carousel's page edges | `paint.rs:203-238`, `weight` at `:237` |
+| L9 | **No theme scoping or inheritance.** One flat global token map; no tokens for focus, hover, pressed, shadow or z-order — focus rings and hover/pressed are per-widget properties instead. | Medium | Any subtree that needs to differ from the global theme | `ThemeToken` at `theme.rs:78-148` (`TOKEN_COUNT` = 33 at `:148`), `Theme` at `theme.rs:356-359`; the per-widget states at `button.rs:346`, `:355-357` |
+| L10 | **`Polygon` is convex-only** — triangle fan, no ear-clipping, no stencil; the source names both rejected alternatives in as many words. No bezier, no fill rules — zero hits for `fill_rule`/`nonzero`/`even_odd` anywhere. **Note also that `DrawCommand::Path` is a *stroked* polyline with an explicit width**, so it cannot serve as a filled icon outline either. | Medium | Any concave silhouette; the proximity ramp; instrument arcs | the fan is `render.rs:960-980` (`// A fan from the first point… the alternative — ear clipping, or a stencil pass — is a rasteriser`); `paint.rs:249`; `Path` at `paint.rs:303-312` |
 
-**Corrections to the gap table earlier in this document.** Two rows were
-checked against the source and are wrong:
+### Corrections to the second gap table
+
+Two rows of the table above were checked against the source on **2026-10-05** and
+found **false at the time they were written**. That is a different failure from
+being overtaken by a later commit, and the distinction is what makes it a
+*verification* failure rather than ordinary staleness:
+
+- **L1 was false when written.** `render/target.rs` (483 lines) and
+  `render/blur.rs` (702 lines) were added in **`22356f6`** (task 22, 2026-10-03),
+  and this file's last previous edit is **`1ea7e79`** — which is *later* in the
+  history. So the table was written on top of a tree that already had both
+  files, and the grep it offered as evidence could not have produced its answer:
+  `git grep -ic framebuffer 1ea7e79` hits **eight files**, `target.rs` alone
+  29 times. **The lesson is the one in `.ai/NEVERAGAIN.md`'s spirit — a sweep of
+  a mechanism's call sites is not a sweep of what exists.** Here it is worse:
+  the absence claim was made by a grep that was never run against the right tree.
+- **L6 was false when written**, and in the crate's own words. The row denied
+  any mode or enumeration concept; `GaugeType` is a `pub enum` documented as
+  *"A mode and not an appearance"* (`gauge.rs:420-426`), and `Severity` changes
+  layout as well as colour (`toast.rs:456-457`). The row has been split into
+  **L6a** (satisfied) and **L6b** (what is genuinely missing), and **L6a's
+  satisfaction is worth more to the demo than the gap was**: writing nine
+  per-widget modes now inherits the crate's own reason for making the mode a
+  setter, which is that a mode must not change in the middle of a frame.
+
+Three further stale citations were found in this pass and are recorded rather
+than fixed here, since fixing them is a code change:
+
+- **Two doc comments assert the opposite of the code beside them.** The
+  mechanism works: `Batch` carries `clip` outside the batch key and
+  `apply_clip` sets the scissor per batch. The stale text is at
+  **`render.rs:1920-1925`** (on `set_scissor`) and **`list.rs:122-126`**. **The
+  correction below cited `render.rs:1459` for the first, which is wrong** —
+  that line is inside `Renderer::new`'s doc block. Three more instances of the
+  same claim exist: `scroll.rs:21`, `image.rs:117`, `image.rs:258`.
+- **The live problem is narrower and worse than "the clip is never set":** the
+  clip is supplied by the demo's frame loop for **one widget only**, so clipping
+  works and is **not owned by the widget system**. That is row **#5** of the
+  first table.
+
+**Corrections to the first gap table.** Two of its rows were checked against the
+source and are wrong:
 
 - *"Scissor/clipping not applied — clip rects are computed but never set on
-  the GPU"* is **false**. `Batch` carries `clip` outside the batch key and
-  `apply_clip` sets the scissor per batch. **The live problem is narrower and
-  worse: the clip is supplied by the demo's frame loop for one widget only**,
-  so clipping works and is not owned by the widget system. Two doc comments
-  (`render.rs:1459`, `list.rs:124`) still assert the opposite of the code they
-  sit next to.
+  the GPU"* is **false**, as above.
 - *"No Icon widget"* is still true, and it is now a larger problem than it was:
-  gap 10 above plus the absence of any vector path mean icons are the *first*
-  thing the demo will need and the least supported thing in the crate.
+  **L10** plus the absence of any vector path mean icons are the *first* thing
+  the demo will need and the least supported thing in the crate. There is no
+  path or vector-glyph support anywhere: `DrawCommand::Path` is stroked, fonts
+  rasterize to a glyph atlas, and there is no outline extraction, no SVG and no
+  curve tessellation.
 
 **A note on how these were checked.** Every row above was verified by reading
 the source in this session — grep for the absence, and read the surrounding
@@ -674,8 +901,15 @@ for the release-note corpus. **`tesla.com` itself 403s from this host**
 (Akamai challenge page), and `rollout-tesla.com/ownersmanual/modely/` returns
 Access Denied — so **Model Y is covered only where its manual text is
 identical to Model 3's**, and the Model Y §Controls Overview was read through
-a third-party mirror. That is a real coverage limit on the primary corpus, not
-a formality.
+a third-party mirror, which is why it is tagged `[B]`. That is a real coverage
+limit on the primary corpus, not a formality.
+
+**Re-tested 2026-10-05 and unchanged**, with one trap added to the record: the
+`tesla.com` 403 and the mirror's *Access Denied* both still hold, but an
+**unknown GUID path on the mirror returns HTTP 200 and ~39 KB of HTML that is an
+unrelated third-party site.** A reachability probe that reports 200 may have
+found nothing of Tesla's at all. § *Sources* carries the consequence — the two
+snippet-derived claims stay `[C]` and cannot be repaired from this host.
 
 ### What this means for the demo's shape
 
@@ -684,13 +918,29 @@ any `TASK_UI_DEMO_n` is written:
 
 1. **The demo must have a map it can put things on top of.** Not a
    placeholder — the translucency, the panes and the overlays are all
-   *defined* against it, and gap 1 is untestable without one.
+   *defined* against it, and **gap #1** (the map widget, in the first table) is
+   untestable without one. Distinct from **L1**, which is the pipeline work for
+   drawing over it.
 2. **The car visualisation and the Controls panel are different screens, not
    one screen with a tab.** The first sketch merged them. Every layout
    decision downstream depends on keeping them apart.
-3. **Mode-dependence (composite gap 4) is the highest-value thing to build
-   and the least supported.** Nine real widgets need it; nothing in the crate
-   models it. If the demo demonstrates only that, it has demonstrated the
-   thing the library is missing.
+3. **Mode-dependence is a demo *design* problem, not a library gap — and the
+   honest half is cross-widget.** The previous version of this item said
+   *"nothing in the crate models it"*, which was false and is corrected in §
+   *Corrections to the second gap table*. What the crate has: a per-widget mode
+   concept (`GaugeType`), a documented position on why it is a setter and not a
+   `Property`, and ten more presentation-bearing enums. **So the demo writes
+   nine per-widget modes and inherits that reasoning for free.** What the crate
+   has not: a mode that crosses a widget boundary, a mode dimension in the
+   theme, or a value whose presentation through an enumeration can change — that
+   is **L6b**, and it is where the real work is.
+   **The counter-argument, recorded because it cuts against the split above:**
+   cross-widget propagation is arguably the half that *does* deserve a library
+   concept, since a demo-local answer means every future consumer reinvents it,
+   and the defroster's snapshot-and-restore (composite row 11) is exactly the
+   kind of mechanism that wants to be shared. Since 2026-10-05 the gap cannot be
+   deferred either way — see § *Operator decisions (2026-10-05)* item 2 — so the
+   open choice is **whether L6b is a `TASK_UI_PRIM_n` or a `TASK_UI_DEMO_n`**, and
+   this document does not settle it.
 
 

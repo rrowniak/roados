@@ -4099,30 +4099,43 @@ sysroot mandatory.
   when a second widget needed one. So it moved, and what moved is
   `widgets::Callback<T>`; tasks 15 and 19 now reach the same type. `button::Callback`
   is an alias, so no button's spelling changed.
-- **SDL3 ships with all twelve subsystems enabled.** The architecture doc asks
-  for audio, render, camera and filesystem off. Accepted temporarily because
-  `sdl3` 0.20.0 re-exports no subsystem features, so honouring the doc needs
-  either a second direct `sdl3-sys` dependency or target-asymmetric options
-  forced from the toolchain file. Neither is worth the cost while the head
-  unit's hardware requirements are still unknown. Consequences to remember: the
-  binary carries audio and camera code it will not use, and no choice is being
-  made about HID, haptics, or which video driver the target image wants.
-  Revisit before `roados_ui`, not before task 02.
+- **SDL3 ships with all twelve subsystems enabled.** **Decided by the operator
+  2026-09-28**, with the channel blocked: `sdl3` 0.20.0 re-exports no subsystem
+  feature, so honouring the architecture document needed either a second direct
+  `sdl3-sys` dependency or target-asymmetric options forced from the toolchain
+  file. Recorded 2026-10-05 that the second objection was **wrong about the
+  mechanism** — a native build passes no toolchain file by default, but the
+  `cmake` crate reads one from the environment for any target, so there was no
+  asymmetry in the mechanism, only in the file that existed.
+  **What changed on 2026-10-05 is not this decision but its justification:** two
+  of the four subsystems the document wanted off — audio and camera — are
+  product requirements (`IDEA.md` § *Audio and media`, and `IDEA.md:60,107,183`),
+  so the deviation is now "the document was product-wrong", not "the operator
+  accepted a blocked alternative". The remaining unused subsystems stay on by the
+  operator's ruling of 2026-10-05 that megabytes are not a reason to narrow what
+  the product can do. `PRIMITIVES_ARCHITECTURE.md` § *Dependencies* now states all
+  of this with a per-subsystem reason; `CROSSBUILD.md` §5.2.1 owns the policy and
+  §5.5 the three options that did get changed. Revisit before `roados_ui`, not
+  before task 02.
 - **`ui_core`'s entry point is `src/lib.rs`, not `src/mod.rs`.** Task 02
   specifies `lib.rs`, which is also what Cargo expects, so
-  `PRIMITIVES_ARCHITECTURE.md:332` is stale on this one point and was left
-  alone. Nothing else in that document's *Module Layout* conflicts with the
-  tree: the module list matches, and its `roados_ui/` line is a sibling
-  directory rather than a module of `ui_core`, so it is not a workspace member
-  at this stage.
+  `PRIMITIVES_ARCHITECTURE.md` was stale on this one point. **Reconciled
+  2026-10-05** by task 28 — and the fix was larger than the filename: the same
+  line named **`UiContext`, a type that does not exist anywhere in `ui/src/`**.
+  The module tree also gained `font.rs`, `texture.rs`,
+  `render/{context,target,blur}.rs` and `ui_demo/{main,fps}.rs`, and is now
+  verified as an exact set match against the tree (34 basenames).
 - **`WidgetNode` has `children`, `parent`, `layout` and `paint`, not the
-  `kind`/`properties`/`flags` of `PRIMITIVES_ARCHITECTURE.md:51-59`.** A node
+  `kind`/`properties`/`flags` the architecture document sketched.** A node
   is a place in a tree with a layout cache and a paint cache; what it *is* and
   what properties it holds are not needed until a widget that has them is
   written, and an empty `kind` would be a lie until then. The reviewer's
   finding is the same one the note further down this file already makes about
   tasks 04 and 05 — that block is the one to settle, and this line only records
-  what task 07 did in the meantime.
+  what task 07 did in the meantime. **Reconciled 2026-10-05**: the sketch in
+  `PRIMITIVES_ARCHITECTURE.md` now shows the four fields, states that no
+  `PropertySet` type exists, and says where visibility actually lives
+  (`LayoutState::visible`, consulted by hit testing only).
 - **A node's clip rect is computed, not applied.** `LayoutState::clip()` holds
   the rect a renderer would scissor to, and the layout pass fills it in
   correctly, but nothing sets a scissor per node yet: `Renderer::set_scissor`
@@ -4361,8 +4374,62 @@ not the build.
 | 25 | Target Image and Sysroot | operator strategy decision; unblocks 26 | `doc/platform/TASK_CROSSPLATFORM_01.md` |
 | 26 | Head-Unit Video Driver | 25 | `doc/platform/TASK_CROSSPLATFORM_02.md` |
 | 27 | Target Runtime Library Audit | 25, 26 | `doc/platform/TASK_CROSSPLATFORM_03.md` |
-| 28 | Reconcile the SDL Configuration | none — but item 5 must land **before task 04** | **unchanged** |
+| 28 | Reconcile the SDL Configuration | nothing — **done 2026-10-05**, see below | `doc/ui/TASK_UI_PRIM_28.md`, amended in place |
 | 29 | Head-Unit Smoke Test | 25, 26, 27 | `doc/platform/TASK_CROSSPLATFORM_04.md` |
+
+### Task 28 — done 2026-10-05, and it changed the build
+
+The `Needs` column said *"item 5 must land before task 04"*. **Task 04 ran on
+2026-09-28** (`a8f3147`) and task 05 the same week (`8c3657b`), so the
+instruction was four commits stale when this was written and **the thing it was
+protecting turned out not to need protecting**: `ui_core/src/node.rs` was
+created by task 02 (`89b67b7`), which specified the module structure. Two
+consecutive tasks each excluded "widget node structure" and neither claimed it,
+and nothing was ever at risk of two agents guessing differently. Both clauses are
+now struck in place with the correction on them.
+
+What the task actually found, in one line: **`PRIMITIVES_ARCHITECTURE.md` was
+wrong in more places than the two the task file knew about, and one of the two it
+did know about was product-wrong rather than merely unreachable.**
+
+**The defect that mattered.** `PRIMITIVES_ARCHITECTURE.md` § *Dependencies* said
+*"SDL3 subsystems disabled at build time: audio, render, camera, filesystem"*.
+Of those four:
+
+| | verdict |
+|---|---|
+| audio | **wrong about the product** — `IDEA.md` § *Audio and media* is a headline feature (zones, ducking, FM/DAB+, USB playback, phone calls) |
+| camera | **wrong about the product** — `IDEA.md:60,107,183`: automatic headlights from a camera, recognition behind it |
+| filesystem | **impossible** — SDL declares twelve subsystems and filesystem is not one; on Unix it is always compiled (`SDL/CMakeLists.txt:2112`), and only `SDL_FILESYSTEM_DUMMY` is a fallback (`:3619-3620`) |
+| render | correct and unused — `ui_core` draws through its own GLES pipeline and never reaches `sdl3::render` |
+
+Two of the four were product requirements. That is a stronger reason than the
+blocked channel the task file gave, and it means the paragraph was not merely
+unimplementable — **it would have been harmful if it had been implemented.**
+
+**The rest of the document, reconciled in the same pass** — none of it was in the
+task file, and the task file's own acceptance criteria did not ask for it:
+
+| what | was | now |
+|---|---|---|
+| `SDL3 native lib` rationale row | "disable unneeded subsystems, reproducible builds" | pins the version, needs no system SDL3, and says plainly that it is **not** reproducible across hosts |
+| the toml block's feature list | `["build-from-source", "image"]` | all four, matching both manifests, with a "do not shorten it" note |
+| `mod.rs` — public API, `UiContext` | a filename that is `lib.rs`, and **a type that does not exist anywhere** | `lib.rs`; `UiContext` named as fictional |
+| module tree | missing `font.rs`, `texture.rs`, `render/{context,target,blur}.rs`, `ui_demo/{main,fps}.rs` | all present; **verified as an exact set match, 34 basenames** |
+| `WidgetNode` sketch | 7 fields, incl. `kind`, `properties`, `flags`, and a `PropertySet` | the 4 that exist; `PropertySet` recorded as a type that never existed |
+| ownership rationale | "no need for Rc/RefCell" | "no `Rc`/`RefCell` **in the tree**" — `node.rs`/`arena.rs` have zero, `property.rs` has 18 |
+| `Property<T>` sketch | `{ value, tracker }` | `Rc<PropertyInner<T>>` with `RefCell`/`Weak`, and why the property graph cannot avoid them while the tree can |
+| `LayoutMode::Flex { wrap }` | presented as working | **accepted and not honoured** — which `layout.rs` already said |
+| *Open Questions* | "Vulkan is additive" | contradicted `PRIMITIVES.md` § *Backend*, which **rejects** Vulkan; resolved, with a revisit trigger |
+
+**What is correct, checked rather than assumed** — worth recording because a
+document that is mostly right does not look mostly right: `ThemeToken` (all 33
+variants, same order, matching `TOKEN_COUNT`), `Easing` (`Linear`, `EaseIn`,
+`EaseOut`, `EaseInOut`, `Spring { damping, stiffness }`, `Bounce`), `Handle`,
+`LayoutMode`, `ATLAS_SIZE = 2048`, the fifteen-widget list, and the shelf
+allocator with eviction. An earlier claim that `Easing::Spring` and `Easing::Bounce`
+did not exist was **wrong and was caught by reading it again** — a `rg -rn` flag
+parsed as `-r n` was silently replacing matches with the letter `n`.
 
 **Three things were recorded as gating the cross-build requirement**, and they
 were not all in these tasks. All three are closed as of task 02, 2026-09-28.
@@ -4505,28 +4572,47 @@ toolchain file:
    which then makes the native and aarch64 builds asymmetric, and puts the
    configuration somewhere `Cargo.toml` does not describe.
 
+**Route 2 is now how the shared SDL options reach both targets**, and the
+asymmetry was only ever a property of the file that existed, not of the
+mechanism: `cmake/sdl-options.cmake` holds what does not differ per target and
+both builds read it. This X11-extension problem is a *separate* one and is not
+solved by it — the X11 sub-options are reachable from neither crate.
+
 Note this is **independent of the subsystem decision** above: the X11
 sub-options are not subsystems, so accepting default subsystems does not bring
 this closer to fixed, and disabling the documented four would not have fixed it
 either. It was always going to be needed.
 
-- Task 04 places "widget node structure" out of scope, deferring it to task 05;
+- ~~Task 04 places "widget node structure" out of scope, deferring it to task 05;
   task 05 is titled *Property System* and does not list a widget node type
   among its requirements. Whoever reaches 04/05 should resolve this rather than
-  both agents guessing differently. Not yet settled by the operator.
-- **`PRIMITIVES_ARCHITECTURE.md` § Dependencies is wrong in two places**, found
-  while doing task 01. Both need an operator decision; neither is mine to amend.
-  1. It says SDL subsystems are disabled by build configuration, but `sdl3`
+  both agents guessing differently. Not yet settled by the operator.~~ —
+  **settled 2026-10-05**: `node.rs` came from task 02, both tasks had already
+  run, and both clauses are struck in place.
+- ~~**`PRIMITIVES_ARCHITECTURE.md` § Dependencies is wrong in two places**, found
+  while doing task 01. Both need an operator decision; neither is mine to amend.~~
+  **Both resolved 2026-10-05 by task 28**, and the first turned out to be worse
+  than "the channel is blocked":
+  1. It said SDL subsystems are disabled by build configuration, but `sdl3`
      0.20.0 **re-exports no subsystem features at all** — its 20 features
      include none, and none forwards one. The switches live on `sdl3-sys` 0.7.1
      (`sdl-<name>` / `no-sdl-<name>`). So the pinned dependency line cannot
      implement the documented configuration. Task 02 is blocked on the choice
      between a second direct `sdl3-sys` dependency, or options forced from the
-     toolchain file — which is target-asymmetric and invisible in `Cargo.toml`.
+     toolchain file — which is target-asymmetric and invisible to `Cargo.toml`.
+     **Resolved as to the mechanism:** the asymmetry claim was wrong (§ above),
+     the operator kept the defaults, and two of the four subsystems it wanted
+     off turned out to be product requirements anyway.
   2. It lists **filesystem** among the subsystems to disable. There is no
      `SDL_FILESYSTEM` option in SDL 3.4.16 and no `sdl-filesystem` feature in
      `sdl3-sys`; SDL always compiles its Unix filesystem implementation.
-     The doc and reality disagree.
+     The doc and reality disagreed. **Resolved:** the document now says filesystem
+     is not a choice, with the mechanism cited and `CROSSBUILD.md` §5.2 owning
+     the depth.
+
+- **Task 04/05 excluded "widget node structure" and neither claimed it.** Settled
+  2026-10-05, after both tasks had run: `node.rs` came from task 02 (`89b67b7`).
+  Both clauses are struck in place with the correction. See § *Task 28*.
 
 ## Waivers, task 01
 
@@ -4567,6 +4653,65 @@ operator's rule, none of these is treated as satisfied.
 
 ## History
 
+- 2026-10-05 — **task 28 done, and it was the documentation task that turned out
+  to need a build change.** Six documents changed and three files of build
+  configuration, and the shape of it was decided twice before any of it was
+  written. **The operator's ruling reshaped the task:** asked to choose which
+  subsystems to disable in order to save megabytes, the answer was that this
+  makes no sense — *we don't have to disable anything just to save a couple of
+  megabytes* — and that the question should not have been asked. Two things
+  followed from taking that seriously. First, the real defect in
+  `PRIMITIVES_ARCHITECTURE.md` is not size at all: it told the next agent to
+  disable **audio and camera**, which `IDEA.md` makes product requirements, and
+  **filesystem**, which has no switch in SDL. Second, the only build change worth
+  making was the one about *truth*, not bytes — three options that no cargo
+  feature can reach and that disagreed with the project's own recorded decisions.
+  **Four decisions are the operator's:** default subsystems stand (2026-09-28,
+  re-justified 2026-10-05 as product-wrong rather than blocked); megabytes are
+  not a reason to narrow capability; **the binary stays unstripped** — 825 KB of
+  `.symtab`/`.strtab` in a 6.5 MB binary, kept deliberately for a usable
+  head-unit backtrace; and the channel for the shared SDL options is a split
+  toolchain file reached through the environment rather than a second direct
+  `sdl3-sys` dependency, which settles the dependency-approval question by not
+  needing one.
+  **The build change, measured.** `cmake/sdl-options.cmake` now carries
+  `SDL_VULKAN`, `SDL_OPENGL` and `SDL_TEST_LIBRARY` off; the aarch64 toolchain
+  file `include()`s it; `.cargo/config.toml` § `[env]` reaches it natively
+  through `HOST_CMAKE_TOOLCHAIN_FILE` and the cross file through
+  `TARGET_CMAKE_TOOLCHAIN_FILE`. Release, x86_64: `libSDL3.a`
+  **7 623 342 → 6 819 806** (−803 536, −10.5 %), `ui_demo`
+  **6 546 728 → 6 137 376** (−409 352, −6.3 %), `libSDL3_test.a` gone (was
+  228 180), Vulkan objects 716 K → 20 K. Cross artifact 6 013 800 → 5 759 648.
+  **1 839 tests green** (1 404 + 217 + 218) and **61.9 fps, worst frame 24.3 ms,
+  0 frames over 33 ms** against a 61.6–61.9 baseline. The cross build was re-run
+  with `CMAKE_TOOLCHAIN_FILE` deliberately unset, to prove the `[env]` wiring
+  stands alone, and the artifact is `ARM aarch64` with `SDL_X11` off,
+  `SDL_UNIX_CONSOLE_BUILD` on, EGL and HIDAPI on — all unchanged.
+  **Three findings that were not in the task file, and each one was nearly
+  missed.** (1) `CROSSBUILD.md` §4.1 listed the two kind-scoped environment
+  variables as `CMAKE_TARGET_CMAKE_TOOLCHAIN_FILE` and
+  `CMAKE_HOST_CMAKE_TOOLCHAIN_FILE`; **neither is the name.** They are
+  `TARGET_CMAKE_TOOLCHAIN_FILE` and `HOST_CMAKE_TOOLCHAIN_FILE` — the **kind
+  comes first** — and getting it wrong is silent, because cargo delivers the
+  variable, the crate never asks for that name, and the build proceeds with
+  SDL's defaults. The spelling was read off `cargo build -vv`, which prints all
+  four probes, after the first attempt appeared to do nothing at all.
+  (2) `sdl3-sys`'s `build.rs` emits **no `rerun-if-changed` directive of any
+  kind**, so editing a `.cmake` file or `.cargo/config.toml` does not rebuild
+  SDL and `cargo build` reports success — the fix is
+  `cargo clean -p sdl3-sys`, and `CROSSBUILD.md` §4.1.1 now says so and §5.5
+  gives the greps that prove the options took. (3) `SDL_OPENGL` was `ON` in
+  **both** `CMakeCache.txt` files and came out undef only because `libgl-dev` is
+  not installed on this host, so the artefact depended on the dev machine's
+  package list — a successful build of a different artefact, the same shape as
+  §6.7's missing-`pkg-config` finding.
+  **`AGENTS.md`'s two line-number citations into this file were stale** (`:346`
+  and `:221`, both pointing at toast-animation text) and the paragraph was
+  rewritten to cite by section instead, with the reason recorded; its warning
+  that the feature list is incomplete is retired because the list is now
+  authoritative. Three `NEVERAGAIN` entries added — the silent env-name
+  mismatch, the object-tree size read as a binary saving, and the absent
+  rerun-if-changed.
 - 2026-10-03 — **task 22 (Dialog) implemented, reviewed once, uncommitted.** The
   largest task in the sequence, and **four sequential sub-tasks** rather than one
   agent: the task file asks for a blurred shadow, a bold title and a cached

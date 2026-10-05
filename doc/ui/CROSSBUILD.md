@@ -37,7 +37,7 @@ published `.crate` files on 2026-09-28:
 | `sdl3-sys` | `0.7.1+SDL-3.4.16` | build metadata carries the vendored SDL version |
 | `sdl3-src` | `=3.4.16` | the SDL C sources; `sdl3-sys` pins it exactly |
 | SDL | **3.4.16** | `cmake_minimum_required(VERSION 3.16)`, `project(SDL3 LANGUAGES C VERSION "3.4.16")` |
-| `cmake` | `0.1` | pinned at 0.1.54 by `sdl3` 0.20.0's own `Cargo.lock`; a fresh resolve may pick a later 0.1.x |
+| `cmake` | `0.1` | resolved to **0.1.58** in `ui/Cargo.lock`; a fresh resolve may pick a later 0.1.x, and §4.1's variable names were read off 0.1.58's source, so re-read them if it moves |
 | `glow` | 0.18.0 | pure Rust, no build script |
 
 Two consequences worth internalising before reading further:
@@ -55,13 +55,13 @@ Two consequences worth internalising before reading further:
 `sdl3-sys` 0.7.1's `build.rs` calls `cmake::Config::new(SOURCE_DIR)`, defines
 `SDL_EXAMPLES=OFF`, `SDL_TESTS=OFF`, `SDL_REVISION=<rev>`, and then maps a fixed
 list of Cargo features to `-D` variables through a `cmake_vars!` macro. It
-passes **no toolchain file, no extra `-D`, and no `CMAKE_ARGS`**. `cmake` 0.1.54
+passes **no toolchain file, no extra `-D`, and no `CMAKE_ARGS`**. `cmake` 0.1.58
 has no `CMAKE_ARGS` support at all (no such string in its source), and CMake's
 own environment-variable list (`cmake --help-manual cmake-env-variables`, CMake
 4.2.3) does not include `CMAKE_PROJECT_INCLUDE` or `CMAKE_PROJECT_INCLUDE_BEFORE`.
 
 So there is exactly one supported way to influence the SDL configure from outside
-the crate: **`CMAKE_TOOLCHAIN_FILE` in the environment.** `cmake` 0.1.54 reads it
+the crate: **`CMAKE_TOOLCHAIN_FILE` in the environment.** `cmake` 0.1.58 reads it
 before it decides anything else and passes it on as a `-D`. The same lookup and
 the same behaviour were observed in `cmake` 0.1.58, so this is not a quirk of one
 patch release.
@@ -523,18 +523,61 @@ does: a "cross" build that quietly produced host objects.
 
 There is no way to add a `-DCMAKE_TOOLCHAIN_FILE=` to the `sdl3-sys` configure
 step from a `Cargo.toml`. The environment is the only channel, and `cmake`
-0.1.54 resolves it target-aware, in this order:
+0.1.58 resolves it target-aware, in this order:
 
 1. `CMAKE_TOOLCHAIN_FILE_aarch64-unknown-linux-gnu`
 2. `CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu`
-3. `CMAKE_TARGET_CMAKE_TOOLCHAIN_FILE` (when cross-compiling) or
-   `CMAKE_HOST_CMAKE_TOOLCHAIN_FILE`
+3. `TARGET_CMAKE_TOOLCHAIN_FILE` (when cross-compiling) or
+   `HOST_CMAKE_TOOLCHAIN_FILE` (when the host is the target)
 4. `CMAKE_TOOLCHAIN_FILE`
 
-Prefer form 2. It is a valid shell identifier, and unlike form 4 it does not
-leak into native builds — with form 4 exported in a shell profile, a plain
-`cargo build` on x86_64 would pick up the aarch64 toolchain file and fail in a
-confusing way.
+**Note the direction of form 3: the kind comes first.** It is
+`format!("{}_{}", kind, var_base)` at `cmake-0.1.58/src/lib.rs:958`, not the
+other way round. An earlier draft of this list had
+`CMAKE_TARGET_CMAKE_TOOLCHAIN_FILE` and `CMAKE_HOST_CMAKE_TOOLCHAIN_FILE`, which
+are neither spelling. The mistake is quiet rather than loud: cargo delivers
+whichever name you export, the crate never asks for that one, and the build
+carries on with SDL's defaults — a successful build of the wrong configuration.
+The list above was read off `cargo build -vv`, which prints all four lookups
+and their answers (`cmake`'s `getenv_os` does a `println!` per probe):
+
+```
+[sdl3-sys 0.7.1+SDL-3.4.16] CMAKE_TOOLCHAIN_FILE_x86_64-unknown-linux-gnu = None
+[sdl3-sys 0.7.1+SDL-3.4.16] CMAKE_TOOLCHAIN_FILE_x86_64_unknown_linux_gnu = None
+[sdl3-sys 0.7.1+SDL-3.4.16] HOST_CMAKE_TOOLCHAIN_FILE = Some("…/cmake/sdl-options.cmake")
+[sdl3-sys 0.7.1+SDL-3.4.16] CMAKE_TOOLCHAIN_FILE = None
+```
+
+Forms 3 and 4 are now **set for you** by `.cargo/config.toml` § `[env]`, one per
+kind, so a plain `cargo build` gets `cmake/sdl-options.cmake` and a plain
+`cargo build --target aarch64-unknown-linux-gnu` gets
+`cmake/aarch64-toolchain.cmake` with no export at all. §4.2's manual export is
+now an *override* rather than a requirement, and still wins, because form 2 is
+probed before form 3.
+
+Form 4 is deliberately left unset, and that is a decision rather than an
+oversight. Setting the bare name would mean an aarch64 build whose operator
+forgot to export anything falls back to a file with no `CMAKE_SYSTEM_NAME`, so
+SDL configures with the host compiler and produces x86-64 objects under an
+aarch64 target directory — the quiet failure §4.2 and §7.8 exist to catch. With
+no bare name there is nothing to fall back to, and the mistake stays loud.
+
+### 4.1.1 Editing a CMake file does not rebuild SDL
+
+`sdl3-sys`'s `build.rs` emits **no `rerun-if-changed` directive at all**, so
+cargo's fallback applies: the build script re-runs when a file *inside the
+package* changes. `cmake/sdl-options.cmake`, `cmake/aarch64-toolchain.cmake` and
+`.cargo/config.toml` are all outside it. Editing any of them and running
+`cargo build` therefore does nothing to SDL, and reports success.
+
+**After changing any of them, force the reconfigure:**
+
+```sh
+cargo clean -p sdl3-sys --manifest-path ui/Cargo.toml
+```
+
+Then check the artefact rather than trusting the exit status — §5.5 has the
+three greps that tell you whether the options took.
 
 ### 4.2 The commands
 
@@ -544,6 +587,13 @@ export CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu="$PWD/cmake/aarch64-toolch
 
 cargo build --target aarch64-unknown-linux-gnu --manifest-path ui/Cargo.toml
 ```
+
+**The export is no longer required.** `.cargo/config.toml` § `[env]` sets
+`TARGET_CMAKE_TOOLCHAIN_FILE` to the same path, so the cross build picks the
+toolchain file up with no environment set up at all — verified 2026-10-05, with
+the variable deliberately unset and the artifact still `ARM aarch64`. The export
+above is kept because it is an explicit override that outranks the config file,
+and because it is what a reader should try first when the cross build misbehaves.
 
 `--manifest-path` is needed because the workspace root is `ui/Cargo.toml`, not
 the repository root; the two snippets below add an environment variable to the
@@ -619,7 +669,7 @@ was a bug before it was a comment:
   `<sysroot>/usr/include` inside it. Pointing `CMAKE_SYSROOT` at it breaks the
   build. Set `ROADOS_SYSROOT` only when the target really is a sysroot tree.
 - **`-march` is appended to `CMAKE_C_FLAGS`, not seeded through
-  `CMAKE_C_FLAGS_INIT`.** `cmake` 0.1.54 always passes
+  `CMAKE_C_FLAGS_INIT`.** `cmake` 0.1.58 always passes
   `-DCMAKE_C_FLAGS=<flags derived from cc::Build>` on the command line, so
   `CMAKE_C_FLAGS` is already a cache entry before the toolchain file is read and
   `CMAKE_C_FLAGS_INIT` is ignored. Verified: with the pre-seeded value present,
@@ -652,7 +702,7 @@ The three `SDL_X11_X*=OFF` flags are this host's, not the target's — see §2.3
 them, and a target with neither X11 nor Wayland needs the opposite
 (`-DSDL_UNIX_CONSOLE_BUILD=ON`, §4.5).
 
-`CMAKE_PREFIX_PATH` also works, and is read by `cmake` 0.1.54 the same
+`CMAKE_PREFIX_PATH` also works, and is read by `cmake` 0.1.58 the same
 target-aware way, so `CMAKE_PREFIX_PATH_aarch64_unknown_linux_gnu=<target
 prefix>` points `find_package` at target libraries without touching the toolchain
 file.
@@ -660,7 +710,7 @@ file.
 ### 4.5 Two things that will bite
 
 - **Always pass `--target` to cargo.** Without it, `TARGET` is the host triple,
-  `cc::Build` derives host flags, and `cmake` 0.1.54 bakes them into
+  `cc::Build` derives host flags, and `cmake` 0.1.58 bakes them into
   `-DCMAKE_C_FLAGS= -ffunction-sections -fdata-sections -fPIC -m64 -w`. `-m64` on
   an aarch64 build is a hard error from the compiler, which is at least loud.
   The `cc` version to check this against is the one `sdl3` 0.20.0's own
@@ -677,7 +727,7 @@ file.
   Either way this flag should not appear once `--target` is correct; the point
   of naming it is the underlying habit.
 - **The target-scoped environment variable (§4.2) is silently ignored without
-  `--target`.** `cmake` 0.1.54 looks up
+  `--target`.** `cmake` 0.1.58 looks up
   `CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu` only when the target triple
   is aarch64; building for the host, it never consults the variable, so you get
   a plain native build and no warning. §4.2 recommends the scoped form precisely
@@ -700,10 +750,11 @@ file.
 
 ### 5.1 How subsystems are switched — and why `sdl3` alone cannot do it
 
-`PRIMITIVES_ARCHITECTURE.md` says audio, render, camera and filesystem are
-disabled at build time, and that a named set of subsystems stays. Two things
-have to be established before that is actionable, and the first one is a
-blocker for the second.
+`PRIMITIVES_ARCHITECTURE.md` used to say audio, render, camera and filesystem are
+disabled at build time, and that a named set of subsystems stays. **It no longer
+says that** — the paragraph was reconciled on 2026-10-05, and the reason is in
+§5.4. Two things still have to be established for anyone who wants to act on the
+old text, and the first is a blocker for the second.
 
 **`sdl3` 0.20.0 re-exports no subsystem features at all.** Its complete feature
 table is: `ash`, `build-from-source`, `build-from-source-static`,
@@ -789,15 +840,24 @@ What the allowlist does and does not cover:
   doc's list, SDL ends up with no audio backend at all, which is presumably the
   intent; see §8 if the head unit is expected to make sound.
 
-**The alternative, for whoever owns task 02's `Cargo.toml`:** force the options
-from the toolchain file instead (`set(SDL_AUDIO OFF CACHE BOOL "" FORCE)`; see
-§7.7). That needs no second dependency and keeps the configuration in one place
-per target, but it is target-asymmetric — a native x86_64 build passes no
-toolchain file and would get a *full* SDL — and it is invisible to anyone
-reading `Cargo.toml`. Choosing between "second direct dependency on a `-sys`
-crate" and "options that differ per target and are not declared in the manifest"
-is a design decision, not a build-environment one. It is the first item in §8;
-this document does not make the call.
+**The alternative: force the options from a toolchain file** — see §7.7. That
+needs no second dependency and keeps the configuration in one place, but an
+earlier draft of this paragraph claimed it was inherently target-asymmetric,
+"a native x86_64 build passes no toolchain file and would get a *full* SDL".
+**That was wrong, and it was wrong about the mechanism rather than about taste.**
+A native build does pass no toolchain file *by default* — but the `cmake` crate
+reads one from the environment for any target (§4.1), so there is no asymmetry
+in the mechanism, only in the file that was there. §5.5 records the fix: the
+options that do not differ per target moved into `cmake/sdl-options.cmake`,
+which **both** targets read, the cross target through
+`cmake/aarch64-toolchain.cmake` and the native one directly.
+
+The subsystems themselves are still on SDL's defaults, and that is the
+operator's decision of 2026-09-28 with the channel blocked — see §5.4. What
+changed on 2026-10-05 is that three options which no cargo feature can reach are
+now set on both targets. The allowlist above remains the way to reach the other
+twelve, and it remains undecided; the reason it is still undecided is not a
+mechanism problem and is recorded as such.
 
 ### 5.1.1 What `no-default-subsystems` costs
 
@@ -815,9 +875,13 @@ them.
 
 ### 5.2 Filesystem cannot be disabled
 
-`PRIMITIVES_ARCHITECTURE.md` lists filesystem among the subsystems to disable.
-It is not possible with this dependency set, and the reason is structural rather
-than a matter of finding the right flag:
+**Settled 2026-10-05: it stays, and the architecture document now says so.** This
+subsection is kept because the mechanism is the reason, and because "there is no
+switch" is a claim that is easy to re-derive wrongly.
+
+The architecture document used to list filesystem among the subsystems to
+disable. It is not possible with this dependency set, and the reason is
+structural rather than a matter of finding the right flag:
 
 - SDL 3.4.16 declares its subsystems through a `define_sdl_subsystem()` macro
   (`CMakeLists.txt:238-263`), and the list is Audio, Video, GPU, Render, Camera,
@@ -837,11 +901,43 @@ than a matter of finding the right flag:
 #define SDL_FILESYSTEM_UNIX 1
 ```
 
-On Linux, SDL 3.4.16 always compiles its Unix filesystem implementation. This is
-flagged for the operator rather than worked around: either the architecture doc
-is amended, or the size is accepted. It is a few kilobytes of `open`/`stat`
-plumbing, and it is also what `SDL_GetPrefPath` and friends need — worth
-knowing before anyone trades it away.
+On Linux, SDL 3.4.16 always compiles its Unix filesystem implementation. It is a
+few kilobytes of `open`/`stat` plumbing, and it is also what `SDL_GetPrefPath`
+and friends need — worth knowing before anyone trades it away. Measured, the
+object subtree is **72 KB** of the 9.3 MB `src/` tree in a release build.
+
+**That measurement is object bytes, not binary bytes**, and the difference is not
+academic: the linker drops unreferenced members of the static archive, so the
+binary saving from any of these options is strictly smaller than the object
+figure and cannot be derived from it. Any future claim about what a subsystem
+costs has to come from a link, not from `du` on an object tree.
+
+### 5.2.1 The subsystem policy, decided
+
+**All twelve subsystems are on, at SDL's defaults. The operator decided this on
+2026-09-28**, knowing the alternative was blocked by §5.1, and it is recorded as
+a deviation in `IMPLEMENTATION_STATE.md`.
+
+Two of the four subsystems the architecture document proposed to disable turned
+out to be **product requirements**, which is a stronger reason than the blocked
+channel:
+
+- **audio** — `IDEA.md` § *Audio and media* asks for zones, source priority,
+  ducking, FM/DAB+ and USB playback. It is a headline feature.
+- **camera** — `IDEA.md:60,107,183`: automatic headlights driven from a camera,
+  and recognition behind it. The V4L2 driver compiles in.
+
+Of the other two, **filesystem** has no switch (§5.2) and **render** is unused
+because `ui_core` draws through its own GLES pipeline and never reaches
+`sdl3::render`.
+
+**And the unused ones stay on by decision, not by oversight.** `render`, `gpu`,
+`dialog`, `tray` and `power` are compiled and nothing calls them. The operator's
+ruling of 2026-10-05 is that trimming megabytes off a static archive is not a
+reason to narrow what the product can do, and that `power` in particular is a
+battery API (`SDL_GetPowerInfo`, the whole of the category) which a head unit on
+the vehicle's supply has no use for. `sensor` is the one genuinely undecided
+option; see §5.4.
 
 ### 5.3 What the options come out as
 
@@ -868,8 +964,11 @@ always compiled in and cost nothing.
 ### 5.4 Video drivers: native keeps X11, the target is framebuffer-only
 
 **This is a design decision, not a footnote.** The two builds have deliberately
-different video configurations, and the mechanism that expresses it is
-necessarily asymmetric.
+different *video driver* configurations. The mechanism that expresses it is
+asymmetric by content — the target has a target identity, an `-march` and a
+sysroot branch that mean nothing to x86_64 — but **not** by kind: §4.1 records
+that the same channel serves either target, and §5.5 is the shared file that
+makes "the same options on both targets" true rather than aspirational.
 
 | | native (dev host) | aarch64 (head unit) |
 |---|---|---|
@@ -877,6 +976,11 @@ necessarily asymmetric.
 | Wayland | off | **off** |
 | KMSDRM | not detected here (§6.7) | **required** |
 | `SDL_UNIX_CONSOLE_BUILD` | on, harmlessly | on, **mandatory** |
+| `SDL_VULKAN`, `SDL_OPENGL`, `SDL_TEST_LIBRARY` | **off** | **off** |
+
+The last row is the shared part: `cmake/sdl-options.cmake`, reached natively
+through `HOST_CMAKE_TOOLCHAIN_FILE` and on the target through
+`cmake/aarch64-toolchain.cmake`'s `include()`. §5.5 has the measured effect.
 
 Native keeps X11 because the dev host runs the task 24 demo in a real window.
 The head unit must not carry a desktop stack at all: it scans out to a panel
@@ -1012,6 +1116,83 @@ correct about the leak, and the stub-`pkg-config` evidence for it stands
 this document was making. It was never a choice: `SDL_KMSDRM` defaults to `ON`
 on Unix, and the native build simply failed to satisfy it — silently, for the
 reason in §6.7.
+
+---
+
+### 5.5 What changed on 2026-10-05, and how to check it
+
+Three SDL options that **no cargo feature can reach** are now off on both
+targets. They are `SDL_VULKAN`, `SDL_OPENGL` and `SDL_TEST_LIBRARY`, and none of
+them is in `sdl3-sys`'s `cmake_vars!` list (`build.rs:30-48`), which covers the
+twelve subsystems plus `SDL_ASAN`, `SDL_CCACHE`, `SDL_LIBC`, `SDL_RPATH` and
+`SDL_UNIX_CONSOLE_BUILD` — nothing else. The channel is therefore the
+environment, via `cmake/sdl-options.cmake`; the reasoning for each option is in
+that file's header, and the wiring is §4.1.
+
+**Why each one, in one line each.** Vulkan was rejected on the merits
+(`PRIMITIVES.md` § *Backend`), and SDL's GPU API cannot do OpenGL ES at all.
+Desktop GL is the GLX path, this project renders GLES 3.1 through EGL, and the
+two are independent SDL options — but `SDL_OPENGL` defaulted **on** and was only
+being defeated by `libgl-dev` being absent on this host, so the artefact
+depended on the dev machine's package list. `SDL_TEST_LIBRARY` builds a static
+`SDL3_test` nothing links and runs a `libunwind` probe whose result cannot reach
+the library header (§6.7).
+
+**The check.** These three greps are the whole verification, and they are worth
+more than the exit status, because a CMake file edit does not trigger a rebuild
+(§4.1.1):
+
+```sh
+d=$(dirname "$(dirname "$(dirname "$(ls ui/target/release/build/sdl3-sys-*/out/build/include-config-release/build_config/SDL_build_config.h | head -1)")")")
+
+# 1. the options took, in the cache
+grep -E '^SDL_(VULKAN|OPENGL|TEST_LIBRARY):' "$d/CMakeCache.txt"
+#   SDL_OPENGL:BOOL=OFF
+#   SDL_TEST_LIBRARY:BOOL=OFF
+#   SDL_VULKAN:BOOL=OFF
+
+# 2. and in the generated header
+grep -E 'SDL_(VIDEO_VULKAN|GPU_VULKAN|VIDEO_RENDER_VULKAN|VIDEO_OPENGL)\b' \
+    "$d/../include-config-release/build_config/SDL_build_config.h"
+#   /* #undef SDL_VIDEO_RENDER_VULKAN */
+#   /* #undef SDL_VIDEO_OPENGL */
+#   /* #undef SDL_VIDEO_VULKAN */
+#   /* #undef SDL_GPU_VULKAN */
+
+# 3. no Vulkan code survived, and the test library is gone
+find "$d/CMakeFiles/SDL3-static.dir" -iname '*vulkan*' -name '*.o' | wc -l   # 5, all empty
+ls "$d/libSDL3_test.a" 2>/dev/null || echo "libSDL3_test.a: GONE"           # GONE
+```
+
+Five `*vulkan*.o` files remain and **that is correct**: SDL globs whole
+directories (`sdlchecks.cmake:330` takes all of `src/video/x11/*.c`), and each of
+those files is internally `#ifdef SDL_VIDEO_VULKAN`. With the option off they
+compile to empty translation units. The check that matters is
+`nm --defined-only` on them — **0 defined symbols each**, against 716 KB of real
+objects before.
+
+**Measured, release, x86_64, same machine and toolchain:**
+
+| | before | after | delta |
+|---|---|---|---|
+| `libSDL3.a` | 7 623 342 | 6 819 806 | **−803 536 (−10.5 %)** |
+| `ui_demo` | 6 546 728 | 6 137 376 | **−409 352 (−6.3 %)** |
+| `libSDL3_test.a` | 228 180 | gone | −228 180 |
+| `*vulkan*.o` | 716 K | 20 K, 0 symbols | −696 K |
+
+The aarch64 cross artifact went 6 013 800 → 5 759 648 (−254 152). Note the two
+figures are not proportional — 803 KB off the archive is 409 KB off the binary —
+which is the object-tree-versus-linker point from §5.2 in the only terms that
+settle it.
+
+**Also verified, and the reason to believe any of it:** 1 839 tests green
+(1 404 + 217 + 218), and `.ai/tools/fps-check.sh` at **61.9 fps, worst frame
+24.3 ms, 0 frames over 33 ms** over 10 s — against a recorded baseline of
+61.6–61.9 fps, so no frame-cost regression. The cross build was re-run with
+`CMAKE_TOOLCHAIN_FILE` deliberately unset to prove §4.1's `[env]` wiring stands
+on its own, and the artifact is `ELF 64-bit LSB pie executable, ARM aarch64`
+with `SDL_X11` off, `SDL_UNIX_CONSOLE_BUILD` on, `SDL_VIDEO_OPENGL_EGL` and
+`SDL_JOYSTICK_HIDAPI` on — every one of those unchanged by this work.
 
 ---
 
@@ -1755,11 +1936,18 @@ Two of the 11 gated macros do not appear in the list at all, and the reasons
 are worth carrying because they bound how far the summary can be trusted as an
 inventory:
 
-- `CheckLibUnwind` has no `dep_option` and sets no `HAVE_` variable — it only
-  adds `HAVE_LIBUNWIND_H` to the `SDL3_test` target, so its outcome is invisible
-  in the backends summary whatever it is. It is also a *test* dependency, and
-  its gate is not exclusive anyway: it tries a plain compile test, then linking
-  `unwind`, and only then `pkg-config`.
+- `CheckLibUnwind` has no `dep_option` and sets no `HAVE_` variable on the
+  library — it only adds `HAVE_LIBUNWIND_H` as a **PRIVATE** definition on the
+  `SDL3_test` target (`sdlchecks.cmake:1418-1481`, inside
+  `if(TARGET SDL3_test)`), so its outcome is invisible in the backends summary
+  *and cannot appear in the library's `SDL_build_config.h` whatever it finds*.
+  It is also a *test* dependency, and its gate is not exclusive anyway: it tries
+  a plain compile test, then linking `unwind`, and only then `pkg-config`.
+  `SDL_TEST_LIBRARY` defaults `ON` (`CMakeLists.txt:399`), so the target really
+  was being built — 228 KB of archive and one three-stage probe per configure.
+  **`SDL_TEST_LIBRARY=OFF` now, on both targets**; see §5.5. That is the honest
+  resolution of "use it or stop checking it": this project cannot use it, and it
+  can now stop being checked.
 - `CheckRPI`/`CheckROCKCHIP` (`bcm_host`, `brcmegl`, `mali`) are on the embedded
   paths and stay off here regardless of `pkg-config`, so the gate is not the
   operative constraint for them.
@@ -1968,7 +2156,7 @@ there is no X11 or Wayland in scope. Provide a sysroot, or set
 
 ### 7.7 An SDL option that `sdl3-sys` does not expose
 
-There is no `-D` escape hatch: no `CMAKE_ARGS` in `cmake` 0.1.54, and CMake's
+There is no `-D` escape hatch: no `CMAKE_ARGS` in `cmake` 0.1.58, and CMake's
 environment-variable list has no `CMAKE_PROJECT_INCLUDE`. The options you can
 reach are exactly the `cmake_vars!` list in `sdl3-sys`'s `build.rs`. The
 remaining escape hatch is `CMAKE_TOOLCHAIN_FILE` itself, which is CMake code read
@@ -2020,7 +2208,7 @@ forcing. `TASK_CROSSPLATFORM_02.md`'s requirement 2 says to check this before
 changing anything, and this is that check's result.
 
 `cmake_vars!` is the whole reachable set. Everything else needs a channel that
-does not exist — there is no `CMAKE_ARGS` in `cmake` 0.1.54 and no
+does not exist — there is no `CMAKE_ARGS` in `cmake` 0.1.58 and no
 `CMAKE_PROJECT_INCLUDE` in CMake's environment-variable list.
 
 **`cmake/aarch64-toolchain.cmake` now uses this for `SDL_X11` and

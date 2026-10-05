@@ -1279,3 +1279,100 @@ brief did not contain and only the measurement produced.
 The sibling is *a drawn control with nothing behind it* in the other direction: a
 control with no code path that reads it. This one is a control with a code path that
 reads it and a tree that never delivers the event.
+
+## 2026-10-05 — An environment variable the build never asks for fails silently
+
+`cmake` 0.1.58 resolves the SDL toolchain file from the environment, in four
+steps, and the third one is `format!("{}_{}", kind, var_base)` — so the name is
+**`HOST_CMAKE_TOOLCHAIN_FILE` or `TARGET_CMAKE_TOOLCHAIN_FILE`, with the kind
+first**. `CROSSBUILD.md` had it as `CMAKE_TARGET_CMAKE_TOOLCHAIN_FILE` and
+`CMAKE_HOST_CMAKE_TOOLCHAIN_FILE`; neither is a name the crate looks for. Task 28
+inherited the wrong spelling, and my first fix guessed a third one,
+`CMAKE_TOOLCHAIN_FILE_HOST` — also wrong, in the opposite direction.
+
+It failed **silently, three times over**, and each layer agreed with the wrong
+one:
+
+- `cargo build` succeeded.
+- `.cargo/config.toml` § `[env]` did deliver the variable — correctly, and
+  `relative = true` resolved it to an absolute path, so *that* half was verifiably
+  working and looked like the whole thing.
+- SDL configured, compiled 900-odd objects, linked, and produced a binary.
+- `SDL_VIDEO_VULKAN`, `SDL_GPU_VULKAN` and `SDL_TEST_LIBRARY` were all still
+  **on**. The configuration was SDL's defaults, not the requested one.
+
+What finally settled it was `cmake`'s own diagnostics: `getenv_os` does a
+`println!` per probe, so `cargo build -vv` prints all four lookups and their
+answers. Reading the code told me the *shape* (`{}_{}`); reading the output told
+me the *direction*.
+
+**Rule:** a variable name is not a name until something has read it back. When a
+build ignores an environment variable, do not conclude the variable is not
+delivered — conclude that delivery and lookup are different claims and prove
+each. And when a `format!` composes a name from a discriminator, the argument
+order is part of the interface: `"{}_{}"` with `(kind, base)` and
+`"{}_{}"` with `(base, kind)` produce two plausible, mutually incompatible
+spellings, and only one is ever exercised. Prefer the form the program can print
+back to you; if it cannot print, find the substitute that can.
+
+This is the same shape as `A build that reports Finished in 0.0xs did not
+rebuild`: **a success signal that is not connected to the thing you changed.**
+`cargo clean -p <pkg>` is the reflex when a build's configuration changes and
+nothing happens.
+
+## 2026-10-05 — A crate with no rerun-if-changed ignores every file you changed
+
+`sdl3-sys` 0.7.1's `build.rs` emits **no `rerun-if-changed` directive at all**.
+Cargo's fallback for a build script with no directives is "re-run if any file in
+the *package* changed" — and `cmake/sdl-options.cmake`,
+`cmake/aarch64-toolchain.cmake` and `.cargo/config.toml` are all outside the
+package. Editing all three and running `cargo build` produced **no rebuild of
+SDL and exit status 0**. The two SDL configure trees that mattered were unchanged
+and nothing said so.
+
+The trap is specific to configuration that lives outside the package. Rust source
+edits are fine, because they are in the package. A build script that reads
+`CARGO_MANIFEST_DIR/../../..` has declared a dependency on a file cargo cannot
+see, and it has no way to declare it.
+
+**Rule:** after changing anything a build script reads from outside its own
+package — a toolchain file, a `.cargo/config.toml`, an env var the crate reads —
+**force the reconfigure and verify the artefact, not the exit status**:
+
+```sh
+cargo clean -p <pkg>          # then build, then grep the artefact
+```
+
+"Build succeeded" is not evidence that the configuration took. The evidence is a
+value in the artefact: a cache entry, a generated header, a symbol count.
+
+## 2026-10-05 — An object-tree size is not a binary-size saving
+
+Task 28 measured the vendored SDL build per subsystem with `du` over
+`CMakeFiles/SDL3-static.dir/src/<subsystem>` — `render` 1.2 M, `gpu` 708 K,
+`audio` 344 K, and so on, against 9.3 M of `src/` objects in total. Those numbers
+are real and they are what a subsystem costs **to compile**.
+
+They are not what it costs **to ship**, and the gap is not a rounding error:
+`libSDL3.a` was 7 623 342 bytes against 9.3 M of objects, because the linker
+drops unreferenced members of a static archive. The measured truth, once both
+sides were linked: forcing Vulkan, desktop GL and SDL's test library off took
+**803 536 bytes off the archive and 409 352 off the binary** — the same change,
+two numbers, neither derivable from the other.
+
+An agent writing this into a design document would have produced a confident
+figure that was wrong by half, and `NEVERAGAIN`'s *"a guard built from a name and
+a size, described as a guard on the bytes"* is the same mistake one level up: a
+measurement of a proxy, described as a measurement of the thing.
+
+**Rule:** name the artifact a number was measured on, in the same sentence —
+*object bytes*, *archive bytes*, *binary bytes* — and never let the second stand
+in for the third. `du` on a build tree is a **build-time** cost. A shipping cost
+needs a link, before and after, on the same machine. If the change has not been
+made, the shipping figure is unknown and "unknown" is the answer.
+
+The corollary bit here too: an argument whose whole force is a number the
+operator has just rejected is an argument to drop, not to soften. The subsystem
+question was settled on the merits — audio and camera are product requirements —
+and only then did the sizes get measured, as a footnote to what had already been
+decided.

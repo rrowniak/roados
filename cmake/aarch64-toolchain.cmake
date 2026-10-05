@@ -311,6 +311,14 @@ foreach(_roados_sdl_var SDL_X11 SDL_WAYLAND)
   endif()
 endforeach()
 
+# The SDL options that do not differ per target. Included rather than copied so
+# the native build can read the same three settings from
+# `cmake/sdl-options.cmake` on its own -- this file is a *toolchain* file and
+# carries a target identity, an `-march` and a sysroot branch, none of which
+# mean anything to an x86_64 build. Inheriting them through a toolchain file is
+# what makes "the same options on both targets" true rather than aspirational.
+include("${CMAKE_CURRENT_LIST_DIR}/sdl-options.cmake")
+
 # --- target tuning ---------------------------------------------------------
 #
 # Appended to CMAKE_C_FLAGS rather than seeded through CMAKE_C_FLAGS_INIT, and

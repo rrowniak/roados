@@ -54,6 +54,17 @@ Every visual aspect of a widget is a `Property<T>`. Properties form a DAG of dep
 
 ## Out of Scope
 
-- Widget node structure (uses properties but doesn't define them)
+- ~~Widget node structure (uses properties but doesn't define them)~~ —
+  **corrected 2026-10-05.** True as far as it goes — this task did not define the
+  node structure — and misleading because it leaves the impression that some
+  other task did. Task 04 pointed at *this* task for it, and this task pointed at
+  nothing, so two consecutive tasks each excluded it and none claimed it.
+  **`ui_core/src/node.rs` came from TASK_UI_PRIM_02** (commit `89b67b7`), which
+  specified the module structure; task 04 is `a8f3147` and this task is
+  `8c3657b`, both later. The actual structure is four fields — `children`,
+  `parent`, `layout`, `paint` — with no `kind`, no `properties` and no `flags`,
+  and no `PropertySet` type exists. `PRIMITIVES_ARCHITECTURE.md` carried a
+  seven-field sketch until 2026-10-05; see its *Widget Tree* section for the
+  corrected one and why the type is smaller than the design suggested.
 - Theme system (uses properties, comes in TASK_UI_PRIM_08)
 - Animation clock (drives animated properties, comes in TASK_UI_PRIM_09)

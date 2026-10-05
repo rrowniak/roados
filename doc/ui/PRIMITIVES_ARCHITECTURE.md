@@ -7,7 +7,7 @@ Research date: 2026-09-27
 | Decision | Choice | Rationale |
 |---|---|---|
 | Widget tree storage | Arena allocation (generational indices) | Cache-friendly, no refcount overhead, bulk deallocation |
-| Ownership | Parent owns children; arena owns all nodes | Tree structure = no cycles = no need for Rc/RefCell |
+| Ownership | Parent owns children; arena owns all nodes | Tree structure = no cycles = no `Rc`/`RefCell` in the tree |
 | Composition | Uniform tree — containers are widgets with children | No special "container" type; everything is a node |
 | Theming | Reactive property graph (Slint-style) | Change propagates to dependents automatically; no full rebuild |
 | Transparency | Premultiplied alpha throughout | Correct interpolation, simpler blending, no color bleeding |
@@ -15,23 +15,79 @@ Research date: 2026-09-27
 | Rendering | Batched draw calls, opaque/transparent separation | Minimizes GPU state changes |
 | SDL3 bindings | `sdl3` crate (v0.20.0, Zlib) | Only actively maintained SDL3 binding |
 | GLES 3.1 bindings | `glow` crate (v0.18.0, MIT/Apache-2.0/Zlib) | Only viable GLES 3.1 binding; dynamic function pointer loading |
-| SDL3 native lib | Vendored (build-from-source via `sdl3-sys`) | Control version, disable unneeded subsystems, reproducible builds |
+| SDL3 native lib | Vendored (build-from-source via `sdl3-sys`) | Pins the SDL version and needs no system SDL3. Not reproducible across hosts — see *Dependencies* |
 
 ## Dependencies
 
 ```toml
 [dependencies]
-sdl3 = { version = "0.20", features = ["build-from-source", "image"] }
+sdl3 = { version = "0.20", features = [
+    "build-from-source",
+    "build-from-source-static",
+    "build-from-source-unix-console",
+    "image",
+] }
 glow = "0.18"
 freetype-rs = { version = "0.38", features = ["bundled"] }
 ```
+
+This is `ui_core`'s list, and `ui_demo` carries the same one minus `image`.
+**Do not shorten it.** `build-from-source-static` links SDL statically into the
+binary rather than through an rpath, which is unreachable from a manifest;
+`build-from-source-unix-console` suppresses a `FATAL_ERROR` at
+`cmake/macros.cmake:415` that SDL raises when neither X11 nor Wayland is
+available, which is exactly the aarch64 configuration — see `CROSSBUILD.md`
+§5.4, which `AGENTS.md` § Rust also cites.
 
 - `sdl3` with `build-from-source` builds SDL3 from vendored source via `sdl3-sys` (cmake crate). No system SDL3 package needed.
 - `sdl3` with `image` pulls in `sdl3-image-sys`, which builds **SDL_image 3.4.6** from vendored C source and statically links it. Justified in *SDL_image* below; the operator approved it 2026-09-30.
 - `glow` loads GLES 3.1 function pointers via `SDL_GL_GetProcAddress` — compatible with SDL3-created contexts.
 - `freetype-rs` with `bundled` builds FreeType 2.13.2 from vendored C source (via `freetype-sys` + `cc`) and statically links it — glyph rasterisation, no system FreeType needed.
 - Text *shaping* (ligatures, complex scripts, bidirectional text) would need HarfBuzz. Its safe Rust binding exposes no shaping API — only `unsafe` C calls — so the operator declined `unsafe` and dropped the dependency 2026-09-30; FreeType alone renders Latin text. Revisit when a complex-script or bidi requirement lands.
-- SDL3 subsystems disabled at build time: audio, render, camera, filesystem — only video, events, input, joystick/gamepad needed.
+- **SDL3 subsystems are left at SDL's defaults. None is disabled.** `sdl3`
+  0.20.0 re-exports no subsystem feature at all, so the manifest cannot express
+  any such configuration; the switches live on `sdl3-sys` 0.7.1 and only for
+  the twelve SDL itself declares (`SDL/CMakeLists.txt:238-263`). The operator
+  accepted the defaults on 2026-09-28 with that alternative blocked. This bullet
+  replaces an earlier one that proposed disabling audio, render, camera and
+  filesystem: two of those four were wrong about the product, one was never
+  possible, and the fourth is the only accurate one. What the build keeps, and
+  why each is right to keep:
+
+  - **video, events, joystick, gamepad, HIDAPI** — `SDL_Init` is asked for
+    exactly these three flags (`render/context.rs:190-192`), and a USB steering
+    wheel is a HID device, so HIDAPI is what turns one into named buttons and
+    axes (`PRIMITIVES.md:96,200`). `SDL_JOYSTICK_VIRTUAL` additionally makes a
+    gamepad injectable from code, which is the only input-injection route that
+    works on a host with no pointer device.
+  - **audio** — a headline feature of the product rather than a preference:
+    `IDEA.md` § *Audio and media* asks for zones, source priority, ducking,
+    radio and USB playback.
+  - **camera** — also a named feature (`IDEA.md:60,107,183`): automatic
+    headlights driven from a camera, and recognition behind it. The V4L2 driver
+    is compiled in.
+  - **haptic** — a listed input primitive, "haptic feedback trigger"
+    (`PRIMITIVES.md:54`).
+  - **filesystem** — not a choice. SDL declares twelve subsystems and
+    filesystem is not one of them; on Unix SDL always compiles it, and the
+    generated header carries `SDL_FILESYSTEM_UNIX 1`
+    (`SDL/CMakeLists.txt:2112`). It is a few kilobytes of `open`/`stat`
+    plumbing, and it is what `SDL_GetPrefPath` and friends need.
+    `CROSSBUILD.md` §5.2 has the mechanism.
+  - **render, gpu, dialog, tray, power** — compiled, and unused. `render` is
+    unused because `ui_core` draws through its own GLES pipeline and never
+    reaches `sdl3::render`; the others have no requirement behind them yet.
+  - **sensor** — compiled, and the one genuinely undecided: `IDEA.md:60` offers
+    "the light sensor or the camera" without saying which, and SDL's sensor
+    subsystem covers a device-attached sensor, not a vehicle-bus one.
+
+  The unused ones are left on deliberately, **and not to save space**: the
+  operator's 2026-10-05 ruling is that trimming megabytes off a static archive
+  is not a reason to narrow what the product can do. Should that change, note
+  that naming a subsystem switch means naming a feature on `sdl3-sys`, which
+  `sdl3` does not re-export — so it takes a second direct dependency, and
+  `CROSSBUILD.md` §5 sets out that channel against the alternative of forcing
+  the options from a toolchain file, with their costs.
 
 ### SDL_image
 
@@ -99,15 +155,23 @@ Every widget is a `WidgetNode` in the arena:
 
 ```rust
 struct WidgetNode {
-    kind: WidgetKind,           // Button, Label, Container, etc.
     children: Vec<Handle>,      // Child nodes (empty for leaf widgets)
     parent: Option<Handle>,     // Parent node
-    properties: PropertySet,    // Reactive properties
     layout: LayoutState,        // Computed layout rect, constraints
     paint: PaintState,          // Cached paint data, dirty flags
-    flags: WidgetFlags,         // Visible, enabled, focused, etc.
 }
 ```
+
+This is the whole type, and it is smaller than an earlier draft of this
+document. There is no `kind`, no `properties` and no `flags` field, and no
+`PropertySet` type exists. A node is a **place in a tree** with a layout cache
+and a paint cache; what a node *is* lives in `widgets`, and what it *shows*
+lives in the properties the widget holds a handle to. Visibility is
+`LayoutState::visible`, and **only hit testing consults it** — `layout.rs` notes
+that the layout pass places every node it reaches, visible or not, so hiding a
+node leaves its rect and its siblings' rects untouched and stops it taking
+input, and nothing more. Fields are private behind `children`, `parent`,
+`layout`/`layout_mut` and `paint`/`paint_mut`.
 
 ### Composition
 
@@ -122,6 +186,10 @@ enum LayoutMode {
 }
 ```
 
+`wrap` is accepted and **not yet honoured**: a `Flex` parent keeps its children
+on one line and clips an overflowing child rather than wrapping it. Every other
+mode behaves as described.
+
 A `Button` is a node with a `Label` child. A `ListView` is a node with N children. A `Dialog` is a node with children. The tree is uniform.
 
 ### Dynamic lists
@@ -135,11 +203,25 @@ For scrolling lists with thousands of items, the arena uses a slab allocator pat
 Every visual aspect of a widget is a `Property<T>`. Properties form a directed acyclic graph (DAG) of dependencies.
 
 ```rust
-struct Property<T> {
-    value: T,
-    tracker: PropertyTracker,   // Who depends on this property
+struct Property<T: 'static> {
+    // A shared handle, not an inline value: several widgets bind to one value,
+    // so it lives behind an Rc and is reached through RefCell.
+    inner: Rc<PropertyInner<T>>,
+}
+
+struct PropertyInner<T: 'static> {
+    value: RefCell<T>,
+    recompute: RefCell<Option<Rc<dyn Fn()>>>,
+    dependencies: RefCell<Vec<Weak<dyn PropertyBase>>>,  // what this reads
+    dependents: RefCell<Vec<Weak<dyn PropertyBase>>>,    // who reads this
 }
 ```
+
+**The widget tree is `Rc`-free; the property graph is not, and cannot be.** A
+bound property has to be readable from a widget that does not own it, so the
+value is shared. The arena's no-`Rc` argument is about ownership and cycles in
+the *tree* — nodes owned by the arena, parents holding `Handle`s — and it holds
+there without exception.
 
 When a property changes, all dependent properties and render nodes are marked dirty. Same model as Slint.
 
@@ -379,15 +461,21 @@ Single-threaded. UI runs on one thread: event polling, input, animation, layout,
 ui/
   src/
     ui_core/                 — the UI primitives library (this project)
-      mod.rs                 — public API, UiContext
+      lib.rs                 — module declarations, the public surface
       arena.rs               — arena allocator, Handle
-      node.rs                — WidgetNode, WidgetKind
+      node.rs                — WidgetNode
       property.rs            — Property, PropertyTracker, PropertyGraph
       theme.rs               — Theme, ThemeToken, ThemeData
+      font.rs                — FreeType faces, glyph rasterisation, the glyph atlas
+      texture.rs             — the image atlas, and the image-decoder seam
       layout.rs              — LayoutMode, layout algorithm
       paint.rs               — PaintState, draw command recording
       batch.rs               — draw call batching
       render.rs              — GPU submission, frame lifecycle
+      render/
+        context.rs           — the SDL window and the GLES 3.1 context
+        target.rs            — the offscreen target a blurred shadow is drawn into
+        blur.rs              — separable Gaussian, for shadows
       animation.rs           — Animation, Easing, animation clock
       input.rs               — InputEvent, hit test, gesture recognition
       widgets/
@@ -408,7 +496,9 @@ ui/
         dialog.rs
         toast.rs
     ui_demo/                — demo/test harness for ui_core
-    roados_ui/               — production UI for the vehicle
+      main.rs
+      fps.rs                 — frame-rate reporting for the demo
+    roados_ui/               — production UI for the vehicle (planned)
     ...                      — future tools, side projects
 ```
 
@@ -416,7 +506,13 @@ ui/
 
 | Question | Impact | Settlement path |
 |---|---|---|
-| Single vs multi-threaded rendering | Performance on target | Benchmark; start single-threaded |
-| Vulkan backend later? | Future-proofing | GLES 3.1 first; Vulkan is additive |
+| ~~Single vs multi-threaded rendering~~ | — | **Settled: single-threaded.** See *Thread Model*. Revisit only if profiling shows the frame saturated. |
+| ~~Vulkan backend later?~~ | — | **Recorded, not deferred.** `PRIMITIVES.md` § *Backend* rejects Vulkan: open-driver support on Mali/VideoCore is immature, so GLES 3.1 is the baseline. An earlier draft of this table said Vulkan was "additive" — that was wrong and contradicted that decision. **Trigger to revisit, recorded 2026-10-05:** a target SoC with a conformant open Vulkan driver. |
+| ~~Very long lists (10k+ items)?~~ | — | **Settled: virtualised.** `widgets::list` recycles a fixed row set; a hundred rows cost three nodes. |
 | Scripting language for UI? | Designer workflow | Start with Rust DSL; evaluate later |
-| Very long lists (10k+ items)? | Memory and perf | Virtualized list with slab allocator |
+
+The first three rows were open when this table was written and have since been
+answered — two by the work itself, one by a decision recorded in another
+document. They are struck through rather than deleted so a reader can see what
+was settled and which document holds the why, and so the two documents that
+once disagreed about Vulkan cannot drift apart again unnoticed.

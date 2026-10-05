@@ -47,6 +47,16 @@ All widget nodes live in a single arena. Each node has a `Handle` (index + gener
 
 ## Out of Scope
 
-- Widget node structure (that comes in TASK_UI_PRIM_05)
+- ~~Widget node structure (that comes in TASK_UI_PRIM_05)~~ — **corrected
+  2026-10-05.** Both clauses were wrong and neither was harmless. This task said
+  the node structure "comes in TASK_UI_PRIM_05"; task 05's own *Out of Scope*
+  said "Widget node structure (uses properties but doesn't define them)". So two
+  consecutive tasks each excluded the same thing and no task claimed it, which is
+  how the seam survived from 2026-09-28 until it was noticed.
+  **`ui_core/src/node.rs` was created by TASK_UI_PRIM_02** (commit `89b67b7`),
+  which specified the module structure and produced the file. Both tasks ran
+  afterwards — `a8f3147` and `8c3657b` — so nothing was ever at risk of being
+  guessed differently, which is what the seam was opened to prevent. The clause
+  above is struck rather than deleted so the correction is visible.
 - Slab allocator for dynamic lists (that comes in TASK_UI_PRIM_18)
 - Thread safety (single-threaded by design)

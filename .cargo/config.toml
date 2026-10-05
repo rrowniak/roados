@@ -14,9 +14,37 @@
 # Override per build with
 # CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=<linker>.
 #
-# The SDL configuration is not here: X11, Wayland and the console build are
-# decided by `cmake/aarch64-toolchain.cmake` and by the manifest's features, so
-# that a native build gets X11 and the target does not. See
-# `doc/ui/CROSSBUILD.md` §4.2 and §5.4.
+# The SDL options are here too, and they are here because of a mechanism rather
+# than a preference. `sdl3-sys`'s `cmake_vars!` block covers the twelve
+# subsystems and five named options; `SDL_VULKAN`, `SDL_OPENGL` and
+# `SDL_TEST_LIBRARY` are not among them, so no cargo feature can reach them and
+# the environment is the only channel. See `cmake/sdl-options.cmake` for why each
+# one is off.
+#
+# **The two names are kind-scoped, and that is deliberate.** The `cmake` crate
+# probes four names, in this order: `CMAKE_TOOLCHAIN_FILE_<target triple>`,
+# `CMAKE_TOOLCHAIN_FILE_<triple with underscores>`, then
+# `HOST_CMAKE_TOOLCHAIN_FILE` when the host is the target or
+# `TARGET_CMAKE_TOOLCHAIN_FILE` when it is not, then the bare
+# `CMAKE_TOOLCHAIN_FILE`. Note the direction — the **kind goes first**, because
+# the format string is `format!("{}_{}", kind, var_base)`. Reading it as
+# `CMAKE_TOOLCHAIN_FILE_HOST` gets it wrong, and wrong quietly: cargo delivers
+# the variable, the crate never asks for that name, and the build carries on
+# with SDL's defaults.
+#
+# Setting the bare name instead would be worse still: a plain `cargo build` on
+# x86_64 would pick up the aarch64 toolchain file, and — worse — an aarch64
+# build whose operator forgot to export the toolchain file would silently fall
+# back to a file that sets no `CMAKE_SYSTEM_NAME`, so SDL would configure with
+# the host compiler and produce x86-64 objects under an aarch64 target
+# directory. Today that mistake fails loudly. Keep it that way: no bare name, so
+# there is nothing to fall back to.
+#
+# Naming them per kind also means `CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu`
+# still wins for the cross build, so the export in `doc/ui/CROSSBUILD.md` §4.2
+# keeps working unchanged and is still the override.
+[env]
+HOST_CMAKE_TOOLCHAIN_FILE = { value = "cmake/sdl-options.cmake", relative = true }
+TARGET_CMAKE_TOOLCHAIN_FILE = { value = "cmake/aarch64-toolchain.cmake", relative = true }
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"

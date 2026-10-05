@@ -13,11 +13,29 @@
 //! Two parts of the task's pipeline are not here. Shaping — ligatures,
 //! complex scripts, bidirectional text — needs HarfBuzz, whose safe Rust
 //! binding exposes no shaping API, and the operator declined the `unsafe` it
-//! would take (see `doc/ui/IMPLEMENTATION_STATE.md`). The font fallback chain
-//! and dynamic atlas growth are not built either; a character the one loaded
-//! face has no glyph for is skipped.
+//! would take (see `doc/ui/IMPLEMENTATION_STATE.md`). Dynamic atlas growth is not
+//! built either: an atlas full of glyphs larger than the one being packed evicts
+//! a shelf and, failing that, drops the glyph.
+//!
+//! **The font fallback chain is in [`crate::font`] and this module reaches it twice
+//!**: once through `font_family`, which the recorded command carries so the
+//! renderer can walk the chain per character, and once through the `advance`
+//! callback the caller supplies, which has to ask the same chain or the words will
+//! not land under their glyphs.
+//!
+//! A character no font in the chain covers is drawn as the replacement box, and it
+//! is measured at the width that box is drawn at, from one function. **"Never a
+//! silent hole" is a statement about the chain and not about every state a label
+//! can be in**: a label whose family names a set with **no font at all** is drawn
+//! as nothing, because there is no face to draw it with — that is
+//! [`FontSet::primary`](crate::font::FontSet::primary) answering `None`, and the
+//! renderer skipping the run. An empty *family* is not that state: it resolves to
+//! the default family (see [`FontSet`](crate::font::FontSet)'s docs on
+//! `drawable`), which is a fix the review of task 30 required after this sentence
+//! claimed otherwise.
 
 use crate::arena::{Arena, Handle};
+use crate::font::FamilyId;
 use crate::layout::LayoutState;
 use crate::node::{self, WidgetNode};
 use crate::property::{Color, Property};
@@ -424,9 +442,22 @@ pub struct Label {
     pub font_size: Property<f32>,
     /// The text colour.
     pub color: Property<Color>,
-    /// The font family name, resolved against the font fallback chain by the
-    /// rendering pipeline.
-    pub font_family: Property<String>,
+    /// The font family the label's text is drawn in, as a handle into the
+    /// [`FontSet`](crate::font::FontSet) the caller laid it out with.
+    ///
+    /// **A handle rather than a name**, and the reason is where the name is
+    /// resolved. A family is a chain of fonts tried in order per character, so
+    /// naming it in a property would mean resolving it once per line per frame —
+    /// which is a lookup in the set, from a `String` the widget would then have to
+    /// clone into every command it records. [`FontSet::family`](crate::font::FontSet::family)
+    /// turns the name into a handle once, when the family is defined, and the
+    /// handle is what rides here and on `DrawCommand::Text`.
+    ///
+    /// The default is [`FamilyId::default`], which is the set's default family, so
+    /// a label that has never been told about families draws in it — which is what
+    /// a caller with no families at all wants and what keeps every existing caller
+    /// of `Label::new` drawing exactly what it drew before.
+    pub font_family: Property<FamilyId>,
     node: Handle,
 }
 
@@ -440,7 +471,7 @@ impl Label {
             text: Property::new(text.into()),
             font_size: Property::new(16.0),
             color: Property::new(Color::new(0, 0, 0, 255)),
-            font_family: Property::new("sans-serif".to_string()),
+            font_family: Property::new(FamilyId::default()),
             node,
         }
     }
@@ -481,6 +512,15 @@ impl Label {
     /// wrapping and alignment are what is actually drawn. A justified line is
     /// recorded word by word, because its extra gap belongs between words and
     /// not after every glyph.
+    ///
+    /// **The `advance` callback and the recorded family must be the same
+    /// chain**, and the caller is the only thing that can see both: this method
+    /// knows the family (from the property) and is handed the advances (from
+    /// `advance`), and a run laid out with one chain's advances and drawn in
+    /// another's is a line whose words do not land under their glyphs. It says so
+    /// rather than checking, because a check would mean a second copy of the
+    /// chain's rule — see [`FontSet::advance`](crate::font::FontSet::advance),
+    /// which is the one function a caller asks for both.
     pub fn paint(
         &self,
         rect: crate::paint::Rect,
@@ -490,6 +530,7 @@ impl Label {
         let layout = self.layout(options, advance);
         let font_size = self.font_size.get();
         let color = self.color.get();
+        let family = self.font_family.get();
         let space = measure(" ", options.letter_spacing, advance);
         let mut painter = crate::paint::Painter::new();
         let mut top = rect.y;
@@ -501,11 +542,20 @@ impl Label {
                     if index > 0 {
                         x += space + line.word_gap;
                     }
-                    painter.text(x, top, word, color, font_size, options.letter_spacing);
+                    painter.text_in(
+                        family,
+                        x,
+                        top,
+                        word,
+                        color,
+                        font_size,
+                        options.letter_spacing,
+                    );
                     x += measure(word, options.letter_spacing, advance);
                 }
             } else {
-                painter.text(
+                painter.text_in(
+                    family,
                     left,
                     top,
                     &line.text,
@@ -523,6 +573,7 @@ impl Label {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::font::FontSet;
 
     /// A monospace advance of 5 pixels per character, spaces included.
     fn mono(_: char) -> f32 {
@@ -721,7 +772,12 @@ mod tests {
         assert_eq!(label.text.get(), "Hello");
         assert_eq!(label.font_size.get(), 16.0);
         assert_eq!(label.color.get(), Color::new(0, 0, 0, 255));
-        assert_eq!(label.font_family.get(), "sans-serif");
+        assert_eq!(
+            label.font_family.get(),
+            FamilyId::default(),
+            "and it draws in the font set's default family, which is what a \
+             caller that has never heard of families wants"
+        );
         assert!(nodes.get(label.handle()).is_some());
     }
 
@@ -741,6 +797,102 @@ mod tests {
         label.text.set("Goodbye".to_string());
         let layout = label.layout(&options(100.0), &mono);
         assert_eq!(layout.lines[0].text, "Goodbye");
+    }
+
+    /// The two families a label can be painted in, as the handles `Label::paint`
+    /// puts on its commands. **A `FontSet` is enough to make them** — no font file
+    /// and no installed font — which is what lets this test be about the property
+    /// reaching the command without a filesystem.
+    fn two_families() -> (FontSet, FamilyId) {
+        let mut fonts = FontSet::new();
+        let other = fonts.define_family("other");
+        (fonts, other)
+    }
+
+    #[test]
+    fn the_family_the_label_carries_is_the_one_it_paints_its_runs_in() {
+        // The whole of requirement 7's property half: a write to `font_family`
+        // changes the family on every command the label records, which is how it
+        // reaches the renderer at all.
+        let (fonts, other) = two_families();
+        let mut nodes = Arena::new();
+        let label = Label::new(&mut nodes, "Hi");
+        let families = |label: &Label| -> Vec<FamilyId> {
+            label
+                .paint(
+                    crate::paint::Rect::new(0.0, 0.0, 100.0, 20.0),
+                    &options(100.0),
+                    &mono,
+                )
+                .iter()
+                .filter_map(|command| match command {
+                    crate::paint::DrawCommand::Text { family, .. } => Some(*family),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        assert_eq!(
+            families(&label),
+            vec![FamilyId::default()],
+            "one line, in the default family, before anything is written"
+        );
+        label.font_family.set(other);
+        assert_eq!(
+            families(&label),
+            vec![other],
+            "and in the other family after the property is written — which is \
+             also that the default family and a defined one are different handles, \
+             since the fixture has defined it"
+        );
+        assert_ne!(other, FamilyId::default());
+        assert_eq!(
+            fonts.family("other"),
+            other,
+            "and the handle the property now holds is the one the set would hand \
+             a caller that resolved the name"
+        );
+    }
+
+    #[test]
+    fn a_family_handle_reaches_the_command_unchanged() {
+        // **What the widget owns, and only that:** the handle in the property is
+        // the handle on the command. Whether the renderer can *draw* with it is
+        // `FontSet`'s half and is not visible here — the handle this uses is an
+        // ordinary one from a set that defined it, so this is not a test about
+        // unknown handles at all.
+        //
+        // **The review of task 30 renamed this**, and both halves of the old name
+        // were wrong. It was `a_family_the_set_never_defined_still_paints_rather_
+        // than_vanishing`, while the fixture defined **two** families and handed
+        // over the one registered as `"two"` — which the set knew perfectly well,
+        // so no handle from an undefined family was ever produced — and "rather
+        // than vanishing" claimed the opposite of what the code did, since a family
+        // with nothing in it **did** vanish until the same review made `FontSet`
+        // resolve an empty family to the default one. A test named for a case its
+        // fixture cannot produce is the failure this repository's `.ai/NEVERAGAIN.md`
+        // records twice, and this file cites that entry two hundred lines above.
+        let mut fonts = FontSet::new();
+        fonts.define_family("one");
+        fonts.define_family("two");
+        let defined = fonts.family("two");
+        let mut nodes = Arena::new();
+        let label = Label::new(&mut nodes, "Hi");
+        label.font_family.set(defined);
+        let commands = label.paint(
+            crate::paint::Rect::new(0.0, 0.0, 100.0, 20.0),
+            &options(100.0),
+            &mono,
+        );
+        assert_eq!(
+            commands.len(),
+            1,
+            "the run is recorded, and it carries the handle"
+        );
+        let crate::paint::DrawCommand::Text { family, .. } = &commands[0] else {
+            panic!("a label's paint is text commands");
+        };
+        assert_eq!(*family, defined, "unchanged and unexamined");
     }
 }
 

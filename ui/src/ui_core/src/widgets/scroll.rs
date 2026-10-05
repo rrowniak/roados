@@ -1773,7 +1773,7 @@ mod tests {
     use super::*;
     use crate::animation::Easing;
     use crate::layout::{Layout, LayoutState as State};
-    use crate::paint::FontWeight;
+    use crate::paint::{FamilyId, FontWeight};
     use crate::theme::ThemeToken;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -3384,6 +3384,7 @@ mod tests {
             color: Color::new(255, 255, 255, 255),
             font_size: 16.0,
             extra_advance: 0.0,
+            family: FamilyId::default(),
             weight: FontWeight::Regular,
         };
         assert_eq!(

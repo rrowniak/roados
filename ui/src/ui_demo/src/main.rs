@@ -228,7 +228,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 use ui_core::animation::{AnimationClock, AnyAnimation, Easing, Interpolate, Stagger};
 use ui_core::arena::{Arena, Handle};
-use ui_core::font::Font;
+use ui_core::font::{FamilyId, Font, FontSet, FontWeight};
 use ui_core::input::{self, Focus, GestureRecognizer, InputEvent, InputEventKind, Key};
 use ui_core::layout::{
     mark_dirty, Constraints, CrossAxisAlignment, FlexConfig, Layout, LayoutMode, LayoutState,
@@ -237,7 +237,7 @@ use ui_core::layout::{
 use ui_core::node::{self, WidgetNode};
 use ui_core::paint::{Color, PaintState, Painter, Rect};
 #[cfg(test)]
-use ui_core::paint::{DrawCommand, FontWeight, UvRect};
+use ui_core::paint::{DrawCommand, UvRect};
 use ui_core::property::Property;
 use ui_core::render::context::Context;
 use ui_core::render::Renderer;
@@ -516,6 +516,78 @@ const FONT_PATH: &str = "/usr/share/fonts/truetype/lato/Lato-Medium.ttf";
 /// `Result`, and `main` propagates it, so a missing file is a failed run rather
 /// than a silently regular title.
 const BOLD_FONT_PATH: &str = "/usr/share/fonts/truetype/lato/Lato-Bold.ttf";
+
+/// The font file at the **end** of the demo's fallback chain: the one a character
+/// Lato does not have is drawn from, if any font in the chain has it.
+///
+/// **DejaVu Sans, and the reason is a measurement of Lato rather than a taste.**
+/// The fallback label's text needs a character the primary font does not cover,
+/// and Lato covers a great deal: measured against its own character map on this
+/// host it has Cyrillic (U+0410), Greek (U+03A9), the euro, the arrow and the
+/// degree sign, so none of those would demonstrate anything. What it has none of
+/// is the pictographic range a car interface actually needs — **U+26A0 WARNING SIGN,
+/// U+2713 CHECK MARK and U+263A WHITE SMILING FACE are all absent from
+/// Lato-Medium and from Lato-Bold**, which is the same fact `toast.rs` records for
+/// its severity disc. DejaVu Sans has all three, plus the rest of that range, and it
+/// is already installed wherever the demo's two Lato files are.
+///
+/// **What it costs, said plainly: a dependency on the device having this file too.**
+/// The demo already hardcodes two absolute paths into `/usr/share/fonts/truetype`,
+/// so a third is the same kind of dependency rather than a new kind, and
+/// `Font::from_path` returns a `Result` that `main` propagates — a head unit without
+/// DejaVu Sans **fails to start the demo** rather than quietly losing the fallback.
+/// That is the trade the operator chose over a chain of one, which would draw the
+/// replacement box for the same characters and never exercise the chain at all.
+///
+/// What would reverse it: a font the operator picks for the head unit, or a family
+/// named by the application rather than by a demo constant — see
+/// `doc/ui/IMPLEMENTATION_STATE.md` § *Task 30 — what it decided*.
+const FALLBACK_FONT_PATH: &str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+
+/// The family the fallback label is *not* in by default: a chain holding the demo's
+/// primary font and **nothing else**.
+///
+/// **The point of it is that it is shorter.** With the default family the label's
+/// warning sign and check mark come from [`FALLBACK_FONT_PATH`]; with this one
+/// there is no second font to ask, so both are drawn as the replacement box and the
+/// label reads as the same sentence with three characters that nothing can draw.
+/// That is the whole of requirement 7's *"setting `font_family` changes the font a
+/// label draws with"*, made visible in one capture rather than asserted about.
+const LATO_ONLY_FAMILY: &str = "lato-only";
+
+/// The fallback label's text: a warning sign and a check mark that Lato has no
+/// glyphs for, and a CJK ideograph that **no** font in either chain has.
+///
+/// **Three characters, three outcomes, on one line.** The first two are the
+/// fallback chain doing its job and are drawn from [`FALLBACK_FONT_PATH`] in the
+/// default family; the third is the replacement box, because DejaVu Sans and Lato
+/// were both measured against their own character maps on this host and neither
+/// covers U+4E2D. A label with only the first two would show the chain and never
+/// show requirement 4, and one with only the third would never show the chain.
+///
+/// The characters are also the reason this label exists rather than a note about
+/// them: U+26A0, U+2713 and U+4E2D are all absent from Lato, which is why
+/// `toast.rs` uses a severity-coloured disc instead of a glyph.
+///
+/// **The `end` after the box is load-bearing and was added by the measurement.**
+/// Requirement 4 says the replacement *"advances the pen"*, and with the box last
+/// on the line **nothing on the screen can show that**: there is no glyph after it
+/// whose position would reveal where the pen went. With `end` there is, and the
+/// capture measures the gap between the box's right edge and the `e` against
+/// [`ui_core::font::replacement_advance`]. A criterion with no instrument is not
+/// met by the instrument's absence.
+const FALLBACK_TEXT: &str = "Fallback \u{26a0} \u{2713} and \u{4e2d} end";
+
+/// The size the fallback label's text is drawn at.
+///
+/// **Its own constant, at [`TEXT_SIZE_START`]'s value, and deliberately not the
+/// panel's `text_size`.** The `+` and `-` keys re-lay the panel's seven labels
+/// through `Demo::set_text_size`, which measures each of them with the demo's own
+/// metrics; this label is measured through its own family's metrics instead, so
+/// following `text_size` would mean a second path through that method for one
+/// label. Pinning the size keeps the change to the family toggle, which is the
+/// thing requirement 7 asks to be changeable.
+const FALLBACK_FONT: f32 = 24.0;
 
 /// The panel the text is laid out in: the width its wrapping label wraps at,
 /// and the height the text column is given.
@@ -1585,6 +1657,26 @@ const DIALOG_FONT: f32 = 18.0;
 /// free on the target's keyboard; `D` is free in a QWERTY, a QWERTZ and an AZERTY.
 const DIALOG_KEY: Keycode = Keycode::D;
 
+// -------------------------------------------------------------- task 30
+//
+// The fallback chain's own three constants — the second font file, the shorter
+// family and the text — are up with [`FALLBACK_FONT_PATH`] and its two
+// neighbours, because they are about the same mechanism and a reader looking for
+// the font the demo falls back to should not have to find a key in between.
+
+/// The key that moves the fallback label between the two families it can be in.
+///
+/// **`Y`, for the last letter nobody has claimed**, and the reason it is not `F`
+/// is that `F` is the image's fit. The key is deliberately one letter away from
+/// the text panel's other two (`C` for colour, `+`/`-` for size) rather than on
+/// the same subject as them, because **what it changes is a font, not the text's
+/// size or colour** — and a key that read as a third text-formatting key would be
+/// a promise about what it does.
+///
+/// What would reverse it: anything the operator prefers. `Y` is free in a QWERTY,
+/// a QWERTZ and an AZERTY.
+const FALLBACK_KEY: Keycode = Keycode::Y;
+
 // ------------------------------------------------------------------ task 23
 //
 // The toast's four strings and its three numbers. They are constants for the same
@@ -1997,15 +2089,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         f32_to_u32(WINDOW.width),
         f32_to_u32(WINDOW.height),
     )?)?;
-    let font = Font::from_path(FONT_PATH)?;
-    renderer.set_font(font.clone());
+    // **The font set, built once and shared.** `FontSet` holds the installed
+    // files, the families built from them, and the identities the atlas keys
+    // their glyphs under — and every one of those is an index *into that set*.
+    // The demo measures text (see `TextMetrics`) and the renderer draws it, so
+    // the two have to read the same set rather than two sets built the same way,
+    // and a clone is what makes that a fact instead of a convention: two sets
+    // built by the same calls in the same order happen to agree, and two built
+    // independently do not, with nothing anywhere to say so.
+    let mut fonts = FontSet::new();
+    fonts.set(FontWeight::Regular, Font::from_path(FONT_PATH)?);
     // **The second face, and the reason the dialog's title is bold on screen.**
     // `DrawCommand::Text` carries a weight and the renderer resolves it against the
-    // faces it holds; with no face for the weight asked for it falls back to the
+    // family's chain; with no face for the weight asked for it falls back to the
     // regular one, which is a deliberate rule and also the way a bold title
     // silently arrives as a plain one. There is nothing else to call here — this
     // is the only bold run in the demo.
-    renderer.set_bold_font(Font::from_path(BOLD_FONT_PATH)?);
+    fonts.set(FontWeight::Bold, Font::from_path(BOLD_FONT_PATH)?);
+    // The fallback, appended to the *default* family's chain: every label in the
+    // demo that has not been given another family draws in that chain, so the
+    // fallback is there for all of them and not only for the label that exists to
+    // show it.
+    fonts.add_fallback(Font::from_path(FALLBACK_FONT_PATH)?);
+    // **The second family, and this line was missing until a capture found it.**
+    // The demo's own test fixture defines `LATO_ONLY_FAMILY`, so the tests saw two
+    // distinct families and every one of them passed — and `main` did not define
+    // it, so `fonts.family(LATO_ONLY_FAMILY)` returned the **default** family and
+    // `Y` wrote the family the label was already in. `FontSet::family` resolves an
+    // unknown name to the default by design, so the wiring was correct by every
+    // rule the library has and wrong in the demo: `Y` did nothing at all, and the
+    // capture of its state was a capture of the default family.
+    //
+    // **It is the test fixture and the artefact disagreeing, and it is the mirror
+    // of the failure task 24.1's completeness assertion exists for**: there, a
+    // production row was missing from a table the tests read; here, a production
+    // definition is missing from a set the tests *built themselves*. Nothing under
+    // test touches `main`, so no assertion could have found it — the pixels did.
+    let lato_only = fonts.define_family(LATO_ONLY_FAMILY);
+    // The same file again, as a **fresh install** and not a reference to the one
+    // above: `add_fallback_to` issues a new `FontId` for it, which costs a second
+    // set of atlas entries for Lato's glyphs and buys the property that a
+    // replaced file's glyphs are unreachable — see `FontSet::add_fallback_to`.
+    fonts.add_fallback_to(lato_only, Font::from_path(FONT_PATH)?);
+    renderer.set_font_set(fonts.clone());
     // The image is loaded before the demo is built and before the window has
     // been shown anything, because `Demo::new` needs a texture and a source to
     // build its `Image` at all. A failure is not a failure of the demo: the
@@ -2014,7 +2140,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let picture = load_picture(&mut renderer);
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
-    let mut demo = Demo::new(TextMetrics::new(font), picture, page)?;
+    let mut demo = Demo::new(
+        TextMetrics::new(fonts.clone(), fonts.default_family()),
+        fonts,
+        picture,
+        page,
+    )?;
     let run_for = run_seconds();
 
     let mut last = Instant::now();
@@ -2512,9 +2643,13 @@ impl Pad {
 /// the height of one line, both at a font size.
 ///
 /// The demo takes these two rather than a [`Font`] because a font can only be
-/// loaded from a file, and the demo's tests must not need a filesystem. `main`
-/// builds them from the same face it hands the renderer; the tests build them
-/// from a monospace stand-in.
+/// loaded from a file, and the demo's tests must not need a filesystem. **This
+/// sentence said "from the same face it hands the renderer" until task 30, and
+/// that stopped being true the moment the demo built a `FontSet`** — there is no
+/// single face any more, there is a set of installed fonts and a chain per
+/// family. `main` now builds them from **a clone of the very set it hands the
+/// renderer**; the tests build them from a monospace stand-in, because a set
+/// cannot be given a font without a font file.
 #[derive(Clone)]
 struct TextMetrics {
     /// A character's advance width at a size, in pixels.
@@ -2524,13 +2659,69 @@ struct TextMetrics {
 }
 
 impl TextMetrics {
-    /// Returns the measurements of `font`.
-    fn new(font: Font) -> Self {
-        let face = Rc::new(font);
-        let lines = Rc::clone(&face);
+    /// Returns the measurements of the chain `fonts` names, for regular-weight runs
+    /// in `family`.
+    ///
+    /// **The set, not a `Font`**, because a character no font in a chain covers has
+    /// to be measured at the width it will be *drawn* at, and that answer belongs to
+    /// the chain: [`ui_core::font::FontSet::advance`] is the one function that asks
+    /// the chain and returns either a covered character's advance or the
+    /// replacement's, so a label laid out through this closure and drawn by the
+    /// renderer cannot disagree about a width. A `Font` on its own could not answer
+    /// for a character it has no glyph for — it has no advance to give, because it
+    /// has no glyph.
+    ///
+    /// **The two closures own a clone each, and they agree because both were
+    /// cloned from one set — not because they share one.** This paragraph said
+    /// "two `Rc` clones of one set, so the two closures share it" until the review
+    /// of task 30 pointed out that the code two functions below it is
+    /// `let advance_fonts = fonts.clone(); let line_fonts = fonts;` — two separate
+    /// `FontSet` values, no `Rc` between them, sharing nothing. The sentence's own
+    /// second clause described exactly that as the thing being avoided.
+    ///
+    /// **What actually makes them agree** is that both are clones of the single
+    /// construction in `main`, and `FontSet::install` issues identities in install
+    /// order, so two sets built by the same calls hold the same ids. That is a real
+    /// property of the calls rather than of the sharing — and it is the reason the
+    /// demo holds its own set instead of asking the renderer for one, since
+    /// `Renderer::set_font_set` *replaces* the renderer's set and would leave the
+    /// caller's handles naming families the renderer no longer has.
+    ///
+    /// The tests build the closures directly instead, from a monospace stand-in,
+    /// because a set cannot be given a font without a font file and a test may not
+    /// open one.
+    fn new(fonts: FontSet, family: FamilyId) -> Self {
+        Self::sharing(fonts, Rc::new(Property::new(family)))
+    }
+
+    /// Returns the measurements of `fonts` in **whichever family `family` holds
+    /// when it is read**.
+    ///
+    /// This is the version a label whose family a property can change needs, and
+    /// it exists because of the one thing that must never happen: **a label laid
+    /// out in one family and drawn in another.** Two objects are involved — the
+    /// property that says which family, and the measurements that have to agree
+    /// with it — and this binds them by making the measurements *read the
+    /// property*. A second `TextMetrics` per family, picked by an index beside the
+    /// property, would have two answers to "which family is this label in", and
+    /// nothing would stop them disagreeing the first time the property was written.
+    ///
+    /// Built once, not per frame: the closure reads the property on every call, so
+    /// a family's change is picked up by the next layout with nothing rebuilt.
+    fn sharing(fonts: FontSet, family: Rc<Property<FamilyId>>) -> Self {
+        let advance_fonts = fonts.clone();
+        let line_fonts = fonts;
+        let advance_family = Rc::clone(&family);
+        let line_family = family;
         TextMetrics {
-            advance: Rc::new(move |ch: char, size: f32| face.advance(ch, size)),
-            line_height: Rc::new(move |size: f32| lines.line_height(size)),
+            advance: Rc::new(move |ch: char, size: f32| {
+                advance_fonts.advance(advance_family.get(), FontWeight::Regular, ch, size)
+            }),
+            line_height: Rc::new(move |size: f32| {
+                line_fonts
+                    .line_height(line_family.get(), FontWeight::Regular, size)
+                    .unwrap_or(size)
+            }),
         }
     }
 
@@ -2755,6 +2946,24 @@ struct Demo {
     labels: Vec<DemoLabel>,
     /// The handles of the label nodes, parallel to `labels`.
     label_nodes: Vec<Handle>,
+    /// The one label that is **not** in `labels`: the one whose text holds a
+    /// character no font in its chain covers, and whose family `Y` changes.
+    ///
+    /// **It is beside the list rather than in it**, and `fallback_metrics` is the
+    /// reason: this label is measured through its own family's chain, while every
+    /// label in `labels` is measured through [`Demo::metrics`]. Putting it in the
+    /// list would have `Demo::set_text_size` and the paint loop measure it with the
+    /// default family's advances — the disagreement `Label::paint` warns about, and
+    /// visible only once the family had been changed.
+    fallback_label: DemoLabel,
+    /// The node of `fallback_label`.
+    fallback_handle: Handle,
+    /// The measurements of `fallback_label`, reading **its own** `font_family`
+    /// property on every call.
+    fallback_metrics: TextMetrics,
+    /// The family `Y` switches `fallback_label` to, which is the default family
+    /// itself: the toggle is between two handles and neither is special.
+    fallback_alternate: FamilyId,
     /// The node the text column is placed in, so a label change can mark the
     /// whole panel dirty rather than every label.
     text_panel: Handle,
@@ -3145,8 +3354,18 @@ impl Demo {
     /// The error is a message rather than a type of its own: the tree is
     /// written out here, so a node that cannot be attached is a bug in this
     /// file and not a runtime condition a caller could act on.
+    ///
+    /// **`fonts` is taken rather than built here**, and it is taken *whole* for the
+    /// reason `main` clones it into the renderer: a
+    /// [`FontId`](ui_core::font::FontId) and a [`FamilyId`]
+    /// are indexes into one set, so the demo measuring text and the renderer
+    /// drawing it must read the same set — two sets built by the same calls in the
+    /// same order happen to agree, and two built independently do not, with nothing
+    /// anywhere to say so. It is a clone of the renderer's, never a second
+    /// construction.
     fn new(
         metrics: TextMetrics,
+        fonts: FontSet,
         picture: Option<Picture>,
         page: Page,
     ) -> Result<Self, &'static str> {
@@ -3399,6 +3618,45 @@ impl Demo {
                 .set_constraints(Constraints::tight(size));
         }
         let label_nodes: Vec<Handle> = labels.iter().map(|demo| demo.label.handle()).collect();
+        // **The fallback label, and it is not one of the seven.** It is built here,
+        // beside them, and kept out of `labels` and `label_nodes` for two reasons
+        // that are the same reason: both of those are the panel's list, and this
+        // label is measured through **its own family's** chain rather than through
+        // the demo's `metrics`. In `labels` it would be measured with the default
+        // family's advances by `Demo::set_text_size` and by the paint loop — which
+        // is precisely the disagreement `Label::paint`'s doc warns about, and it
+        // would only show once the family was changed.
+        let mut fallback_label = Label::new(&mut nodes, FALLBACK_TEXT);
+        fallback_label.color = cycling_color(&color_token, &token_properties);
+        fallback_label.font_size.set(FALLBACK_FONT);
+        // **The property the demo changes, and the measurements that follow it.**
+        // `Label::font_family` starts at the default family — the one whose chain
+        // ends at `FALLBACK_FONT_PATH` — and `TextMetrics::sharing` reads this very
+        // property on every call, so the label's advances are always its own
+        // family's. Two objects would otherwise both answer "which family is this
+        // label in", and nothing would stop them disagreeing.
+        let fallback_alternate = fonts.family(LATO_ONLY_FAMILY);
+        let fallback_metrics =
+            TextMetrics::sharing(fonts, Rc::new(fallback_label.font_family.clone()));
+        let fallback = DemoLabel {
+            label: fallback_label,
+            options: LayoutOptions {
+                max_width: TEXT_COLUMN_WIDTH,
+                wrap: WrapMode::None,
+                truncation: Truncation::Ellipsis,
+                ..LayoutOptions::default()
+            },
+        };
+        {
+            let handle = fallback.label.handle();
+            let size = fallback.size(&fallback_metrics, FALLBACK_FONT);
+            nodes
+                .get_mut(handle)
+                .ok_or("ui_demo: the fallback label's node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+        }
+        let fallback_handle = fallback.label.handle();
         let text_column = Container::new(&mut nodes, LayoutMode::column());
         text_column.set_flex_config(
             &mut nodes,
@@ -3406,7 +3664,7 @@ impl Demo {
                 .with_spacing(LABEL_SPACING)
                 .with_cross_axis_alignment(CrossAxisAlignment::Start),
         );
-        for &child in &label_nodes {
+        for child in label_nodes.iter().copied().chain([fallback_handle]) {
             if !text_column.add_child(&mut nodes, child) {
                 return Err("ui_demo: a label could not be attached to the text column");
             }
@@ -4696,16 +4954,22 @@ impl Demo {
         for pad in &pads {
             on(Page::Pads, pad.node, false);
         }
-        // `text`: the panel, the column inside it, and the seven labels. The
-        // column is here rather than left out because it is the node the labels
-        // are children of, and `hit_test` skips the whole subtree of an invisible
-        // node — hiding the labels alone would leave a container that is on no
-        // page drawing nothing over a page that is not showing.
+        // `text`: the panel, the column inside it, the seven labels and the fallback
+        // label. The column is here rather than left out because it is the node the
+        // labels are children of, and `hit_test` skips the whole subtree of an
+        // invisible node — hiding the labels alone would leave a container that is
+        // on no page drawing nothing over a page that is not showing.
         on(Page::Text, text_panel.handle(), false);
         on(Page::Text, text_column.handle(), false);
         for &handle in &label_nodes {
             on(Page::Text, handle, false);
         }
+        // **The fallback label has its own row rather than a turn of the loop
+        // above**, because it is not in `label_nodes` — and that is the point of
+        // writing it out: a row written by hand is one the complement assertion
+        // checks against the tree, and a label that had been left out of the table
+        // would be trivially "always painted" and would draw on every page.
+        on(Page::Text, fallback_handle, false);
         // `input`: the field, its two readouts and the keyboard. The field is the
         // only focusable here, and the keyboard is not: a key is driven by the
         // press that grabbed it, not by `Tab`.
@@ -4762,6 +5026,10 @@ impl Demo {
             background_color,
             labels,
             label_nodes,
+            fallback_label: fallback,
+            fallback_handle,
+            fallback_metrics,
+            fallback_alternate,
             text_panel: text_panel.handle(),
             metrics,
             text_size: TEXT_SIZE_START,
@@ -5284,6 +5552,41 @@ impl Demo {
             .unwrap_or(0);
         let next = (index + 1) % TEXT_COLOR_TOKENS.len();
         self.color_token.set(TEXT_COLOR_TOKENS[next]);
+    }
+
+    /// Moves the fallback label between the two families it can be in, by writing
+    /// the one property [`Label::font_family`] is.
+    ///
+    /// **The property write is the whole mechanism, and it is enough** because
+    /// three things read it: `Label::paint` puts it on the command, the text
+    /// pass walks that family's chain per character, and `fallback_metrics` reads
+    /// it on every advance it is asked for. **A write that did not re-lay the
+    /// label out would be the interesting defect**, so the layout is recomputed
+    /// here from the same measurements the paint will use: the two chains measure
+    /// the same string differently — the default family draws the warning sign
+    /// and the check mark from the fallback font, `LATO_ONLY_FAMILY` draws all
+    /// three characters as the replacement box — so the rect the column places
+    /// the label in is a different width after a switch.
+    fn toggle_font_family(&mut self) {
+        let property = self.fallback_label.label.font_family.clone();
+        let next = if property.get() == self.fallback_alternate {
+            FamilyId::default()
+        } else {
+            self.fallback_alternate
+        };
+        property.set(next);
+        // The property writes come first and the borrow below cannot be held
+        // across them, for the reason `set_text_size` gives: each write marks its
+        // own node dirty through that node's callback, and the callbacks borrow
+        // the arena.
+        let size = self
+            .fallback_label
+            .size(&self.fallback_metrics, FALLBACK_FONT);
+        let mut nodes = self.nodes.borrow_mut();
+        if let Some(node) = nodes.get_mut(self.fallback_handle) {
+            node.layout_mut().set_constraints(Constraints::tight(size));
+        }
+        mark_dirty(&mut nodes, self.text_panel);
     }
 
     /// Handles one input event: `T` switches between the dark and light
@@ -6763,6 +7066,26 @@ impl Demo {
                 rect,
             );
         }
+        // **The fallback label, painted with its own family's measurements** and not
+        // with `self.metrics`. The two would agree while its family is the default
+        // one and disagree the moment `Y` moves it, which is exactly the state the
+        // capture has to be able to see: a label whose words do not land under their
+        // glyphs looks like a font problem and is a measuring one.
+        {
+            let handle = self.fallback_handle;
+            let rect = nodes
+                .get(handle)
+                .and_then(|node| node.layout().rect())
+                .map(Into::into);
+            record_label(
+                &mut nodes,
+                handle,
+                &self.fallback_label,
+                &self.fallback_metrics,
+                FALLBACK_FONT,
+                rect,
+            );
+        }
 
         // The controls layer's own labels, which are reached through the layer
         // rather than as its siblings. They are painted after the widgets they
@@ -7829,6 +8152,12 @@ impl Demo {
             // different failure every run.
             handles.push(("text panel label", handle));
         }
+        // **A name of its own, and not an eighth "text panel label".** It is
+        // named apart from the other seven because it behaves apart from them: it
+        // is the one label whose rect changes with something other than `+`/`-`,
+        // so a failure about it is about the family and a failure named "text
+        // panel label" would be about the size.
+        handles.push(("fallback label", self.fallback_handle));
         handles.extend([
             ("gauge", self.gauge.handle()),
             ("gauge readout", self.gauge_readout.label.handle()),
@@ -8079,7 +8408,7 @@ type GalleryShortcut = (&'static str, Keycode, Option<Page>, fn(&mut Demo));
 /// no page to land on, and `None` is what says *stay where you are*. Every other
 /// row names the page its widget is on, and `every_shortcut_works_from_every_page_
 /// and_lands_on_its_own` is what holds the seventeen and the one apart.
-const GALLERY_SHORTCUTS: [GalleryShortcut; 18] = [
+const GALLERY_SHORTCUTS: [GalleryShortcut; 19] = [
     (
         "Space, which presses every pad",
         Keycode::Space,
@@ -8115,6 +8444,12 @@ const GALLERY_SHORTCUTS: [GalleryShortcut; 18] = [
         Keycode::C,
         Some(Page::Text),
         Demo::cycle_text_color,
+    ),
+    (
+        "Y, which moves the fallback label's font family",
+        FALLBACK_KEY,
+        Some(Page::Text),
+        Demo::toggle_font_family,
     ),
     (
         "0, which sends the slider to its minimum",
@@ -8267,6 +8602,7 @@ fn paint_order(nodes: &Arena<WidgetNode>, root: Handle) -> Vec<Handle> {
 mod tests {
     use super::*;
     use std::time::Duration;
+    use ui_core::font::replacement_advance;
 
     /// Monospace stand-in measurements: every character half its size wide, and
     /// every line 1.2 times its size tall, so both grow with the font size the
@@ -8277,6 +8613,28 @@ mod tests {
             advance: Rc::new(|_, size| size * 0.5),
             line_height: Rc::new(|size| size * 1.2),
         }
+    }
+
+    /// The font set the demo's own fixtures are built with: **no fonts in it, and
+    /// one family defined.**
+    ///
+    /// The empty half is the honest part. A set with no font is a real state — a
+    /// renderer before anything is installed — and every character in every chain
+    /// is then uncovered, so the fallback label is laid out with every character at
+    /// the replacement's advance. That is the same number the replacement is drawn
+    /// at, so the fixture is measuring what production measures for the
+    /// characters neither font has; what it cannot say is anything about the two
+    /// DejaVu draws, because there is no DejaVu here and a test may not open a
+    /// font file.
+    ///
+    /// The defined family is what makes `Y` testable at all: an undefined name
+    /// resolves to the default family, so with no family defined the toggle would
+    /// write the same handle twice and a test asserting the property changed would
+    /// pass on a demo that had changed nothing.
+    fn demo_fonts() -> FontSet {
+        let mut fonts = FontSet::new();
+        fonts.define_family(LATO_ONLY_FAMILY);
+        fonts
     }
 
     /// Returns a demo with the stand-in measurements.
@@ -8303,7 +8661,7 @@ mod tests {
     /// **`Page::DEFAULT` is `pads`,** so the tests whose subject really is on the
     /// default page are unchanged and the ones that are not name theirs.
     fn demo_on(page: Page) -> Demo {
-        Demo::new(mono_metrics(), None, page).unwrap()
+        Demo::new(mono_metrics(), demo_fonts(), None, page).unwrap()
     }
 
     /// Lays the demo out once, the way the first frame does, so a test can ask
@@ -8769,6 +9127,253 @@ mod tests {
             demo.handle_event(key(Keycode::Plus));
         }
         assert_eq!(demo.text_size, TEXT_SIZE_MAX, "and stops at the ceiling");
+    }
+
+    /// The tests below are the demo's half of task 30. What they can establish is
+    /// that the label exists, that its text is the text requirement 7 asks for,
+    /// that `Y` writes the one property the whole mechanism reads, and that the
+    /// label is measured through a **different** function from the other seven.
+    ///
+    /// What they cannot establish, and the reason is the same one the library
+    /// tests give: **whether Lato covers a warning sign is a fact about a file on
+    /// this host**, checked against the file and recorded in [`FALLBACK_FONT_PATH`]'s
+    /// doc. A test may not open a font file, so the fixture's set holds no fonts
+    /// and every character in it is uncovered — which is a real state and the right
+    /// one to assert the *replacement*'s arithmetic against, and is no evidence at
+    /// all about which font draws the warning sign. That is what the capture is
+    /// for, and `.ai/NEVERAGAIN.md` has three entries about defects that passed
+    /// every unit test here for exactly this reason.
+    #[test]
+    fn the_fallback_label_carries_characters_no_font_in_its_chain_covers() {
+        let demo = laid_out_on(Page::Text);
+        assert_eq!(
+            demo.fallback_label.label.text.get(),
+            FALLBACK_TEXT,
+            "and the text is the one its own constant names, so a test cannot pass \
+             on a string that no longer holds the three characters"
+        );
+        // **The three, written out rather than counted**, because a count would be
+        // satisfied by three copies of one character. Lato has no glyph for the
+        // first two (measured against its own character map) and no font in either
+        // chain has one for the third, which is what makes this line demonstrate
+        // both the chain and the replacement.
+        for ch in ['\u{26a0}', '\u{2713}', '\u{4e2d}'] {
+            assert!(
+                FALLBACK_TEXT.contains(ch),
+                "the text holds U+{:04X}, which is what makes this label the one \
+                 requirement 7 asks for",
+                u32::from(ch)
+            );
+        }
+    }
+
+    #[test]
+    fn the_fallback_label_starts_in_the_default_family_and_y_moves_it_and_back() {
+        let mut demo = dialog_closed_on(Page::Text);
+        let property = demo.fallback_label.label.font_family.clone();
+        assert_eq!(
+            property.get(),
+            FamilyId::default(),
+            "the default family, whose chain is the one that ends at the fallback \
+             font"
+        );
+        let alternate = demo.fallback_alternate;
+        assert_ne!(
+            alternate,
+            property.get(),
+            "and the second family is a *different* handle, or the toggle would \
+             write the family it is already in and the two tests below would pass \
+             on a demo that had changed nothing"
+        );
+
+        demo.handle_event(key(FALLBACK_KEY));
+        assert_eq!(
+            property.get(),
+            alternate,
+            "one press puts it in the chain that has no second font, where all \
+             three characters are drawn as the replacement"
+        );
+        demo.handle_event(key(FALLBACK_KEY));
+        assert_eq!(
+            property.get(),
+            FamilyId::default(),
+            "and a second press puts it back, because the key is a toggle between \
+             two handles and not a one-way move"
+        );
+    }
+
+    #[test]
+    fn the_fallback_label_is_measured_through_its_own_family_and_not_the_panels() {
+        let demo = laid_out_on(Page::Text);
+        // The two measurement paths, side by side, on the same character and the
+        // same size. **The fixture's set holds no fonts, so its answer is the
+        // replacement's advance** — and the panel's is the monospace stand-in. This
+        // is the assertion that the disagreement `Label::paint` warns about is not
+        // reachable: the fallback label cannot be measured by the panel's
+        // `metrics`, because these are two functions and they do not agree.
+        let size = FALLBACK_FONT;
+        assert_eq!(
+            demo.fallback_metrics.advance('a', size),
+            replacement_advance(size),
+            "a character no font in the chain covers is measured at the width the \
+             replacement is drawn at, and it is the library's own number rather \
+             than a copy of the constant: a test that re-derived 0.6 would agree \
+             with a change to the box and still pass"
+        );
+        assert_eq!(
+            demo.metrics.advance('a', size),
+            size * 0.5,
+            "and the panel's stand-in answers differently, so a label measured by \
+             the wrong one of the two would be laid out at the wrong width"
+        );
+
+        // The label's own **laid-out line**, which is where the two measurement
+        // paths differ. The *rect* would not: `DemoLabel::size` returns
+        // `max(max_width, the laid-out width)`, the label is narrower than the
+        // panel in both chains of this fixture, and so both answers are
+        // `TEXT_COLUMN_WIDTH` — an assertion over the rect would pass on a demo
+        // that measured the label with the wrong function, which is the failure
+        // this test exists to rule out.
+        let line_width = |demo: &Demo, metrics: &TextMetrics| -> f32 {
+            let mut options = demo.fallback_label.options;
+            options.line_height = metrics.line_height(FALLBACK_FONT);
+            demo.fallback_label
+                .label
+                .layout(&options, &|ch: char| metrics.advance(ch, FALLBACK_FONT))
+                .lines
+                .first()
+                .map_or(0.0, |line| line.width)
+        };
+        let expected = line_width(&demo, &demo.fallback_metrics);
+        let by_the_panel = line_width(&demo, &demo.metrics);
+        // **Summed the way `layout_text` sums it**, character by character, and
+        // not as `count * advance`: eighteen additions of 14.4 are not
+        // bit-identical to one multiplication of the total, and an assertion
+        // written the second way fails on the fifth decimal for no reason a reader
+        // could see.
+        let summed = FALLBACK_TEXT
+            .chars()
+            .map(|_ch| replacement_advance(FALLBACK_FONT))
+            .sum::<f32>();
+        assert_eq!(
+            expected, summed,
+            "the line is measured at the replacement's advance for every \
+             character, because this fixture's set has no font in it"
+        );
+        assert_eq!(
+            FALLBACK_TEXT.chars().count(),
+            22,
+            "and the string is twenty-two characters, so the sum above is \
+             twenty-two advances rather than something shorter that would pass \
+             by accident"
+        );
+        assert_ne!(
+            expected, by_the_panel,
+            "and the panel's stand-in measures the same text differently, so a \\
+             label measured by the wrong one of the two would be laid out at the \\
+             wrong width"
+        );
+    }
+
+    #[test]
+    fn the_fallback_label_records_its_family_on_the_command_it_paints() {
+        let mut demo = laid_out_on(Page::Text);
+        let families = |demo: &Demo| -> Vec<FamilyId> {
+            let node = demo.nodes.borrow();
+            let Some(node) = node.get(demo.fallback_handle) else {
+                panic!("the fallback label's node is in the arena");
+            };
+            node.paint()
+                .commands()
+                .iter()
+                .filter_map(|command| match command {
+                    DrawCommand::Text { family, .. } => Some(*family),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            families(&demo),
+            vec![FamilyId::default()],
+            "one line, in the family it was laid out in"
+        );
+        demo.toggle_font_family();
+        let node_rect = demo
+            .nodes
+            .borrow()
+            .get(demo.fallback_handle)
+            .and_then(|node| node.layout().rect())
+            .map(Rect::from);
+        // The paint has to be recorded again before the command is readable: a
+        // property write on its own changes what the *next* frame records, and a
+        // test that read the node without a frame would be reading the old one.
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            families(&demo),
+            vec![demo.fallback_alternate],
+            "and after a frame it records the family it was switched to, which is \
+             how `font_family` reaches the renderer at all"
+        );
+        // **A draw-command assertion cannot see which font drew a character**, and
+        // this one is not claiming to: it sees the handle travel from the property
+        // to the command. The chain that handle selects is walked inside
+        // `draw_text_batch`, which needs a GL context, and the pixels are the
+        // evidence for that half.
+        assert!(
+            node_rect.is_some(),
+            "and the label still has a rect, because the toggle re-laid it out"
+        );
+    }
+
+    #[test]
+    fn the_fallback_label_is_on_the_text_page_and_no_others() {
+        let demo = laid_out_on(Page::Text);
+        assert_eq!(
+            demo.page_members
+                .iter()
+                .filter(|member| member.handle == demo.fallback_handle)
+                .count(),
+            1,
+            "exactly one row in the page table, or it is either drawn on every page \
+             or on none"
+        );
+        let page = demo
+            .page_members
+            .iter()
+            .find(|member| member.handle == demo.fallback_handle)
+            .map(|member| member.page);
+        assert_eq!(
+            page,
+            Some(Page::Text),
+            "and the row names the text page, which is the page its column is on"
+        );
+    }
+
+    #[test]
+    fn the_fallback_label_is_not_one_of_the_panels_own_seven() {
+        // The structural half of the reason it is kept out of `labels`: if it were
+        // in the list, `set_text_size` would measure it with the panel's metrics and
+        // the paint loop would draw it with the panel's family, and nothing would
+        // say so. This is the assertion that keeps it out.
+        let demo = laid_out_on(Page::Text);
+        assert_eq!(
+            demo.labels.len(),
+            7,
+            "the panel still holds the seven labels `demo_labels` builds"
+        );
+        assert!(
+            !demo.label_nodes.contains(&demo.fallback_handle),
+            "and the fallback label's node is not among their handles, so no loop \
+             over the list can reach it"
+        );
+        assert_eq!(
+            demo.labels
+                .iter()
+                .filter(|label| label.label.handle() == demo.fallback_handle)
+                .count(),
+            0,
+            "and it is not in the list itself, which is what the paint loop walks"
+        );
     }
 
     #[test]
@@ -12215,7 +12820,9 @@ mod tests {
     ///
     /// **Seven `text panel label` rows, and the repetition is load-bearing**: the
     /// comparison is over sorted lists with duplicates intact, so losing *one* of
-    /// the seven labels fails it. A set of names would not notice.
+    /// the seven labels fails it. A set of names would not notice. The eighth
+    /// label is named `fallback label` and is one row rather than an eighth
+    /// repetition, for the reason [`Demo::placed_handles`] gives.
     fn expected_placed_rect_names() -> Vec<&'static str> {
         vec![
             "pads card",
@@ -12226,6 +12833,7 @@ mod tests {
             "text panel label",
             "text panel label",
             "text panel label",
+            "fallback label",
             "gauge",
             "gauge readout",
             "slider",
@@ -12263,17 +12871,19 @@ mod tests {
         let mut want = expected_placed_rect_names();
         want.sort_unstable();
         // **The count, checked rather than asserted in a doc comment.** One card,
-        // seven text-panel labels and seventeen controls and readouts — and the
-        // second review of this task caught the prose above claiming twenty-six
-        // while the list held twenty-five, which is the shape of the same failure a
-        // number nobody computed is a number nobody checked. Adding a leaf now has
-        // to change this line as well as the list, which is two edits and is the
-        // point.
+        // seven text-panel labels, one fallback label and seventeen controls and
+        // readouts — and the second review of this task caught the prose above
+        // claiming twenty-six while the list held twenty-five, which is the shape of
+        // the same failure a number nobody computed is a number nobody checked.
+        // Adding a leaf now has to change this line as well as the list, which is
+        // two edits and is the point. Task 30 is the second time this line has had
+        // to change, which is the evidence that it is the right place for the
+        // number rather than a doc comment.
         assert_eq!(
             want.len(),
-            25,
-            "the written-out list holds one card, seven text-panel labels and \
-             seventeen controls and readouts"
+            26,
+            "the written-out list holds one card, seven text-panel labels, one \
+             fallback label and seventeen controls and readouts"
         );
         assert_eq!(
             got, want,
@@ -15174,6 +15784,16 @@ mod tests {
         text_size: f32,
         /// `C`: the token the text takes its colour from.
         color_token: ThemeToken,
+        /// `Y`: the family the fallback label is drawn in.
+        ///
+        /// **A handle rather than a name**, for the same reason the widget's own
+        /// property is one: the demo compares states and asks whether anything
+        /// moved, and the family is an index into the set. What makes the row
+        /// testable at all is that the fixture's set **defines** the second
+        /// family — an undefined name resolves to the default family, so a toggle
+        /// between two undefined names would write the same handle twice and this
+        /// field would read the same on both sides.
+        font_family: FamilyId,
         /// `0` and `1`: the slider's value.
         slider: f32,
         /// `F`: the image's fit.
@@ -15207,6 +15827,7 @@ mod tests {
             dark: demo.dark,
             text_size: demo.text_size,
             color_token: demo.color_token.get(),
+            font_family: demo.fallback_label.label.font_family.get(),
             slider: demo.slider.widget.value.get(),
             image_fit: demo.image_fit.get(),
             progress: demo.progress.value.get(),
@@ -15747,7 +16368,7 @@ mod tests {
         // `match` — there is no `match`. What it does check is that every row's
         // function still does what its name says, which is the one way a table of
         // function pointers can rot silently.
-        assert_eq!(GALLERY_SHORTCUTS.len(), 18, "eighteen shortcuts");
+        assert_eq!(GALLERY_SHORTCUTS.len(), 19, "nineteen shortcuts");
         assert!(
             !GALLERY_SHORTCUTS
                 .iter()

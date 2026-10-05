@@ -23,6 +23,21 @@
 //! the advance cache is keyed by character and size alone and a shared one would
 //! measure bold with regular's widths. Nothing here synthesises weight, blends
 //! two copies of a glyph, or re-rasterizes anything at draw time.
+//!
+//! **A family is a chain, and the chain is the fallback.** A run also says which
+//! family it wants ([`FamilyId`]), and a family holds a face per weight plus a
+//! list of fallbacks; the first font in that list with a glyph for a character
+//! draws it. The chain is built once, when the family is defined, and a lookup
+//! walks it — it is never assembled per character.
+//!
+//! **A character no font in the chain covers is drawn, not dropped.** It becomes
+//! [`replacement_bitmap`]: a hollow box, synthesized rather than taken from a font
+//! because the fonts this repository's demo loads have no glyph at U+FFFD, which
+//! was measured against each file's own character map rather than assumed. The box
+//! is a [`GlyphBitmap`] like any other, so it is packed into the atlas and drawn
+//! by the text shader with no second draw path, and it advances the pen by
+//! [`replacement_advance`] — the same function the measuring half asks, so the
+//! hole in the layout is exactly as wide as the box drawn in it.
 
 use freetype::face::LoadFlag;
 use freetype::{Face, Library};
@@ -247,6 +262,32 @@ impl Font {
         text.chars().map(|ch| self.advance(ch, size)).sum()
     }
 
+    /// Returns whether this font has a glyph for `ch`.
+    ///
+    /// **A character it has no glyph for is a normal answer, not an error**, and
+    /// this is the question the fallback chain asks: a run's first font says no
+    /// and the next one is asked, and a chain in which every font says no draws
+    /// the replacement rather than nothing.
+    ///
+    /// It asks FreeType's character map and **does not rasterize or load a glyph**,
+    /// which is the whole reason the chain can be walked per character per frame:
+    /// the answer is a lookup in the face's own table of what it covers, where
+    /// [`Font::advance`] and [`Font::rasterize`] are a glyph load each. Asking by
+    /// `load_char` instead — which also answers correctly — would cost a load per
+    /// font per character, and the load is the 61 µs the advance cache exists to
+    /// avoid.
+    ///
+    /// **Index `0` counts as "no glyph"**, because FreeType returns `0` for a
+    /// character the face maps to `.notdef`, and `.notdef` is the empty box every
+    /// font carries rather than a drawing of the character asked for. Counting it
+    /// as covered would make every font claim every character and the chain would
+    /// never move past the first font — a silent hole where the fallback should
+    /// have been.
+    #[must_use]
+    pub fn has_glyph(&self, ch: char) -> bool {
+        self.face.get_char_index(codepoint(ch)).is_some()
+    }
+
     /// Rasterizes `ch` at `size` pixels into a top-down coverage bitmap.
     ///
     /// Returns `None` for a character the font has no glyph for (it rasterizes
@@ -364,9 +405,10 @@ impl FontWeight {
 /// face is installed there, and the regular slot otherwise.
 ///
 /// **This is the whole of the fallback rule, and it is in one place because two
-/// places would be two rules.** [`FontSet::resolve`] reads it to find a face, and
-/// the renderer's text pass reads the set's answer; neither decides anything of
-/// its own.
+/// places would be two rules.** A family's chain reads it to find the face a run
+/// starts from — in `Family::primary_id`, which is where the chain's own two
+/// clauses live — and the renderer's text pass reads the set's answer; neither
+/// decides anything of its own.
 ///
 /// The fallback is **the regular face**, and it is deliberate: a heading that
 /// asks for bold on a renderer that was given one font must still be *drawn*,
@@ -421,21 +463,38 @@ pub fn resolve_slot<F>(faces: &[Option<F>; FACE_COUNT], weight: FontWeight) -> O
     }
 }
 
-/// One installed face's identity in the glyph atlas.
+/// One installed font's identity: what a chain names and the atlas keys on.
 ///
-/// The atlas is shared by every face the renderer holds, so a glyph's cache key
-/// has to say which face rasterized it — see `GlyphKey`, which is where the
-/// atlas's cache key spells it out. This is that third
-/// part of the key, and it is deliberately **not** the weight: it is handed out by
-/// [`FontSet::set`] every time a face is installed, so a renderer that swaps its
-/// bold file cannot serve the glyphs of the file it no longer holds. A newtype
-/// rather than a bare `u32` because the two are not interchangeable, and this is
-/// the one value whose confusion draws a letter in the wrong weight with no error
-/// anywhere.
+/// The atlas is shared by every font the set holds, so a glyph's cache key has to
+/// say which font rasterized it — see `GlyphKey`, which is where the atlas's
+/// cache key spells it out. This is that third part of the key, and it is
+/// deliberately **not** the weight: it is handed out every time a font is
+/// installed, so a renderer that swaps its bold file cannot serve the glyphs of
+/// the file it no longer holds. A newtype rather than a bare `u32` because the
+/// two are not interchangeable, and this is the one value whose confusion draws a
+/// letter in the wrong weight with no error anywhere.
+///
+/// **It names a file, not a family.** A [`FamilyId`] names the *chain* — the
+/// ordered list of fonts a run is looked for in — and this names one font inside
+/// one; a chain of three fonts has three of these and one [`FamilyId`]. The two
+/// are not interchangeable either, and the value of confusing them is a chain
+/// walked in the wrong order, which is a letter drawn from a font the caller did
+/// not ask for.
+///
+/// **The number comes from `FontIds::issue` and there is no public constructor
+/// for it.** That is what keeps a caller from naming a font the set does not hold:
+/// the id is meaningless outside the set that issued it, which is also why a set
+/// handed to a renderer must be the same set the caller measured with — two sets
+/// built by the same calls in the same order agree, and two built independently
+/// do not, with nothing to say so.
+///
+/// **It is also the font's own index in the set's table**, which is what makes the
+/// identity and the lookup one number rather than two that could drift — see
+/// `FontSet::install`, which issues once and pushes once.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct FaceId(u32);
+pub struct FontId(u32);
 
-impl FaceId {
+impl FontId {
     /// Returns the number this id wraps.
     ///
     /// For a caller keeping an id beside its own bookkeeping; nothing in this
@@ -446,100 +505,242 @@ impl FaceId {
     }
 }
 
-/// One face as the glyph atlas needs it: the [`Font`] to rasterize from, and the
-/// [`FaceId`] its glyphs are cached under.
+/// One installed font as the glyph atlas needs it: the [`Font`] to rasterize
+/// from, and the [`FontId`] its glyphs are cached under.
 ///
 /// A pair rather than two arguments to [`GlyphAtlas::get_or_insert`] because the
 /// two must not be able to disagree: the atlas keys on the id and rasterizes from
-/// the font, so a caller that passed one face's id with another face's outlines
-/// would cache a glyph under the wrong key and draw the wrong weight for every
-/// later run — a defect invisible until two weights are on screen at once. There
-/// is exactly one way to make this value, [`FontSet::resolve`].
+/// the font, so a caller that passed one font's id with another font's outlines
+/// would cache a glyph under the wrong key and draw the wrong glyphs for every
+/// later run — a defect invisible until two fonts are on screen at once. There
+/// are exactly two ways to make this value, [`FontSet::pick`] and
+/// [`FontSet::primary`], and both are on the set.
 #[derive(Clone, Copy)]
-pub struct FaceRef<'a> {
+pub struct FontRef<'a> {
     font: &'a Font,
-    id: FaceId,
+    id: FontId,
 }
 
-impl std::fmt::Debug for FaceRef<'_> {
-    /// Prints the face's id and nothing else.
+impl std::fmt::Debug for FontRef<'_> {
+    /// Prints the font's id and nothing else.
     ///
     /// Not derived because `Font` is not `Debug` — it holds a FreeType handle,
     /// which has nothing to print that means anything — and a `Debug` that could
     /// not be derived would have to leave the field out anyway. The id is the half
-    /// that says which face this is.
+    /// that says which font this is.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FaceRef")
+        f.debug_struct("FontRef")
             .field("id", &self.id)
             .finish_non_exhaustive()
     }
 }
 
-impl<'a> FaceRef<'a> {
-    /// Returns the face to rasterize from.
+impl<'a> FontRef<'a> {
+    /// Returns the font to rasterize from.
     #[must_use]
     pub fn font(&self) -> &'a Font {
         self.font
     }
 
-    /// Returns the identity this face's glyphs are cached under.
+    /// Returns the identity this font's glyphs are cached under.
     #[must_use]
-    pub fn id(&self) -> FaceId {
+    pub fn id(&self) -> FontId {
         self.id
     }
 }
 
-/// The identities the faces of a [`FontSet`] are cached under, one per slot.
+/// The counter `FontSet::install` draws the next font's identity from.
 ///
-/// Separate from `FontSet` for the reason [`AdvanceCache`] is: a `Font` cannot be
-/// made without a font file, which a unit test may not open, and the rule worth
-/// testing here — **every install is a new identity**, so replacing a weight
-/// cannot leave the atlas serving the glyphs of the file that has just been
-/// dropped — is a rule about ids and not about FreeType.
-#[derive(Clone, Debug)]
-struct FaceIds {
-    /// The id the next installed face is given.
-    next: u32,
-    /// The id each slot holds, which is meaningless for a slot nothing has been
-    /// installed in and is never read for one.
-    slots: [FaceId; FACE_COUNT],
+/// **Its own type, and the reason is a test.** Before task 30 a `Font` could only
+/// be put in the set by installing a *file*, and `AGENTS.md` forbids a test to
+/// open one — so the rule worth testing here, *"every install is a new identity,
+/// so a weight that is reinstalled cannot be served the glyphs of the file that
+/// has just been dropped"*, had no seam to be tested through. The counter is that
+/// seam: it is a number, and two numbers can be compared without a font.
+///
+/// **It is also the whole of what makes the id unique**, and it agrees with
+/// `FontSet::fonts`' own length by construction — `install` pushes exactly one
+/// font per issue — so there is one number in the set rather than an index in a
+/// vector beside a counter that could drift from it. `the_identity_and_the_fonts_
+/// own_length_are_the_same_number` is the test that pins that, and it is the
+/// assertion this type exists to make possible.
+#[derive(Clone, Debug, Default)]
+struct FontIds {
+    /// The id the next installed font is given, which is also how many fonts have
+    /// been installed.
+    issued: u32,
 }
 
-impl FaceIds {
-    fn new() -> Self {
-        FaceIds {
-            next: 0,
-            slots: [FaceId(0), FaceId(0)],
-        }
-    }
-
-    /// Returns an identity no face in this set has held.
+impl FontIds {
+    /// Returns an identity no font in this set has held, and counts it.
     ///
-    /// A counter rather than the slot's index because the slot is not the
-    /// identity: a face installed in one slot may be replaced by a different file
-    /// later, and the glyphs of the first one must not be found for the second.
-    /// It only has to differ from the identities already handed out, so it is
-    /// never read back and wrapping after `u32::MAX` installs is not a hazard any
-    /// process will reach.
-    fn issue(&mut self) -> FaceId {
-        let id = FaceId(self.next);
-        self.next = self.next.wrapping_add(1);
+    /// A counter rather than anything derived from a slot because the slot is not
+    /// the identity: a font installed for one weight may be replaced by a
+    /// different file later, and the first file's glyphs must not be found for the
+    /// second. Wrapping after `u32::MAX` installs is not a hazard any process will
+    /// reach, and a wrapped id would be a *repeat* rather than a wrong one.
+    fn issue(&mut self) -> FontId {
+        let id = FontId(self.issued);
+        self.issued = self.issued.wrapping_add(1);
         id
     }
+}
 
-    /// Records `id` as the identity of the face in `slot`.
-    fn install(&mut self, slot: usize, id: FaceId) {
-        self.slots[slot] = id;
+/// The name the default family is defined under.
+///
+/// The default family is **not** named `"sans-serif"` on purpose: a name that
+/// looks like a promise about fontconfig's generic families is one a reader would
+/// take as "the font the platform picks", and this set does no such thing. The
+/// name is what [`FontSet::define_family`] would find it under, so it is written
+/// down once and read from one place.
+const DEFAULT_FAMILY: &str = "default";
+
+/// A named chain of fonts: what a text run asks for, and what a
+/// [`crate::paint::DrawCommand::Text`] carries.
+///
+/// **A family is a chain, not a face.** One [`FontId`] names one installed file;
+/// this names the *order* a run looks for glyphs in — the face for the run's
+/// weight first, then the fallbacks — so `font_family` can be a property that
+/// changes which file a character is drawn from.
+///
+/// The default is [`FontSet::default_family`]'s id, which is `0`, so a value
+/// built by [`Default`] is the family every program gets without asking for one.
+/// A [`Property<FamilyId>`](crate::property::Property) therefore needs no
+/// special case for "no family was chosen", which is what made this the shape
+/// rather than an `Option<FamilyId>`.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct FamilyId(u32);
+
+impl FamilyId {
+    /// Returns the number this id wraps.
+    ///
+    /// For a caller keeping an id beside its own bookkeeping; nothing in this
+    /// crate needs the number rather than the id.
+    #[must_use]
+    pub fn get(self) -> u32 {
+        self.0
     }
 
-    /// Returns the identity of the face installed in `slot`.
-    fn get(&self, slot: usize) -> FaceId {
-        self.slots[slot]
+    /// Wraps a family's index in a [`FontSet`].
+    ///
+    /// Private for the reason [`FontId::u32_from`] is: the number is the set's
+    /// own table index, and a handle that could name a family that is not there
+    /// would be indistinguishable from one that is.
+    fn u32_from(index: u32) -> Self {
+        FamilyId(index)
     }
 }
 
-/// The faces a renderer draws text with: one per [`FontWeight`], and the
-/// identity each is cached under in the glyph atlas.
+/// One family: a face per weight, and the fallbacks tried after them.
+///
+/// **The chain is built once, here, when the family is defined** — and a family
+/// is only ever appended to, so it is never rebuilt: a glyph lookup walks the
+/// entries below and does not assemble anything. That is the whole of what
+/// "the chain is built once per family, not per glyph" asks for, and the
+/// alternative — deriving the chain inside every lookup — would be the same
+/// vector rebuilt once per character of every frame.
+///
+/// The two lists are separate because they answer different questions. `faces`
+/// is *this family's own face for each weight*, and a weight asks for exactly one
+/// of them, so a missing entry means "this family has no face of that weight"
+/// and the chain moves on to the fallbacks. `fallbacks` is *the files to try after
+/// that face*, in order, and it is shared by every weight in the family: a bold
+/// run that the bold face cannot draw has no more business reaching for the
+/// family's regular face than it has for any other font it was not given.
+#[derive(Clone, Debug, Default)]
+struct Family {
+    /// The name this family was defined under. The set keeps it beside the chain
+    /// so that `family(name)` can answer, and because a chain a reader cannot
+    /// name is a chain nobody can check.
+    name: String,
+    /// The family's own face for each weight, if it has one.
+    faces: [Option<FontId>; FACE_COUNT],
+    /// The fonts tried after the face for the weight asked for, in order.
+    fallbacks: Vec<FontId>,
+}
+
+/// The family a set with no families at all answers with, which
+/// [`FontSet::new`] makes unreachable — kept because the accessor that would need it
+/// is otherwise a function with an arm that cannot be written.
+static EMPTY_FAMILY: Family = Family {
+    name: String::new(),
+    faces: [None, None],
+    fallbacks: Vec::new(),
+};
+
+impl Family {
+    /// Returns whether the family holds no font at all — no face for any weight
+    /// and no fallback.
+    fn is_empty(&self) -> bool {
+        self.faces.iter().all(Option::is_none) && self.fallbacks.is_empty()
+    }
+
+    /// Returns the id of the font that starts this family's chain for `weight`.
+    ///
+    /// **The weight's own face, else the regular one, else the first fallback** —
+    /// the first two clauses are [`resolve_slot`]'s rule unchanged, and the third
+    /// is what makes a family that defines no face of its own work at all: a
+    /// chain of fallbacks alone is a family whose first font is its primary.
+    ///
+    /// `None` when the family has no face for the weight, no regular face, and no
+    /// fallback: there is nothing to draw the run with, which is the one case the
+    /// caller can see.
+    fn primary_id(&self, weight: FontWeight) -> Option<FontId> {
+        resolve_slot(&self.faces, weight)
+            .and_then(|slot| self.faces[slot])
+            .or_else(|| self.fallbacks.first().copied())
+    }
+}
+
+/// What a chain says about one character: an installed font that covers it, or
+/// nothing.
+///
+/// **Neither variant is an error.** A character no font in the chain covers is an
+/// ordinary state — it is drawn as the replacement glyph — so there is no
+/// `Result`, and the caller that cannot act on an error has one action to take
+/// anyway.
+#[derive(Clone, Copy, Debug)]
+pub enum PickedFont<'a> {
+    /// The first font in the chain that has a glyph for the character.
+    Covered(FontRef<'a>),
+    /// No font in the chain has one; draw the replacement.
+    Replacement,
+}
+
+/// Picks the first font of a chain that covers `ch`, given the chain's primary,
+/// its fallbacks and a way to ask each one.
+///
+/// A free function over a `covers` callback rather than a method on [`FontSet`]
+/// for the reason [`resolve_slot`] is: **the rule is worth testing without a
+/// font file, and a `Font` cannot be made without one.** The set's own
+/// [`FontSet::pick`] supplies the callback and is otherwise this function.
+///
+/// The primary is asked first and then the fallbacks, with the primary skipped in
+/// the second pass: a chain whose only fallback is the font that already answered
+/// asks each font twice, which is free but reads as two rules when it is one.
+///
+/// Total: every chain answers for every character, including the empty chain,
+/// which answers [`PickedFont::Replacement`].
+#[must_use]
+pub fn pick_in_chain(
+    primary: Option<FontId>,
+    fallbacks: &[FontId],
+    covers: &mut dyn FnMut(FontId, char) -> bool,
+    ch: char,
+) -> Option<FontId> {
+    if let Some(id) = primary {
+        if covers(id, ch) {
+            return Some(id);
+        }
+    }
+    fallbacks
+        .iter()
+        .copied()
+        .find(|&id| Some(id) != primary && covers(id, ch))
+}
+
+/// The fonts a renderer draws text with: an installed file per weight, the chains
+/// built from them, and the identity each file's glyphs are cached under.
 ///
 /// **One [`Font`] per weight, not one font with two faces inside it.** The
 /// advance cache is keyed by character and pixel size, so a second face sharing
@@ -555,9 +756,16 @@ impl FaceIds {
 /// and [`resolve_slot`] never looks at a slot it does not need.
 #[derive(Clone)]
 pub struct FontSet {
-    faces: [Option<Font>; FACE_COUNT],
-    /// The identity each slot's glyphs are cached under, handed out by `set`.
-    ids: FaceIds,
+    /// Every installed font, in install order, and **the index is the [`FontId`]'s
+    /// number** — a chain names a font and this is where it is found.
+    fonts: Vec<Font>,
+    /// The identities handed out, which `install` draws from and which agree with
+    /// `fonts`' own length by construction. Its own type so the rule can be tested
+    /// without a font file; see [`FontIds`].
+    ids: FontIds,
+    /// The families, by name. The first is the default family, and there is
+    /// always at least one, so a [`FamilyId`] of `0` names a family that exists.
+    families: Vec<Family>,
 }
 
 impl Default for FontSet {
@@ -567,31 +775,121 @@ impl Default for FontSet {
 }
 
 impl FontSet {
-    /// Creates a set holding no face, which draws no text.
+    /// Creates a set holding no font, which draws no text.
+    ///
+    /// **The default family exists from here on.** It holds nothing, so it
+    /// resolves to nothing and a run in it is not drawn — which is what a renderer
+    /// that has installed no font does. What it buys is that
+    /// [`FamilyId::default`] and [`FontSet::default_family`] are the same family
+    /// without either of them having to be special-cased anywhere else.
     #[must_use]
     pub fn new() -> Self {
         FontSet {
-            faces: [None, None],
-            ids: FaceIds::new(),
+            fonts: Vec::new(),
+            ids: FontIds::default(),
+            families: vec![Family {
+                name: DEFAULT_FAMILY.to_string(),
+                ..Family::default()
+            }],
         }
     }
 
-    /// Installs `font` as the face for `weight`, replacing whatever was there.
+    /// Installs `font` as the default family's face for `weight`, replacing
+    /// whatever was there.
     ///
-    /// The face is given a **fresh** [`FaceId`] every time it is installed,
+    /// The font is given a **fresh** [`FontId`] every time it is installed,
     /// including the first: the id is *this file's* identity in the atlas, not
     /// the slot's name, so replacing a weight re-rasterizes rather than serving
     /// glyphs rasterized from the file that has just been dropped. Which number
-    /// that is depends on the order the faces were installed in, and nothing
+    /// that is depends on the order the fonts were installed in, and nothing
     /// depends on the number — the atlas only ever compares ids.
     pub fn set(&mut self, weight: FontWeight, font: Font) {
-        let id = self.ids.issue();
-        let slot = weight.slot();
-        self.faces[slot] = Some(font);
-        self.ids.install(slot, id);
+        let id = self.install(font);
+        self.default_family_mut().faces[weight.slot()] = Some(id);
     }
 
-    /// Returns whether the set holds no face at all.
+    /// Installs `font` in the default family's chain, after the face for the
+    /// weight a run asks for, and returns the identity it was given.
+    ///
+    /// This is the whole of the fallback mechanism's entry point: a run whose
+    /// primary face has no glyph for a character asks this list next, in the order
+    /// fonts were added, and the first one that covers it draws that character.
+    /// The chain is **appended to and never rebuilt**, so a family defined once
+    /// answers the same way for the rest of the program's life.
+    pub fn add_fallback(&mut self, font: Font) -> FontId {
+        let id = self.install(font);
+        self.default_family_mut().fallbacks.push(id);
+        id
+    }
+
+    /// Defines a family named `name` with nothing in it yet, and returns its id.
+    ///
+    /// An empty family draws nothing, exactly like a set with no font: it is a
+    /// name a caller can put in a `font_family` property and fill with
+    /// [`FontSet::add_fallback_to`], and **an existing name is not replaced** —
+    /// defining a family twice returns the one that is there, so a second call is
+    /// not a way to empty a chain that something else is drawing with.
+    pub fn define_family(&mut self, name: &str) -> FamilyId {
+        if let Some(id) = self.family_id(name) {
+            return id;
+        }
+        let id = FamilyId::u32_from(u32::try_from(self.families.len()).unwrap_or(0));
+        self.families.push(Family {
+            name: name.to_string(),
+            ..Family::default()
+        });
+        id
+    }
+
+    /// Appends `font` to `family`'s chain and returns the identity it was given.
+    ///
+    /// The font is installed afresh rather than shared with another family, so
+    /// naming the same file in two families costs two identities and therefore two
+    /// sets of atlas entries for its glyphs. That is deliberate: a shared entry
+    /// would need the two families to agree that the file never changes, and an
+    /// id per install is the one thing that makes a replaced file's glyphs
+    /// unreachable.
+    pub fn add_fallback_to(&mut self, family: FamilyId, font: Font) -> FontId {
+        let id = self.install(font);
+        if let Some(family) = self.family_mut(family) {
+            family.fallbacks.push(id);
+        }
+        id
+    }
+
+    /// Returns the id of the family named `name`, or the default family's.
+    ///
+    /// **An unknown name is the default family and not an error**, because this is
+    /// where a `font_family` string becomes a handle and a property's default is
+    /// `"sans-serif"` in every program that has not defined one. Refusing it would
+    /// mean every program that had not been told about families had to be taught
+    /// about them first, and a family that quietly resolved to nothing would draw
+    /// no text at all.
+    #[must_use]
+    pub fn family(&self, name: &str) -> FamilyId {
+        match self.family_id(name) {
+            Some(id) => id,
+            None => self.default_family(),
+        }
+    }
+
+    /// Returns the id of the family named `name`, if it is defined.
+    #[must_use]
+    pub fn family_id(&self, name: &str) -> Option<FamilyId> {
+        self.families
+            .iter()
+            .position(|family| family.name == name)
+            .and_then(|index| u32::try_from(index).ok())
+            .map(FamilyId::u32_from)
+    }
+
+    /// Returns the default family's id, which is [`FamilyId::default`].
+    #[must_use]
+    pub fn default_family(&self) -> FamilyId {
+        FamilyId::default()
+    }
+
+    /// Returns whether the set holds no font at all.
     ///
     /// The renderer's text pass asks this before it walks a batch, because a
     /// renderer with no font draws no text — which is what it did before there
@@ -599,21 +897,215 @@ impl FontSet {
     /// was rather than free modulo a per-command resolution.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.faces.iter().all(Option::is_none)
+        self.fonts.is_empty()
     }
 
-    /// Returns the face a run asking for `weight` is drawn with.
+    /// Returns what the chain of `family` says about `ch` in `weight`.
     ///
-    /// `None` only for a set with no face at all; a weight with no face of its
-    /// own resolves to the regular one, per [`resolve_slot`].
+    /// This is the whole of the fallback rule at the call site: the family's primary
+    /// for the weight and its fallbacks, asked in that order, and the first font
+    /// with a glyph for the character wins. [`pick_in_chain`] is that walk, as a
+    /// function that can be tested without a font.
+    ///
+    /// **The family is read through `FontSet::drawable`**, so an empty family
+    /// answers from the default one rather than from nothing — see that method for
+    /// why an empty family must not be a dropped run.
+    ///
+    /// `PickedFont::Replacement` means **no font in the chain has a glyph**, which
+    /// is not a failure and must not be treated as one: the caller draws
+    /// [`replacement_bitmap`] and the run continues.
     #[must_use]
-    pub fn resolve(&self, weight: FontWeight) -> Option<FaceRef<'_>> {
-        let slot = resolve_slot(&self.faces, weight)?;
-        let font = self.faces[slot].as_ref()?;
-        Some(FaceRef {
-            font,
-            id: self.ids.get(slot),
+    pub fn pick(&self, family: FamilyId, weight: FontWeight, ch: char) -> PickedFont<'_> {
+        let entry = self.drawable(family);
+        let primary = entry.primary_id(weight);
+        let picked = pick_in_chain(
+            primary,
+            &entry.fallbacks,
+            &mut |id, ch| self.covers(id, ch),
+            ch,
+        );
+        match picked.and_then(|id| self.font_ref(id)) {
+            Some(font) => PickedFont::Covered(font),
+            None => PickedFont::Replacement,
+        }
+    }
+
+    /// Returns the face that starts `family`'s chain for `weight`: the font every
+    /// metric of the run comes from.
+    ///
+    /// **Ascent and line height are this font's and not the drawn glyphs'.** A run
+    /// that spans two fonts has no single face to take its line's height from —
+    /// taking it from whichever glyph happened to be first would make the line
+    /// box depend on the text's first character — so the primary is the one whose
+    /// metrics the layout uses, and the fallbacks contribute glyphs, bearings and
+    /// advances and nothing else.
+    ///
+    /// `None` only for a set with **no font at all**, which is the one state with
+    /// nothing to measure from and nothing to draw with; see `FontSet::drawable`
+    /// for the empty *family*, which is not that state.
+    #[must_use]
+    pub fn primary(&self, family: FamilyId, weight: FontWeight) -> Option<FontRef<'_>> {
+        let primary = self.drawable(family).primary_id(weight)?;
+        self.font_ref(primary)
+    }
+
+    /// Returns the family `id` names **when it holds a font**, and the default
+    /// family otherwise.
+    ///
+    /// **An empty family resolves to the default one, and that is what stops a run
+    /// from vanishing.** The review of task 30 found the gap: `draw_text_batch`
+    /// asks for a run's primary and `continue`s when there is none, so a family
+    /// defined with nothing in it — which `define_family` accepts, and which a
+    /// `Property<FamilyId>` can be written to before its fonts are installed —
+    /// dropped every character of every run in it. Requirement 4 says a character
+    /// no font covers *"must never be a silent hole"*, and a whole run is the
+    /// largest hole there is.
+    ///
+    /// **The same rule as [`FontSet::family`]'s, applied one step later:** an
+    /// unknown *name* resolves to the default family there, and an empty family
+    /// resolves to it here. One rule with two arms rather than two rules, and a
+    /// handle that cannot name a font-less family rather than one that can.
+    ///
+    /// A set whose **default** family is also empty has nothing to offer at all,
+    /// and this returns the requested family — `primary` then answers `None` and
+    /// the renderer draws nothing, which is correct: **a renderer with no font is
+    /// the one state that draws no text.**
+    ///
+    /// **No allocation and no `Option`**, because this is called once per character
+    /// per run and a chain lookup that cloned a family would be the first
+    /// per-frame allocation in the text path — the shape of cost `.ai/NEVERAGAIN.md`
+    /// records as invisible until a frame rate is measured.
+    fn drawable(&self, id: FamilyId) -> &Family {
+        let entry = self.entry(id);
+        let default = self.default_family();
+        if !entry.is_empty() || default == id {
+            return entry;
+        }
+        self.entry(default)
+    }
+
+    /// Returns the advance width of `ch` at `size` pixels in `family`, in pixels.
+    ///
+    /// **This is the measuring half of the text path and it answers what
+    /// [`FontSet::pick`] answers**, which is the only reason it can be trusted by a
+    /// layout: a run laid out with one chain's advances and drawn with another's
+    /// is a line whose words do not land under their glyphs. It asks the chain
+    /// rather than being told the answer, and the two callers cannot drift.
+    ///
+    /// A character no font in the chain covers is
+    /// [`replacement_advance`] — the width the replacement is drawn at, so the
+    /// hole the caller leaves in the layout is exactly as wide as the box drawn
+    /// in it.
+    #[must_use]
+    pub fn advance(&self, family: FamilyId, weight: FontWeight, ch: char, size: f32) -> f32 {
+        match self.pick(family, weight, ch) {
+            PickedFont::Covered(face) => face.font().advance(ch, size),
+            PickedFont::Replacement => replacement_advance(size),
+        }
+    }
+
+    /// Returns the distance from a line's top edge to the baseline at `size`
+    /// pixels, from the chain's primary face.
+    ///
+    /// `None` for a family with no font to ask; a caller that has no baseline has
+    /// no text to draw either.
+    #[must_use]
+    pub fn ascent(&self, family: FamilyId, weight: FontWeight, size: f32) -> Option<f32> {
+        self.primary(family, weight)
+            .map(|face| face.font().ascent(size))
+    }
+
+    /// Returns the recommended distance between consecutive baselines at `size`
+    /// pixels, from the chain's primary face.
+    ///
+    /// The primary face's and not a maximum over the chain, for the reason
+    /// [`FontSet::primary`] gives.
+    #[must_use]
+    pub fn line_height(&self, family: FamilyId, weight: FontWeight, size: f32) -> Option<f32> {
+        self.primary(family, weight)
+            .map(|face| face.font().line_height(size))
+    }
+
+    /// Measures a run of text at `size` pixels in `family`: the sum of the
+    /// advances of its characters, each from the font that covers it.
+    #[must_use]
+    pub fn measure(&self, family: FamilyId, weight: FontWeight, text: &str, size: f32) -> f32 {
+        text.chars()
+            .map(|ch| self.advance(family, weight, ch, size))
+            .sum()
+    }
+
+    /// Installs `font` and returns the identity it was given.
+    ///
+    /// **One issue and one push, which is what makes the id the font's own index.**
+    /// The two are separate statements because the id is what the atlas keys on and
+    /// the index is where the face is found, and a set in which they could differ
+    /// would cache one file's glyphs under another's identity.
+    fn install(&mut self, font: Font) -> FontId {
+        let id = self.ids.issue();
+        self.fonts.push(font);
+        id
+    }
+
+    /// Returns the family `id` names, or the default family when there is no such
+    /// family.
+    ///
+    /// An id this set never handed out resolves to the default family rather than
+    /// to nothing, and for the same reason [`FontSet::family`] does: a handle from
+    /// another set, or from before a family was defined, must draw *something*.
+    ///
+    /// **Total**, and that is deliberate — `FontSet::new` creates the default
+    /// family and nothing removes it, so both arms have something to return. A
+    /// caller that wants to know whether a family holds anything asks
+    /// [`Family::is_empty`] through [`FontSet::drawable`].
+    fn entry(&self, id: FamilyId) -> &Family {
+        let index = usize::try_from(id.get()).unwrap_or(usize::MAX);
+        self.families
+            .get(index)
+            .or_else(|| self.families.first())
+            .unwrap_or(&EMPTY_FAMILY)
+    }
+
+    /// Returns the family `id` names for writing, or `None` when the set has no
+    /// such family and no default to write into.
+    fn family_mut(&mut self, id: FamilyId) -> Option<&mut Family> {
+        let index = usize::try_from(id.get())
+            .ok()
+            .filter(|&index| index < self.families.len())
+            .or(if self.families.is_empty() {
+                None
+            } else {
+                Some(0)
+            })?;
+        self.families.get_mut(index)
+    }
+
+    /// Returns the default family for writing.
+    ///
+    /// A set always has one, because [`FontSet::new`] creates it, so this cannot
+    /// fail and the callers do not each re-check it.
+    fn default_family_mut(&mut self) -> &mut Family {
+        self.families.first_mut().unwrap_or_else(|| {
+            unreachable!("FontSet::new creates the default family, so there is one")
         })
+    }
+
+    /// Returns whether the installed font `id` names has a glyph for `ch`.
+    fn covers(&self, id: FontId, ch: char) -> bool {
+        self.font(id).is_some_and(|font| font.has_glyph(ch))
+    }
+
+    /// Returns the installed font `id` names.
+    fn font(&self, id: FontId) -> Option<&Font> {
+        usize::try_from(id.get())
+            .ok()
+            .and_then(|index| self.fonts.get(index))
+    }
+
+    /// Returns `id` paired with the font it names, which is what the atlas caches
+    /// its glyphs under.
+    fn font_ref(&self, id: FontId) -> Option<FontRef<'_>> {
+        self.font(id).map(|font| FontRef { font, id })
     }
 }
 
@@ -758,6 +1250,138 @@ pub fn pad_bitmap(bitmap: &GlyphBitmap, pad: u32) -> GlyphBitmap {
     }
 }
 
+/// The width of the replacement box as a fraction of the em.
+///
+/// The em rather than a pixel count because the box has to sit with the text it
+/// is standing in for: a fixed 8 pixels would be a narrow box beside 24-pixel
+/// type and a wide one beside 14-pixel type, and the *same* box is what tells a
+/// reader that one character is missing.
+///
+/// It is also the box's **advance**, through [`replacement_advance`] — the hole a
+/// layout leaves for the character is exactly as wide as the box drawn in it.
+const REPLACEMENT_ADVANCE_EM: f32 = 0.6;
+
+/// The height of the replacement box as a fraction of the em.
+///
+/// Slightly taller than it is wide, which is the proportion of the empty box
+/// convention goes back on: a square reads as a filled square and a box twice as
+/// tall as it is wide reads as a container that lost its contents, which is what
+/// it is standing in for.
+const REPLACEMENT_HEIGHT_EM: f32 = 0.72;
+
+/// The smallest box either dimension may have, in pixels.
+///
+/// At the small sizes a label's truncation marker or a badge is drawn at, the
+/// fractions round to zero or one, and a 1×1 box is one solid pixel that could be
+/// mistaken for debris.
+///
+/// **Three and not two, and the review of task 30 is what found the two.** This
+/// constant's own doc used to promise that the floor is "the smallest rectangle
+/// that still reads as an outline", while **a 2×2 rectangle has no interior
+/// column at all**: `y == 0 || x == 0 || y + 1 == h || x + 1 == w` is true for
+/// every one of its four pixels, so every size from 1 to 4 pixels drew a solid
+/// block — exactly the failure the sentence says the floor prevents. **Three is
+/// the smallest width with a column that is not on the outline**, so it is the
+/// smallest size at which "hollow" is true rather than merely intended.
+/// `the_replacement_is_a_hollow_box_that_sits_on_the_baseline` now runs its pixel
+/// loop over three sizes rather than one, which is what makes this a checked claim
+/// instead of a comment.
+const REPLACEMENT_MIN: u32 = 3;
+
+/// The advance width of the replacement glyph at `size` pixels.
+///
+/// **The one number both halves of the replacement agree on**, and the reason it
+/// is a function rather than a field read back from the bitmap: the layout's
+/// width for an uncovered character comes from here and the drawn box's own
+/// `advance` comes from [`replacement_bitmap`], so a caller that measured with
+/// one and drew with the other would leave a gap or an overlap. Two callers, one
+/// function — the rule `.ai/NEVERAGAIN.md`'s *two documents each claiming
+/// ownership of one definition* is about, in code.
+#[must_use]
+pub fn replacement_advance(size: f32) -> f32 {
+    REPLACEMENT_ADVANCE_EM * size.max(0.0)
+}
+
+/// Builds the glyph drawn for a character no font in a chain covers: a hollow
+/// rectangle, one pixel of ink on each of its four edges.
+///
+/// **Synthesized rather than taken from a font, and that is a measurement rather
+/// than a preference.** The obvious form is `U+FFFD REPLACEMENT CHARACTER`
+/// rasterized from the primary font, and the font this repository's demo loads has
+/// **no glyph at it** — `Font::has_glyph('\u{fffd}')` is false for Lato-Medium,
+/// Lato-Bold, LiberationSans and NotoSansDevanagari on this host, checked against
+/// each file's own character map rather than against a list of what those fonts
+/// are supposed to have. A rule "use U+FFFD if the primary has one" would therefore
+/// take its second branch in the one place it can be seen, and would look like a
+/// feature in the fonts that do have it.
+///
+/// The box is the conventional empty box, so a reader sees *a character is
+/// missing here* rather than *something was drawn*. It is a [`GlyphBitmap`] like
+/// any other, which is what lets it be packed into the atlas and drawn by the text
+/// shader with no second draw path: **one batch, one shader, one quad**.
+///
+/// The box sits **on the baseline**: `bearing_y` is the box's own height, so the
+/// bottom edge is at the baseline and the top edge is where a capital letter's top
+/// would be. The advance is [`replacement_advance`] and **not the box's rounded
+/// width**, so the pen moves by the same fraction of the em whatever the size —
+/// a rounded width would make the box and the gap disagree by up to half a pixel.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::font::{replacement_advance, replacement_bitmap};
+///
+/// let box_ = replacement_bitmap(24.0);
+/// assert_eq!(box_.advance, replacement_advance(24.0));
+/// // A hollow box: every border pixel is ink and the middle is not.
+/// let w = usize::try_from(box_.width).unwrap_or(0);
+/// let h = usize::try_from(box_.height).unwrap_or(0);
+/// assert_eq!(box_.pixels[0], 255, "the top-left corner is ink");
+/// assert_eq!(box_.pixels[w + 1], 0, "and the middle of the top edge is not");
+/// assert_eq!(
+///     box_.pixels[(h / 2) * w + (w / 2)],
+///     0,
+///     "and neither is the middle of the box"
+/// );
+/// ```
+#[must_use]
+pub fn replacement_bitmap(size: f32) -> GlyphBitmap {
+    let em = size.max(0.0);
+    let width = (REPLACEMENT_ADVANCE_EM * em)
+        .round()
+        .max(u32_to_f32(REPLACEMENT_MIN));
+    let height = (REPLACEMENT_HEIGHT_EM * em)
+        .round()
+        .max(u32_to_f32(REPLACEMENT_MIN));
+    let w = width as u32;
+    let h = height as u32;
+    let mut pixels = vec![0u8; usize::try_from(w).unwrap_or(0) * usize::try_from(h).unwrap_or(0)];
+    for y in 0..h {
+        for x in 0..w {
+            let edge = y == 0 || x == 0 || y + 1 == h || x + 1 == w;
+            if !edge {
+                continue;
+            }
+            let index = usize::try_from(y).unwrap_or(0) * usize::try_from(w).unwrap_or(0)
+                + usize::try_from(x).unwrap_or(0);
+            if let Some(slot) = pixels.get_mut(index) {
+                *slot = 255;
+            }
+        }
+    }
+    GlyphBitmap {
+        width: w,
+        height: h,
+        // The box starts at the pen, so its left edge is the pen's own position
+        // and nothing is drawn to the left of it.
+        bearing_x: 0,
+        // Its bottom edge sits on the baseline.
+        bearing_y: i32::try_from(h).unwrap_or(0),
+        advance: replacement_advance(size),
+        pixels,
+    }
+}
+
 /// Where a glyph lives in the atlas, in UV coordinates and pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GlyphPlacement {
@@ -784,23 +1408,48 @@ pub struct GlyphPlacement {
     pub advance: f32,
 }
 
-/// The key identifying a glyph in the atlas: the character, its pixel size, and
-/// the face that rasterized it.
+/// The key identifying an entry in the atlas.
 ///
-/// **The face is part of the key because the atlas is shared by every face the
-/// renderer holds.** Everything the atlas stores about a glyph is that face's own
-/// — the coverage bitmap, the bearings that place it against the pen, and the
-/// advance the next glyph starts after — so a key of character and size alone
-/// would hand a bold run the *regular* glyph's quad: one letter in the wrong
-/// weight, drawn from the right UVs, with no error anywhere. `face` is the
-/// [`FaceId`] rather than the [`FontWeight`] because it is the identity of the
-/// file that was rasterized, which is what changes when a weight is reinstalled
-/// and is not what the run asked for.
+/// **Two variants rather than a key with an optional character**, because the
+/// replacement glyph is not a character of a font and keying it as one would mean
+/// either a fabricated `char` — a real character some font does have, whose entry
+/// a reader would then believe was that character's — or an identity reserved for
+/// it, which is a second naming scheme beside this one. The variant says what the
+/// entry is, and both arms of it say it with fields they mean.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-struct GlyphKey {
-    ch: char,
-    size: u32,
-    face: FaceId,
+enum GlyphKey {
+    /// A character of one installed font, at a pixel size.
+    ///
+    /// **The font is part of the key because the atlas is shared by every font the
+    /// set holds.** Everything the atlas stores about a glyph is that font's own
+    /// — the coverage bitmap, the bearings that place it against the pen, and the
+    /// advance the next glyph starts after — so a key of character and size alone
+    /// would hand a run the *first* font's quad: one letter from the wrong file,
+    /// drawn from the right UVs, with no error anywhere. `font` is the
+    /// [`FontId`] rather than the [`FontWeight`] because it is the identity of the
+    /// file that was rasterized, which is what changes when a weight is reinstalled
+    /// and is not what the run asked for.
+    Glyph {
+        /// The character the glyph draws.
+        ch: char,
+        /// The pixel count the size rounds to, which is the size the font was
+        /// actually set to.
+        size: u32,
+        /// The font that rasterized it.
+        font: FontId,
+    },
+    /// The replacement glyph at a pixel size.
+    ///
+    /// **No character, and no font**, because it is drawn for every character no
+    /// font covers and looks the same for all of them. One entry per size rather
+    /// than one per uncovered character: a run of five characters nothing covers
+    /// packs one box and draws it five times, where a key carrying the character
+    /// would pack five identical copies of it and evict five shelves' worth of
+    /// real glyphs.
+    Replacement {
+        /// The pixel count the size rounds to.
+        size: u32,
+    },
 }
 
 /// One shelf of the atlas: a horizontal row of glyphs with a shared height.
@@ -887,39 +1536,88 @@ impl GlyphAtlas {
     /// The key `ch` at `size` is cached under in `face`: the character, the
     /// pixel count the size rounds to, and the face's identity.
     ///
-    /// One function builds every key, so a cache that cannot tell two faces apart
+    /// One function builds every key, so a cache that cannot tell two fonts apart
     /// would have to be wrong here rather than in one lookup: the size is the
-    /// rounded pixel count because that is the size the face is actually set to,
-    /// and the face is part of the key because the atlas is shared by all of them.
-    fn key_for(ch: char, size: f32, face: FaceId) -> GlyphKey {
-        GlyphKey {
+    /// rounded pixel count because that is the size the font is actually set to,
+    /// and the font is part of the key because the atlas is shared by all of them.
+    fn key_for(ch: char, size: f32, font: FontId) -> GlyphKey {
+        GlyphKey::Glyph {
             ch,
             size: f32_to_u32(size.max(0.0)).max(1),
-            face,
+            font,
         }
     }
 
-    /// Returns the placement of `ch` at `size` in `face`, rasterizing and
+    /// The key the replacement glyph at `size` is cached under.
+    ///
+    /// The same rounding and the same floor as [`GlyphAtlas::key_for`], written out
+    /// rather than borrowed, because the two are different variants of one key: a
+    /// function that took a character and returned a `GlyphKey` for both would
+    /// have to invent one for the replacement, which is the fabrication the enum
+    /// exists to avoid.
+    fn replacement_key(size: f32) -> GlyphKey {
+        GlyphKey::Replacement {
+            size: f32_to_u32(size.max(0.0)).max(1),
+        }
+    }
+
+    /// Returns the placement of `ch` at `size` in `font`, rasterizing and
     /// packing it if it is not already in the atlas.
     ///
-    /// The same character at the same size in a different face is a **different**
+    /// The same character at the same size in a different font is a **different**
     /// glyph — different coverage, different bearings, different advance — so it
     /// is packed separately and looked up separately; see `GlyphKey`.
     ///
-    /// Returns `None` if the font has no glyph for `ch`.
+    /// Returns `None` if the font has no glyph for `ch`, **which is what a space
+    /// always returns**: a space rasterizes to nothing, so there is no quad to
+    /// draw and no placement to read an advance from, while the space still
+    /// occupies width. The caller reads the advance from the font instead; see
+    /// `crate::render`'s `advance_for`.
     pub fn get_or_insert(
         &mut self,
         ch: char,
         size: f32,
-        face: FaceRef<'_>,
+        font: FontRef<'_>,
     ) -> Option<GlyphPlacement> {
-        let key = Self::key_for(ch, size, face.id());
-        if let Some(&placement) = self.glyphs.get(&key) {
-            self.touch_row(placement.row_y);
-            return Some(placement);
-        }
-        let bitmap = face.font().rasterize(ch, size)?;
-        let padded = pad_bitmap(&bitmap, COVERAGE_PAD);
+        let key = Self::key_for(ch, size, font.id());
+        self.cached(key)
+            .or_else(|| self.pack(key, font.font().rasterize(ch, size)))
+    }
+
+    /// Returns the placement of the replacement glyph at `size`, packing
+    /// [`replacement_bitmap`] if it is not already in the atlas.
+    ///
+    /// **This is what a character no font in a chain covers is drawn from**, and it
+    /// returns a placement like any other rather than a `None`: the caller has
+    /// already asked the chain and every font said no, so a `None` here would put
+    /// the hole straight back that the replacement exists to fill. The only way it
+    /// returns `None` is the atlas being full of larger glyphs than the box, in
+    /// which case the character is dropped and the run continues — a lossy atlas
+    /// rather than a silent missing character, which is a different defect and
+    /// task 31's.
+    pub fn get_or_insert_replacement(&mut self, size: f32) -> Option<GlyphPlacement> {
+        let key = Self::replacement_key(size);
+        self.cached(key)
+            .or_else(|| self.pack(key, Some(replacement_bitmap(size))))
+    }
+
+    /// Returns the placement stored under `key`, marking its shelf most recently
+    /// used.
+    fn cached(&mut self, key: GlyphKey) -> Option<GlyphPlacement> {
+        let placement = *self.glyphs.get(&key)?;
+        self.touch_row(placement.row_y);
+        Some(placement)
+    }
+
+    /// Pads, packs and records `bitmap` under `key`, and returns where it went.
+    ///
+    /// One function for both arms of [`GlyphKey`], because padding, packing,
+    /// blitting and shelf bookkeeping are four steps that have to happen in that
+    /// order for every entry, and a second copy of them is a second copy of the
+    /// atlas's only state machine. `None` for a bitmap the font did not produce
+    /// and one the atlas cannot fit.
+    fn pack(&mut self, key: GlyphKey, bitmap: Option<GlyphBitmap>) -> Option<GlyphPlacement> {
+        let padded = pad_bitmap(&bitmap?, COVERAGE_PAD);
         let glyph = make_coverage(&padded);
         let (x, y) = self.allocate(glyph.width, glyph.height)?;
         self.blit(x, y, &glyph);
@@ -1441,8 +2139,8 @@ mod weight_tests {
         // found separately — a key without the face would hand the bold run the
         // regular glyph's quad, one letter in the wrong weight with no error.
         let mut atlas = GlyphAtlas::new(1024);
-        let regular = FaceId(0);
-        let bold = FaceId(1);
+        let regular = FontId(0);
+        let bold = FontId(1);
         let key_regular = GlyphAtlas::key_for('a', 20.0, regular);
         let key_bold = GlyphAtlas::key_for('a', 20.0, bold);
         assert_ne!(
@@ -1480,7 +2178,7 @@ mod weight_tests {
         // The other direction: adding the face must not make the key *only* the
         // face, or every glyph would be one entry per face and the atlas would
         // hold one letter.
-        let face = FaceId(3);
+        let face = FontId(3);
         assert_ne!(
             GlyphAtlas::key_for('a', 20.0, face),
             GlyphAtlas::key_for('b', 20.0, face)
@@ -1496,51 +2194,735 @@ mod weight_tests {
     }
 
     #[test]
-    fn the_size_in_the_key_is_the_pixel_count_the_face_is_set_to() {
-        // Unchanged by the face, and pinned because the atlas's own tests would
+    fn the_size_in_the_key_is_the_pixel_count_the_font_is_set_to() {
+        // Unchanged by the font, and pinned because the atlas's own tests would
         // not notice: a float key would store the same glyph twice for two sizes
         // that round to the same pixel count.
-        assert_eq!(GlyphAtlas::key_for('a', 20.4, FaceId(0)).size, 20);
-        assert_eq!(GlyphAtlas::key_for('a', 0.0, FaceId(0)).size, 1);
+        let GlyphKey::Glyph { size, .. } = GlyphAtlas::key_for('a', 20.4, FontId(0)) else {
+            panic!("a character's key names its size");
+        };
+        assert_eq!(size, 20);
+        let GlyphKey::Glyph { size, .. } = GlyphAtlas::key_for('a', 0.0, FontId(0)) else {
+            panic!("a character's key names its size");
+        };
+        assert_eq!(
+            size, 1,
+            "and a size of zero floors to one, as it always has"
+        );
     }
 
     #[test]
-    fn each_installed_face_is_given_an_identity_of_its_own() {
-        let mut ids = FaceIds::new();
+    fn the_replacement_key_is_one_size_and_names_no_character() {
+        // The shape of the second arm, and the reason it is a variant rather than
+        // a key with an empty character: a key built per uncovered character would
+        // pack five identical boxes for a run of five.
+        let key = GlyphAtlas::replacement_key(20.0);
+        assert_eq!(key, GlyphAtlas::replacement_key(20.0), "one entry per size");
+        assert_ne!(key, GlyphAtlas::replacement_key(21.0), "and one per size");
+        assert_ne!(
+            key,
+            GlyphAtlas::key_for('a', 20.0, FontId(0)),
+            "and it is not a character's entry, or the box would be drawn where a \
+             letter was asked for and the two would evict each other"
+        );
+    }
+
+    #[test]
+    fn the_replacement_key_is_not_any_characters_key_and_says_so_in_its_variant() {
+        // **The assertion the first version of this file did not have**, and the
+        // mutation `replacement-is-keyed-per-character` is what found it: making
+        // the replacement's key a `Glyph` under some character changes nothing
+        // about the numbers — it is still one entry per size, and it is still
+        // distinct from the keys of 'a', ' ' and U+4E2D — so both of the tests
+        // above stayed green while the enum's reason for existing was gone.
+        //
+        // The character a hand-written key would fabricate is **U+FFFD**, because
+        // that is the character the replacement *stands in for*. So this asks about
+        // that one specifically, and asserts the variant as well: a key that is not
+        // a `Replacement` is the defect, whatever it collides with.
+        let key = GlyphAtlas::replacement_key(20.0);
+        assert!(
+            matches!(key, GlyphKey::Replacement { size: 20 }),
+            "the replacement's key says what it is: {key:?}"
+        );
+        for font in 0..4_u32 {
+            assert_ne!(
+                key,
+                GlyphAtlas::key_for('\u{fffd}', 20.0, FontId(font)),
+                "and it is not U+FFFD's key in any font — the character the box \\
+                 stands in for is the one a fabricated key would collide with, and \\
+                 a collision there would draw the replacement *over* a font's own \\
+                 replacement character wherever that font has one"
+            );
+        }
+    }
+
+    /// **The two tests below were deleted by task 30 and are restored here**, and
+    /// the review of task 30 is what found them: `FaceIds` was removed when the
+    /// identity became a font's own index, and with it the only seam through which
+    /// *"every install is a new identity"* could be tested — a `Font` needs a font
+    /// file, which `AGENTS.md` forbids a test to open. `FontIds` is that seam back,
+    /// and the mutation `install()` returning a constant id survived the whole
+    /// suite while the property was untested, which is precisely what a gate with
+    /// no test looks like.
+    #[test]
+    fn each_installed_font_is_given_an_identity_of_its_own() {
+        let mut ids = FontIds::default();
         let first = ids.issue();
         let second = ids.issue();
         assert_ne!(
             first, second,
-            "two faces cached under one identity would share every glyph in the \
+            "two fonts cached under one identity would share every glyph in the \
              atlas, whichever weight they were rasterized from"
         );
     }
 
     #[test]
-    fn a_reinstalled_face_gets_an_identity_the_previous_one_never_had() {
+    fn a_reinstalled_font_gets_an_identity_the_previous_one_never_had() {
         // The rule the atlas key depends on when a renderer swaps its bold file:
         // the glyphs of the file that has just been dropped must not be found for
         // the file that is there now, and the only thing that can separate them is
-        // a new identity.
-        let mut ids = FaceIds::new();
+        // a new identity. **An id is never reused**, so replacing a weight cannot
+        // hand back the identity the dropped file had — and the identity an
+        // untouched font still holds is still that font's, which is the half a
+        // chain still naming it depends on.
+        let mut ids = FontIds::default();
         let regular = ids.issue();
         let bold = ids.issue();
-        ids.install(FontWeight::Regular.slot(), regular);
-        ids.install(FontWeight::Bold.slot(), bold);
-
         let bold_again = ids.issue();
-        ids.install(FontWeight::Bold.slot(), bold_again);
 
-        assert_ne!(bold_again, bold, "the replaced face is a different face");
-        assert_eq!(
-            ids.get(FontWeight::Bold.slot()),
-            bold_again,
-            "and the slot holds the one that is installed now"
+        assert_ne!(bold_again, bold, "the replaced font is a different font");
+        assert_ne!(
+            bold_again, regular,
+            "and its identity is not the other one's"
         );
         assert_eq!(
-            ids.get(FontWeight::Regular.slot()),
-            regular,
-            "while the other slot is untouched by one slot being replaced"
+            regular.get(),
+            0,
+            "while the identity the first font still holds is the one it was given: \\
+             a counter that rewrote an old id would take it away from a chain still \\
+             naming that font"
+        );
+        assert_eq!(bold.get(), 1);
+        assert_eq!(bold_again.get(), 2, "three installs, three numbers");
+    }
+
+    #[test]
+    fn the_identity_and_the_fonts_own_length_are_the_same_number() {
+        // **New in task 30, and it is the assertion the index-based identity
+        // introduces.** `FontSet::install` pushes one font per issue, so the id
+        // and the index agree by construction — and "by construction" is a comment,
+        // not a check. If a future install path ever pushed without issuing, or
+        // issued without pushing, the atlas would key one file's glyphs where
+        // another file is looked up: a bold run drawn from the regular glyph's
+        // quad, with no error anywhere.
+        let mut ids = FontIds::default();
+        let mut installed = Vec::new();
+        for _ in 0..3 {
+            let id = ids.issue();
+            installed.push(id);
+        }
+        for (index, id) in installed.iter().enumerate() {
+            assert_eq!(
+                id.get(),
+                u32::try_from(index).unwrap_or(0),
+                "the {index}th font installed is at index {index} and carries that \
+                 number, so an id is where the face is found"
+            );
+        }
+        assert_eq!(
+            ids.issued,
+            u32::try_from(installed.len()).unwrap_or(0),
+            "and the counter is exactly how many were installed"
+        );
+    }
+
+    #[test]
+    fn the_two_arms_of_the_key_do_not_collide_at_the_same_size() {
+        // Every size has both a character's entries and the replacement's, and the
+        // atlas holds them in one map: an arm that could be reached from the other
+        // would return the wrong placement with no error.
+        for size in [1.0_f32, 14.0, 20.4, 24.0] {
+            let mut keys = std::collections::HashSet::new();
+            for ch in ['a', '\u{4e2d}', ' '] {
+                keys.insert(GlyphAtlas::key_for(ch, size, FontId(0)));
+            }
+            keys.insert(GlyphAtlas::replacement_key(size));
+            assert_eq!(keys.len(), 4, "four distinct entries at {size} pixels");
+        }
+    }
+}
+
+/// The chain: which font a character is looked for in, and what happens when none
+/// of them has it.
+///
+/// Neither half needs a font file and neither could: rasterizing needs a real
+/// face, and a unit test may not open one. What *can* be tested is everything the
+/// chain decides before FreeType is asked anything — the order fonts are asked in,
+/// and the width an uncovered character is measured at — because the chain's rule
+/// is written as a free function over a coverage callback for exactly this
+/// reason. What is **not** here is anything that reads a font's own character map:
+/// whether Lato covers a warning sign is a fact about a file on this host, checked
+/// against the file and recorded in the module docs, not something a unit test can
+/// assert.
+#[cfg(test)]
+mod chain_tests {
+    use super::*;
+
+    /// Coverage as a table: one row per font id and the characters that font
+    /// covers. **A font with no row covers nothing**, and that is the whole of how
+    /// two fonts in one chain are made to differ — written as a table rather than
+    /// as one set of characters because a callback answering the same for every
+    /// font cannot tell a chain from its first entry.
+    fn covers_in<'a>(table: &'a [(u32, &'a str)]) -> impl FnMut(FontId, char) -> bool + 'a {
+        move |id: FontId, ch: char| {
+            table
+                .iter()
+                .any(|&(font, covered)| font == id.get() && covered.contains(ch))
+        }
+    }
+
+    /// The primary of a chain and the fallbacks after it, as the arguments
+    /// `pick_in_chain` takes.
+    fn chain(primary: Option<u32>, fallbacks: &[u32]) -> (Option<FontId>, Vec<FontId>) {
+        (
+            primary.map(FontId),
+            fallbacks.iter().copied().map(FontId).collect(),
+        )
+    }
+
+    #[test]
+    fn the_first_font_that_covers_the_character_is_the_one_that_draws_it() {
+        // The mechanism: the primary says no, the first fallback says yes, and the
+        // answer is that fallback's identity — which is what the atlas then keys
+        // the glyph under and what the advance is measured from.
+        let (primary, fallbacks) = chain(Some(0), &[1, 2]);
+        let picked = pick_in_chain(
+            primary,
+            &fallbacks,
+            &mut covers_in(&[(1, "\u{26a0}"), (2, "\u{26a0}")]),
+            '\u{26a0}',
+        );
+        assert_eq!(picked, Some(FontId(1)));
+    }
+
+    #[test]
+    fn the_primary_is_asked_before_any_fallback() {
+        // A fallback that covers everything would make this invisible if the order
+        // were reversed, and reversing it is the defect: the whole point of a
+        // chain is that the font the caller asked for draws what it has.
+        let (primary, fallbacks) = chain(Some(0), &[1]);
+        let picked = pick_in_chain(
+            primary,
+            &fallbacks,
+            &mut covers_in(&[(0, "a"), (1, "a")]),
+            'a',
+        );
+        assert_eq!(
+            picked,
+            Some(FontId(0)),
+            "the primary covered it, so the primary drew it"
+        );
+    }
+
+    #[test]
+    fn a_character_no_font_covers_is_not_a_font() {
+        // The other direction, and the reason this returns an `Option` at all: no
+        // font is a normal answer and it has to be distinguishable from "the first
+        // font that covered it".
+        let (primary, fallbacks) = chain(Some(0), &[1, 2]);
+        let picked = pick_in_chain(
+            primary,
+            &fallbacks,
+            &mut covers_in(&[(0, "a"), (1, "a"), (2, "a")]),
+            '\u{4e2d}',
+        );
+        assert_eq!(
+            picked, None,
+            "no font covers it, which the caller draws as the replacement"
+        );
+    }
+
+    #[test]
+    fn a_chain_of_one_font_answers_for_every_character() {
+        // Total in both directions, because a caller walks this per character per
+        // frame and an early return would be a hole rather than an answer.
+        let (primary, fallbacks) = chain(Some(0), &[]);
+        let mut covers_everything = |_id: FontId, _ch: char| true;
+        assert_eq!(
+            pick_in_chain(primary, &fallbacks, &mut covers_everything, 'a'),
+            Some(FontId(0)),
+            "one font that covers everything is a whole chain"
+        );
+        assert_eq!(
+            pick_in_chain(primary, &fallbacks, &mut covers_in(&[]), 'a'),
+            None,
+            "and one that covers nothing draws no font at all"
+        );
+    }
+
+    #[test]
+    fn an_empty_chain_draws_no_font_and_asks_no_font() {
+        // The state a renderer is in before any font is installed, and the one the
+        // renderer's own empty-set gate exists to avoid paying for per character.
+        let empty: Vec<FontId> = Vec::new();
+        let mut asked = 0_u32;
+        let picked = pick_in_chain(
+            None,
+            &empty,
+            &mut |_id: FontId, _ch: char| {
+                asked += 1;
+                true
+            },
+            'a',
+        );
+        assert_eq!(picked, None);
+        assert_eq!(
+            asked, 0,
+            "and it asked nobody, so there is nothing to draw with"
+        );
+    }
+
+    #[test]
+    fn the_primary_is_asked_once_when_it_is_also_a_fallback() {
+        // A chain built by appending the primary's own font — which is what
+        // `add_fallback` with the same file gives — must not ask it twice. Asking
+        // twice is free but it is two readings of one chain and the next reader
+        // would have to work out whether the two can disagree.
+        //
+        // **The primary has to decline, or this test cannot see anything**: the
+        // walk returns as soon as a font covers the character, so with a primary
+        // that covers it the fallback pass never runs and the duplicate is
+        // invisible. The first version of this test had the primary covering and
+        // asserted one question, which passed with the filter deleted — the
+        // mutation named `chain-asks-the-primary-twice` is what found it.
+        let (primary, fallbacks) = chain(Some(0), &[0, 1]);
+        let mut asked = Vec::new();
+        let picked = pick_in_chain(
+            primary,
+            &fallbacks,
+            &mut |id: FontId, ch: char| {
+                asked.push((id, ch));
+                // The primary has no glyph; the font that is also a fallback has.
+                id.get() == 1 && ch == 'a'
+            },
+            'a',
+        );
+        assert_eq!(
+            picked,
+            Some(FontId(1)),
+            "the second font in the list covers it, and it is the same font the \\
+             chain already asked once"
+        );
+        assert_eq!(
+            asked,
+            vec![(FontId(0), 'a'), (FontId(1), 'a')],
+            "two questions, one per font: the primary is asked first and **not** \\
+             again in the fallback pass, and the third entry of the chain is never \
+             reached"
+        );
+    }
+
+    #[test]
+    fn the_chain_is_walked_in_order_and_stops_at_the_first_hit() {
+        // The order is the mechanism, so it is pinned as an order: three fallbacks
+        // all covering the character, and the first one is the answer.
+        let (primary, fallbacks) = chain(None, &[7, 8, 9]);
+        let mut asked = Vec::new();
+        let picked = pick_in_chain(
+            primary,
+            &fallbacks,
+            &mut |id: FontId, ch: char| {
+                asked.push(id.get());
+                ch == 'x'
+            },
+            'x',
+        );
+        assert_eq!(picked, Some(FontId(7)));
+        assert_eq!(asked, vec![7], "and the two after it were never asked");
+    }
+
+    #[test]
+    fn a_family_with_no_face_of_its_own_starts_at_its_first_font() {
+        // A chain of fallbacks alone is a family whose primary is its first entry —
+        // which is what makes `define_family` + `add_fallback_to` a family at all.
+        let family = Family {
+            faces: [None, None],
+            fallbacks: vec![FontId(4), FontId(5)],
+            ..Family::default()
+        };
+        assert_eq!(family.primary_id(FontWeight::Regular), Some(FontId(4)));
+        assert_eq!(
+            family.primary_id(FontWeight::Bold),
+            Some(FontId(4)),
+            "and the weight asked for does not change it, because the family has \
+             no face of either"
+        );
+    }
+
+    #[test]
+    fn a_familys_primary_is_the_weights_own_face_then_the_regular_one() {
+        // The two clauses `resolve_slot` already owns, read through a family: they
+        // are unchanged, and this says so where the chain now reads them.
+        let family = Family {
+            faces: [Some(FontId(1)), Some(FontId(2))],
+            fallbacks: vec![FontId(3)],
+            ..Family::default()
+        };
+        assert_eq!(family.primary_id(FontWeight::Regular), Some(FontId(1)));
+        assert_eq!(family.primary_id(FontWeight::Bold), Some(FontId(2)));
+
+        let regular_only = Family {
+            faces: [Some(FontId(1)), None],
+            fallbacks: vec![FontId(3)],
+            ..Family::default()
+        };
+        assert_eq!(
+            regular_only.primary_id(FontWeight::Bold),
+            Some(FontId(1)),
+            "a weight with no face of its own falls back to the regular one"
+        );
+    }
+
+    #[test]
+    fn a_family_with_nothing_in_it_has_no_primary_and_no_fallbacks() {
+        // The empty chain, and `None` rather than a panic: a family id from another
+        // set resolves to the default family, and the default family of an empty
+        // set is empty.
+        let empty = Family::default();
+        assert_eq!(empty.primary_id(FontWeight::Regular), None);
+        assert!(empty.fallbacks.is_empty());
+        assert!(
+            empty.is_empty(),
+            "and it says so, which is what `FontSet::drawable` asks before handing \\
+             the default family over in its place"
+        );
+    }
+
+    #[test]
+    fn a_family_that_holds_a_font_is_not_empty_even_with_no_face_of_its_own() {
+        // The other side of the same question, and the reason the check is
+        // `is_empty` rather than *"has a face for this weight"*: a family of
+        // fallbacks alone is a real family, and asking for a regular face in it
+        // must not classify it as empty and send the run to the default family.
+        let chain_only = Family {
+            faces: [None, None],
+            fallbacks: vec![FontId(9)],
+            ..Family::default()
+        };
+        assert!(!chain_only.is_empty());
+        assert!(
+            !Family {
+                faces: [Some(FontId(1)), None],
+                fallbacks: Vec::new(),
+                ..Family::default()
+            }
+            .is_empty(),
+            "and a family with one face of its own is not empty either"
+        );
+    }
+
+    #[test]
+    fn an_empty_family_is_replaced_by_the_default_one_where_there_is_a_font() {
+        // The rule that stops a whole run from vanishing, and the review of task 30
+        // is what found it missing: `draw_text_batch` `continue`s when a run's
+        // family has no primary, so an empty family dropped every character of
+        // every run in it — requirement 4's "never a silent hole", at the largest
+        // possible size.
+        //
+        // **What is testable here and what is not, stated rather than blurred.**
+        // Which family is *chosen* needs a font in the default family, and a test
+        // may not open one — so this asserts the two halves that do not: that an
+        // empty family is recognised as empty, and that `drawable` hands back the
+        // family it was given when **that** family is the default one (which is
+        // the case a set with no fonts at all is in, and the one that must stay a
+        // dropped run). **The substitution itself is verified by the capture
+        // recorded in `IMPLEMENTATION_STATE.md`, not by a test**, and
+        // `an_empty_family_resolves_to_the_default_rather_than_to_nothing_is_not_
+        // unit_testable` is not written here because a test that asserts a
+        // substitution it cannot set up is a test that passes either way.
+        let mut set = FontSet::new();
+        let empty_family = set.define_family("later");
+        assert_eq!(set.family("later"), empty_family);
+        assert!(
+            set.entry(empty_family).is_empty(),
+            "a family defined and never filled is empty, which is the state the \\
+             rule is about"
+        );
+        assert!(
+            set.primary(empty_family, FontWeight::Regular).is_none(),
+            "and with nothing installed at all there is genuinely nothing to draw \
+             with, so the run is dropped — the one state that may be"
+        );
+        assert!(
+            matches!(
+                set.pick(empty_family, FontWeight::Regular, 'a'),
+                PickedFont::Replacement
+            ),
+            "and a character in it is uncovered, which is a box rather than a gap"
+        );
+    }
+
+    #[test]
+    fn the_default_family_exists_from_the_first_moment_and_is_the_default_one() {
+        // Why `FamilyId::default` needs no `Option`: `FontSet::new` makes the
+        // default family, so a property built with `Default` names a family that
+        // exists rather than one that has to be checked for.
+        let set = FontSet::new();
+        assert_eq!(set.default_family(), FamilyId::default());
+        assert_eq!(
+            Some(set.entry(FamilyId::default()).name.as_str()),
+            Some(DEFAULT_FAMILY)
+        );
+    }
+
+    #[test]
+    fn a_family_named_twice_is_defined_once() {
+        // Defining a family twice returns the one that is there rather than
+        // replacing it: emptying a chain something else is drawing with, by
+        // accident, is not a thing a caller can do by asking twice.
+        let mut set = FontSet::new();
+        let first = set.define_family("heading");
+        let second = set.define_family("heading");
+        assert_eq!(first, second);
+        assert_eq!(set.family("heading"), first);
+    }
+
+    #[test]
+    fn a_family_name_that_is_not_defined_is_the_default_family() {
+        // The rule that keeps every existing program working: nothing here has
+        // heard of families, its labels carry `FamilyId::default()`, and the
+        // default family is what they are drawn in.
+        let set = FontSet::new();
+        assert_eq!(set.family("sans-serif"), set.default_family());
+        assert_eq!(set.family(""), set.default_family());
+    }
+
+    #[test]
+    fn a_family_id_this_set_never_handed_out_is_the_default_family() {
+        // The handle can come from another set, or from before a family was
+        // defined. Either way the run is drawn, in the default family, because a
+        // run that is not drawn is a hole in the layout.
+        let mut set = FontSet::new();
+        let defined = set.define_family("heading");
+        let never_handed_out = FamilyId::u32_from(defined.get() + 7);
+        assert_eq!(
+            Some(set.entry(never_handed_out).name.as_str()),
+            Some(DEFAULT_FAMILY),
+            "an id from beyond the table lands on the default family"
+        );
+    }
+
+    #[test]
+    fn the_replacement_advance_is_the_advance_the_box_is_drawn_at() {
+        // The one number both halves agree on, and the assertion that holds them
+        // together: the layout's width for an uncovered character comes from
+        // `replacement_advance` and the drawn box's own advance comes from the
+        // bitmap. Two callers, one function — and this is the test that says so,
+        // at several sizes, because a rounding difference at one size can be a
+        // half-pixel gap at another.
+        for size in [8.0_f32, 12.0, 14.0, 18.0, 24.0, 48.0] {
+            assert_eq!(
+                replacement_bitmap(size).advance,
+                replacement_advance(size),
+                "at {size} pixels the box and the pen agree"
+            );
+        }
+    }
+
+    #[test]
+    fn the_replacement_is_a_hollow_box_that_sits_on_the_baseline() {
+        // Shape, because "draws a visible replacement" is a claim about pixels and
+        // the pixels are the bitmap: every border pixel ink, the middle empty, and
+        // the bearings putting it on the baseline at the pen.
+        //
+        // **Three sizes, and the two small ones are the point.** At 24 pixels every
+        // assertion below passes whatever `REPLACEMENT_MIN` is, because the fractions
+        // are far from the floor — which is how `REPLACEMENT_MIN = 2` survived: a 2×2
+        // box is *solid*, and no test looked at a size where the floor binds.
+        for size in [3.0_f32, 8.0, 24.0] {
+            let bitmap = replacement_bitmap(size);
+            let w = usize::try_from(bitmap.width).unwrap_or(0);
+            let h = usize::try_from(bitmap.height).unwrap_or(0);
+            assert!(w >= 3 && h >= 3, "at {size} px it is {w}x{h}, not a dot");
+            for y in 0..h {
+                for x in 0..w {
+                    let edge = y == 0 || x == 0 || y + 1 == h || x + 1 == w;
+                    let expected = if edge { 255 } else { 0 };
+                    assert_eq!(
+                        bitmap.pixels[y * w + x],
+                        expected,
+                        "at {size} px, pixel ({x}, {y}) is {}",
+                        if edge { "on the outline" } else { "inside" }
+                    );
+                }
+            }
+        }
+        let bitmap = replacement_bitmap(24.0);
+        assert!(bitmap.pixels.contains(&255), "and there is ink in the box");
+        assert!(
+            bitmap.pixels.iter().all(|&p| p == 0 || p == 255),
+            "which is whole pixels, because it is not a font's edge and has no \
+             antialiasing to carry"
+        );
+        assert_eq!(bitmap.bearing_x, 0, "the box starts at the pen");
+        assert_eq!(
+            bitmap.bearing_y,
+            i32::try_from(bitmap.height).unwrap_or(0),
+            "and its bottom edge sits on the baseline"
+        );
+    }
+
+    /// The numbers the two constants fix, at one size, written out.
+    ///
+    /// **A design choice is not a derived number, so nothing can prove it — which
+    /// is exactly why it is pinned.** `REPLACEMENT_ADVANCE_EM` is 0.6 and
+    /// `REPLACEMENT_HEIGHT_EM` is 0.72, and at 24 pixels that is a box 14 wide and
+    /// 17 tall with an advance of 14.4. Every *other* test in this module can only
+    /// show that the two halves of the replacement agree, which they would agree
+    /// about at 0.06 as readily as at 0.6; a mistyped fraction would leave the
+    /// suite green and put a box half the width of the character it stands in for
+    /// on the screen. `.ai/NEVERAGAIN.md`'s *a strength clamped to 0..=1* entry is
+    /// the same shape: assert the number the word in the spec fixes, because a
+    /// shape assertion will not.
+    #[test]
+    fn the_replacement_box_is_the_size_its_two_constants_fix() {
+        let bitmap = replacement_bitmap(24.0);
+        assert_eq!(
+            (bitmap.width, bitmap.height),
+            (14, 17),
+            "0.6 and 0.72 of 24 pixels, rounded: a box a little taller than it is \
+             wide, which is the proportion that reads as 'empty'"
+        );
+        // **Within an ulp, and the reason is written down rather than the
+        // tolerance being a number someone picked.** `0.6_f32 * 24.0` is
+        // 14.400001, so an exact comparison against the decimal a reader would
+        // write is an assertion about f32's arithmetic rather than about this
+        // constant. The property being pinned is "0.6 of the em", and 14.4 is that
+        // to the nearest representable value.
+        assert!(
+            (bitmap.advance - 14.4).abs() < 1e-4,
+            "and an advance of 0.6 em — which is 14.4 and not 14, because the pen \
+             moves by the fraction and the box is the rounded drawing of it \
+             (got {})",
+            bitmap.advance
+        );
+    }
+
+    #[test]
+    fn a_replacement_is_packed_and_returned_rather_than_dropped() {
+        // **The gate this module would otherwise have none of.** Everything else
+        // here is about *which* font draws a character; this is about the one path
+        // that draws something no font drew, and it can only answer for itself:
+        // `get_or_insert_replacement` takes no font, so a test can call it.
+        //
+        // The mutation it kills is one line — returning `None` — and that is the
+        // original defect task 30 exists to remove: a character nothing covers,
+        // answered with "no glyph", drawn as nothing. A `None` here is a silent
+        // hole wearing the fix's own type.
+        let mut atlas = GlyphAtlas::new(1024);
+        let placement = atlas.get_or_insert_replacement(24.0);
+        let placement = placement.expect("the replacement is packed, not dropped");
+        // **The padded size, not the bitmap's**, and the difference is the point:
+        // the atlas stores `COVERAGE_PAD` transparent pixels around every glyph so
+        // linear filtering never interpolates a neighbour into it, and this entry
+        // goes through the same `pad_bitmap` a rasterized glyph does. A reader who
+        // expected 14 × 17 here would be right about the box and wrong about what
+        // the atlas holds — the quad drawn on screen is the placement, so it is two
+        // pixels wider than the ink and lands 14.4 pixels along the pen.
+        assert_eq!(placement.width, 16, "14 of box plus a pixel either side");
+        assert_eq!(
+            placement.height, 19,
+            "17 of box plus a pixel above and below"
+        );
+        assert_eq!(placement.advance, replacement_advance(24.0));
+        assert_eq!(placement.bearing_x, -1, "moved a pixel left of the pen");
+        assert_eq!(
+            placement.bearing_y, 18,
+            "and its bottom edge still sits on the baseline, because the padding \
+             moves with the ink"
+        );
+        assert!(
+            atlas.pixels().contains(&255),
+            "and there are inked pixels in the atlas, which is what makes this a \
+             drawn box rather than a placement of nothing"
+        );
+    }
+
+    #[test]
+    fn the_replacement_is_packed_once_per_size_however_many_characters_need_it() {
+        // The other direction, and the reason the key has no character in it: five
+        // uncovered characters in a row draw five boxes out of **one** atlas entry,
+        // so a page of text in a script no font covers cannot evict every real
+        // glyph in the atlas to store identical copies of a box.
+        let mut atlas = GlyphAtlas::new(1024);
+        let first = atlas
+            .get_or_insert_replacement(24.0)
+            .expect("the replacement is packed");
+        let second = atlas.get_or_insert_replacement(24.0).expect("and again");
+        assert_eq!(
+            first, second,
+            "the same entry, found rather than packed again"
+        );
+        assert_eq!(
+            atlas.glyphs.len(),
+            1,
+            "and the atlas holds one entry for both, not two"
+        );
+        assert_ne!(
+            atlas.get_or_insert_replacement(25.0),
+            Some(first),
+            "a different size is a different entry, because a glyph is rasterized \
+             at the size it is drawn"
+        );
+        assert_eq!(atlas.glyphs.len(), 2, "which is two");
+    }
+
+    #[test]
+    fn the_replacement_is_never_a_blank_or_a_single_pixel() {
+        // The two sizes where a fraction of the em rounds away, and where a box
+        // built from `round()` alone would be 1x1 — one solid pixel that reads as
+        // debris rather than as a missing character.
+        for size in [1.0_f32, 2.0, 3.0, 6.0, 0.0, -4.0] {
+            let bitmap = replacement_bitmap(size);
+            assert!(
+                bitmap.width >= REPLACEMENT_MIN && bitmap.height >= REPLACEMENT_MIN,
+                "at {size} pixels the box is {}x{}, not a dot",
+                bitmap.width,
+                bitmap.height
+            );
+            assert!(
+                !bitmap.pixels.is_empty(),
+                "and it has pixels at all, at {size} pixels"
+            );
+        }
+    }
+
+    #[test]
+    fn the_replacement_advances_the_pen_rather_than_disappearing() {
+        // "Whatever it is, it advances the pen", stated as the property: the hole
+        // a layout leaves is as wide as the box, so the words after it do not
+        // close over the gap.
+        assert!(
+            replacement_advance(24.0) > 0.0,
+            "an uncovered character is as wide as the box drawn in it"
+        );
+        // **The review of task 30 deleted a line here** that read
+        // `assert_eq!(replacement_advance(24.0), replacement_advance(24.0) * 3.0 / 3.0)`
+        // and claimed to show "a function of the size rather than a constant". Both
+        // sides are the same `f32` bits, so it was true by construction and it is
+        // **not even generally true of `f32` here** — 229 of the 1999 half-pixel
+        // sizes fail `x * 3.0 / 3.0 == x`. What it actually asserted was that one
+        // value round-trips.
+        assert_ne!(
+            replacement_advance(8.0),
+            replacement_advance(24.0),
+            "and it is a function of the size rather than a constant, which is the \
+             property the deleted line claimed and could not test"
+        );
+        assert!(
+            replacement_advance(48.0) > replacement_advance(24.0),
+            "and it grows with the text, as a character's width does"
         );
     }
 }

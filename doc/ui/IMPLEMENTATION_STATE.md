@@ -11,16 +11,27 @@ The platform and cross-compilation tasks are a separate sequence —
 `doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
 `doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-05 (task 24 recorded as `e567634`; nothing in flight)
+**Last updated:** 2026-10-05 (task 30 implemented and reviewed-in-place, **not
+committed**; tasks 24 and 33 committed as `e567634` and `1aa28e6`)
 
 ## Current position
 
-**Status: task 24 (Demo Application) is done and committed as `e567634` on
+**Status: task 30 (Font fallback chain) is implemented, measured and reviewed,
+and is UNCOMMITTED.** It is the first task of the `PRIM` sequence to be handed
+over without a commit, because the operator's session asked for the work to
+continue rather than for it to be landed; **the sequence's *No uncommitted
+advance* gate is therefore open**, and `.ai/workflows/task-sequence.md` step 5
+is the operator's. Nothing else is in flight.
+
+Task 33 is done and committed as `1aa28e6` on 2026-10-05. **Task 24 (Demo
+Application) is done and committed as `e567634` on
 2026-10-05** — all three sub-tasks in one commit, as the operator decided, so
 the sequence's *No uncommitted advance* gate was stepped over deliberately and
-recorded at the time rather than skipped quietly. **Task 24 is the last task of
-the `PRIM` sequence**, and the operator's instruction on 2026-10-05 was to record
-the progress and **not** to begin the next one, so nothing is in flight.
+recorded at the time rather than skipped quietly. **Task 24 was the last task of
+the `PRIM` sequence by number**, and tasks 30–32 are the text gaps task 11 left,
+created afterwards — so "the last task" was true when written and is not true
+now, and this sentence is the correction rather than a claim that the sequence
+continued as planned.
 Task 23 (Toast) is done, committed as `1fed4b6` on 2026-10-04, in a commit whose
 message reads *`doc/ui/TASK_UI_PRIM_22.md done`*. Task 22 is done, committed as
 `22356f6` on 2026-10-03; task 21 as `64d2b97`, task 20 as `79941cd`, task 19 as
@@ -241,6 +252,422 @@ with `--tab=<name>` to land on a page without clicking. See § *Task table* for
 the split and the three measured facts behind it. **24.1 is next, and it is the
 one that makes the other two addressable** — it is what makes a page reachable
 without a pointer, which is this host's only capture route.
+
+## Task 30 — what it decided, and what it found
+
+**Implemented 2026-10-05, uncommitted, reviewed in a separate session the same
+day** (4 majors and 5 minors, all fixed; see *The review round* below). **11
+files, 8 of them code**: `ui_core/src/{font,paint,render,batch}.rs`,
+`ui_core/src/widgets/{label,list,scroll}.rs`, `ui_demo/src/main.rs`, and three
+documents (this file, `TASK_UI_PRIM_30.md`, `.ai/NEVERAGAIN.md`). **The count was
+first written as 8 files and 5 code**, and the review is what corrected it: the
+three under-reported ones are `batch.rs`, `list.rs` and `scroll.rs`, and they are
+**not incidental** — they are the three further consumers of `DrawCommand::Text`
+that had to learn the new field, and `list.rs`'s `translate_commands` is the one
+place a field could have been silently dropped on the way to the screen. A
+hand-over's blast radius should be read as "every consumer of what changed".
+
+**The suite went 1839 → 1876** (1404 → 1433 lib, 217 → 223 demo, 218 → 220
+doctests). **"Every pre-existing test is still present" was false and is corrected
+here: two were deleted**, `each_installed_face_is_given_an_identity_of_its_own` and
+`a_reinstalled_face_gets_an_identity_the_previous_one_never_had`, together with the
+`FaceIds` type they needed — see the first major below. Both are restored, renamed
+to say what they are about, and a third test was added for the invariant the
+index-based identity introduces.
+
+### The task file's requirement 6 was met before the task was
+
+**`GlyphKey` already carried a face.** `TASK_UI_PRIM_30.md`'s Context says
+*"`GlyphKey` is `{ ch, size }`. Two fonts would therefore collide in the atlas on
+the same character at the same size, which must be fixed before a second font can
+be added at all."* Task 22 added a second FreeType face for the dialog's bold
+title and, with it, `FaceId` as the third part of the key — so requirement 6 was
+**already satisfied on 2026-09-30**, a year of file history before this task, and
+the two fonts it warns about (Lato-Medium and Lato-Bold) have been packing
+separately ever since. The work this task actually did to that key was not to add
+a field but to **give the replacement glyph a key of its own**: see *The key became
+an enum* below.
+
+**The rename, and why it is not cosmetic.** `FaceId` is now `FontId` and `FaceRef`
+is `FontRef`. A `FontSet` that hands out *chain* handles needs an identity for a
+file, and inventing a second newtype beside the existing one would have been two
+names for one value in one file — which is `.ai/NEVERAGAIN.md`'s *two documents
+each claiming ownership of one definition* in code. It is a public API change to
+`ui_core` and it is deliberate; the crate is 0.1.0, unpublished, and used by one
+binary.
+
+### The three operator decisions, taken 2026-10-05 before any code
+
+1. **Requirement 3: the command carries the handle and the renderer owns the set.**
+   The alternative the task file offers — the `Painter` resolves the family at
+   record time — was measured before it was offered: **per-glyph coverage
+   resolution happens inside `draw_text_batch` either way**, because the glyph
+   atlas is only there, so the difference is only *where the name becomes a
+   chain*. Chosen because it makes the weight's existing mechanism the template
+   (`DrawCommand::Text` already carries a `FontWeight` resolved per command, with
+   nothing in the batch key), and because it keeps `Painter` free of fonts — under
+   the alternative, every widget that records text (Label, Button, Toast, Dialog,
+   TextInput, Chart, the on-screen keyboard) would have to be handed a font set.
+   `DrawCommand::Text` gained `family: FamilyId`, and `Label::font_family` became
+   `Property<FamilyId>`: **a handle rather than the name**, because the name is
+   resolved once, where the family is defined (`FontSet::family`), and a `String`
+   on a command recorded every frame would allocate per line per frame.
+2. **Requirement 4: a synthesized box, not `U+FFFD` from the primary font.** The
+   measurement that decided it: **Lato-Medium has no glyph at U+FFFD**, nor do
+   Lato-Bold, LiberationSans or NotoSansDevanagari on this host — checked against
+   each file's own character map with `fc-query`, not against a list of what those
+   fonts are supposed to have. A rule "use U+FFFD when the primary has one" would
+   therefore take its *second* branch in the one place it can be seen here.
+3. **The demo's fallback font is DejaVu Sans.** Measured, and the reason is a
+   measurement of Lato rather than a taste: Lato covers Cyrillic (U+0410), Greek
+   (U+03A9), €, → and °, so none of those would demonstrate anything, and what it
+   has none of is the pictographic range a car interface needs — **U+26A0, U+2713
+   and U+263A are all absent from Lato-Medium and Lato-Bold**, which is the same
+   fact `toast.rs` records for its severity disc. **The cost, stated plainly: a
+   dependency on the device having the file too.** The demo already hardcodes two
+   absolute paths into `/usr/share/fonts/truetype`, and `Font::from_path` returns a
+   `Result` that `main` propagates, so a head unit without DejaVu Sans **fails to
+   start the demo** rather than quietly losing the fallback.
+
+### The rule, in one place, and what it subsumes
+
+`FontSet::pick` asks the family's **primary** (its own face for the run's weight,
+else its regular one, else its first fallback) and then the fallbacks in order,
+and the first font with a glyph for the character draws it. The first two clauses
+are `resolve_slot`'s rule **unchanged** — the six tests that pin the weight's
+behaviour still pin exactly the same claims, and `resolve_slot` keeps its
+identity, its doctests and its public signature. The walk itself is
+`pick_in_chain`, a **free function over a coverage callback**, for the reason
+`resolve_slot` is one: the rule is worth testing without a font file and a `Font`
+cannot be made without one. `has_glyph` asks FreeType's character map
+(`get_char_index`) and **does not load a glyph**, which is what makes a per-
+character-per-frame walk affordable at all.
+
+### The replacement glyph, and the one number both halves agree on
+
+A hollow rectangle, one pixel of ink on each edge, sitting on the baseline, packed
+into the atlas as an ordinary `GlyphBitmap` — so it is drawn by the text shader in
+the same batch with no second draw path. **Measured on screen**, from
+`ui_demo --tab=text`, window id `0x100002f` re-read at the time and
+`pgrep -a -x ui_demo` in the same call as the `magick import`:
+
+- **14 × 17 pixels of hollow ink at (250, 586)**, read a row at a time: ink at
+  x=250 and x=263 with 12 background columns between them, and a column through
+  x=253 carrying ink at y=586 and y=602 and nothing between. That is
+  `round(0.6 × 24) = 14` by `round(0.72 × 24) = 17`, the two constants exactly, and
+  the bottom edge is on the baseline because `bearing_y` is the box's own height.
+- **7 columns of pen advance** between the box's right edge (x=263) and the `e` of
+  `end` (x=271). The `end` after the box **was added by this measurement**: with
+  the box last on the line nothing on screen can show that it advances the pen, and
+  a criterion with no instrument is not met by the instrument's absence.
+- **The atlas entry is the padded size**, 16 × 19, because the replacement goes
+  through the same `pad_bitmap` a rasterized glyph does. A test asserting 14 × 17
+  against the placement failed, and was right to.
+
+The advance is `replacement_advance(size)` and the bitmap's own `advance` field is
+that same function's answer, so the layout's hole and the drawn box cannot
+disagree. **A design choice is not a derived number, so nothing can prove
+`0.6`** — the two halves would agree at `0.06` just as readily — and
+`the_replacement_box_is_the_size_its_two_constants_fix` is the test that pins the
+number, because `.ai/NEVERAGAIN.md`'s *a strength clamped to 0..=1* entry says to
+assert the number the word in the spec fixes.
+
+### The key became an enum, because the replacement is not a character
+
+`GlyphKey` was a struct with `ch`, `size` and `face`. It is now
+`Glyph { ch, size, font }` and `Replacement { size }`. A struct with an optional
+character would have meant either **fabricating a `char`** — a real character some
+font does have, whose entry a reader would believe was that character's — or a
+second naming scheme reserved for the replacement beside the first. **One entry
+per size and none per character**: a run of five uncovered characters packs one box
+and draws it five times, where a key carrying the character would pack five
+identical copies and evict five shelves of real glyphs.
+
+### The defect the capture found, and the shape of it
+
+**`main` never defined the `lato-only` family.** The demo's own test fixture calls
+`define_family(LATO_ONLY_FAMILY)`, so every test saw two *distinct* families and
+passed — and in the shipped binary `fonts.family("lato-only")` returned the
+**default** family, because `FontSet::family` resolves an unknown name to the
+default by design. `Y` therefore wrote the family the label was already in, and
+**the capture of `Y`'s state was a capture of the default family**: the two images
+came out byte-identical from x=230 onward, which is what gave it away.
+
+It is the mirror of the failure task 24.1's completeness assertion exists for.
+There, a production **row** was missing from a table the tests read; here, a
+production **definition** is missing from a set the tests **built themselves**, and
+nothing under test touches `main`, so no assertion could have found it. **The
+pixels did**, and the measurement that found it is a comparison two captures
+should have differed in.
+
+The fix is five lines in `main`, and its doc says what it cost: Lato is installed a
+second time as a fresh `FontId`, which buys "a replaced file's glyphs are
+unreachable" and costs a second set of atlas entries for Lato's glyphs.
+
+### The two states, measured
+
+The same sentence — `Fallback ⚠ ✓ and 中 end` — in two families, both captured with
+`ui_demo --tab=text`:
+
+| family | ⚠ and ✓ | 中 | the line's ink |
+|---|---|---|---|
+| default (`Lato → DejaVu`) | **DejaVu's own glyphs** | the box, 14 × 17 | **247 px** |
+| `lato-only` (`Lato`, nothing else) | **boxes** | the box | **234 px** |
+
+**13 pixels narrower with three boxes instead of two DejaVu glyphs and one box**,
+and 1958 pixels differ between the two captures. That difference is the on-screen
+evidence for the two mutations below that no unit test could kill.
+
+### Deliberate breaks — 26 rows, 18 killed, 7 survived, 1 not a result
+
+Four rounds, in `/tmp/opencode/mut30{,b,c,d,e}.sh`, one log per row named for it,
+restore on a trap, `touch` before and after, every binary run with
+`--no-fail-fast`, and the failure count parsed off the `test result:` line with an
+unparseable log aborting. **The runner itself was wrong twice and both times it
+reported survivors**: `grep -c -F` counts *lines*, so a three-line anchor read
+"12 times" and fifteen rows aborted as no-ops; and `run_suite` printed its report
+**and** returned the count on stdout, so the caller's `-gt` compared a
+multi-line string and **every run read as a survivor**, including two that failed
+to compile. The first sweep produced no results at all and was discarded.
+
+**18 killed**, one per gate: the chain never falling back; the fallback winning
+over the primary; the primary asked twice; a family with no face losing its
+primary; the advance ignoring the replacement; the replacement dropped; the
+replacement keyed per character; the replacement with no baseline; the box at a
+tenth of the em; the box drawn as a filled blob; `notdef` counting as coverage;
+the recorder dropping the family; the label painting in the default family; the
+toggle writing the same family twice; the page-table row dropped; the written-out
+name list's row dropped; `Y` off the shortcut table; the label losing its warning
+sign; an unknown family name resolving to something other than the default.
+
+**Three of those kills were two test defects, found by mutation and fixed here:**
+
+1. **`the_primary_is_asked_once_when_it_is_also_a_fallback` could not see the
+   duplicate it was written for.** The walk returns as soon as a font covers the
+   character, so with a primary that *covers* it the fallback pass never runs and
+   the mutation is invisible. The test now has the primary decline.
+2. **`the_replacement_key_is_one_size_and_names_no_character` did not pin the
+   thing the enum exists for.** Making the replacement's key a `Glyph` under
+   U+FFFD changes no number — it is still one entry per size and still distinct
+   from `'a'`, `' '` and U+4E2D — so the test stayed green while the enum's reason
+   for existing was gone. It now asserts the **variant** and asks about U+FFFD
+   specifically.
+3. **A gate with no test at all**: `get_or_insert_replacement` returning `None` is
+   the original defect wearing the fix's own type, and nothing called the method.
+   `a_replacement_is_packed_and_returned_rather_than_dropped` is that test, and it
+   can exist because the method takes no font.
+
+**After the review, five more rows** (`/tmp/opencode/v.sh`, own runner, per-row
+log, `tar` restore plus `touch` after it, and the stdout-capture bug from the first
+two sweeps fixed): **1 killed, 3 survived, 1 was not a result.**
+
+- **Killed:** `REPLACEMENT_MIN` back to `2` — the minor-3 fix is verified, and it is
+  the only one of the nine findings whose fix is *provably* under test.
+- **Survived:** the reviewer's `install()` → constant id; the empty-family
+  substitution removed; and `ids.issue()`/`fonts.push()` swapped. All three need a
+  `Font` to reach and a test may not open one — **and the first of them is the
+  reviewer's own major-1 mutation, which the restored tests do not kill.**
+- **Not a result:** a row that only added `let _ = &primary;`, which changes the
+  binary and not the behaviour. Reported as a survivor by a runner that had not yet
+  learned the difference, which is the entry `.ai/NEVERAGAIN.md` gained today.
+
+**7 survived, and one row was not a result:**
+
+- **`has_glyph` treating `notdef` as coverage** — one FreeType call that needs a
+  real font file, which `AGENTS.md` forbids a test to open. The *rule* the call
+  feeds is covered by `pick_in_chain` through its callback; the call itself is
+  not.
+- **`draw_text_batch` taking the baseline from `font_size` instead of the
+  chain's primary** — needs a GL context, and the file already carries a
+  paragraph naming this exact class for the weight.
+- **`draw_text_batch` drawing the box for every character** — also GL-side, and
+  **narrower than it looks**: the arm selection is `pick`'s output, which *is*
+  covered; what is not is that the two arms call the two atlas methods.
+- **`the-fallback-label-is-measured-by-the-panel`** — the paint site's
+  `fallback_metrics` swapped for `metrics`. **The fixture's two families are both
+  empty, so they measure identically** and the swap is invisible. A test does
+  establish that the two paths exist and differ (**316.8 against 264.0** for the
+  same 22-character string), but that one does not say which path the paint site
+  uses. **The review of this task is what corrected the figures**: they were
+  recorded as 259.2 and 216.0, which are the numbers for the 18-character text
+  that shipped before `" end"` was appended to make the pen advance observable —
+  a number in a document that no code produced, in a file whose rule is that it
+  may not contradict its artefact.
+- **`toggle-does-not-re-lay-the-label-out`** and
+  **`the-toggle-uses-the-panel-metrics`** — the same root cause, and the same
+  closure: with two empty families the label's rect does not change when the
+  family does, so neither the re-layout nor the choice of metrics is observable.
+  **This is the one acceptance criterion whose evidence is the capture rather than
+  a test**, and the capture answers it: the two states' lines measure 247 px and
+  234 px, so the re-layout is real and the families really do measure differently.
+- **`the-fallback-font-file-is-not-installed`** — deleting
+  `fonts.add_fallback(Font::from_path(FALLBACK_FONT_PATH)?)` from `main` changes
+  nothing under test, because `main` opens a window. The capture answers it too: a
+  warning sign drawn at all cannot happen without that line.
+- **The one row that was not a result:** replacing `self.default_family()` with
+  `FamilyId::default()` — and with `self.family_id(DEFAULT_FAMILY)` — is **not a
+  mutation**, because `FontSet::new` pushes the default family under that name as
+  its first entry and `default_family()` *is* `FamilyId::default()`. It applied,
+  the binary changed, the behaviour did not. The row that tests the rule is
+  `an-unknown-name-resolves-to-something-else`, which is killed.
+
+### What was measured and how
+
+- `cargo fmt --check`, `cargo build --all-targets --all-features`,
+  `cargo clippy --all-targets --all-features -- -D warnings` and `cargo doc
+  --no-deps` all clean, re-run after the last edit. **`cargo test
+  --all-features`: 1428 + 223 + 220 = 1871**, from 1839. **`cargo audit` is not
+  installed** on this host, for the ninth task running.
+- **Frame rate, release, `fps-check.sh`, floor 55: 63.1 fps** over 632 frames in
+  10.011 s, worst frame 22.7 ms, 0 frames over 33 ms. Per page, 8 s each: `text`
+  **61.9**, `overlays` **62.1**, `pads` **63.9** on the same day. The recorded band
+  for task 24 was 61.1–63.9 across six pages, so every page is inside it. The
+  chain walk costs one character-map lookup per character per run and nothing
+  measurable: the atlas entries are cached exactly as before and the new work is
+  `has_glyph`, which does not load a glyph.
+- **Captures**: `task30_text2.png` (default family), `task30_alt2.png` (`lato-only`),
+  both `--tab=text`, window id re-read at the time, `pgrep -a -x ui_demo` in the
+  same call as the `magick import`, release build, no instrument for the first.
+  **The second needed a temporary seed** because keyboard and pointer injection
+  deliver nothing to this window on this host; the seed is quoted in full below.
+- **The seed, in full, and it was reverted.** Seven lines in `main`, immediately
+  after `Demo::new`, calling **the same method the `Y` row calls** — so what was
+  photographed is the shipped behaviour and not a re-implementation of it:
+
+  ```rust
+  // SEED (temporary capture aid, reverted immediately after): the state `Y`
+  // moves the fallback label to, reached without a key. Pointer and keyboard
+  // injection deliver nothing to this window on this host, so the second
+  // family's own pixels are otherwise uncapturable. It calls the same method
+  // the shortcut row calls, so what is photographed is the shipped behaviour
+  // and not a re-implementation of it.
+  if std::env::var("ROADOS_FALLBACK_ALT").is_ok() {
+      demo.toggle_font_family();
+  }
+  ```
+
+  `grep -c ROADOS_FALLBACK_ALT` is **0** and `grep -c SEED` is **0**. **A whole-file
+  `md5sum` comparison is not offered as proof**, because the file legitimately
+  changed after the snapshot was taken — the `lato-only` definition was added by
+  the defect the first capture found — so the md5 would be evidence of that fix
+  rather than of the revert. The named search is the proof.
+
+### What is NOT claimed
+
+- **Nothing about which font draws ⚠ or ✓ on any font other than the two files
+  this host has.** `has_glyph` was mutated and the mutation survived: the rule is
+  tested through a callback and the FreeType call is not tested at all.
+- **Nothing about the re-layout being *correct* rather than *different*.** The
+  capture shows the two states' widths differ, which is what a re-layout in the
+  label's own family predicts and what a *stale* rect would contradict — but the
+  fixture cannot test it and only one of the two directions was photographed.
+- **Nothing about `pick`'s answer being used by the two atlas arms**, for the
+  reason given above: GL-side, and the mutation survives.
+- **Nothing about a head unit's font directory.** DejaVu Sans was chosen for its
+  measured coverage on this host; whether it is on the device is the operator's
+  call and this task's second decision's cost.
+
+### The review round — 4 majors and 5 minors, all fixed
+
+**A separate session, `general` subagent, `.ai/agents/reviewer.md` as its brief.**
+It was given the spec, the diff and the hand-over's claims, and told to check the
+claims rather than trust them, to attack specific ones, and **not to fix
+anything**. Verdict: *approve with required changes*. **Its gates matched mine**
+(1428 + 223 + 220, fmt/clippy/doc clean, `cargo audit` absent, 61.7 and 62.0 fps
+against a floor of 55), **it reproduced all four pixel measurements exactly** — the
+14 × 17 box at (250, 586), the 7 columns of pen advance, the 247 px line, and the
+`fc-query` coverage facts behind requirement 4's amendment — **and it confirmed
+both spec amendments were justified rather than rewrites.** It also independently
+mutated `resolve_slot` (killed by 6 assertions) and `primary_id` (killed).
+
+**Four majors, and three of them were false statements of mine.** This is the
+first review round in this sequence to return that many, and the shape is the
+file's own recurring one rather than anything new:
+
+1. **The `FontId` invariant had no test left, because two were deleted.**
+   `FaceIds` existed for a stated reason — a `Font` needs a font file, so the rule
+   *"every install is a new identity"* needed a seam that was not FreeType — and
+   removing it in favour of "the id is the font's own index" took the tests with it.
+   **The reviewer's mutation settles it:** `install()` returning a constant id gives
+   every font the same atlas key — precisely the collision the third key field
+   exists to prevent — and the suite was green. `FontIds` is restored as that seam
+   with both tests restored and renamed, **plus a third for the invariant the new
+   design introduces** (`the_identity_and_the_fonts_own_length_are_the_same_number`),
+   because "one issue and one push" is a comment and not a check. **And the claim
+   "every pre-existing test is still present" in this file was false; it is corrected
+   above.**
+   **The fix is only half of what the finding asked for, and the mutation re-run
+   established that rather than my having noticed.** Re-running the reviewer's
+   mutation against the restored tests: **it still survives.** The three restored
+   tests exercise `FontIds::issue` — the counter — while the mutation is in
+   `FontSet::install`, which **cannot be reached without a `Font`, which cannot be
+   made without a file.** So the counter is under test again and the *link* from
+   `install` to it is not, and `the_identity_and_the_fonts_own_length_are_the_same_
+   number` pins the counter against a `Vec` the test owns rather than against the
+   set's own — **a weaker claim than its name suggests, and the name is part of the
+   finding.** A second mutation, swapping `ids.issue()` and `fonts.push()` so the
+   two could drift, also survives. Both are listed with the other structural
+   survivors below rather than counted as closed.
+2. **An empty family dropped every character of every run in it**, and two comments
+   said the opposite. `draw_text_batch` `continue`s when a run's primary is `None`,
+   `define_family` accepts a name with nothing in it, and a `Property<FamilyId>` can
+   be written before the fonts arrive — so requirement 4's *"never a silent hole"*
+   had a reachable path where a **whole run** was the hole, and `label.rs`'s module
+   doc claimed it could not happen. Fixed by `FontSet::drawable`: an empty family
+   resolves to the default one, **the same rule `FontSet::family` already states for
+   an unknown name**, so it is one rule with two arms. **The substitution is not unit
+   testable** (it needs a font in the default family) and is recorded as such; what
+   *is* tested is `Family::is_empty` and that a genuinely font-less set still drops.
+3. **`TextMetrics`'s doc justified its own design by the failure it commits.** It
+   read *"Two `Rc` clones of one set, so the two closures share it"* while the code
+   two functions below was `let advance_fonts = fonts.clone(); let line_fonts = fonts;`
+   — two values, no `Rc`, sharing nothing — and the sentence's own second clause
+   described exactly that as the thing avoided. **Self-refuting, and I wrote it.**
+   The paragraph now says the truth: they agree because both are clones of one
+   construction, which is the same reason the demo keeps its own set. The struct doc
+   above it still said `main` builds them "from the same face it hands the renderer",
+   which task 30 made false and did not touch.
+4. **The amended acceptance criterion 1 was checked `[x]` on numbers no code
+   produces.** It claimed *"259.2 and 216.0"*; the shipped `FALLBACK_TEXT` is **22**
+   characters, so the two measurement paths give **316.8** and **264.0**. The two
+   figures are the ones for the 18-character text that shipped *before* `" end"` was
+   appended to make the pen advance observable — **a number written into a document
+   after the thing it measured had changed, in a file whose rule is that it may not
+   contradict its artefact.** Corrected in both documents, and the criterion now says
+   plainly that **its own two-font clause has no unit test** because the fixture's
+   set holds no fonts.
+
+**Five minors**, all fixed: a test named
+`a_family_the_set_never_defined_still_paints_rather_than_vanishing` whose fixture
+defined two families and handed over a *defined* one (renamed to what it does);
+an assertion `replacement_advance(24.0) == replacement_advance(24.0) * 3.0 / 3.0`
+that cannot fail and is not even true of `f32` in general — 229 of 1999 half-pixel
+sizes fail it (deleted, replaced with the property it claimed);
+**`REPLACEMENT_MIN = 2` made the box solid at every size from 1 to 4 pixels**, which
+contradicts its own doc's promise of an outline (now 3, and the hollowness test runs
+at three sizes instead of one); a `Renderer::fonts()` accessor whose doc claimed a
+guarantee the setter eleven lines above refutes, with **no callers** (deleted); and
+the file count, corrected above.
+
+**What the reviewer could not check, recorded rather than glossed:** it could not
+reach the `lato-only` state — three XTEST presses of `y` delivered nothing and the
+label's band compared **AE 0** between states — so **the 234 px figure is
+unverified by it and not contradicted by anything it measured.** It also reported
+two untracked files appearing from outside during its session,
+`doc/ui/TASK_UI_PRIM_34.md` and `TASK_UI_PRIM_35.md`, which are not mine and which
+I have not touched; every number above is from the tree as `git status` showed it.
+
+### Two decisions that are the operator's
+
+1. **Whether the six surviving mutations' three structural gaps are accepted.**
+   Two are GL-side and one is font-file-side, all three are named above with the
+   reason a unit test cannot reach them, and **the capture answers the two that
+   have a visual consequence**. None is waived: the gate is *offered*, with what
+   covers it and what does not.
+2. **Whether the demo's third font path is acceptable.** A head unit without
+   DejaVu Sans fails to start `ui_demo`. The alternative — a chain of one, drawing
+   the box for the same three characters and never exercising the chain — was
+   declined in the decision above, and it is the operator's to reverse.
 
 ## Task 24.1 — what it decided, and what it found
 
@@ -4285,6 +4712,7 @@ verified. A blank cell is unknown, not "none".
 | 24.2 | `CONTENT_TOP`, and the band goes page-local | done | `e567634` | **4 passes**: 2 majors + 8 minors, 0 + 9, 0 + 1, approve. **The major was 24.1's round-3 finding reproduced on `placed_handles`**, the table this change introduced — 0 failed / 1817 with a row dropped, and the reviewer's compound (a fattened progress bar *plus* the deleted row) green across all 1817. Round 3 also found the round-1 fix had landed in a failure message and **not in the doc that said the same thing the other way.** | **Two assertions retired**, one *withdrawn outright* (the gallery/band bound is false per-page) and one *replaced* (`inside(window, chart)` plus the `Data` neighbour loop), both recorded in the file with the arithmetic. **AC 6 amended**: `fps-check.sh` cannot select a page, so the six pages were measured by `ROADOS_RUN_SECONDS=<n> … --tab=<page>` — **not waived**. The root became `LayoutMode::Absolute` because `set_position` on a `Stack` child is a no-op |
 | 24.3 | The tab bar | done | `e567634` | **3 passes**: 1 major + 7 minors, 0 + 6, **approve**. The major was `release_tab`'s `animate_to_state` held down by nothing on the ordinary gesture — press and release the button of the page **already on show** leaves `show_page` early-returning, measured `left: 0.95, right: 1.0`, a button stuck at the pressed scale with 1836 green. Round 2's six minors were prose, and its reviewer **found the orchestrator's own amendment asserting a false mechanism about `ui_core`** — "at most one `InputEvent` per SDL event", refuted by a four-line probe | **All twelve criteria met.** AC 11 (a pressed button mid-transition) needed a **temporary, reverted seed** — XTEST delivered nothing — and the arithmetic was corrected from a false 96 % to a measured **22 %**. **Requirement 4's call and duration are different numbers**: `Motion::from_theme` is 150 ms, not `THEME_TRANSITION`'s 300, pinned with an `assert_ne!`, and **on `T` the bar and its buttons arrive 150 ms apart, which nobody has seen.** Deliberate break 2 is **not expressible** (`Callback` is `Fn`) |
 | 33 | Set the SDL options no cargo feature can reach | nothing — **done 2026-10-05**, split out of task 28, **reviewed 2026-10-05** | `doc/ui/TASK_UI_PRIM_33.md` | | none waived: 8 of 8 verified — AC 1 and AC 2's native half by cache/header greps, AC 3 and AC 4 by grepping the same header for the settings that must *not* have moved, AC 2's cross half by a cross build, AC 5 and AC 6 by `ls` and `nm`, AC 7 by 1 839 tests plus three `fps-check.sh` runs, AC 8 by this review finding its command broken and it being fixed |
+| 30 | Font fallback chain | **implemented 2026-10-05, UNCOMMITTED** | — | **not reviewed in a separate session** | **No acceptance criterion is waived; three gaps are *offered* with what covers them.** **All seven requirements are implemented.** The three operator decisions (requirement 3's handle-on-the-command, requirement 4's synthesized box over `U+FFFD`, the DejaVu Sans fallback) are recorded above with the measurements that decided them. **Requirement 6 was already met** when task 22 added `FaceId` to `GlyphKey`, a year before this task, and this task's work on that key was to give the replacement glyph its own variant rather than a fabricated character. **The capture found a defect no test could**: `main` never defined the `lato-only` family, the fixture did, every test passed, and `Y` did nothing — the two captures came out byte-identical. Fixed, and the mirror of task 24.1's missing row is recorded as such. **ACs 1–4 are covered by 1428 lib tests** (the chain walk through `pick_in_chain`, the atlas key as an enum, the two families' differing metrics, the property reaching the command). **AC 5 is capture-verified and measured**: 14 × 17 hollow pixels at (250, 586) against the two constants, 7 columns of pen advance, and the same sentence 247 px wide in the default family against 234 px in `lato-only` — 1958 pixels differing. **Seven mutations survive, all structural and named above**: two GL-side, one needing a font file, and three sharing one cause (a fixture whose two families both hold no fonts measure identically), plus the `main`-not-under-test row. **The capture answers the two with a visual consequence.** **63.1 fps** on the recorded floor of 55. See *Task 30 — what it decided* |
 | — | Tesla-like demo application | pending | | | see `doc/ui/DEMO_APPLICATION.md` |
 
 **Task 24 was superseded on 2026-09-30 and un-superseded on 2026-10-03.** The
@@ -4489,7 +4917,7 @@ each has a task file so the work is not carried in prose.
 
 | # | Task | Unmet requirement in task 11 | Symptom today |
 |---|---|---|---|
-| 30 | Font fallback chain | §2 *Font fallback chain* | `Label::font_family` is a property nothing reads; the demo hardcodes one `FONT_PATH`. A character the font lacks is **silently dropped** — `get_or_insert` returns `None`, `draw_text_batch` `continue`s, and the word has a hole in it. `GlyphKey` is `{ ch, size }`, so a second font would collide with the first. |
+| 30 | Font fallback chain | §2 *Font fallback chain* | **Implemented 2026-10-05, uncommitted** — the symptom column is what it was: `Label::font_family` was a property nothing read and a character the font lacked was silently dropped. Both are gone. Two of the three premises were stale: `GlyphKey` has carried the face since task 22, and `FontSet` has existed since the same task. |
 | 31 | Dynamic atlas growth | §3 *Dynamic atlas growth* | The atlas is a fixed `ATLAS_SIZE = 2048`. `allocate` evicts LRU rows and returns `None` when it cannot, and `None` is a **silent** dropped glyph. Live glyphs' UVs and row bookkeeping must survive a re-pack. |
 | 32 | Fade and clip truncation, drawn | §4 *Text truncation: ellipsis, clip, fade* | `truncate_line` treats `Clip` and `Fade` identically and `Label::paint` never reads `truncation`, so there is **no fade ramp at all** and `Clip` is a layout cut, not a visual clip. Only the ellipsis third works. |
 

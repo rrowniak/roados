@@ -432,7 +432,7 @@ impl DrawCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paint::{FontWeight, Rect, UvRect};
+    use crate::paint::{FamilyId, FontWeight, Rect, UvRect};
 
     fn rect(color: Color) -> DrawCommand {
         DrawCommand::Rect {
@@ -501,6 +501,7 @@ mod tests {
             color: transparent(),
             font_size: 16.0,
             extra_advance: 0.0,
+            family: FamilyId::default(),
             weight: FontWeight::Regular,
         });
         batcher.add(rect(opaque()));
@@ -524,6 +525,7 @@ mod tests {
             color: opaque(),
             font_size: 16.0,
             extra_advance: 0.0,
+            family: FamilyId::default(),
             weight: FontWeight::Regular,
         });
 

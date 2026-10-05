@@ -1508,6 +1508,7 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 color,
                 font_size,
                 extra_advance,
+                family,
                 weight,
             } => DrawCommand::Text {
                 x: x + by.x,
@@ -1516,6 +1517,10 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 color: *color,
                 font_size: *font_size,
                 extra_advance: *extra_advance,
+                // The family travels with the command: it names the chain the run
+                // is looked for in, which is a property of the text rather than of
+                // where the text is on screen.
+                family: *family,
                 weight: *weight,
             },
             DrawCommand::Image {
@@ -1690,6 +1695,7 @@ fn ceil_to_usize(value: f32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::font::FontSet;
     use crate::layout::{Layout, LayoutState as State};
     use crate::paint::{Color, FontWeight, PaintState, Painter, TextureId, UvRect};
     use std::cell::{Cell, RefCell};
@@ -2376,7 +2382,11 @@ mod tests {
     }
 
     #[test]
-    fn a_text_run_moves_and_keeps_its_text_colour_size_tracking_and_weight() {
+    fn a_text_run_moves_and_keeps_its_text_colour_size_tracking_family_and_weight() {
+        // A family that is not the default one, so the assertion below is about
+        // this handle and not about two defaults comparing equal.
+        let mut fonts = FontSet::new();
+        let heading = fonts.define_family("heading");
         let command = DrawCommand::Text {
             x: 7.0,
             y: 8.0,
@@ -2384,6 +2394,7 @@ mod tests {
             color: Color::new(7, 8, 9, 255),
             font_size: 16.0,
             extra_advance: 1.5,
+            family: heading,
             weight: FontWeight::Bold,
         };
         let moved = translate_commands(std::slice::from_ref(&command), Offset::new(664.0, 120.0));
@@ -2394,6 +2405,7 @@ mod tests {
             color,
             font_size,
             extra_advance,
+            family,
             weight,
         } = &moved[0]
         else {
@@ -2410,6 +2422,12 @@ mod tests {
             "a translated bold run is still a bold run: the face it is drawn \
              with rides in the command, so a translation that dropped it would \
              quietly move a heading into the regular weight"
+        );
+        assert_eq!(
+            *family, heading,
+            "and it keeps its family too, for the same reason: a translated run \
+             that fell back to the default family would be drawn from a different \
+             chain, at different widths, with nothing to say so"
         );
     }
 

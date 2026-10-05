@@ -3,7 +3,7 @@
 //! Owns the cached paint state of a node, and the recording of the draw
 //! commands a frame is made of.
 
-pub use crate::font::FontWeight;
+pub use crate::font::{FamilyId, FontWeight};
 pub use crate::property::Color;
 
 /// An axis-aligned rectangle in window coordinates, origin at the top left.
@@ -217,23 +217,47 @@ pub enum DrawCommand {
         /// letter spacing. A run that is justified is recorded word by word
         /// instead, so its extra gap is carried by the word positions.
         extra_advance: f32,
+        /// Which family the run is drawn in.
+        ///
+        /// **The family is on the command and nowhere else**, for the same reason
+        /// the weight is: a widget that wants a heading in one family should say
+        /// so in one word rather than grow a parameter that every other call site
+        /// would have to be given. A family is a *chain* of fonts — see
+        /// [`FontId`](crate::font::FontId)'s family — and the renderer walks it per
+        /// character: the face for this run's weight first, then the fallbacks,
+        /// and the first font with a glyph for a character draws that character.
+        ///
+        /// A handle rather than a name because **the name is resolved once, where
+        /// the family is defined** (`FontSet::family`), and this is a command
+        /// recorded every frame: a `String` here would allocate per text command
+        /// per frame to carry a word that never changes. The operator chose this
+        /// over resolving the family in the `Painter` for the same reason the
+        /// weight rode in the command rather than in a `Font` parameter.
+        ///
+        /// `FamilyId::default()` is the set's default family, so a run recorded by
+        /// [`Painter::text`] — which every run that has not been given a family is
+        /// — is drawn in the family every program gets without asking for one. An
+        /// id the renderer's set does not hold resolves to its default family
+        /// rather than to nothing, because a run that is not drawn is a hole in the
+        /// layout.
+        family: FamilyId,
         /// Which face the run is drawn with.
         ///
         /// **The weight is on the command and nowhere else**, so that a widget
         /// that wants a bold title says so in one word rather than growing a
         /// `Font` parameter that every other call site — every label, every
         /// button, every key of the on-screen keyboard — would then have to be
-        /// given. The renderer resolves it against the faces it holds, and
-        /// everything the run is drawn *with* comes from that one face: its
-        /// rasterized glyphs, their bearings and their advances. There is no
-        /// synthetic weight, so a bold run carries a bold face's own ink at a
-        /// bold face's own width.
+        /// given. The renderer resolves it against the chain the family names, and
+        /// everything the run is drawn *with* comes from one face: its rasterized
+        /// glyphs, their bearings and their advances. There is no synthetic
+        /// weight, so a bold run carries a bold face's own ink at a bold face's
+        /// own width.
         ///
-        /// A renderer with no face for the weight asked for draws the run with
-        /// its regular face rather than dropping it, so this is a request and
-        /// not a promise — see `ui_core::font`'s
-        /// [`resolve_slot`](crate::font::resolve_slot), which is
-        /// where that rule lives.
+        /// A chain with no face for the weight asked for falls back to the
+        /// family's regular one, and a family that names no face of its own falls
+        /// back to its first font, so this is a request and not a promise — see
+        /// `ui_core::font`'s [`resolve_slot`](crate::font::resolve_slot) and
+        /// [`Family`](crate::font::FontSet::pick), which is where that rule lives.
         weight: FontWeight,
     },
     /// A textured rectangle.
@@ -455,9 +479,10 @@ impl Painter {
     /// Records a text run at `font_size` pixels, on a line whose top edge is at
     /// `y`, with `extra_advance` pixels of tracking after each glyph.
     ///
-    /// Drawn in the renderer's regular face — [`Painter::text_bold`] is this
-    /// method with one word changed, and every argument means the same thing in
-    /// both.
+    /// Drawn in the renderer's regular face and its **default family** —
+    /// [`Painter::text_bold`] is this method with one word changed, and
+    /// [`Painter::text_in`] is this method with a family in front of it, and
+    /// every argument means the same thing in all three.
     pub fn text(
         &mut self,
         x: f32,
@@ -468,6 +493,80 @@ impl Painter {
         extra_advance: f32,
     ) {
         self.text_in_weight(
+            FamilyId::default(),
+            x,
+            y,
+            text,
+            color,
+            font_size,
+            extra_advance,
+            FontWeight::Regular,
+        );
+    }
+
+    /// Records a text run in `family`: every argument as [`Painter::text`], one
+    /// family different, in the renderer's regular weight.
+    ///
+    /// A family is a chain of fonts tried in order for each character, so this is
+    /// the call a widget makes when its `font_family` property is not the default
+    /// — a label whose property can change, say. [`Painter::text`] is this method
+    /// with [`FamilyId::default`], which is why every other call site in the tree
+    /// — every button, every toast, every key of the on-screen keyboard — is
+    /// unaffected by families at all: a widget that never asks for one draws in
+    /// the default family, exactly as it drew before there were any.
+    ///
+    /// The family is a handle, so the name a caller has was resolved once through
+    /// `FontSet::family` rather than per command: a `String` on the command would
+    /// allocate once per line per frame. `FamilyId::default()` here is the set's
+    /// default family, and a handle the renderer's set does not hold resolves to
+    /// its default family rather than to nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ui_core::font::FontSet;
+    /// use ui_core::paint::{Color, DrawCommand, Painter};
+    ///
+    /// // A family is a handle the caller gets from the set that defines it, and
+    /// // the handle is what the command carries — the name is resolved once.
+    /// let mut fonts = FontSet::new();
+    /// let heading = fonts.define_family("heading");
+    ///
+    /// // The same string in two families: two commands, two family handles, and
+    /// // the renderer draws each in its own chain.
+    /// let mut painter = Painter::new();
+    /// painter.text_in(heading, 0.0, 0.0, "Settings", Color::new(255, 255, 255, 255), 20.0, 0.0);
+    /// painter.text(0.0, 24.0, "Settings", Color::new(180, 180, 180, 255), 16.0, 0.0);
+    ///
+    /// let families: Vec<_> = painter
+    ///     .finish()
+    ///     .iter()
+    ///     .filter_map(|command| match command {
+    ///         DrawCommand::Text { family, .. } => Some(*family),
+    ///         _ => None,
+    ///     })
+    ///     .collect();
+    /// assert_eq!(families, vec![heading, fonts.default_family()]);
+    /// assert_ne!(heading, fonts.default_family(), "and it is not the default");
+    /// ```
+    // The same eight arguments [`Painter::text`] takes, plus the family, for the
+    // same reason the recorder below allows them: they are the text command's own
+    // fields, and a struct to hold them would be a public API change to every
+    // call site in the tree for a type whose only use is to be destructured again
+    // on the other side of the function.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_in(
+        &mut self,
+        family: FamilyId,
+        x: f32,
+        y: f32,
+        text: &str,
+        color: Color,
+        font_size: f32,
+        extra_advance: f32,
+    ) {
+        self.text_in_weight(
+            family,
             x,
             y,
             text,
@@ -531,6 +630,7 @@ impl Painter {
         extra_advance: f32,
     ) {
         self.text_in_weight(
+            FamilyId::default(),
             x,
             y,
             text,
@@ -541,17 +641,18 @@ impl Painter {
         );
     }
 
-    /// The one place a text command is recorded, so the weight cannot be a field
-    /// some of the painters forget.
+    /// The one place a text command is recorded, so neither the weight nor the
+    /// family can be a field some of the painters forget.
     ///
-    /// Eight arguments is the command's seven fields plus the weight, and
-    /// grouping them into a struct would be a public API change to every call
-    /// site in the tree for nothing a caller could see — so the lint is answered
-    /// here rather than by inventing a type whose only purpose is to be
-    /// destructured again inside the function.
+    /// Nine arguments is the command's eight fields plus the weight, and grouping
+    /// them into a struct would be a public API change to every call site in the
+    /// tree for nothing a caller could see — so the lint is answered here rather
+    /// than by inventing a type whose only purpose is to be destructured again
+    /// inside the function.
     #[allow(clippy::too_many_arguments)]
     fn text_in_weight(
         &mut self,
+        family: FamilyId,
         x: f32,
         y: f32,
         text: &str,
@@ -567,6 +668,7 @@ impl Painter {
             color,
             font_size,
             extra_advance,
+            family,
             weight,
         });
     }
@@ -1173,6 +1275,7 @@ mod tests {
             color: regular_color,
             font_size: regular_size,
             extra_advance: regular_tracking,
+            family: regular_family,
             weight: regular,
         } = &commands[0]
         else {
@@ -1185,11 +1288,16 @@ mod tests {
             color: bold_color,
             font_size: bold_size,
             extra_advance: bold_tracking,
+            family: bold_family,
             weight: bold,
         } = &commands[1]
         else {
             panic!("not text");
         };
+        assert_eq!(
+            regular_family, bold_family,
+            "both runs name the default family, and only the weight differs"
+        );
         assert_eq!(
             (
                 regular_x,

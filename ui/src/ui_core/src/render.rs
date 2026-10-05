@@ -12,7 +12,7 @@ use std::path::Path;
 
 use crate::arena::{Arena, Handle};
 use crate::batch::{Batch, Batcher, ShaderKind};
-use crate::font::{Font, FontSet, FontWeight, GlyphAtlas, GlyphPlacement};
+use crate::font::{Font, FontSet, FontWeight, GlyphAtlas, GlyphPlacement, PickedFont};
 use crate::node::WidgetNode;
 use crate::paint::{DrawCommand, Rect, UvRect};
 use crate::property::Color;
@@ -1776,6 +1776,42 @@ impl Renderer {
         self.fonts.set(FontWeight::Regular, font);
     }
 
+    /// Replaces the whole set the renderer draws text from, families included.
+    ///
+    /// **This is the call that makes a chain reachable at all**, and it is the one
+    /// a caller measures with: a [`FontId`](crate::font::FontId) and a
+    /// [`FamilyId`](crate::font::FamilyId)
+    /// are indexes into *a* set, so the caller laying text out and the renderer
+    /// drawing it have to be reading the same one. Cloning the set into the
+    /// renderer is what makes that a fact rather than a convention — two sets built
+    /// by the same calls in the same order happen to agree, and two built
+    /// independently do not, with nothing anywhere to say so.
+    ///
+    /// Installing through the setters instead is fine for a program with one
+    /// family; it is a program that hands a family handle to a widget that needs
+    /// this one.
+    ///
+    /// **There is deliberately no `fonts()` accessor**, and the review of task 30 is
+    /// why. One existed, with a doc claiming that a borrow from it "keeps a
+    /// caller's handles and the renderer's set from drifting apart" — which is
+    /// false, and is refuted by this very method: it takes `&mut self` and replaces
+    /// the set wholesale, so every handle ever taken through a borrow can be
+    /// invalidated by the next call, and `FamilyId` is `Copy`, so nothing about a
+    /// borrow outlives it. **Nothing called it** (`grep -rn '\.fonts()' ui/src/` is
+    /// empty): the demo keeps the set it built and clones it in here, which is the
+    /// arrangement that actually works — **a clone cannot be invalidated behind the
+    /// caller's back**, which is the property the accessor was credited with and did
+    /// not have.
+    ///
+    /// Replaces rather than merges: a set that was given fonts and is given
+    /// another has had its fonts **dropped**, and every glyph the atlas cached for
+    /// them is unreachable — the ids the old set issued are not in the new one.
+    /// The atlas still holds their pixels until a shelf is evicted, which is
+    /// memory and nothing else.
+    pub fn set_font_set(&mut self, fonts: FontSet) {
+        self.fonts = fonts;
+    }
+
     /// Sets the face the renderer draws [`FontWeight::Bold`] runs with.
     ///
     /// **Optional, and nothing changes without it.** A text command recorded in
@@ -2695,14 +2731,20 @@ impl Renderer {
     /// glyph's bearing and advance, and sampling its coverage from the atlas.
     /// Batches that are not text, or drawn with no font set, are skipped.
     ///
-    /// **The face is resolved per command, and the whole of it comes from one
-    /// [`FaceRef`](crate::font::FaceRef).** Baseline, advances, bearings and the
-    /// atlas entry are four readings of one decision, and a run that took its
-    /// metrics from one face and its coverage from another would be laid out with
-    /// the wrong widths — which shows as a bold run drawn at regular spacing
-    /// rather than as an error. Two text commands in the same batch may therefore
-    /// be different weights, and nothing about the batch key changes: the weight
-    /// rides inside the command, so a batch is still one draw call.
+    /// **The family and the weight are resolved per command, per character**, and
+    /// the whole of it comes from one [`FontSet`]. Baseline, advances, bearings and
+    /// the atlas entry are four readings of one decision, and a run that took its
+    /// metrics from one font and its coverage from another would be laid out with
+    /// the wrong widths — which shows as a run drawn at the wrong spacing rather
+    /// than as an error. Two text commands in the same batch may therefore be
+    /// different weights *and* different families, and nothing about the batch key
+    /// changes: both ride inside the command, so a batch is still one draw call.
+    ///
+    /// **The baseline comes from the chain's primary face, not from the face that
+    /// happens to cover the run's first character.** A run spanning two fonts has
+    /// no single face whose ascent could be "the" ascent, and taking it from the
+    /// first glyph would make the line box depend on which letter the sentence
+    /// started with.
     ///
     /// **What no test in this repository covers.** Resolving
     /// `FontWeight::Regular` here instead of `*weight` — the mutation that draws
@@ -2731,30 +2773,40 @@ impl Renderer {
                 color,
                 font_size,
                 extra_advance,
+                family,
                 weight,
             } = command
             else {
                 continue;
             };
-            // A weight with no face installed resolves to the regular one, and a
-            // set with no face at all resolved above; the `else` is therefore only
-            // reachable while a face is being replaced, which cannot happen
-            // mid-frame because the borrow of the set is held by `face`.
-            let Some(face) = self.fonts.resolve(*weight) else {
+            // **The only state in which a run is skipped at all**, and it is the
+            // set's own empty check that has already run: `self.fonts.is_empty()`
+            // above returns for a set with no font, so by the time a command is
+            // reached the set holds at least one — and `primary` asks the *drawable*
+            // family, which resolves a family that holds nothing to the default one
+            // for exactly this reason. **A family with nothing in it therefore does
+            // not drop the run**: it draws in the default family, which is the fix
+            // the review of task 30 required, because a dropped run is requirement
+            // 4's "silent hole" at the largest size there is.
+            let Some(primary) = self.fonts.primary(*family, *weight) else {
                 continue;
             };
-            let font = face.font();
-            // The command gives the top of the line box; the face places the
-            // baseline inside it. Placing the baseline at `y` itself would put
-            // the ascenders above the command's own rect, off the top of the
-            // window for a label laid out at the origin.
-            let baseline = *y + font.ascent(*font_size);
+            let baseline = *y + primary.font().ascent(*font_size);
+            // Two borrows of disjoint fields, taken as locals so the two
+            // closures below can hold one each: the chain asks the set, the atlas
+            // is written to, and neither can be reached through `self` while the
+            // other is borrowed.
+            let fonts = &self.fonts;
+            let atlas = &mut self.atlas;
             walk_run(
                 text,
                 *x,
                 *extra_advance,
-                &mut |ch| self.atlas.get_or_insert(ch, *font_size, face),
-                &mut |ch| font.advance(ch, *font_size),
+                &mut |ch| match fonts.pick(*family, *weight, ch) {
+                    PickedFont::Covered(face) => atlas.get_or_insert(ch, *font_size, face),
+                    PickedFont::Replacement => atlas.get_or_insert_replacement(*font_size),
+                },
+                &mut |ch| fonts.advance(*family, *weight, ch, *font_size),
                 &mut |placement, pen_x| {
                     let gx = pen_x + i32_to_f32(placement.bearing_x);
                     let gy = baseline - i32_to_f32(placement.bearing_y);
@@ -2969,7 +3021,7 @@ impl Renderer {
 mod tests {
     use super::*;
     use crate::font::resolve_slot;
-    use crate::paint::{Painter, TextureId};
+    use crate::paint::{FamilyId, Painter, TextureId};
     use blur::MAX_TAPS;
 
     #[test]
@@ -3322,6 +3374,7 @@ mod tests {
             color: Color::new(0, 0, 0, 255),
             font_size: 16.0,
             extra_advance: 0.0,
+            family: FamilyId::default(),
             weight: FontWeight::Regular,
         });
         assert!(text.is_empty());
@@ -3616,13 +3669,16 @@ mod tests {
         // which is what keeps the "no font" path as free as it was before there
         // were two weights rather than free modulo a resolution per command.
         let set = FontSet::new();
-        assert!(set.is_empty(), "a fresh set holds no face in it");
+        assert!(set.is_empty(), "a fresh set holds no font in it");
         for weight in FontWeight::ALL {
-            assert!(
-                set.resolve(weight).is_none(),
-                "{weight:?} resolves to no face, so there is nothing to rasterize \
-                 and the pass returns before it walks the batch"
-            );
+            for family in [set.default_family(), set.family("anything")] {
+                assert!(
+                    set.primary(family, weight).is_none(),
+                    "{weight:?} in {family:?} resolves to no font, so there is \
+                     nothing to rasterize and the pass returns before it walks the \
+                     batch"
+                );
+            }
         }
     }
 

@@ -452,7 +452,24 @@ Scrolling lists: widgets scrolling out of view return to a free list. New items 
 
 ### Texture atlas eviction
 
+**Amended 2026-10-05 by `TASK_UI_PRIM_31`; the two sentences below were the
+architecture's, and the first of them is no longer true.**
+
 Fixed maximum size (e.g., 2048x2048). When full, LRU entries evicted. Glyphs evicted before icons.
+
+The glyph atlas **grows** when it fills — to the next power of two above its
+current size, and no past 4096 or whatever the driver's `GL_MAX_TEXTURE_SIZE`
+is, whichever is smaller — and the shelves are re-packed into the larger
+texture, every live glyph's UV and shelf included. LRU eviction happens only at
+that ceiling, and a glyph that fits nowhere even there is **counted** rather than
+dropped: `GlyphAtlas::dropped`, surfaced as `Renderer::dropped_glyphs` and
+printed by `ui_demo` as `roados-glyphs … dropped=N`. The starting size is 2048.
+
+"Glyphs evicted before icons" is **structural rather than scheduled**: glyphs and
+images live in two textures — `ui_core/src/font.rs` and `ui_core/src/texture.rs`
+— so evicting a glyph cannot take an icon whatever the order. The image atlas is
+where the ordering that statement is really about lives, and it has its own: LRU
+shelves with pinned handles the eviction may not take.
 
 ## Thread Model
 

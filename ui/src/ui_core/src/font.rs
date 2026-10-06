@@ -38,11 +38,19 @@
 //! by the text shader with no second draw path, and it advances the pen by
 //! [`replacement_advance`] — the same function the measuring half asks, so the
 //! hole in the layout is exactly as wide as the box drawn in it.
+//!
+//! **The atlas grows, and a refusal is counted rather than silent.** A full
+//! atlas doubles — to the next power of two, no past the ceiling the renderer
+//! read from the driver — and re-packs the glyphs already in it, so every glyph
+//! placed before the grow still addresses its own pixels afterwards. Only at the
+//! ceiling does it evict, and a glyph that fits nowhere even there is reported
+//! through [`GlyphAtlas::dropped`] instead of drawn as a hole nobody is told
+//! about.
 
 use freetype::face::LoadFlag;
 use freetype::{Face, Library};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// The transparent margin stored around a glyph's ink, in pixels.
@@ -1452,6 +1460,39 @@ enum GlyphKey {
     },
 }
 
+/// One glyph's entry in the atlas: where its pixels are, and the metrics its
+/// quad is drawn from.
+///
+/// **Pixels, not UVs, and that is what makes a grow safe.** A UV is only
+/// meaningful against the size it was divided by: a glyph packed at `x = 8` in a
+/// 2048 texture has `u0 = 0.00390625`, and after the atlas grows to 4096 that
+/// same number addresses `x = 16` — the wrong glyph's first pixel, from a run
+/// that looks correctly laid out. So the atlas keeps the pixel it wrote and
+/// [`GlyphAtlas::placement_of`] derives the UVs from the size it is *now*, which
+/// makes a stale UV unrepresentable rather than merely unlikely.
+///
+/// The alternative — keeping UVs and recomputing all of them at the moment of the
+/// grow — needs the pixel back to recompute them from, which is the number this
+/// entry is.
+#[derive(Clone, Copy, Debug)]
+struct Entry {
+    /// Left edge of the glyph's coverage in the atlas, in pixels.
+    x: u32,
+    /// Top edge of the glyph's coverage in the atlas, in pixels: the top edge of
+    /// its shelf.
+    y: u32,
+    /// Coverage width in pixels, including the padding.
+    width: u32,
+    /// Coverage height in pixels, including the padding.
+    height: u32,
+    /// Horizontal bearing: offset from the pen to the coverage's left edge.
+    bearing_x: i32,
+    /// Vertical bearing: offset from the baseline to the coverage's top edge.
+    bearing_y: i32,
+    /// Advance width in pixels.
+    advance: f32,
+}
+
 /// One shelf of the atlas: a horizontal row of glyphs with a shared height.
 struct Row {
     /// The row's top edge in the atlas.
@@ -1471,13 +1512,23 @@ type FreeSpan = (u32, u32);
 /// The glyph atlas: a square texture of glyph coverage, for every face the
 /// renderer holds.
 ///
-/// Glyphs are packed into shelves (rows). When the atlas fills up, the least
-/// recently used shelf is evicted — its glyphs are dropped, its pixels cleared
-/// and its vertical span returned to the free list for reuse — which keeps the
-/// hot glyphs resident. The atlas is CPU-side; the renderer uploads
-/// [`GlyphAtlas::take_dirty_pixels`] to a GL texture.
+/// Glyphs are packed into shelves (rows). When the atlas fills up it **grows** —
+/// to the next power of two, and no past [`GlyphAtlas::new`]'s ceiling — and the
+/// shelves are re-packed into the larger texture; only when it is as large as it
+/// is allowed to get does it evict, dropping the least recently used shelf, its
+/// glyphs, its pixels, and returning its vertical span to the free list for
+/// reuse. Growth comes first because a glyph the atlas cannot hold is a glyph
+/// that is not drawn, and a bigger texture is cheaper than a hole; eviction
+/// comes second because it is the only mechanism here that loses a glyph.
+///
+/// A glyph that still cannot be placed at the ceiling is **counted**, not
+/// dropped in silence: see [`GlyphAtlas::dropped`]. The atlas is CPU-side; the
+/// renderer uploads [`GlyphAtlas::take_dirty_pixels`] to a GL texture.
 pub struct GlyphAtlas {
+    /// The current texture size, square. Doubles on a grow.
     size: u32,
+    /// The size a grow may not pass, and therefore where growth stops.
+    max: u32,
     pixels: Vec<u8>,
     /// Shelves in recency order: the front is the least recently used.
     rows: Vec<Row>,
@@ -1485,16 +1536,28 @@ pub struct GlyphAtlas {
     free: Vec<FreeSpan>,
     /// The next unused pixel row, below every shelf ever allocated.
     next_y: u32,
-    glyphs: HashMap<GlyphKey, GlyphPlacement>,
+    glyphs: HashMap<GlyphKey, Entry>,
     dirty: bool,
+    /// The glyphs the atlas has refused, as keys. A set and not a count — see
+    /// [`GlyphAtlas::dropped`]. `HashSet` because the neighbouring map is one
+    /// and this is never iterated, so nothing wants an order.
+    refused: HashSet<GlyphKey>,
 }
 
 impl GlyphAtlas {
-    /// Creates an empty `size` × `size` atlas.
+    /// Creates an empty `size` × `size` atlas that may grow to `max` × `max`.
+    ///
+    /// **`max` is a ceiling, not a target, and `max` below `size` means no
+    /// growth at all** — which is how the caller says "this driver, or this
+    /// deployment, has no room for a bigger atlas" without a second constructor
+    /// and a second name for the same atlas. The renderer reads the ceiling from
+    /// `GL_MAX_TEXTURE_SIZE` and from its own documented maximum, so the atlas
+    /// cannot be asked to grow into a texture the driver would refuse.
     #[must_use]
-    pub fn new(size: u32) -> Self {
+    pub fn new(size: u32, max: u32) -> Self {
         GlyphAtlas {
             size,
+            max,
             pixels: vec![
                 0;
                 usize::try_from(size).unwrap_or(0) * usize::try_from(size).unwrap_or(0)
@@ -1504,6 +1567,7 @@ impl GlyphAtlas {
             next_y: 0,
             glyphs: HashMap::new(),
             dirty: false,
+            refused: HashSet::new(),
         }
     }
 
@@ -1511,6 +1575,43 @@ impl GlyphAtlas {
     #[must_use]
     pub fn size(&self) -> u32 {
         self.size
+    }
+
+    /// Returns how many distinct glyphs the atlas is refusing to draw because it
+    /// is at its ceiling and could not free a shelf for them.
+    ///
+    /// **This is the report requirement 6 of `TASK_UI_PRIM_31` asks for, and the
+    /// number counts glyphs rather than events — which is the whole policy, and
+    /// the difference between a number that means something and one that does
+    /// not.** A refused glyph *is* asked for again: `get_or_insert` is a cache
+    /// miss followed by a pack, a refused key is not in the map, and the text
+    /// pass re-expands the batch every frame — so a counter incremented per
+    /// refusal would report one unrasterizable glyph as 3 600 after three
+    /// seconds at 60 fps, and an operator could not tell that from a page of
+    /// holes. **So the keys are what is kept**, and asking for a refused glyph
+    /// again changes nothing about the number.
+    ///
+    /// **A key leaves the set the moment it can be packed.** The number answers
+    /// *what is not being drawn now*, not *what ever went wrong*: an eviction can
+    /// free the shelf a large glyph wanted, and a glyph that packs afterwards is
+    /// being drawn, so leaving it in the set would make the report lie about the
+    /// screen.
+    ///
+    /// The rest of the policy: a refused glyph is not drawn; the pen still
+    /// advances by the advance the font reports for that character, so a run keeps
+    /// its spacing and one missing glyph does not reflow the rest of the line;
+    /// nothing is queued, because a shelf that could not be freed once will not be
+    /// freed by a queue; and the renderer surfaces this count through
+    /// [`crate::render::Renderer::dropped_glyphs`], so a run that lost glyphs
+    /// says so rather than drawing a page of holes and looking like a font bug.
+    ///
+    /// **An eviction is not a refusal.** A glyph whose shelf is evicted is not
+    /// lost: it is still in the run that asked for it next frame, and the atlas
+    /// rasterizes it again. Counting those would make the number report the
+    /// atlas working as designed.
+    #[must_use]
+    pub fn dropped(&self) -> u32 {
+        u32::try_from(self.refused.len()).unwrap_or(u32::MAX)
     }
 
     /// Returns the atlas pixel data, ready to upload to a GL texture.
@@ -1591,10 +1692,11 @@ impl GlyphAtlas {
     /// returns a placement like any other rather than a `None`: the caller has
     /// already asked the chain and every font said no, so a `None` here would put
     /// the hole straight back that the replacement exists to fill. The only way it
-    /// returns `None` is the atlas being full of larger glyphs than the box, in
-    /// which case the character is dropped and the run continues — a lossy atlas
-    /// rather than a silent missing character, which is a different defect and
-    /// task 31's.
+    /// returns `None` is the atlas being at its ceiling and unable to free a
+    /// shelf for the box, in which case the character is dropped, the run
+    /// continues at the advance the font reports, and the refusal is counted in
+    /// [`GlyphAtlas::dropped`] rather than left to be noticed as a hole on the
+    /// screen.
     pub fn get_or_insert_replacement(&mut self, size: f32) -> Option<GlyphPlacement> {
         let key = Self::replacement_key(size);
         self.cached(key)
@@ -1604,9 +1706,30 @@ impl GlyphAtlas {
     /// Returns the placement stored under `key`, marking its shelf most recently
     /// used.
     fn cached(&mut self, key: GlyphKey) -> Option<GlyphPlacement> {
-        let placement = *self.glyphs.get(&key)?;
-        self.touch_row(placement.row_y);
-        Some(placement)
+        let entry = *self.glyphs.get(&key)?;
+        self.touch_row(entry.y);
+        Some(self.placement_of(&entry))
+    }
+
+    /// Returns where `entry`'s pixels are in the atlas **as it is now**.
+    ///
+    /// The one place a UV is computed, which is what keeps a grow from having to
+    /// find every stale one: an entry holds pixels, and the size they are
+    /// divided by is read here, at the moment the placement is handed out.
+    fn placement_of(&self, entry: &Entry) -> GlyphPlacement {
+        let size = u32_to_f32(self.size);
+        GlyphPlacement {
+            u0: u32_to_f32(entry.x) / size,
+            v0: u32_to_f32(entry.y) / size,
+            u1: u32_to_f32(entry.x + entry.width) / size,
+            v1: u32_to_f32(entry.y + entry.height) / size,
+            row_y: entry.y,
+            width: entry.width,
+            height: entry.height,
+            bearing_x: entry.bearing_x,
+            bearing_y: entry.bearing_y,
+            advance: entry.advance,
+        }
     }
 
     /// Pads, packs and records `bitmap` under `key`, and returns where it went.
@@ -1616,38 +1739,184 @@ impl GlyphAtlas {
     /// order for every entry, and a second copy of them is a second copy of the
     /// atlas's only state machine. `None` for a bitmap the font did not produce
     /// and one the atlas cannot fit.
+    ///
+    /// **The two `None`s are different events and only one of them is counted.**
+    /// A font with no glyph for a character — which is what a space always is —
+    /// has nothing to store and nothing to report, because the caller already
+    /// knows it asked for a character nothing covers; a bitmap the atlas refuses
+    /// at its ceiling is a glyph this renderer failed to draw, and that is what
+    /// [`GlyphAtlas::dropped`] counts.
     fn pack(&mut self, key: GlyphKey, bitmap: Option<GlyphBitmap>) -> Option<GlyphPlacement> {
         let padded = pad_bitmap(&bitmap?, COVERAGE_PAD);
         let glyph = make_coverage(&padded);
-        let (x, y) = self.allocate(glyph.width, glyph.height)?;
+        let Some((x, y)) = self.allocate(glyph.width, glyph.height) else {
+            self.refused.insert(key);
+            return None;
+        };
+        // A glyph that fits again is being drawn, so it is no longer refused —
+        // see `dropped`.
+        self.refused.remove(&key);
         self.blit(x, y, &glyph);
-        let placement = GlyphPlacement {
-            u0: u32_to_f32(x) / u32_to_f32(self.size),
-            v0: u32_to_f32(y) / u32_to_f32(self.size),
-            u1: u32_to_f32(x + glyph.width) / u32_to_f32(self.size),
-            v1: u32_to_f32(y + glyph.height) / u32_to_f32(self.size),
-            row_y: y,
+        let entry = Entry {
+            x,
+            y,
             width: glyph.width,
             height: glyph.height,
             bearing_x: glyph.bearing_x,
             bearing_y: glyph.bearing_y,
             advance: glyph.advance,
         };
-        self.glyphs.insert(key, placement);
+        self.glyphs.insert(key, entry);
         if let Some(row) = self.row_at_mut(y) {
             row.glyphs.push(key);
         }
-        Some(placement)
+        Some(self.placement_of(&entry))
     }
 
-    /// Finds a shelf for a `w` × `h` glyph, evicting the least recently used
-    /// row until one fits, and returns its top-left corner.
+    /// Finds a shelf for a `w` × `h` glyph and returns its top-left corner,
+    /// **growing the atlas first and evicting only when it cannot grow.**
+    ///
+    /// The order is the whole of the change this task exists for. Evicting a
+    /// shelf that holds a hundred glyphs to make room for one is the right answer
+    /// to an atlas that is as large as it is allowed to get and no earlier, and
+    /// a grow is a re-pack rather than a re-alloc, so the glyphs already in the
+    /// atlas survive it. Each of the three outcomes ends the loop: `fit`
+    /// succeeds, `grow` makes `self.size` strictly larger and it is bounded by
+    /// the ceiling, and an eviction removes a shelf and there are finitely many.
     fn allocate(&mut self, w: u32, h: u32) -> Option<(u32, u32)> {
         loop {
             if let Some(found) = self.fit(w, h) {
                 return Some(found);
             }
+            if self.grow(w, h) {
+                continue;
+            }
             self.evict_lru_row()?;
+        }
+    }
+
+    /// Grows the atlas one step if a `w` × `h` glyph could fit in a bigger one,
+    /// and returns whether it did.
+    ///
+    /// **To the next power of two above the current size, and no further than the
+    /// ceiling.** A power of two because every size in the sequence divides the
+    /// next, so the sizes the atlas has held divide the size it is growing into
+    /// and nothing has to be rounded on the way; the ceiling because a texture
+    /// that grows without one grows until the driver refuses the upload, and a GL
+    /// error nothing reads is the failure mode `.ai/NEVERAGAIN.md` has already
+    /// recorded twice.
+    ///
+    /// **It rounds the current size up to the next power of two, and not up its own
+    /// double.** `next_power_of_two` is idempotent on a power of two — it answers
+    /// 64 with 64 — so asking it for "the next power of two" of a 64-pixel atlas
+    /// asks for the size the atlas already is, and growth is refused forever at
+    /// the size it started: every size this atlas holds after the first step *is*
+    /// a power of two, so the second step would be the one that never happened.
+    /// Asking for the power of two above `size + 1` is the same question with the
+    /// idempotence taken out, and it is what puts the 128 between a 100-pixel
+    /// start and a 200-pixel ceiling.
+    ///
+    /// **A glyph that would not fit the ceiling does not grow the atlas at all.**
+    /// It is refused now rather than after allocating 16 MB per doubling to learn
+    /// what its own width already says — which is the difference between a
+    /// refusal and a 16 MB allocation on the way to the same refusal.
+    fn grow(&mut self, w: u32, h: u32) -> bool {
+        if w.saturating_add(ATLAS_PAD) > self.max || h > self.max {
+            return false;
+        }
+        // `checked_next_power_of_two` is `None` only for a size that would
+        // overflow a `u32`, which no texture is; the ceiling is the answer then,
+        // and `min` bounds it either way.
+        let next = self
+            .size
+            .saturating_add(1)
+            .checked_next_power_of_two()
+            .unwrap_or(self.max)
+            .min(self.max);
+        if next <= self.size {
+            return false;
+        }
+        self.repack(next);
+        true
+    }
+
+    /// Re-packs every live shelf into a `size` × `size` atlas.
+    ///
+    /// **A re-pack, not a re-allocation, and the difference is every glyph
+    /// already in the texture.** Each one carries UVs into the texture it was
+    /// written to and each shelf carries the `y` that the LRU order and
+    /// [`GlyphAtlas::evict_lru_row`] address it by, so dropping the pixels and
+    /// keeping the bookkeeping would leave a run sampling a texture that no
+    /// longer exists.
+    ///
+    /// **The shelves are laid out again, tight against the top, in the order
+    /// they were in before** — which is recency order, oldest first, so the
+    /// eviction order survives the move as well. They fit because they fitted
+    /// before: their bands are disjoint spans of `[0, size)`, so their heights
+    /// sum to less than the old size, which is smaller than the new one. The
+    /// pixels come out of the old texture rather than out of a copy of every
+    /// glyph, because the atlas holds coverage only as pixels and a shelf's band
+    /// can be copied whole — a shelf's glyphs are packed contiguously from its
+    /// left edge and nothing else is ever written into it.
+    ///
+    /// **The free spans are handed back rather than translated.** A span is a
+    /// hole an eviction left, and once the shelves have moved, its coordinates no
+    /// longer describe one: in the layout above they can land on top of a shelf
+    /// that was moved there, and the next glyph to take it would be drawn into
+    /// another glyph's coverage. What the spans bought is space, and the layout
+    /// above is that space contiguous.
+    fn repack(&mut self, size: u32) {
+        let old_size = self.size;
+        let old = std::mem::replace(
+            &mut self.pixels,
+            vec![0; usize::try_from(size).unwrap_or(0) * usize::try_from(size).unwrap_or(0)],
+        );
+        let mut next_y: u32 = 0;
+        let mut packed = Vec::with_capacity(self.rows.len());
+        for row in std::mem::take(&mut self.rows) {
+            let y = next_y;
+            next_y = next_y.saturating_add(row.height);
+            self.copy_shelf(&old, old_size, size, y, &row);
+            for key in &row.glyphs {
+                if let Some(entry) = self.glyphs.get_mut(key) {
+                    entry.y = y;
+                }
+            }
+            packed.push(Row { y, ..row });
+        }
+        self.rows = packed;
+        self.next_y = next_y;
+        self.free.clear();
+        self.size = size;
+        // The whole new texture is new as far as the renderer is concerned: every
+        // shelf may have moved, and `take_dirty_pixels` hands out the whole
+        // buffer rather than a region, so the flag is the only thing that says
+        // the upload has to happen.
+        self.dirty = true;
+    }
+
+    /// Copies `row`'s packed band from the `old_size` texture into the `size` one
+    /// at `y`.
+    ///
+    /// The band is `row.x` wide and `row.height` tall: everything the shelf has
+    /// written, and nothing it has not, because `fit` only ever advances a
+    /// shelf's cursor and only ever blits inside it.
+    fn copy_shelf(&mut self, old: &[u8], old_size: u32, size: u32, y: u32, row: &Row) {
+        let from_stride = usize::try_from(old_size).unwrap_or(0);
+        let to_stride = usize::try_from(size).unwrap_or(0);
+        let width = usize::try_from(row.x.min(size)).unwrap_or(0);
+        let height = usize::try_from(row.height).unwrap_or(0);
+        for band in 0..height {
+            let from = usize::try_from(row.y).unwrap_or(0) + band;
+            let to = usize::try_from(y).unwrap_or(0) + band;
+            if from >= from_stride || to >= to_stride {
+                break;
+            }
+            let src = from * from_stride;
+            let dst = to * to_stride;
+            if src + width <= old.len() && dst + width <= self.pixels.len() {
+                self.pixels[dst..dst + width].copy_from_slice(&old[src..src + width]);
+            }
         }
     }
 
@@ -1835,7 +2104,7 @@ mod tests {
     fn atlas_starts_empty() {
         // A real font is needed to rasterize, so this checks the atlas
         // geometry directly: a `size`×`size` texture of zeroed coverage.
-        let atlas = GlyphAtlas::new(64);
+        let atlas = GlyphAtlas::new(64, 64);
         assert_eq!(atlas.size(), 64);
         assert_eq!(atlas.pixels().len(), 64 * 64);
         assert!(atlas.pixels().iter().all(|&p| p == 0));
@@ -1877,7 +2146,7 @@ mod atlas_tests {
 
     #[test]
     fn a_glyph_is_separated_from_its_neighbour_by_the_padding() {
-        let mut atlas = GlyphAtlas::new(64);
+        let mut atlas = GlyphAtlas::new(64, 64);
         let (x0, _) = atlas.allocate(8, 8).unwrap();
         let (x1, _) = atlas.allocate(8, 8).unwrap();
         assert_eq!(x1, x0 + 8 + ATLAS_PAD, "the gap is a whole padding wide");
@@ -1885,7 +2154,7 @@ mod atlas_tests {
 
     #[test]
     fn an_evicted_shelf_clears_its_pixels() {
-        let mut atlas = GlyphAtlas::new(64);
+        let mut atlas = GlyphAtlas::new(64, 64);
         let (x, y) = atlas.allocate(16, 16).unwrap();
         atlas.blit(x, y, &coverage(16, 16));
         assert!(
@@ -1901,7 +2170,7 @@ mod atlas_tests {
 
     #[test]
     fn an_evicted_shelf_is_reused_rather_than_appended_to() {
-        let mut atlas = GlyphAtlas::new(64);
+        let mut atlas = GlyphAtlas::new(64, 64);
         let (_, first_y) = atlas.fit(16, 16).unwrap();
         // Fill the atlas, without evicting, so a new shelf cannot be appended.
         while atlas.fit(16, 16).is_some() {}
@@ -1914,7 +2183,7 @@ mod atlas_tests {
 
     #[test]
     fn a_glyph_too_big_for_the_atlas_is_refused_rather_than_looping() {
-        let mut atlas = GlyphAtlas::new(16);
+        let mut atlas = GlyphAtlas::new(16, 16);
         assert!(atlas.fit(17, 8).is_none(), "wider than the atlas");
         assert!(atlas.fit(8, 17).is_none(), "taller than the atlas");
         // Every shelf is evicted in turn, and then there is nothing left to
@@ -1925,7 +2194,7 @@ mod atlas_tests {
 
     #[test]
     fn the_pixels_are_offered_once_per_change() {
-        let mut atlas = GlyphAtlas::new(64);
+        let mut atlas = GlyphAtlas::new(64, 64);
         assert!(atlas.take_dirty_pixels().is_none(), "a new atlas is clean");
         let (x, y) = atlas.allocate(8, 8).unwrap();
         atlas.blit(x, y, &coverage(8, 8));
@@ -1991,9 +2260,643 @@ mod atlas_tests {
             Some(7.5),
             "a clone sees what the original measured"
         );
-        clone.set('b', 20, 3.0);
-        assert_eq!(cache.get('b', 20), Some(3.0), "and the other way round");
+        cache.set('b', 20, 3.0);
+        assert_eq!(clone.get('b', 20), Some(3.0), "and the other way round");
         assert_eq!(cache.len(), 2, "one cache, not two");
+    }
+}
+
+/// The tests below are about the atlas growing: what happens to the glyphs that
+/// were already in it when it does, where it stops, and what it says when it
+/// cannot take a glyph at all.
+///
+/// **No font file, and none is needed** — which is the point of testing growth
+/// here rather than through the renderer. A glyph reaches the atlas as a
+/// [`GlyphBitmap`] and everything after that is the atlas's own state machine,
+/// so [`GlyphAtlas::pack`] can be called with a bitmap a test builds. That is
+/// also why the coverage in these tests is per-pixel rather than per-rect: the
+/// acceptance criterion is that a glyph placed before the grow **still addresses
+/// its own pixels** afterwards, and "the size went up" is not that.
+#[cfg(test)]
+mod growth_tests {
+    use super::*;
+
+    /// A bitmap of `w` × `h` pixels whose every pixel differs from 0, shifted by
+    /// `seed`.
+    ///
+    /// **The pattern is the assertion, and what makes it work is that it is not
+    /// flat.** A glyph packed as a solid 255 would read back correctly from *any*
+    /// address inside any glyph-sized rectangle, so a re-pack that moved a glyph,
+    /// or a UV that divided by the wrong size, would return 255 and pass. A
+    /// per-pixel pattern cannot.
+    ///
+    /// **It is not injective, and this file does not claim it is.** The values run
+    /// `1 + (x·7 + y·13 + seed·29) % 254`, so a 20 × 20 glyph — 400 pixels against
+    /// 254 available values — has 146 pixels sharing a value with another. What
+    /// carries the assertion is that `read_back` compares the glyph's **whole
+    /// rectangle including its transparent padding**: a glyph addressed one pixel
+    /// off returns a different border as well as a different middle, and the
+    /// padding is a row and a column of zeros nothing else in the atlas has.
+    fn bitmap(w: u32, h: u32, seed: u32) -> GlyphBitmap {
+        let mut pixels = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                // Never 0: the padding the atlas stores around a glyph is
+                // transparent, so a 0 could not be told from a pixel that was
+                // never written.
+                let value = 1 + (x * 7 + y * 13 + seed * 29) % 254;
+                pixels.push(u8::try_from(value).unwrap_or(0));
+            }
+        }
+        GlyphBitmap {
+            width: w,
+            height: h,
+            bearing_x: 0,
+            bearing_y: i32::try_from(h).unwrap_or(0),
+            advance: u32_to_f32(w),
+            pixels,
+        }
+    }
+
+    /// The coverage `pack` stores for `source`: the same bitmap with the atlas's
+    /// padding around it, as [`pad_bitmap`] and [`make_coverage`] produce it.
+    fn padded_pixels(source: &GlyphBitmap) -> Vec<u8> {
+        pad_bitmap(source, COVERAGE_PAD).pixels
+    }
+
+    /// Reads back the pixels `placement` addresses, **through its UVs**, the way
+    /// the text shader does.
+    ///
+    /// The UVs rather than the atlas's private entry, because the UVs are what
+    /// the renderer samples with and the whole of what a re-pack can get wrong.
+    /// The sizes these tests use are powers of two, for which the division and
+    /// the multiplication back are exact — so the rounding here cannot hide a
+    /// placement that is a pixel off.
+    fn read_back(atlas: &GlyphAtlas, placement: &GlyphPlacement) -> Vec<u8> {
+        let size = u32_to_f32(atlas.size());
+        let x0 = usize::try_from(f32_to_u32((placement.u0 * size).round())).unwrap_or(0);
+        let y0 = usize::try_from(f32_to_u32((placement.v0 * size).round())).unwrap_or(0);
+        let w = usize::try_from(placement.width).unwrap_or(0);
+        let h = usize::try_from(placement.height).unwrap_or(0);
+        let stride = usize::try_from(atlas.size()).unwrap_or(0);
+        let mut out = Vec::new();
+        for row in 0..h {
+            let start = (y0 + row) * stride + x0;
+            out.extend_from_slice(&atlas.pixels()[start..start + w]);
+        }
+        out
+    }
+
+    /// A key for the `index`th glyph of a run of tests, distinct from every
+    /// other **because the size differs**.
+    ///
+    /// **The size and not the character, because 26 letters is not enough.** The
+    /// tests below pack up to 80 glyphs, and a key that repeats is worse than a
+    /// key that is missing: `pack` is only reached on a cache miss, so packing
+    /// the same key twice would file one entry under it in two shelves, and the
+    /// atlas's two copies of a glyph's shelf would disagree — which is the kind
+    /// of corruption that only shows up as a glyph that disappears much later.
+    fn key(index: u32) -> GlyphKey {
+        GlyphAtlas::key_for('a', u32_to_f32(16 + index), FontId(0))
+    }
+
+    /// Packs `count` glyphs of `w` × `h`, from `from` upwards, and returns the
+    /// atlas's size after each one.
+    ///
+    /// **A bounded loop, and that is not a convenience.** `allocate` grows
+    /// before it evicts, so a "fill the atlas" loop written as
+    /// `while allocate(..).is_some() {}` does not end when the atlas is full —
+    /// it ends when the *ceiling* is reached, and at the ceiling `allocate`
+    /// evicts a shelf and succeeds again, so the loop never ends at all. The
+    /// sizes are returned rather than asserted inside, because the sequence of
+    /// them is what two of the tests below are about.
+    fn pack_from(atlas: &mut GlyphAtlas, w: u32, h: u32, from: u32, count: u32) -> Vec<u32> {
+        let mut sizes = Vec::new();
+        for index in from..from + count {
+            let packed = atlas.pack(key(index), Some(bitmap(w, h, index)));
+            assert!(packed.is_some(), "glyph {index} is packed");
+            sizes.push(atlas.size());
+        }
+        sizes
+    }
+
+    /// The sizes in `sizes` with the repetitions removed, in order.
+    fn steps(sizes: &[u32]) -> Vec<u32> {
+        let mut out: Vec<u32> = Vec::new();
+        for size in sizes {
+            if out.last() != Some(size) {
+                out.push(*size);
+            }
+        }
+        out
+    }
+
+    /// The glyphs on each shelf, in the order the atlas keeps its shelves — which is
+    /// the eviction order, oldest first.
+    fn order_of_shelves(atlas: &GlyphAtlas) -> Vec<GlyphKey> {
+        atlas
+            .rows
+            .iter()
+            .flat_map(|row| row.glyphs.iter().copied())
+            .collect()
+    }
+
+    /// The `y` of each shelf, in the order the atlas keeps them.
+    fn ys_of_shelves(atlas: &GlyphAtlas) -> Vec<u32> {
+        atlas.rows.iter().map(|row| row.y).collect()
+    }
+
+    #[test]
+    fn a_glyph_packed_before_a_grow_still_addresses_its_own_pixels() {
+        // The acceptance criterion this task exists for, and the one that can only
+        // be met by reading pixels back: **a grow is a re-pack, and every glyph
+        // already in the atlas has to come out of it addressing its own
+        // coverage.**
+        //
+        // 20 × 20 bitmaps become 22 × 22 of coverage, so a 64-pixel atlas holds
+        // two per shelf and two shelves — four glyphs — and the fifth is the one
+        // that cannot fit. The count was measured rather than reasoned about in
+        // the prose above, because it is what makes "the fifth glyph grew it"
+        // true: three shelves would need 66 pixels and the atlas has 64.
+        let mut atlas = GlyphAtlas::new(64, 256);
+        let mut packed: Vec<(GlyphKey, Vec<u8>)> = Vec::new();
+        for index in 0..4_u32 {
+            let source = bitmap(20, 20, index);
+            let expected = padded_pixels(&source);
+            let placement = atlas
+                .pack(key(index), Some(source))
+                .unwrap_or_else(|| panic!("glyph {index} is packed"));
+            assert_eq!(
+                read_back(&atlas, &placement),
+                expected,
+                "glyph {index} reads back its own coverage the moment it is packed, \
+                 at row_y {} of a {}-pixel atlas",
+                placement.row_y,
+                atlas.size()
+            );
+            packed.push((key(index), expected));
+        }
+        assert_eq!(atlas.size(), 64, "four of them fit, and it did not grow");
+
+        let after = pack_from(&mut atlas, 20, 20, 4, 2);
+        assert_eq!(
+            after,
+            vec![128, 128],
+            "the fifth glyph could not fit in 64, so the atlas doubled and the sixth \
+             went into the larger one"
+        );
+        assert_eq!(
+            atlas.glyphs.len(),
+            6,
+            "a grow loses no entries: it re-packs, it does not re-allocate"
+        );
+        for (key, expected) in &packed {
+            let placement = atlas
+                .cached(*key)
+                .unwrap_or_else(|| panic!("{key:?} survived the grow"));
+            assert_eq!(
+                read_back(&atlas, &placement),
+                *expected,
+                "{key:?} still addresses its own pixels after the grow — UVs ({}, {}) \
+                 in a {}-pixel atlas",
+                placement.u0,
+                placement.v0,
+                atlas.size()
+            );
+        }
+    }
+
+    #[test]
+    fn growth_doubles_to_a_power_of_two_and_stops_at_the_maximum() {
+        // Both halves of the criterion at once, and with **the whole sequence**
+        // rather than one observation of it: a starting size that is not a power
+        // of two, a ceiling that is not one either, and the two steps between
+        // them. Each number here is one the growth rule has to produce.
+        let mut atlas = GlyphAtlas::new(100, 200);
+        let sizes = pack_from(&mut atlas, 20, 20, 0, 80);
+        assert_eq!(
+            steps(&sizes),
+            vec![100, 128, 200],
+            "the sizes it passed through, starting at the size it was built at: it \\
+             grows to the next power of two (128) rather than straight to the \\
+             ceiling, and then to the ceiling (200) rather than past it — {sizes:?}"
+        );
+        // And it is at the ceiling for good: asking again changes nothing, which
+        // is the half of the criterion that "it stopped growing once" would miss
+        // if the atlas grew on the *next* ask rather than this one.
+        assert!(
+            !atlas.grow(20, 20),
+            "a grow at the ceiling is refused, not deferred"
+        );
+        assert_eq!(atlas.size(), 200);
+        for _ in 0..8 {
+            assert!(!atlas.grow(20, 20), "and it stays refused");
+        }
+        assert_eq!(atlas.size(), 200, "so it never moves again");
+    }
+
+    #[test]
+    fn a_grow_dirties_the_whole_new_texture() {
+        // The flag is the only thing that carries a grow to the GPU, and this is
+        // the one case where it cannot be blitted into being true: the atlas is
+        // clean, `allocate` grows it, and nothing is blitted — so the flag has to
+        // be the grow's own doing.
+        let mut atlas = GlyphAtlas::new(64, 256);
+        pack_from(&mut atlas, 20, 20, 0, 4);
+        assert!(
+            atlas.take_dirty_pixels().is_some(),
+            "four glyphs were placed"
+        );
+        assert!(
+            atlas.take_dirty_pixels().is_none(),
+            "and the atlas is clean again, so what dirties it below is the grow alone"
+        );
+        let placed = atlas.allocate(22, 22);
+        assert!(placed.is_some(), "the fifth glyph grows rather than fails");
+        assert_eq!(atlas.size(), 128, "and it doubled");
+        let pixels = atlas
+            .take_dirty_pixels()
+            .expect("a grow dirties the atlas even though nothing was blitted");
+        assert_eq!(
+            pixels.len(),
+            128 * 128,
+            "and what is offered for upload is the whole new texture, not the part of \
+             it that moved: the renderer's upload is given the whole buffer and the \
+             current size, and this flag is the only thing that says it has to run"
+        );
+    }
+
+    #[test]
+    fn a_glyph_too_large_for_the_ceiling_is_refused_and_counted() {
+        // Requirement 6, and the half of it that is not a test of a counter: the
+        // refusal must not cost four re-packs to arrive at.
+        let mut atlas = GlyphAtlas::new(64, 512);
+        assert_eq!(atlas.dropped(), 0, "nothing has been refused yet");
+        // **Past the ceiling, not merely past the current size** — a glyph that
+        // only does not fit *yet* is a grow, and these two are the refusal.
+        assert!(
+            atlas.pack(key(0), Some(bitmap(600, 20, 0))).is_none(),
+            "600 pixels will not fit a 512-pixel ceiling"
+        );
+        assert_eq!(atlas.dropped(), 1, "and it is counted");
+        assert_eq!(
+            atlas.size(),
+            64,
+            "**and the atlas did not grow to find out.** Three doublings from 64 is \
+             a 512-pixel texture allocated and re-packed to arrive at the same \
+             refusal, and the glyph's own width already said so"
+        );
+        assert!(
+            atlas.pack(key(1), Some(bitmap(20, 600, 1))).is_none(),
+            "and a glyph too tall for it is refused on the same count rather than \
+             growing until it is tall enough"
+        );
+        assert_eq!(
+            atlas.dropped(),
+            2,
+            "and the count is a count, not a flag: two refusals are two"
+        );
+        assert!(
+            atlas.glyphs.is_empty() && atlas.rows.is_empty(),
+            "and a refused glyph is not half-stored — no entry and no shelf — or the \
+             next glyph would be drawn into it"
+        );
+    }
+
+    #[test]
+    fn a_glyph_the_font_has_no_bitmap_for_is_not_a_refusal() {
+        // The two `None`s of `pack` are one counter apart, and conflating them
+        // would make the counter report spaces as lost glyphs — a space is one per
+        // word, on every screen, and it is not a loss.
+        let mut atlas = GlyphAtlas::new(64, 64);
+        assert!(atlas.pack(key(0), None).is_none(), "a space");
+        assert_eq!(
+            atlas.dropped(),
+            0,
+            "which is not drawn and not counted: it has no quad, and the pen is \
+             given the font's own advance instead"
+        );
+        assert!(
+            atlas.glyphs.is_empty(),
+            "and nothing about it was stored either"
+        );
+    }
+
+    #[test]
+    fn a_glyph_refused_every_frame_is_counted_once_and_not_asked_about_again() {
+        // **The review's finding, as a test.** A refused glyph *is* asked for
+        // again on every frame — `get_or_insert` is a cache miss followed by a
+        // pack, and a refused key is not in the map — so a counter incremented
+        // per refusal reported one unrasterizable glyph as thousands after a few
+        // seconds at 60 fps, and the number requirement 6 exists to produce could
+        // not tell that apart from a page of holes.
+        // A ceiling above the start, so the second half of the test has somewhere to grow to
+        let mut atlas = GlyphAtlas::new(64, 128);
+        let too_big = bitmap(600, 20, 0);
+        for _ in 0..5 {
+            assert!(atlas.pack(key(0), Some(too_big.clone())).is_none());
+        }
+        assert_eq!(
+            atlas.dropped(),
+            1,
+            "**five refusals of one glyph is one glyph that is not being drawn**, and \
+             a number an operator reads has to mean that"
+        );
+        assert!(
+            atlas.pack(key(1), Some(too_big)).is_none(),
+            "a second glyph"
+        );
+        assert_eq!(
+            atlas.dropped(),
+            2,
+            "while a *different* glyph refused is a second glyph missing from a line, \
+             which is what the operator is being told"
+        );
+        // And the number is a live reading rather than a ledger: a glyph that can
+        // be placed again is being drawn, so it must leave the report.
+        assert!(atlas.grow(20, 20), "the atlas grows");
+        assert!(atlas.pack(key(0), Some(bitmap(20, 20, 0))).is_some());
+        assert_eq!(
+            atlas.dropped(),
+            1,
+            "so the glyph that now packs is off the report, and the one that still \
+             does not fit stays on it"
+        );
+    }
+
+    #[test]
+    fn eviction_still_frees_a_shelf_at_the_ceiling() {
+        // Growth is not a replacement for eviction, and at the ceiling the atlas
+        // has to go back to throwing glyphs away — otherwise a long session either
+        // grows without bound or refuses everything.
+        let mut atlas = GlyphAtlas::new(64, 64);
+        let mut keys = Vec::new();
+        for index in 0..4_u32 {
+            atlas
+                .pack(key(index), Some(bitmap(20, 20, index)))
+                .unwrap_or_else(|| panic!("glyph {index} is packed"));
+            keys.push(key(index));
+        }
+        assert_eq!(atlas.size(), 64, "four glyphs fill it, and it did not grow");
+        // **Which shelf each glyph is in, measured rather than assumed.** Two per
+        // shelf at 22 pixels in a 64-pixel atlas, so the first two share one and
+        // an eviction takes both — and a test that assumed the oldest glyph was
+        // alone on its shelf would be asserting a packing this atlas does not do.
+        let shelf_of: Vec<u32> = keys
+            .iter()
+            .map(|key| {
+                atlas
+                    .cached(*key)
+                    .unwrap_or_else(|| panic!("{key:?} is packed"))
+                    .row_y
+            })
+            .collect();
+        assert_eq!(
+            shelf_of,
+            vec![0, 0, 22, 22],
+            "two glyphs per shelf, two shelves"
+        );
+        let seventh = atlas
+            .pack(key(4), Some(bitmap(20, 20, 4)))
+            .expect("at the ceiling the atlas evicts rather than refuses");
+        assert_eq!(
+            atlas.size(),
+            64,
+            "and it is still 64: a ceiling is not a suggestion"
+        );
+        for (index, key) in keys.iter().enumerate() {
+            let gone = atlas.cached(*key).is_none();
+            assert_eq!(
+                gone,
+                index < 2,
+                "glyph {index} is on the least recently used shelf, so it went with \
+                 it, and the two on the shelf above stayed: a shelf is the unit of \
+                 eviction, which costs two glyphs here and not one"
+            );
+        }
+        assert_eq!(
+            atlas.dropped(),
+            0,
+            "and an eviction is not a refusal: the glyph is rasterized again the \
+             next frame the run asks for it, which is what LRU is for"
+        );
+        let (x, y) = (
+            usize::try_from(f32_to_u32((seventh.u0 * u32_to_f32(atlas.size())).round()))
+                .unwrap_or(0),
+            usize::try_from(seventh.row_y).unwrap_or(0),
+        );
+        assert_eq!(
+            (x, y),
+            (0, 0),
+            "and it landed at the origin of the shelf the eviction returned to the \
+             free list, which is what reuse means"
+        );
+        assert_eq!(
+            read_back(&atlas, &seventh),
+            padded_pixels(&bitmap(20, 20, 4)),
+            "with its own coverage under it: the eviction cleared the shelf before it \
+             was handed back, so the new glyph sampled nothing of the old one"
+        );
+    }
+
+    #[test]
+    fn the_least_recently_used_shelf_is_still_the_first_one_after_a_grow() {
+        // The other half of a re-pack. A shelf is addressed by its `y`, the
+        // recency order *is* the order shelves sit in `rows`, and a grow moves
+        // every one of them. If the move lost the order, the next eviction would
+        // take a hot shelf: invisible on screen — the text is redrawn, all of it
+        // correct — and it costs a shelf's worth of rasterization per eviction.
+        let mut atlas = GlyphAtlas::new(64, 256);
+        // Tall, thin glyphs: one per shelf, so each key names its own shelf.
+        let mut keys = Vec::new();
+        for index in 0..4_u32 {
+            atlas
+                .pack(key(index), Some(bitmap(60, 4, index)))
+                .unwrap_or_else(|| panic!("glyph {index} is packed"));
+            keys.push(key(index));
+        }
+        assert_eq!(atlas.rows.len(), 4, "four shelves, one glyph each");
+        // **The middle shelf is the one touched, and that is the whole difficulty
+        // of this test.** Looking up the newest shelf changes nothing — it is
+        // already at the back — so the recency order would go on being the order
+        // the shelves sit in, and a re-pack that wrote each shelf back to its own
+        // `y` would look identical to one that re-flowed them correctly. Touching
+        // the second shelf makes the two orders differ, so the re-pack has to
+        // *move* a shelf for the assertion below to mean anything.
+        assert!(
+            atlas.cached(keys[1]).is_some(),
+            "the second glyph is looked up, which makes its shelf the most recent"
+        );
+        let recency_before: Vec<GlyphKey> = order_of_shelves(&atlas);
+        let ys_before: Vec<u32> = ys_of_shelves(&atlas);
+        assert_eq!(
+            recency_before,
+            vec![keys[0], keys[2], keys[3], keys[1]],
+            "so the recency order is no longer the order the shelves sit in, which is \
+             what makes the next three assertions able to fail"
+        );
+
+        // **The grow is asked for directly**, because `allocate` would take a
+        // fresh shelf before it grew and that is a different test: this one is
+        // about what the move does to the shelves that are already there.
+        assert!(atlas.grow(60, 6), "and the atlas grows");
+        assert_eq!(atlas.size(), 128);
+        assert_eq!(
+            atlas.rows.len(),
+            4,
+            "no shelf was invented or lost by the move"
+        );
+        assert_eq!(
+            order_of_shelves(&atlas),
+            recency_before,
+            "**and the recency order came through it unchanged**, read as the glyphs \
+             on each shelf rather than as a `y`: an order that survived by accident — \
+             because every shelf went back to where it was — is not an order that \
+             survived"
+        );
+        assert_ne!(
+            ys_of_shelves(&atlas),
+            ys_before,
+            "which is a claim about the move and not about the order: the shelves did \
+             move, so the assertion above was not the identity"
+        );
+        assert_eq!(
+            atlas.rows[0].glyphs,
+            vec![keys[0]],
+            "and the least recently used glyph is still on the front shelf"
+        );
+
+        // **Every placement's `row_y` has to be the `y` of the shelf that holds
+        // that glyph** — not merely some shelf that exists. The entry and the shelf
+        // list are two copies of one fact, and eviction frees a shelf by the `y`
+        // the entry names: an entry left on its old `y` still points at *a* shelf,
+        // so an assertion that only asks "is there a shelf at this `y`" passes
+        // while the glyph is on a different one, and the shelf an eviction frees is
+        // a shelf nothing is in. Membership is not correspondence.
+        for key in &keys {
+            let placement = atlas
+                .cached(*key)
+                .unwrap_or_else(|| panic!("{key:?} survived the grow"));
+            let shelf = atlas
+                .rows
+                .iter()
+                .find(|row| row.glyphs.contains(key))
+                .unwrap_or_else(|| panic!("{key:?} is on a shelf"));
+            assert_eq!(
+                placement.row_y, shelf.y,
+                "{key:?} says it is at row_y {} and the shelf holding it is at y {}",
+                placement.row_y, shelf.y
+            );
+        }
+
+        let front = atlas.rows[0].glyphs.clone();
+        assert!(atlas.evict_lru_row().is_some(), "an eviction still happens");
+        for key in front {
+            assert!(
+                atlas.cached(key).is_none(),
+                "{key:?} was on the least recently used shelf and went with it"
+            );
+        }
+        assert_eq!(
+            atlas.rows.len(),
+            3,
+            "and only one shelf went, so the rest of the atlas is still addressable"
+        );
+    }
+
+    #[test]
+    fn a_glyph_packed_after_a_grow_does_not_land_in_a_span_the_move_invalidated() {
+        // **The free spans are handed back rather than moved**, and this is what
+        // that costs if it is got wrong. A span is a hole an eviction left, and
+        // the re-flow writes a shelf where the hole was — so a span kept across
+        // the move is not a hole any more, and the next glyph to take it is
+        // blitted over a live one.
+        let mut atlas = GlyphAtlas::new(64, 128);
+        // Four 22-pixel glyphs are two full shelves of a 64-pixel atlas.
+        let mut expected: Vec<(GlyphKey, Vec<u8>)> = Vec::new();
+        for index in 0..4_u32 {
+            let source = bitmap(20, 20, index);
+            expected.push((key(index), padded_pixels(&source)));
+            atlas
+                .pack(key(index), Some(source))
+                .unwrap_or_else(|| panic!("glyph {index} is packed"));
+        }
+        assert_eq!(atlas.rows.len(), 2, "two shelves, two glyphs each");
+        assert!(
+            atlas.evict_lru_row().is_some(),
+            "an eviction frees the first shelf's span and takes its two glyphs"
+        );
+        // The two on that shelf are gone, and the sweep below is over what is left.
+        expected.drain(..2);
+        // The re-flow now has one shelf left, and it moves down to the origin —
+        // which is where the freed span is.
+        assert!(atlas.grow(22, 22), "and the atlas grows to 128");
+        assert_eq!(atlas.size(), 128);
+        assert_eq!(atlas.next_y, 22, "the one shelf is written at the top");
+        // Three of the four fill the rest of that shelf's width — it holds two, so
+        // its cursor is at 46 and three more take it to 115 — and the fourth is the
+        // one that has to go somewhere else.
+        for index in 4..8_u32 {
+            let source = bitmap(20, 20, index);
+            expected.push((key(index), padded_pixels(&source)));
+            atlas
+                .pack(key(index), Some(source))
+                .unwrap_or_else(|| panic!("glyph {index} is packed"));
+        }
+        let placed = atlas.rows.last().expect("a shelf").glyphs.clone();
+        assert_eq!(
+            placed,
+            vec![key(7)],
+            "so the fourth went on a shelf of its own, and the other three stayed on \
+             the one the re-flow wrote"
+        );
+        let last = atlas.rows.last().expect("a shelf");
+        assert_eq!(
+            (last.y, last.glyphs.len()),
+            (22, 1),
+            "**at y 22, below the shelf the re-flow wrote — not into the span the \
+             eviction left, which is where that shelf now is.** A glyph placed into \
+             the stale span is blitted over the glyph that is already there"
+        );
+        // **And every glyph in the atlas still reads back its own coverage**, which
+        // is what catches the blit over a neighbour. Written as a sweep over the
+        // keys rather than as one named glyph because the sweep is what cannot miss
+        // a shelf.
+        for (key, pixels) in &expected {
+            let placement = atlas
+                .cached(*key)
+                .unwrap_or_else(|| panic!("{key:?} is still packed"));
+            assert_eq!(
+                read_back(&atlas, &placement),
+                *pixels,
+                "{key:?} reads back its own coverage after the grow and after four \
+                 more glyphs were packed around it"
+            );
+        }
+    }
+
+    #[test]
+    fn a_grow_leaves_the_new_texture_empty_where_nothing_was() {
+        // The half of the re-pack nothing else looks at: **the new texture is
+        // zeroed**, so a moved glyph cannot sample the coverage of one that did
+        // not move into its place, and a shelf above the moved ones is not
+        // carrying whatever the old buffer held at those coordinates.
+        let mut atlas = GlyphAtlas::new(64, 256);
+        pack_from(&mut atlas, 20, 20, 0, 4);
+        assert!(atlas.grow(20, 20), "it grows");
+        assert_eq!(atlas.size(), 128);
+        assert_eq!(
+            atlas.pixels().len(),
+            128 * 128,
+            "and the texture it hands to the upload is the new one"
+        );
+        let ink = atlas.pixels().iter().filter(|&&pixel| pixel != 0).count();
+        assert_eq!(
+            ink,
+            4 * 20 * 20,
+            "exactly the four glyphs' own ink, and nothing else: {ink} inked pixels \
+             in a 128 × 128 texture that was 64 × 64 before"
+        );
     }
 }
 
@@ -2009,17 +2912,18 @@ mod atlas_tests {
 mod weight_tests {
     use super::*;
 
-    /// A glyph's placement, off the origin and with a size the assertions can
-    /// tell apart: an atlas placement at `(0, 0)` with the default metrics cannot
-    /// be told from any other, which is the same reason `.ai/NEVERAGAIN.md` § *A
-    /// rect's origin and a rect's extent are different numbers* exists.
-    fn placement(x: f32, advance: f32) -> GlyphPlacement {
-        GlyphPlacement {
-            u0: x / 1024.0,
-            v0: 0.0,
-            u1: (x + 8.0) / 1024.0,
-            v1: 8.0 / 1024.0,
-            row_y: 16,
+    /// A glyph's entry, off the origin and with a size the assertions can tell
+    /// apart: an entry at `x = 0` with the default metrics cannot be told from
+    /// any other, which is the same reason `.ai/NEVERAGAIN.md` § *A rect's
+    /// origin and a rect's extent are different numbers* exists.
+    ///
+    /// **An `Entry` and not a `GlyphPlacement`, because that is what the atlas
+    /// stores** — the placement is derived from it, and a test that builds one
+    /// by hand would be testing a struct the atlas never holds.
+    fn entry(x: u32, advance: f32) -> Entry {
+        Entry {
+            x,
+            y: 16,
             width: 8,
             height: 8,
             bearing_x: 1,
@@ -2138,7 +3042,7 @@ mod weight_tests {
         // rasterized from the regular face and once from the bold one, must be
         // found separately — a key without the face would hand the bold run the
         // regular glyph's quad, one letter in the wrong weight with no error.
-        let mut atlas = GlyphAtlas::new(1024);
+        let mut atlas = GlyphAtlas::new(1024, 1024);
         let regular = FontId(0);
         let bold = FontId(1);
         let key_regular = GlyphAtlas::key_for('a', 20.0, regular);
@@ -2149,11 +3053,15 @@ mod weight_tests {
              are different glyphs and the key has to say which face rasterized it"
         );
 
-        atlas.glyphs.insert(key_regular, placement(8.0, 10.0));
-        atlas.glyphs.insert(key_bold, placement(64.0, 12.0));
+        atlas.glyphs.insert(key_regular, entry(8, 10.0));
+        atlas.glyphs.insert(key_bold, entry(64, 12.0));
 
-        let found_regular = atlas.glyphs.get(&key_regular).copied();
-        let found_bold = atlas.glyphs.get(&key_bold).copied();
+        // **Read back through `cached`, not out of the map**, because `cached` is
+        // what a renderer asks and it is where the UV is derived from the entry's
+        // pixel and the atlas's current size. Reading the map would skip the one
+        // step this task changed, and the `u0` assertion below is about that step.
+        let found_regular = atlas.cached(key_regular);
+        let found_bold = atlas.cached(key_bold);
         assert_eq!(
             found_regular.map(|p| p.advance),
             Some(10.0),
@@ -2820,7 +3728,7 @@ mod chain_tests {
         // original defect task 30 exists to remove: a character nothing covers,
         // answered with "no glyph", drawn as nothing. A `None` here is a silent
         // hole wearing the fix's own type.
-        let mut atlas = GlyphAtlas::new(1024);
+        let mut atlas = GlyphAtlas::new(1024, 1024);
         let placement = atlas.get_or_insert_replacement(24.0);
         let placement = placement.expect("the replacement is packed, not dropped");
         // **The padded size, not the bitmap's**, and the difference is the point:
@@ -2855,7 +3763,7 @@ mod chain_tests {
         // uncovered characters in a row draw five boxes out of **one** atlas entry,
         // so a page of text in a script no font covers cannot evict every real
         // glyph in the atlas to store identical copies of a box.
-        let mut atlas = GlyphAtlas::new(1024);
+        let mut atlas = GlyphAtlas::new(1024, 1024);
         let first = atlas
             .get_or_insert_replacement(24.0)
             .expect("the replacement is packed");

@@ -1384,3 +1384,162 @@ operator has just rejected is an argument to drop, not to soften. The subsystem
 question was settled on the merits — audio and camera are product requirements —
 and only then did the sizes get measured, as a footnote to what had already been
 decided.
+
+## 2026-10-05 — `tar -x` restores the archived mtime, so a restored tree is older
+## than the build and cargo keeps the binary the mutation produced
+
+Task 30's deliberate-break sweep left a mutation in the tree, and the tell was not
+in the runner at all. The restore was `tar -xf "$PRISTINE"` on a trap, which is
+correct as a restore and **lies to cargo afterwards**: `tar` puts back the mtimes
+the archive recorded, and those were taken before the session's first mutation —
+so every source file came back *older* than the build a mutation had just
+produced. Cargo fingerprinted them as unchanged, kept the mutated rlib, and the
+suite reported **two failures against a source file that was provably correct**:
+`the text holds U+26A0` failing on a file that contained `\u{26a0}`, and a
+character count reading 12 for a string of 18.
+
+**`diff` said the tree was clean and the suite was red, and neither was a lie** —
+that is what makes this one new. `.ai/NEVERAGAIN.md` already has the `cp -p`
+entry ("a restore that preserves metadata and thereby lies to the build cache"),
+and this is that mechanism reached by a different command. **`touch` after the
+restore is the fix**, and it is two words, so the cost of leaving them out is a
+session's worth of chasing a defect that was not in the tree.
+
+**Rule:** a mutation runner's restore must leave the tree looking **newer** than
+any build that ran during the sweep. `cp` without `-p` does it; `tar -x` does
+not; so after either, `touch` the files. And **when a test fails, read the source
+before believing the test** — a failure that contradicts the file is either a
+stale binary or a wrong expectation, and `cargo build` printing what it rebuilt
+is what tells the two apart in one command.
+
+## 2026-10-05 — A test fixture that builds what production does not define
+
+Task 30's demo label is switched between two font families by a property, and the
+demo's test fixture **defines the second family** so the toggle has something to
+toggle to. `main` builds its font set in a different place, and it **did not
+define that family** — and `FontSet::family` resolves an unknown name to the
+default family *by design*, so `Y` wrote the family the label was already in. It
+did nothing. Every test passed, because every test ran against the fixture.
+
+**The capture found it and nothing else could.** The two states were photographed
+to show the same sentence drawn two ways, and the two images came out
+byte-identical across 71 sampled columns of the label's row — the second was a
+photograph of the first. `magick compare -metric AE` reports 1958 differing
+pixels over the whole window, which is the fps readout and the padding; the
+*label's* row is what is identical, and it is identical because nothing happened.
+
+This is task 24.1's missing-row finding **mirrored**. There, a production row was
+absent from a table the tests read and a completeness assertion caught it. Here, a
+production **definition** is absent from a set the tests *constructed themselves*,
+so the tests and the artefact were built from two different sources and the
+assertions agreed with the fixture. The sweep's row
+`the-fallback-font-file-is-not-installed` — deleting
+`fonts.add_fallback(Font::from_path(FALLBACK_FONT_PATH)?)` from `main` — is the
+same defect measured from the other side, and **it survived**, because `main`
+opens a window and no test touches it.
+
+**Rule:** when a fixture supplies a value the product is supposed to supply, the
+fixture is **a second copy of that decision** and the two can differ without
+anything failing. Prefer extracting the construction into a function the tests can
+call; where the value needs a file or a window and cannot be, **say so in the
+fixture's doc and count the wiring as unverified**, because "the tests pass" then
+covers the fixture and nothing else. And **photograph a change and compare the
+two states rather than each against nothing**: one capture of a thing that did not
+change looks exactly like one capture of a thing that did not change, and only a
+pair answers it.
+
+## 2026-10-05 — An unknown-name rule and a mutation of it can be the same value
+
+A deliberate-break row replaced `self.default_family()` with
+`FamilyId::default()` in `FontSet::family`, and with
+`self.family_id(DEFAULT_FAMILY).unwrap_or(...)` in a second attempt. **Neither is
+a mutation.** `FontSet::new` pushes the default family under `DEFAULT_FAMILY` as
+its first entry and `default_family()` *is* `FamilyId::default()`, so all three
+spellings name the same family. Both edits applied, the binary changed, the
+behaviour did not, and the runner's guard — which compares the mutated text
+against the base before building, and the binary's bytes — passed both.
+
+This is the *same* failure as *a guard built from a name and a size*, one level up:
+**a fingerprint proves the artefact changed and says nothing about whether the
+behaviour did.** The remedy that file gives is right and is worth restating
+because it was not applied here: **a declared expectation per row**, and a
+mutation that is unkillable must be *argued* as unkillable rather than reported
+as a survivor. The row that actually tests the rule is
+`an-unknown-name-resolves-to-something-else` — resolving an unknown name to a
+family that is **not** the default — and it is killed.
+
+**Rule:** when a mutation survives, ask whether it *can* be killed before writing
+it down as a weak test. Two ways to spell the same value, a constant and its own
+definition, a default and the thing it defaults to — a change between them is a
+rename, and a renamed row has tested nothing. The cheap check is to ask what the
+edit was *for*, and if the answer is "to see whether this path is reached", the
+edit needs to change a **value**, not a spelling.
+
+## 2026-10-05 — `next_power_of_two` is idempotent on a power of two, so "grow to
+## the next power of two" is a grow that never happens
+
+Task 31's atlas growth asked `next_power_of_two` for the next power of two above
+the atlas's size, exactly as the task file words it — and growth never fired once.
+The atlas starts at 2048 and every size it holds after a grow **is** a power of
+two, so the answer was always the size it already had: `min(64, max) = 64`, the
+`next <= size` guard returned `false`, and `allocate` fell straight through to
+eviction — which is precisely the behaviour the task exists to remove, reached
+through the code that was supposed to prevent it.
+
+**The suite caught it in one run and it would never have been caught on screen.**
+Six tests failed on the first execution, all of them saying the same thing: the
+atlas had not grown. Nothing about the demo shows it: 2048² holds about 9 500
+glyphs and the demo has 200, so *no run of the product ever grows the atlas at
+all* — the growth path is unreachable from a capture unless a build is seeded to
+reach it.
+
+**Rule:** a "round up to the next power of two" is not a doubling, and the two
+are written differently: ask for the power of two **above `size + 1`**, not above
+`size`, because the rounding function is a fixed point at a power of two. This
+is the same shape as *an unknown-name rule and a mutation of it can be the same
+value*: **a function applied to a value the function is idempotent on returns the
+value**, so any growth, padding or rounding keyed on "the next X" is a no-op on
+every value it has already produced. And when a task's mechanism is unreachable
+from the product's own screens, **assert the mechanism's own numbers in a test
+before believing the code that computes them** — the numbers are cheap and the
+screen is not.
+
+## 2026-10-05 — A mutation the runner refused to apply was recorded as a kill
+
+Task 31's sweep claimed 13 of 14 deliberate breaks killed. **Two of them had never
+run.** The runner compares its search string against the source before it builds —
+the guard from *an unknown-name rule and a mutation of it can be the same value* —
+and rustfmt had wrapped `atlas_sizes`'s return tuple across four lines since the
+row was written, so the guard matched nothing, refused the mutation, and printed
+`GUARD`. The output line was read as a kill when it was re-run, because the row
+above it said `KILLED` and nobody counted the rows.
+
+**The guard is right and the record was wrong.** A guard that lets a no-op mutation
+through is worse than no guard at all: it certifies a behaviour change that was never
+compiled. But a `GUARD` line is *not* a kill, and a summary written from the rows
+rather than from the run will call it one.
+
+**Rule:** read the verdict column, not the table above it, and **a sweep's summary
+is written from the run's own count of its verdicts** — `grep -c KILLED` on the
+output, not the number of rows in the table. Where the two disagree the table is
+wrong, and here it was wrong twice in two places at once (the heading said 14 rows,
+the table had 13, the script had 15). Related: *four documents agreeing is one
+belief, counted four times*.
+
+## 2026-10-05 — A counter incremented per event, beside a doc saying it was not
+
+Task 31 counted the glyphs the atlas refused so a missing glyph would stop being
+silent, incremented the counter on every refusal, and wrote in the same doc comment
+that **"the character is not queued, retried or re-rasterized"**. All three halves
+of that were wrong in the same direction: a refused key is not in the map, so
+`get_or_insert` re-rasterizes and re-refuses it on every frame, and the text pass
+re-expands each batch per frame — so one unrasterizable glyph reported 3 600 after
+three seconds at 60 fps. The reviewer found it by reading the doc against the code,
+which is the only tool that compares them.
+
+**Rule:** a counter that answers "how much is wrong" must be keyed on **what is
+wrong**, not on how often the question was asked — `HashSet` before `usize`. And
+**when a doc comment states a mechanism as strongly as "not retried", write the
+sentence from the call path rather than from the intention**: the intent was to
+avoid pointless work, and the honest statement of it is "a retry costs a cache
+miss", which does not change what the number means.

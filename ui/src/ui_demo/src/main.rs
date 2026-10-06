@@ -2195,8 +2195,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // measurement nobody can get at is the failure this whole mechanism exists to
     // avoid.
     println!("{}", demo.fps_report());
+    println!(
+        "{}",
+        glyph_report(renderer.glyph_atlas_size(), renderer.dropped_glyphs())
+    );
 
     Ok(())
+}
+
+/// Returns the line the demo prints about the glyph atlas when it stops.
+///
+/// **`key=value` pairs after a fixed prefix, for the reason
+/// [`FrameRate::report`] gives its own line**: a script greps for the prefix and
+/// pulls each number out by name. It is printed on **every** run rather than only
+/// when a glyph was lost, because a line that appears only on failure cannot be
+/// told from a line that was never printed — and this line exists to answer
+/// "did the atlas run out of room?", which is a question with a negative answer
+/// far more often than a positive one.
+///
+/// Two fields, and the second is the one `TASK_UI_PRIM_31` requirement 6 asks
+/// for: `dropped` is the number of glyphs the atlas could not hold at its
+/// ceiling, which used to be a glyph missing from a line with nothing anywhere
+/// saying so.
+#[must_use]
+fn glyph_report(atlas_size: u32, dropped: u32) -> String {
+    format!("roados-glyphs atlas_size={atlas_size} dropped={dropped}")
 }
 
 /// Returns how long the loop should block after a frame that took `spent`.
@@ -14324,6 +14347,27 @@ mod tests {
             demo.fps_report(),
             "roados-fps frames=30 duration_s=0.600 average_fps=50.0 \
              worst_frame_ms=20.0 long_frames=0"
+        );
+    }
+
+    #[test]
+    fn the_glyph_report_names_the_atlas_size_and_the_dropped_count() {
+        // **The other line a test runner parses**, and the one
+        // `TASK_UI_PRIM_31` requirement 6 ends in: a glyph the atlas could not
+        // hold used to be a hole in a line of text with nothing saying so, and
+        // this is what says so. The whole line is asserted for the reason the
+        // frame-rate one is — a renamed field is a script that quietly finds
+        // nothing — and the zero case is here because **the line is printed on
+        // every run**, so a reader has to be able to tell "nothing was dropped"
+        // from "nothing was printed".
+        assert_eq!(
+            glyph_report(2048, 0),
+            "roados-glyphs atlas_size=2048 dropped=0"
+        );
+        assert_eq!(
+            glyph_report(4096, 3),
+            "roados-glyphs atlas_size=4096 dropped=3",
+            "and a run that grew and lost glyphs says both"
         );
     }
 

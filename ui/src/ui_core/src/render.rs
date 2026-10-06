@@ -130,8 +130,55 @@ const IMAGE_SIZE_OFFSET: i32 = 32;
 /// The number of indices one quad contributes to an index buffer: two triangles.
 const INDICES_PER_QUAD: usize = 6;
 
-/// The glyph atlas texture size in pixels, square.
+/// The glyph atlas texture size in pixels, square, before any grow.
+///
+/// **A starting size, not a fixed one.** `TASK_UI_PRIM_31` made the atlas grow
+/// rather than evict when it fills, so the number here is where a session begins
+/// rather than a ceiling; [`ATLAS_MAX_SIZE`] is the ceiling, and this is the
+/// size the demo has been measured at.
 const ATLAS_SIZE: u32 = 2048;
+
+/// The largest the glyph atlas may grow to, in pixels, square.
+///
+/// **4096 is a documented choice, not a derived one**: 16 MB of `GL_R8` coverage,
+/// which is the whole of the cost, and a power of two so the last step from 2048
+/// lands on it. It is a ceiling on the *memory* as much as on the texture, and
+/// on a head unit with a few hundred megabytes of RAM a glyph cache that doubles
+/// past 16 MB is a defect rather than a feature — a page of text at one size is
+/// about 3 000 glyphs, so a session that needs more than 16 MB of them is a
+/// session with a lot of sizes on screen at once.
+///
+/// **It is also checked against the driver**, in [`atlas_sizes`], because a
+/// ceiling this module fixes is no use against a `GL_MAX_TEXTURE_SIZE` below it:
+/// the atlas would grow, the upload would fail, and the glyphs it had already
+/// packed would sample a texture of the wrong size.
+const ATLAS_MAX_SIZE: u32 = 4096;
+
+/// Returns the glyph atlas's starting size and growth ceiling for a driver whose
+/// largest texture is `driver_limit`.
+///
+/// **Both numbers are bounded by the driver, and the starting size is bounded
+/// twice** — by the size this module documents and by what the driver can
+/// address. The starting size matters for the same reason the ceiling does: a
+/// driver under 2048 would be handed a texture it cannot allocate, and the
+/// failure would be a GL error nothing reads rather than an atlas sized to fit.
+///
+/// **A driver that answers zero is treated as one that cannot say, and is given
+/// no growth.** Every GLES 3.1 implementation answers `GL_MAX_TEXTURE_SIZE`, so
+/// zero means the query failed, and the two honest answers to a limit nobody
+/// knows are "grow and find out" and "stay where you are". Only one of them
+/// cannot hand `glTexImage2D` something it refuses.
+fn atlas_sizes(driver_limit: u32) -> (u32, u32) {
+    let driver_limit = if driver_limit == 0 {
+        ATLAS_SIZE
+    } else {
+        driver_limit
+    };
+    (
+        ATLAS_SIZE.min(driver_limit),
+        ATLAS_MAX_SIZE.min(driver_limit),
+    )
+}
 
 /// The solid-color shader: window-space positions, per-vertex color, and an
 /// SDF that cuts rounded corners in the fragment shader.
@@ -795,6 +842,105 @@ where
         pen_x += advance_for(placement.as_ref(), unrasterized, extra_advance);
     }
     pen_x
+}
+
+/// Builds the quad vertices for every text command in `batch`, packing their
+/// glyphs into `atlas` as it goes.
+///
+/// One pass, and **the pass is where the atlas can grow**: a glyph is packed the
+/// first time it is asked for, and packing is what triggers a grow. What a pass
+/// cannot know is whether it will be the last one — see [`expand_until_settled`],
+/// which is what this is called from.
+fn text_vertices(atlas: &mut GlyphAtlas, fonts: &FontSet, batch: &Batch) -> Vec<TextVertex> {
+    let mut vertices: Vec<TextVertex> = Vec::new();
+    for command in &batch.commands {
+        let DrawCommand::Text {
+            x,
+            y,
+            text,
+            color,
+            font_size,
+            extra_advance,
+            family,
+            weight,
+        } = command
+        else {
+            continue;
+        };
+        // **The only state in which a run is skipped at all**, and it is the
+        // set's own empty check that has already run: `draw_text_batch` returns
+        // for a set with no font, so by the time a command is reached the set
+        // holds at least one — and `primary` asks the *drawable* family, which
+        // resolves a family that holds nothing to the default one for exactly
+        // this reason. **A family with nothing in it therefore does not drop the
+        // run**: it draws in the default family, which is the fix the review of
+        // task 30 required, because a dropped run is requirement 4's "silent
+        // hole" at the largest size there is.
+        let Some(primary) = fonts.primary(*family, *weight) else {
+            continue;
+        };
+        let baseline = *y + primary.font().ascent(*font_size);
+        // The atlas is reborrowed rather than moved out of the parameter, so the
+        // two closures below can hold one borrow each: the chain asks the set,
+        // the atlas is written to, and neither can be reached through the other.
+        let atlas = &mut *atlas;
+        walk_run(
+            text,
+            *x,
+            *extra_advance,
+            &mut |ch| match fonts.pick(*family, *weight, ch) {
+                PickedFont::Covered(face) => atlas.get_or_insert(ch, *font_size, face),
+                PickedFont::Replacement => atlas.get_or_insert_replacement(*font_size),
+            },
+            &mut |ch| fonts.advance(*family, *weight, ch, *font_size),
+            &mut |placement, pen_x| {
+                let gx = pen_x + i32_to_f32(placement.bearing_x);
+                let gy = baseline - i32_to_f32(placement.bearing_y);
+                let w = u32_to_f32(placement.width);
+                let h = u32_to_f32(placement.height);
+                let uv = (placement.u0, placement.v0, placement.u1, placement.v1);
+                vertices.extend_from_slice(&text_quad(gx, gy, w, h, uv, *color));
+            },
+        );
+    }
+    vertices
+}
+
+/// Runs `expand` and returns its vertices, **and runs it again if the atlas
+/// changed size while it ran**, returning only the last pass's vertices.
+///
+/// **A placement's UVs are divided by the atlas's size**, and a grow re-packs
+/// every glyph into a larger texture, so vertices built before a grow sample the
+/// re-packed texture at the coordinates of the old one. The run is laid out
+/// correctly and drawn from the wrong pixels, on one frame — the frame the grow
+/// happens on, which is a frame no capture after it can show.
+///
+/// **The second pass cannot grow the atlas again, so this ends rather than
+/// loops.** The first pass packed every glyph it could, so the second finds all
+/// of them cached and packs nothing; the only lookups that still pack are the
+/// glyphs the atlas *refused*, and a refusal is what growth being exhausted looks
+/// like, so the size at the end of the second pass is the size at the end of the
+/// first. The `loop` is therefore read as "at most twice", and it is written as a
+/// loop so that the reason it stops is the size and not a counter.
+///
+/// **It is a free function so that it can be tested**, which is the whole reason
+/// it is not three lines inside `draw_text_batch`: that method needs a GL context
+/// and a font face, and `AGENTS.md` forbids a test to open one — which had left
+/// the rule below with an argument, a capture and a deliberate break that
+/// survives as its only evidence.
+fn expand_until_settled(
+    atlas: &mut GlyphAtlas,
+    mut expand: impl FnMut(&mut GlyphAtlas) -> Vec<TextVertex>,
+) -> Vec<TextVertex> {
+    let mut size = atlas.size();
+    loop {
+        let vertices = expand(atlas);
+        let settled = atlas.size();
+        if settled == size {
+            return vertices;
+        }
+        size = settled;
+    }
 }
 
 /// Converts a color to normalized premultiplied components.
@@ -1599,6 +1745,10 @@ impl Renderer {
                 .gl()
                 .get_uniform_location(shadow_composite_program, "u_source")
         };
+        // The atlas's sizes are settled before it is built rather than inside
+        // the literal, because they are two numbers read from the driver and
+        // computed by one function — see `atlas_sizes`.
+        let (atlas_size, atlas_max_size) = atlas_sizes(target::max_texture_size(context.gl()));
         let mut renderer = Renderer {
             context,
             program,
@@ -1618,7 +1768,7 @@ impl Renderer {
             u_text_resolution,
             atlas_texture,
             fonts: FontSet::new(),
-            atlas: GlyphAtlas::new(ATLAS_SIZE),
+            atlas: GlyphAtlas::new(atlas_size, atlas_max_size),
             applied_clip: None,
             text_vertex_capacity: 0,
             text_index_capacity: 0,
@@ -1825,6 +1975,44 @@ impl Renderer {
     /// here thickens a regular glyph or draws it twice.
     pub fn set_bold_font(&mut self, font: Font) {
         self.fonts.set(FontWeight::Bold, font);
+    }
+
+    /// Returns how many glyphs the glyph atlas could not hold and therefore did
+    /// not draw.
+    ///
+    /// **This is the end of the line `TASK_UI_PRIM_31` requirement 6 asks for,
+    /// and a count rather than an error is a deliberate choice.** The atlas grows
+    /// to its ceiling and only then evicts, so a glyph that cannot be placed is
+    /// either wider than the whole texture — a font rasterized at an absurd size
+    /// — or a ceiling that was set too low for the text being drawn. Both are
+    /// bugs, and neither is worth ending the frame over: the run keeps its
+    /// spacing, the frame is drawn, and the number is here for whoever is
+    /// looking. What must not happen is the state requirement 6 calls a defect:
+    /// **the glyph goes missing and nobody is told**, which is what this returns
+    /// and what `ui_demo` prints.
+    ///
+    /// **It is a live reading, not a high-water mark**, and it can go down: a
+    /// glyph the atlas could not hold leaves the count the moment it can be held
+    /// again, because the number answers *what is not being drawn now*. A caller
+    /// that wants a high-water mark has to keep one itself. Nothing is ever
+    /// *added* to the count by the same glyph twice, however many frames ask for
+    /// it — see [`crate::font::GlyphAtlas::dropped`].
+    #[must_use]
+    pub fn dropped_glyphs(&self) -> u32 {
+        self.atlas.dropped()
+    }
+
+    /// Returns the glyph atlas's current texture size in pixels, square.
+    ///
+    /// **It moves.** A full atlas grows — see [`crate::font::GlyphAtlas`] — so
+    /// this is not the size the renderer was built with, and a caller that
+    /// cached it at startup is holding a number that was true then. It is here
+    /// because the growth is otherwise invisible from outside: a session that
+    /// doubled its atlas is a session whose first frame after the grow uploaded
+    /// four times the coverage, and that is worth being able to ask about.
+    #[must_use]
+    pub fn glyph_atlas_size(&self) -> u32 {
+        self.atlas.size()
     }
 
     /// Loads the image at `path` and returns a handle to it.
@@ -2678,6 +2866,14 @@ impl Renderer {
     /// The atlas is populated lazily while a batch is being expanded, so this
     /// has to run *after* the quads are built and *before* they are drawn: an
     /// upload taken before rasterization would sample an empty texture.
+    ///
+    /// **The size is read here rather than cached, which is what makes a grow
+    /// reach the GPU at all.** `tex_image_2d` is given `self.atlas.size()` and
+    /// the whole buffer, so a texture that grew is reallocated at its new size
+    /// and every texel of it is written — the alternative, uploading into the
+    /// size the texture was created with, would leave the upper half of a 4096
+    /// texture undefined and the quads sampling it. The atlas's own `dirty` flag
+    /// is what decides whether any of this happens, and a grow sets it.
     fn upload_atlas(&mut self) -> Result<(), RenderError> {
         let size = self.atlas.size();
         let Some(pixels) = self.atlas.take_dirty_pixels() else {
@@ -2764,59 +2960,20 @@ impl Renderer {
         if self.fonts.is_empty() {
             return Ok(());
         }
-        let mut vertices: Vec<TextVertex> = Vec::new();
-        for command in &batch.commands {
-            let DrawCommand::Text {
-                x,
-                y,
-                text,
-                color,
-                font_size,
-                extra_advance,
-                family,
-                weight,
-            } = command
-            else {
-                continue;
-            };
-            // **The only state in which a run is skipped at all**, and it is the
-            // set's own empty check that has already run: `self.fonts.is_empty()`
-            // above returns for a set with no font, so by the time a command is
-            // reached the set holds at least one — and `primary` asks the *drawable*
-            // family, which resolves a family that holds nothing to the default one
-            // for exactly this reason. **A family with nothing in it therefore does
-            // not drop the run**: it draws in the default family, which is the fix
-            // the review of task 30 required, because a dropped run is requirement
-            // 4's "silent hole" at the largest size there is.
-            let Some(primary) = self.fonts.primary(*family, *weight) else {
-                continue;
-            };
-            let baseline = *y + primary.font().ascent(*font_size);
-            // Two borrows of disjoint fields, taken as locals so the two
-            // closures below can hold one each: the chain asks the set, the atlas
-            // is written to, and neither can be reached through `self` while the
-            // other is borrowed.
-            let fonts = &self.fonts;
-            let atlas = &mut self.atlas;
-            walk_run(
-                text,
-                *x,
-                *extra_advance,
-                &mut |ch| match fonts.pick(*family, *weight, ch) {
-                    PickedFont::Covered(face) => atlas.get_or_insert(ch, *font_size, face),
-                    PickedFont::Replacement => atlas.get_or_insert_replacement(*font_size),
-                },
-                &mut |ch| fonts.advance(*family, *weight, ch, *font_size),
-                &mut |placement, pen_x| {
-                    let gx = pen_x + i32_to_f32(placement.bearing_x);
-                    let gy = baseline - i32_to_f32(placement.bearing_y);
-                    let w = u32_to_f32(placement.width);
-                    let h = u32_to_f32(placement.height);
-                    let uv = (placement.u0, placement.v0, placement.u1, placement.v1);
-                    vertices.extend_from_slice(&text_quad(gx, gy, w, h, uv, *color));
-                },
-            );
-        }
+        // **The batch is expanded against the size the atlas has now, and
+        // expanded again if that size moves while it is being expanded** — which
+        // it can, because packing a glyph is what triggers a grow. A
+        // [`GlyphPlacement`]'s UVs are divided by the atlas's size, so the quads
+        // built before the grow sample the re-packed texture at the coordinates
+        // of the *old* one: the run is laid out correctly and drawn from the
+        // wrong pixels, on exactly one frame, which is the frame a capture of a
+        // growing atlas would photograph. **Both halves of that are free
+        // functions** — `text_vertices` builds one pass and `expand_until_settled`
+        // decides whether to run it again — so the decision is tested where a
+        // test can reach it rather than behind a GL context and a font face.
+        let fonts = &self.fonts;
+        let atlas = &mut self.atlas;
+        let vertices = expand_until_settled(atlas, |atlas| text_vertices(atlas, fonts, batch));
         if vertices.is_empty() {
             return Ok(());
         }
@@ -3023,6 +3180,211 @@ mod tests {
     use crate::font::resolve_slot;
     use crate::paint::{FamilyId, Painter, TextureId};
     use blur::MAX_TAPS;
+
+    #[test]
+    fn the_glyph_atlas_starts_at_the_documented_size_and_grows_to_the_ceiling() {
+        // The ordinary case, and the two numbers it asserts are the ones
+        // `ATLAS_SIZE` and `ATLAS_MAX_SIZE` fix. A driver with room to spare
+        // changes neither.
+        assert_eq!(atlas_sizes(16384), (2048, 4096));
+        assert_eq!(ATLAS_SIZE, 2048, "the size the demo has been measured at");
+        assert_eq!(ATLAS_MAX_SIZE, 4096, "and the ceiling it grows to");
+    }
+
+    #[test]
+    fn the_glyph_atlas_never_asks_for_a_texture_the_driver_cannot_address() {
+        // Requirement 4, and it is two claims rather than one. The ceiling is
+        // bounded by the driver, and so is the *starting* size — which was not
+        // true before this task, because the atlas was built at `ATLAS_SIZE`
+        // whatever the driver said, and a driver under 2048 would have been handed
+        // a texture it cannot allocate as a GL error nothing reads.
+        for limit in [1024, 2048, 3000, 4096, 16384] {
+            let (size, max) = atlas_sizes(limit);
+            assert!(size <= limit, "{size} starts inside a {limit} limit");
+            assert!(max <= limit, "{max} grows no past a {limit} limit");
+            assert!(size <= max, "and the start is never past the ceiling");
+        }
+    }
+
+    #[test]
+    fn a_driver_at_the_documented_size_gets_no_growth_and_a_smaller_one_gets_a_smaller_start() {
+        // **The two clamping decisions, separately, because they are different
+        // decisions.** A driver at exactly 2048 keeps the start and loses the
+        // growth; a driver under it loses both, because an atlas is a texture
+        // before it is a cache.
+        assert_eq!(
+            atlas_sizes(2048),
+            (2048, 2048),
+            "no room to grow into, and the start is already at the limit"
+        );
+        assert_eq!(
+            atlas_sizes(1024),
+            (1024, 1024),
+            "a quarter of the documented size, and the start respects it"
+        );
+        assert_eq!(
+            atlas_sizes(3000),
+            (2048, 3000),
+            "**and a limit between the two powers of two is the ceiling itself**, not \\
+             the power of two above it: 4096 is past what this driver can address, \\
+             and a grow that asks for it would get an unchecked GL error"
+        );
+    }
+
+    #[test]
+    fn a_driver_that_cannot_say_how_big_a_texture_may_be_is_given_no_growth() {
+        // `max_texture_size` answers 0 when the query fails, and every GLES 3.1
+        // implementation answers it — so zero is a broken driver, and the two
+        // honest answers to a limit nobody knows are "grow and find out" and
+        // "stay put". Only one of them cannot hand `glTexImage2D` a size it
+        // refuses, and this is that one.
+        assert_eq!(
+            atlas_sizes(0),
+            (2048, 2048),
+            "the documented size, and no growth above it"
+        );
+    }
+
+    #[test]
+    fn the_text_batch_is_expanded_again_when_the_atlas_grows_under_it() {
+        // **The gate, and it is the one `.ai/NEVERAGAIN.md` has four rounds of
+        // history about — a rule with no test.** A placement's UVs are divided by
+        // the atlas's size, a grow re-packs the atlas into a larger texture, and
+        // the quads built before the grow therefore sample the re-packed texture
+        // at the coordinates of the old one. It is invisible on every frame after
+        // the grow, so a capture cannot see it: the review built the demo twice,
+        // once with this loop and once without, and the label crop compared at
+        // 0.3 s, 1 s, 3 s and 8 s was **AE = 0 every time**.
+        //
+        // So the decision is a free function over `GlyphAtlas::size()` — two
+        // `u32`s — and the expansion it re-runs is a closure, which is what makes
+        // it reachable from a test at all: `draw_text_batch` itself needs a GL
+        // context and a font face, and neither may be opened by a test here.
+        //
+        // **The expander packs the replacement glyphs a text batch asks for**,
+        // one per size, through the public entry point and with no font: they are
+        // 14-18 pixels square, so twelve of them overflow a 64-pixel atlas and the
+        // first pass grows it. Each pass returns one vertex carrying the size it
+        // saw, so the test can also ask *which* pass's vertices came back.
+        let sizes = [
+            20.0_f32, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0,
+        ];
+        let mut atlas = GlyphAtlas::new(64, 256);
+        let mut passes = 0;
+        let mut seen = Vec::new();
+        let vertices = expand_until_settled(&mut atlas, |atlas| {
+            passes += 1;
+            seen.push(atlas.size());
+            for size in sizes {
+                assert!(
+                    atlas.get_or_insert_replacement(size).is_some(),
+                    "the replacement at {size} is packed"
+                );
+            }
+            vec![TextVertex {
+                pos: [0.0, 0.0],
+                uv: [u32_to_f32(atlas.size()), 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            }]
+        });
+        assert!(
+            atlas.size() > 64,
+            "**the expander grew the atlas, which is the whole premise**: {}",
+            atlas.size()
+        );
+        assert_eq!(
+            seen.first().copied(),
+            Some(64),
+            "and the first pass saw the size it started at"
+        );
+        assert_eq!(
+            passes, 2,
+            "**so it ran exactly twice**: the vertices built in the first pass are \
+             divided by a size that no longer exists, and the second pass — which \
+             finds every glyph cached and packs nothing — cannot grow it again, \
+             which is why this is a loop that ends rather than one that might not"
+        );
+        assert_eq!(
+            seen.last().copied(),
+            Some(atlas.size()),
+            "with the second pass seeing the settled size"
+        );
+        assert_eq!(
+            vertices[0].uv[0],
+            u32_to_f32(atlas.size()),
+            "**and the vertices returned are the second pass's**, not the first's: a \
+             first-pass vertex carries the size the atlas had before the grow, \
+             which is the defect this function exists to remove"
+        );
+    }
+
+    #[test]
+    fn the_text_pass_expands_its_batch_through_the_settle_loop() {
+        // **The seam above the loop's own tests, which is where a refactor would
+        // remove it.** `expand_until_settled`'s two tests hand it a closure of their
+        // own, so they pass whether or not the text pass goes through it — and
+        // replacing the call with a bare `text_vertices(atlas, fonts, batch)` is the
+        // defect this whole rule exists to prevent, with the entire suite green.
+        // **The review found that by running it.**
+        //
+        // **A source-string assertion, in the shape `blur.rs` already uses for its
+        // `#[repr(C)]`**: the file's own text is the artefact, the search is over
+        // the part of it **above the test module** so the assertion cannot be
+        // satisfied by its own words, and the search is scoped to `draw_text_batch`
+        // rather than to the whole file so it says what it means. It is brittle to
+        // renaming and says so; a rename should fail here rather than silently
+        // unsatisfy the search.
+        let source = include_str!("render.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("no test module in this file");
+        let start = production
+            .find("fn draw_text_batch")
+            .expect("the text pass is in this file");
+        let rest = &production[start..];
+        let end = rest[1..].find("\n    fn ").map_or(rest.len(), |at| at + 1);
+        let pass = &rest[..end];
+        assert!(
+            pass.contains("expand_until_settled("),
+            "**the text pass must expand its batch through `expand_until_settled`.** \
+             A placement's UVs are divided by the atlas's size, a grow re-packs the \
+             atlas, and the quads built before the grow would sample the re-packed \
+             texture at the old one's coordinates — one frame, and no capture after \
+             it can see it"
+        );
+        // The control: the function really is named the way the search above
+        // expects, so a rename fails here rather than quietly passing.
+        assert!(
+            production.contains("fn expand_until_settled("),
+            "and the settle loop is named the way this search expects"
+        );
+    }
+
+    #[test]
+    fn a_batch_is_expanded_once_when_the_atlas_does_not_grow() {
+        // The other half, and it is a performance half: the loop must not
+        // re-expand a batch that did not grow the atlas, or every text batch on
+        // every frame is walked twice for nothing.
+        let mut atlas = GlyphAtlas::new(64, 256);
+        let mut passes = 0;
+        expand_until_settled(&mut atlas, |atlas| {
+            passes += 1;
+            assert!(atlas.get_or_insert_replacement(20.0).is_some());
+            Vec::new()
+        });
+        assert_eq!(passes, 1, "one pass when nothing changed");
+        // And the second run of the same expander is one pass too — the glyph it
+        // packed is cached now, so there is nothing left to do even if the atlas
+        // were empty.
+        let mut passes = 0;
+        expand_until_settled(&mut atlas, |atlas| {
+            passes += 1;
+            assert!(atlas.get_or_insert_replacement(20.0).is_some());
+            Vec::new()
+        });
+        assert_eq!(passes, 1, "and still one on the next frame");
+    }
 
     #[test]
     fn vertex_layout_matches_offsets() {

@@ -410,6 +410,90 @@ be the first thing you reach for.
 > machine: the cross build stopped earlier, at the `dbus/dbus.h` error in
 > §6.4.1. The mechanism above is read from the cited CMake sources, not observed.
 
+### 2.6 The same prerequisites, as a container image
+
+`docker/Dockerfile` and `docker/run.sh` package everything §2.1 through §2.5 ask
+for, plus six things a *running* demo and the verification suite need that no
+section above lists because none of them is a build prerequisite. This is a
+convenience and a reproduction of the host, not a supported configuration: when
+the two disagree, the host is the reference and this section is the bug.
+
+**Why the image is not `ghcr.io/anomalyco/opencode`.** That image carries no
+build toolchain — no rustc, no cargo, no C compiler, no cmake, no git — so it
+cannot build SDL 3.4.16, SDL_image 3.4.6 and FreeType 2.13.2 from vendored C
+source (§1). It is also Alpine, and this repository does not build musl: both
+targets are `*-linux-gnu` (`AGENTS.md` § *Rust*), the aarch64 linker in
+`.cargo/config.toml` is named `aarch64-linux-gnu-gcc` (§2.5), and Debian
+multiarch is one of the two strategies
+`doc/platform/TASK_CROSSPLATFORM_01.md` requirement 1 is choosing between.
+`docker/Dockerfile` is therefore Debian trixie, and it installs opencode from the
+release asset instead of copying the binary — that image's copy is linked
+against `ld-musl-x86_64.so.1` and will not start on glibc.
+
+**What the image adds to §2.2, §2.3 and §2.5.**
+
+| Package | Why it is here |
+|---|---|
+| `zlib1g-dev` | Not in §2.3. `freetype-sys` builds its bundled libpng, libpng includes `zlib.h`, and `libz-sys` carries zlib's *sources* under `src/zlib` rather than its headers where libpng's include path looks. Without it: `cc-rs` fails with `libpng/pngstruct.h:30:10: fatal error: zlib.h`. Observed 2026-10-05. |
+| `libegl1 libgles2 libgl1 libglvnd0 libglx-mesa0 libgl1-mesa-dri` | Runtime only. SDL ships its own Khronos headers (§2.4) and links nothing but libc (§5.4), so nothing here is needed to *build*. `libgl1-mesa-dri` supplies the GLES 3.1+ driver the demo's `Context::new` refuses to start without, and the swrast fallback, so a container without `/dev/dri` still runs. |
+| `fonts-lato fonts-dejavu-core` | Hard requirement. `ui/src/ui_demo/src/main.rs` names `/usr/share/fonts/truetype/lato/Lato-Medium.ttf`, `Lato-Bold.ttf` and `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf` as absolute paths and propagates `Font::from_path`'s error, so a missing font is a failed run rather than a degraded one. These two packages place them at exactly those paths. |
+| `x11-utils imagemagick` | `xwininfo`, `magick import`, `magick compare` — the capture method in `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture method*, which `.ai/agents/developer.md` § Phase 3 — Verify makes a gate. |
+| `file binutils` | §3's `file target/debug/<binary>`, plus the `readelf -h` and `nm` checks. |
+| `cargo-audit`, `rustfmt`, `clippy` | The three commands in `.ai/agents/developer.md` § Phase 3 — Verify that a bare Rust toolchain does not provide. `cargo-audit` closes a gap `doc/ui/IMPLEMENTATION_STATE.md` records as standing — "**`cargo audit` is not installed** on this host, for the ninth task running" — at the cost of about three minutes of image build. |
+
+**What `docker/run.sh` passes through, and why each one is required.**
+The repository at `/workspace`, mounted whole rather than `ui/`, because
+`.cargo/config.toml`'s two `relative = true` toolchain paths resolve against the
+`cmake/` directory beside that file and Cargo reads a config only from the
+working directory and its ancestors (§4.1). `$CARGO_HOME`, `$cache/target` and
+`$HOME` as volumes — the first because a volume over `/usr/local/cargo` would
+hide rustup's shims, the second so the container's ~1.6 GB of build output does
+not collide with the host's, the third so opencode's sessions persist. The X11
+socket and `/run/user/$UID` read-only, because the demo has no headless path and
+on this host `XAUTHORITY` is a per-session path rather than `~/.Xauthority`.
+`--device /dev/dri`, an accelerator rather than a requirement.
+`--tmpfs /tmp:rw,exec,size=2g`, where `exec` is load-bearing for the throwaway
+`libXtst` input-injection program the capture method builds and runs from
+`/tmp`. Each mount carries the reason at its own line in the script.
+
+**Measured in the container on 2026-10-05**, every command through
+`docker/run.sh` from the repository root — the shell ones as
+`ROADOS_ENTRYPOINT=sh docker/run.sh -c …`, which is the same container and the
+same mounts opencode runs its bash tool in:
+
+- `cargo build --release --all-targets` — clean, SDL 3.4.16 and SDL_image 3.4.6
+  built from vendored source.
+- `cargo fmt --check`, `cargo clippy --all-targets --all-features -D warnings`,
+  `cargo doc --no-deps` — clean.
+- `cargo test --all-features` — 1450 lib + 224 demo + 220 doc = **1894 passed**,
+  1 ignored, 0 failed. Higher than the 1871 in
+  `doc/ui/IMPLEMENTATION_STATE.md` § *What was measured and how*, which is the
+  tree's own movement rather than a difference of method; both counts come from
+  the same command.
+- `cargo audit` — 1290 advisories fetched, 47 dependencies scanned, none
+  reported.
+- `cargo build --release --target aarch64-unknown-linux-gnu --manifest-path
+  ui/Cargo.toml` — succeeded, `readelf -h` reports `ELF64 / AArch64`. §4.2
+  already recorded this on the host; the image adds nothing to it.
+- `.ai/tools/fps-check.sh 5 55` — 317 frames in 5.006 s, **63.3 fps**, worst
+  frame 32.4 ms, 0 frames over 33 ms. At or above the ~55 fps floor in
+  `doc/ui/IMPLEMENTATION_STATE.md` § *What was measured and how* and consistent
+  with the host's own 61.6–61.9 band. One sample, not three, which
+  `.ai/tools/README.md` § *fps-check.sh* § *Do not use it for* is right to insist
+  on; a second run of the same command gave 63.1 fps, worst frame 23.5 ms.
+- The capture path, end to end: `xwininfo -root -tree` found window `0x100000f`,
+  `magick import -window 0x100000f` produced a 1280×1020 PNG, and **the pixels
+  were looked at** — the `pads` page with its three coloured pads, the tab strip
+  and the on-screen `fps 61, avg 65.0, worst 21 ms` line. That is the check
+  `.ai/agents/developer.md` § Phase 3 — Verify demands for anything that draws,
+  and it is also the only evidence that the container's GL context and the font
+  paths work rather than merely initialise.
+
+A rate measured in the container is comparable with the host baseline because the
+GPU is the same device, but that is an argument, not a measurement: the
+containers share a GPU, not a frame clock. Treat the container number as its own
+sample.
+
 ---
 
 ## 3. Native x86_64 build

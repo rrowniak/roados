@@ -11,17 +11,21 @@ The platform and cross-compilation tasks are a separate sequence —
 `doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
 `doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-05 (task 30 implemented and reviewed-in-place, **not
-committed**; tasks 24 and 33 committed as `e567634` and `1aa28e6`)
+**Last updated:** 2026-10-05 (task 31 implemented, reviewed and fixed, **awaiting
+the operator's commit**;
+task 30 committed as `75a896c`, tasks 24 and 33 as `e567634` and `1aa28e6`)
 
 ## Current position
 
-**Status: task 30 (Font fallback chain) is implemented, measured and reviewed,
-and is UNCOMMITTED.** It is the first task of the `PRIM` sequence to be handed
-over without a commit, because the operator's session asked for the work to
-continue rather than for it to be landed; **the sequence's *No uncommitted
-advance* gate is therefore open**, and `.ai/workflows/task-sequence.md` step 5
-is the operator's. Nothing else is in flight.
+**Status: task 31 (Dynamic atlas growth) is implemented, reviewed once in a
+separate session, and every finding fixed** — 2 majors and 3 minors, all closed.
+**It is awaiting the operator's commit, which is step 5 of
+`.ai/workflows/task-sequence.md` and the only step left.** Nothing else is in flight, and task 30 — which this file recorded as
+**UNCOMMITTED** when it was written — **is committed, as `75a896c`**, so the
+sequence's *No uncommitted advance* gate is closed again. **That correction is
+this file's, not the commit's**: the "UNCOMMITTED" text went in *inside* `75a896c`
+itself, which is a state file written before the commit that closed it, and the
+task table row below was wrong in the same way for longer.
 
 Task 33 is done and committed as `1aa28e6` on 2026-10-05. **Task 24 (Demo
 Application) is done and committed as `e567634` on
@@ -253,10 +257,288 @@ the split and the three measured facts behind it. **24.1 is next, and it is the
 one that makes the other two addressable** — it is what makes a page reachable
 without a pointer, which is this host's only capture route.
 
+## Task 31 — what it decided, and what it found
+
+**Implemented 2026-10-05, reviewed twice in sessions separate from the author's —
+verdict *approve with required changes* both rounds, 2 majors + 3 minors and then
+1 major + 4 minors, all nine fixed — and measured.** **4 code files and 4
+documents of its own**: `ui_core/src/{font,render}.rs`,
+`ui_core/src/render/target.rs`, `ui_demo/src/main.rs`, and `TASK_UI_PRIM_31.md`,
+`PRIMITIVES_ARCHITECTURE.md` § *Texture atlas eviction*, `.ai/NEVERAGAIN.md` and
+this file. **The suite went 1876 → 1894** — 1433 → 1450 lib, 223 → 224 demo, 220
+doctests unmoved — **+18 tests, none removed**, checked by name against a `HEAD`
+worktree rather than by subtracting two totals. **Both figures are the file's own
+convention, passed tests**, with the one ignored test at both ends: round 2 found
+this sentence mixing the two, lib counted with the ignored test and the totals
+without it. **A fifth document rides along and is not this task's** —
+`doc/ui/TASK_UI_PRIM_30.md` is task 30's post-review amendment, still uncommitted
+because `75a896c` predates it, so the operator's commit carries five documents and
+only four of them belong to task 31. The one migrated test, task 30's
+`the_same_letter_in_two_faces_is_two_atlas_entries`, keeps every assertion it had
+and now reads its placements back through `cached` rather than out of the map,
+which is the one step this task changed.
+
+### The atlas holds pixels now, and a UV is derived from them
+
+**A glyph's entry in the atlas is `{x, y, width, height, bearings, advance}` and
+its UVs are computed when the placement is handed out.** This is the whole design
+of the task, and requirement 2 asked for something weaker — re-pack the glyphs and
+*update their UVs* — which is not expressible: a UV cannot be recomputed from a UV,
+so a re-pack from stored UVs would have to reconstruct the pixel coordinates it
+never kept. The entry keeps the pixel and the size it is divided by is read at the
+moment of use, which makes a stale UV unrepresentable rather than unlikely.
+
+**It also caught a defect no acceptance criterion mentions, and the only way to
+see it is the re-pack itself.** A batch's quads are built while its glyphs are
+being packed, so a grow part-way through a batch leaves every quad built before it
+addressing the *old* texture's coordinates — the run is laid out correctly and
+drawn from the wrong pixels, on one frame, which is the frame a capture of a
+growing atlas photographs. `draw_text_batch` therefore expands the batch again when
+the atlas grew during it, and the derived UVs are what make that second pass
+correct rather than merely repeated. **One rebuild suffices and that is arguable
+rather than lucky**: the first pass packed every glyph it could, so the second
+finds them all cached, and the only lookups that still pack are the characters the
+atlas *refused* — which is what growth being exhausted looks like, so the size is
+the same at the end of the next pass as it is now.
+
+### Four decisions, three of them the operator's to reverse
+
+1. **The ceiling is 4096** (`ATLAS_MAX_SIZE`), and it is **a memory ceiling as much
+   as a texture one**: 16 MB of `GL_R8`. The driver's `GL_MAX_TEXTURE_SIZE` bounds it
+   below that, and `atlas_sizes` bounds **the starting size** as well — which was
+   never bounded before, so a driver under 2048 was handed a texture it cannot
+   allocate as an unchecked GL error nobody reads. **A driver that answers zero is
+   treated as one that cannot say and is given no growth**, which is the only one of
+   the two possible answers that cannot hand `glTexImage2D` a size it refuses.
+2. **A refusal is a counted drop, not a `RenderError`.** A glyph that fits nowhere
+   at the ceiling is either a font rasterized at an absurd size or a ceiling set too
+   low for the text being drawn; both are bugs, neither is worth ending the frame
+   over, and the run keeps its spacing because the pen still advances by the font's
+   own advance. **An eviction is not counted** (the glyph is re-rasterized next
+   frame) **and neither is a character no font covers** (that is a space, or the
+   replacement box, and the caller already knows it asked) — the two `None`s of
+   `pack` are one counter apart and a test says so.
+3. **The free spans are handed back rather than moved on a re-pack.** A span is a
+   hole an eviction left, and the re-flow writes a shelf where the hole was, so a
+   kept span is not a hole any more. **The deliberate break that keeps them is
+   killed**, by a test that packs four more glyphs after a grow and sweeps every key
+   for its own pixels.
+4. **The demo prints `roados-glyphs atlas_size=… dropped=…` on every run**, not only
+   when a glyph was lost: a line that appears only on failure cannot be told from a
+   line that was never printed. It carries the atlas size as well, because the
+   growth is otherwise invisible from outside a process.
+
+### The tests found the mechanism's own defect on the first run
+
+**`next_power_of_two` is idempotent on a power of two.** The atlas starts at 2048 and
+every size it holds after a grow *is* a power of two, so asking it for the next
+power of two of the current size returns the current size, the `next <= size` guard
+refuses, and `allocate` falls through to eviction — **the behaviour the task exists
+to remove, reached through the code written to prevent it.** Six tests failed on the
+first execution, all of them saying the atlas had not grown. The fix asks for the
+power of two above `size + 1`. Recorded in `NEVERAGAIN.md`.
+
+**And nothing about a capture would ever have shown it**: 2048² holds about 9 500
+glyphs and the demo has 200, so *no run of the product grows the atlas at all* —
+the growth path is unreachable from a screen unless a build is seeded to reach it.
+That is why the seeds below exist.
+
+### The deliberate-break sweep, and the review round that read it
+
+**Two rounds. Round 1 returned 2 majors and 3 minors; round 2, which re-ran the
+sweep and re-measured the frame rate, returned 1 major and 4 minors. Everything in
+both rounds is fixed.** The reviewer built the demo twice to test the one row that
+survived round 1, and **the numbers below are theirs as much as mine: 20 rows, 20
+killed.**
+
+| # | the break | killed by |
+|---|---|---|
+| 1 | `repack` copies no pixels | `a_glyph_packed_before_a_grow_still_addresses_its_own_pixels` |
+| 2 | `repack` moves no entry's `row_y` | `the_least_recently_used_shelf_is_still_the_first_one_after_a_grow` |
+| 3 | `repack` sets no dirty flag | `a_grow_dirties_the_whole_new_texture` |
+| 4 | `repack` keeps the free spans | `a_glyph_packed_after_a_grow_does_not_land_in_a_span_the_move_invalidated` |
+| 5 | `allocate` evicts before it grows | AC 1's test |
+| 6 | `grow` ignores the ceiling | `growth_doubles_to_a_power_of_two_and_stops_at_the_maximum` |
+| 7 | `grow` does not ask whether the glyph can fit it | `a_glyph_too_large_for_the_ceiling_is_refused_and_counted` |
+| 8 | `grow` asks `next_power_of_two` of the size itself | the same size-sequence test |
+| 9 | a refusal is not counted | `a_glyph_too_large_for_the_ceiling_is_refused_and_counted` |
+| 10 | a missing bitmap is counted as a refusal | `a_glyph_the_font_has_no_bitmap_for_is_not_a_refusal` |
+| 11 | a placement's UVs divided by a fixed size | AC 1's test |
+| 12 | the driver limit ignored — start | `the_glyph_atlas_never_asks_for_a_texture_the_driver_cannot_address` |
+| 13 | the driver limit ignored — ceiling | the same, plus the two per-decision tests |
+| 14 | a driver answering zero is given growth | `a_driver_that_cannot_say_how_big_a_texture_may_be_is_given_no_growth` |
+| 15 | the batch is not re-expanded after a grow | `the_text_batch_is_expanded_again_when_the_atlas_grows_under_it` |
+| 16 | the first pass's vertices are the ones returned | the same |
+| 17 | a batch is always expanded twice | `a_batch_is_expanded_once_when_the_atlas_does_not_grow` |
+| 18 | a refusal counted once per event again | `a_glyph_refused_every_frame_is_counted_once_and_not_asked_about_again` |
+| 19 | a glyph that packs again stays on the refused list | the same |
+| 20 | the text pass stops going through the settle loop | `the_text_pass_expands_its_batch_through_the_settle_loop` |
+
+**Three of these rows killed tests rather than confirming them**, which is the part
+worth keeping. Row 2 survived its test because the test looked up the *newest*
+shelf — already at the back, so the recency order went on being the order the
+shelves sat in, and a re-pack that wrote every shelf back to its own `y` was
+indistinguishable from a correct one. Row 4 survived because the only thing
+asserting it was a sentence in a doc comment. Both tests were rewritten: the
+recency test touches the **middle** shelf so the two orders differ and asserts the
+order **as the glyphs on each shelf**, and the span test packs four glyphs after
+the grow and sweeps every key for its own coverage.
+
+**Row 20 is round 2's major, and it is the same finding one level up.** The two
+tests for `expand_until_settled` hand it a closure of their own, so they pass
+whether or not the text pass calls it — and replacing the call with a bare
+`text_vertices(atlas, fonts, batch)` is the defect, with the whole suite green.
+**Fixed with the technique `blur.rs` already uses**: a source-string assertion that
+`draw_text_batch`'s own body names `expand_until_settled`, searched over the part
+of the file **above the test module** so it cannot be satisfied by its own words,
+with a control assertion so a rename fails rather than silently passing. Brittle to
+renaming, and it says so.
+
+**Three findings, and the two majors were both about requirement 6 and the gate
+that had no test.**
+
+1. **Major — the count counted refusals, not glyphs, and the policy said the
+   opposite.** `pack` incremented on every refusal, nothing remembered that a key
+   had been refused, and a refused key *is* asked for again every frame — so the
+   demo would have printed `dropped=3600` for a session that put **one** hole on
+   the screen, and the number requirement 6 exists to produce could not tell that
+   from a page of holes. The doc's own sentence — *"the character is not queued,
+   retried or re-rasterized"* — was false of the code beside it. **Fixed by
+   keeping the keys rather than the events**: `dropped` is now
+   `refused.len()` over a `HashSet<GlyphKey>`, a key leaves the set the moment it
+   can be packed again (so the number answers *what is not being drawn now*), and
+   the policy paragraph was rewritten to match. Two mutations cover it, rows 18
+   and 19.
+2. **Major — the re-expansion loop was a new gate with no test, and the capture
+   offered as its evidence provably cannot see it.** The waiver claimed it was
+   structural: `draw_text_batch` needs a GL context and a font face. **The
+   reviewer was right that the blocker was where the loop lived, not what it
+   decides** — the decision is a comparison of two `u32`s the atlas already hands
+   out, and the expansion it re-runs is already a closure. They also *tested* the
+   capture: the loop-on and loop-off binaries compared at 0.3 s, 1 s, 3 s and 8 s
+   are **AE = 0 at every offset**, because the defect occupies exactly one frame
+   and every frame after it is identical either way. **Fixed by extraction**:
+   `text_vertices` builds one pass and `expand_until_settled` decides whether to
+   run it again, both free functions, and two tests kill rows 15–17 — including
+   one asserting the batch is expanded **once** when nothing grew, which is the
+   performance half.
+3. **Minor — the sweep's own numbers did not reconcile**, and this is the finding
+   that would have cost a reader the coverage: the heading, the table and the
+   summary gave three different counts, and **two of the rows had never run**. The
+   mutation guard compares the search string against the source before building,
+   and rustfmt had wrapped `atlas_sizes`'s tuple across four lines, so the guard
+   matched nothing and refused both driver-limit rows — correctly, which is what a
+   guard is for. They had been recorded as kills anyway. Re-run against the
+   formatted source, both die (rows 12 and 13), and the count is one number.
+4. **Minor — "+13 tests" was one short of the suite's own delta**, which is 16 in
+   `ui_core` and 1 in `ui_demo`: **17 in all**, none removed. Verified by name
+   against a `HEAD` worktree, `cargo test -- --list` on both sides.
+5. **Minor — the test fixture was credited with a property it cannot have.** The
+   criterion claimed "no two pixels carry the same value", and
+   `1 + (x·7 + y·13 + seed·29) % 254` over a 20 × 20 glyph has 400 pixels against
+   254 values, so **146 of its pixels share a value with another** — and no
+   non-zero `u8` pattern could do better. The assertion is nonetheless strong,
+   because `read_back` compares the whole rectangle **including its transparent
+   padding**, which a mis-addressed glyph moves. The criterion and the helper's doc
+   now say that instead.
+
+**Round 2 — 1 major and 4 minors, and the major was this list again.** The major is
+row 20 above: the tests covered the function and not the call, and the record had
+already been upgraded to *"nothing about the second pass is unverified any more"*.
+Three of the four minors are **the record being wrong about work that was right**,
+which is the failure mode this sequence's last three rounds have all been:
+
+6. **Minor — row 17 could not produce a verdict at all.** The mutation removed the
+   loop's only `return`, so the code looped for ever and the test never finished;
+   `cargo test` emits no `test result:` line, and a runner with no timeout hung on
+   it and **left the tree mutated**. Fixed on both sides: the row now returns after
+   its second expansion, and `run_row` treats a `timeout`'s 124 as a verdict of its
+   own — `HUNG`, which is neither a kill nor a survivor and cannot be read as one.
+7. **Minor — `Renderer::dropped_glyphs` documented the opposite of the fix.** It
+   said *"it never resets … the total since the renderer was built"* while the
+   atlas removes a key the moment it packs again. **Two new halves of one diff
+   contradicted each other**, and the public API's contract was the wrong one: a
+   caller polling it cannot get the high-water mark the doc promised. The doc now
+   says what the number is.
+8. **Minor — the file inventory named four documents and the tree has five.**
+   `doc/ui/TASK_UI_PRIM_30.md` is task 30's amendment, uncommitted because
+   `75a896c` predates it, and it would have ridden into the operator's commit
+   attributed to task 31. Named now, as a fifth document that is not this task's.
+9. **Minor — the suite totals mixed two conventions**, lib counted with the
+   ignored test and the totals without it. One convention, the file's own, at both
+   ends: 1876 → 1893, 1433 → 1449.
+
+### The capture: a seeded 64-pixel atlas, and AE = 0
+
+`ATLAS_SIZE` was seeded to **64**, the demo built and run, and the report line read
+`roados-glyphs atlas_size=256 dropped=0` — **the atlas grew twice through the real
+GL path**, reallocating the texture under a live text pass. The text page's label
+rows then came out **pixel-identical to the same page drawn from a 2048 atlas**:
+`magick compare -metric AE -crop 1280x380+0+230` reads **0**, and the 2 199 pixels
+differing in the whole window are the frame-rate readout and the padding. **That is
+requirement 2's guarantee measured through GL, on a texture reallocated under it,
+and a pair of captures rather than one** — the comparison the `NEVERAGAIN.md` entry
+from task 30 asks for, because one capture of a thing that did not change looks
+exactly like one capture of a thing that did not.
+
+**And it is not evidence for the second pass, which the first version of this
+section claimed it was.** The reviewer's finding 2 built the demo twice — the loop
+on, the loop broken to `if true { break; }` — and compared the same crop at 0.3 s,
+1 s, 3 s and 8 s: **AE = 0 at every offset**. The defect is on one frame and the
+frame after it is clean either way, so a capture cannot reach it by construction.
+That is why the rule was extracted instead.
+
+**The largest-size criterion needed two seeds and `+` was not one of them**: this
+host injects no events, so `TEXT_SIZE_START` was seeded to 64 (the `+` ceiling) and
+to 40 (the largest size at which the text page's nine labels all fit — at 64 the
+column overflows the window, which is a layout consequence of the seed and not a
+glyph defect). At 40 every label is on screen including task 30's
+`Fallback ⚠ ✓ and □ end`, **three fonts on one line**, and every run reported
+`dropped=0`. **Both seeds are reverted**, and the `ATLAS_SIZE`/`TEXT_SIZE_START`
+values are back at 2048 and 24.
+
+**62.5 fps** on the recorded floor of 55 after the review's fixes (`fps-check.sh
+12 55`, 751 frames in 12.013 s, worst frame 23.4 ms, 0 over 33 ms) — task 30
+measured 63.1 on the same floor and the reviewer 62.7 on theirs, so the spread is
+the spread this file already records and the atlas's per-placement UV derivation
+has cost nothing measurable. The
+cross build still passes: `cargo build --release --target aarch64-unknown-linux-gnu`,
+`ELF 64-bit, Machine: AArch64`.
+
+### What is NOT claimed
+
+- **Nothing about the second pass is unverified any more.** The first version of
+  this section listed it as the one gate with no test; the review's second major
+  found the seam that made it testable and it is now `expand_until_settled` with
+  two tests and three killed mutations behind it.
+- **The image atlas does not grow.** Task 31's *Out of Scope* says so, and
+  `texture.rs` still evicts LRU shelves from a fixed `ATLAS_SIZE` with pinned
+  handles. **"Memory ceiling across atlases" is likewise untouched**, so a screen
+  full of photographs and a page of large text still have no shared budget.
+- **Nothing shrinks.** An atlas that grew stays at its size for the session, which
+  is the out-of-scope line, not an oversight.
+- **Nothing about `GL_MAX_TEXTURE_SIZE` was measured on a small driver.** The clamp
+  is arithmetic over `atlas_sizes` and three tests; the driver this host has answers
+  with a number past 4096, so the clamp's own behaviour on a constrained driver is
+  argued rather than observed.
+- **The demo's atlas still never fills**, so the refusal path is not on any screen:
+  `dropped=0` in six runs is evidence that nothing was refused, not that the
+  refusal is legible.
+- **`ATLAS_MAX_SIZE = 4096` is 16 MB of `GL_R8` and was not measured on a
+  constrained device.** The clamp is arithmetic and three tests; the driver on this
+  host answers past 4096, so what a real head unit does at the ceiling is argued.
+- **The refused-key set grows with the number of *distinct* refused glyphs.** It is
+  bounded by the same variety that bounds a session's glyphs, and it is emptied as
+  glyphs pack again — but nothing enforces a bound, and a pathological session that
+  asked for a thousand refused sizes would hold a thousand keys.
+
 ## Task 30 — what it decided, and what it found
 
-**Implemented 2026-10-05, uncommitted, reviewed in a separate session the same
-day** (4 majors and 5 minors, all fixed; see *The review round* below). **11
+**Done 2026-10-05 as `75a896c`, reviewed in a separate session the same day**
+(4 majors and 5 minors, all fixed; see *The review round* below). **The commit
+itself carried the words *uncommitted* in this section and *UNCOMMITTED* in the
+task table**, because both were written before the commit that closed them; both
+are corrected here and the correction is dated, not quietly rewritten. **11
 files, 8 of them code**: `ui_core/src/{font,paint,render,batch}.rs`,
 `ui_core/src/widgets/{label,list,scroll}.rs`, `ui_demo/src/main.rs`, and three
 documents (this file, `TASK_UI_PRIM_30.md`, `.ai/NEVERAGAIN.md`). **The count was
@@ -4712,8 +4994,140 @@ verified. A blank cell is unknown, not "none".
 | 24.2 | `CONTENT_TOP`, and the band goes page-local | done | `e567634` | **4 passes**: 2 majors + 8 minors, 0 + 9, 0 + 1, approve. **The major was 24.1's round-3 finding reproduced on `placed_handles`**, the table this change introduced — 0 failed / 1817 with a row dropped, and the reviewer's compound (a fattened progress bar *plus* the deleted row) green across all 1817. Round 3 also found the round-1 fix had landed in a failure message and **not in the doc that said the same thing the other way.** | **Two assertions retired**, one *withdrawn outright* (the gallery/band bound is false per-page) and one *replaced* (`inside(window, chart)` plus the `Data` neighbour loop), both recorded in the file with the arithmetic. **AC 6 amended**: `fps-check.sh` cannot select a page, so the six pages were measured by `ROADOS_RUN_SECONDS=<n> … --tab=<page>` — **not waived**. The root became `LayoutMode::Absolute` because `set_position` on a `Stack` child is a no-op |
 | 24.3 | The tab bar | done | `e567634` | **3 passes**: 1 major + 7 minors, 0 + 6, **approve**. The major was `release_tab`'s `animate_to_state` held down by nothing on the ordinary gesture — press and release the button of the page **already on show** leaves `show_page` early-returning, measured `left: 0.95, right: 1.0`, a button stuck at the pressed scale with 1836 green. Round 2's six minors were prose, and its reviewer **found the orchestrator's own amendment asserting a false mechanism about `ui_core`** — "at most one `InputEvent` per SDL event", refuted by a four-line probe | **All twelve criteria met.** AC 11 (a pressed button mid-transition) needed a **temporary, reverted seed** — XTEST delivered nothing — and the arithmetic was corrected from a false 96 % to a measured **22 %**. **Requirement 4's call and duration are different numbers**: `Motion::from_theme` is 150 ms, not `THEME_TRANSITION`'s 300, pinned with an `assert_ne!`, and **on `T` the bar and its buttons arrive 150 ms apart, which nobody has seen.** Deliberate break 2 is **not expressible** (`Callback` is `Fn`) |
 | 33 | Set the SDL options no cargo feature can reach | nothing — **done 2026-10-05**, split out of task 28, **reviewed 2026-10-05** | `doc/ui/TASK_UI_PRIM_33.md` | | none waived: 8 of 8 verified — AC 1 and AC 2's native half by cache/header greps, AC 3 and AC 4 by grepping the same header for the settings that must *not* have moved, AC 2's cross half by a cross build, AC 5 and AC 6 by `ls` and `nm`, AC 7 by 1 839 tests plus three `fps-check.sh` runs, AC 8 by this review finding its command broken and it being fixed |
-| 30 | Font fallback chain | **implemented 2026-10-05, UNCOMMITTED** | — | **not reviewed in a separate session** | **No acceptance criterion is waived; three gaps are *offered* with what covers them.** **All seven requirements are implemented.** The three operator decisions (requirement 3's handle-on-the-command, requirement 4's synthesized box over `U+FFFD`, the DejaVu Sans fallback) are recorded above with the measurements that decided them. **Requirement 6 was already met** when task 22 added `FaceId` to `GlyphKey`, a year before this task, and this task's work on that key was to give the replacement glyph its own variant rather than a fabricated character. **The capture found a defect no test could**: `main` never defined the `lato-only` family, the fixture did, every test passed, and `Y` did nothing — the two captures came out byte-identical. Fixed, and the mirror of task 24.1's missing row is recorded as such. **ACs 1–4 are covered by 1428 lib tests** (the chain walk through `pick_in_chain`, the atlas key as an enum, the two families' differing metrics, the property reaching the command). **AC 5 is capture-verified and measured**: 14 × 17 hollow pixels at (250, 586) against the two constants, 7 columns of pen advance, and the same sentence 247 px wide in the default family against 234 px in `lato-only` — 1958 pixels differing. **Seven mutations survive, all structural and named above**: two GL-side, one needing a font file, and three sharing one cause (a fixture whose two families both hold no fonts measure identically), plus the `main`-not-under-test row. **The capture answers the two with a visual consequence.** **63.1 fps** on the recorded floor of 55. See *Task 30 — what it decided* |
+| 30 | Font fallback chain | **done 2026-10-05** | `75a896c` | **1 pass, in a session separate from the author's.** *Approve with required changes*: **4 majors + 5 minors, all fixed.** **This row said "UNCOMMITTED" and "not reviewed in a separate session" until 2026-10-05, and both halves were false**: the task was committed as `75a896c`, and § *Task 30* has carried the round's count and the verdict since the day — the row and the section it points at contradicted each other. | **No acceptance criterion is waived; three gaps are *offered* with what covers them.** **All seven requirements are implemented.** The three operator decisions (requirement 3's handle-on-the-command, requirement 4's synthesized box over `U+FFFD`, the DejaVu Sans fallback) are recorded above with the measurements that decided them. **Requirement 6 was already met** when task 22 added `FaceId` to `GlyphKey`, a year before this task, and this task's work on that key was to give the replacement glyph its own variant rather than a fabricated character. **The capture found a defect no test could**: `main` never defined the `lato-only` family, the fixture did, every test passed, and `Y` did nothing — the two captures came out byte-identical. Fixed, and the mirror of task 24.1's missing row is recorded as such. **ACs 1–4 are covered by 1428 lib tests** (the chain walk through `pick_in_chain`, the atlas key as an enum, the two families' differing metrics, the property reaching the command). **AC 5 is capture-verified and measured**: 14 × 17 hollow pixels at (250, 586) against the two constants, 7 columns of pen advance, and the same sentence 247 px wide in the default family against 234 px in `lato-only` — 1958 pixels differing. **Seven mutations survive, all structural and named above**: two GL-side, one needing a font file, and three sharing one cause (a fixture whose two families both hold no fonts measure identically), plus the `main`-not-under-test row. **The capture answers the two with a visual consequence.** **63.1 fps** on the recorded floor of 55. See *Task 30 — what it decided* |
+| 31 | Dynamic atlas growth | **implemented 2026-10-05, changes requested** | — | **2 passes**, both in sessions separate from the author's; **round 2 re-ran round 1's sweep and re-measured the frame rate** rather than reading the record. Round 1: *approve with required changes*, **2 majors + 3 minors**. Round 2: *approve with required changes*, **1 major + 4 minors**. **All nine fixed.** **The two majors were requirement 6's count — it counted refusals, not glyphs, so a glyph re-asked every frame made one hole read as 3 600 — and a gate with no test**: the batch's re-expansion after a grow, whose evidence the author offered was a capture the reviewer then showed is AE = 0 with the loop broken. **Round 2's major was that finding one level up** — the tests covered the extracted function and not the call site — closed with a source-string assertion in the shape `blur.rs` already uses. **Three of round 2's four minors were the record being wrong about work that was right**, including a sweep row that could produce no verdict because it hung the runner. **20 of 20 deliberate breaks killed. +18 tests, none removed.** **62.5 fps** on the floor of 55; the reviewer's own three runs read 62.8 / 63.2 / 63.5. See *Task 31 — what it decided* |
+| 34 | Depth buffer | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_34.md` | — | — |
+| 35 | Mesh vertex format and GPU buffers | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_35.md` | — | — |
+| 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_36.md` | — | — |
+| 37 | The mesh draw command, its shader and its batching | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_37.md` | — | — |
+| 38 | `ROADOSMF` model format and its loader | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_38.md` | — | — |
+| 39 | Offline asset pipeline | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_39.md` | — | — |
+| 40 | Drag-to-rotate — **partially closes gap `L4`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_40.md` | — | — |
+| 41 | `GL_RGBA8` colour capture and a public backdrop API — **gap `L1`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_41.md` | — | — |
+| 42 | `ui_core::nav::Screens` — screen registry, back stack, four gates — **closes gap `#3`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_42.md` | — | — |
+| 43 | `TabBar` widget and `Button::selected` — **closes gap `#7`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_43.md` | — | — |
+| 44 | `Icon` widget and a tintable `DrawCommand::Image` — **closes gap `#4`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_44.md` | — | — |
+| 45 | Per-node clip ownership — **closes gap `#5`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_45.md` | — | — |
+| 46 | Scroll axis, momentum and snap points — **closes gap `L5`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_46.md` | — | — |
+| 47 | `mode::ModeScope` and `Segmented` — **closes gap `L6b`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_47.md` | — | — |
+| 48 | Margin, `flex-shrink`, cross-axis gap — **closes gap `L7`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_48.md` | — | — |
+| 49 | Measured width on `DrawCommand::Text` — **closes gap `L8`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_49.md` | — | — |
+| 50 | Theme scoping and the `FocusRing` token — **closes gap `L9`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_50.md` | — | — |
+| 51 | Convexity pre-test; `L10` escalated, **not closed** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_51.md` | — | — |
+| 52 | `LayoutMode::Grid` — **closes gap `L3` / `#2`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_52.md` | — | — |
 | — | Tesla-like demo application | pending | | | see `doc/ui/DEMO_APPLICATION.md` |
+
+### Tasks 34–40 — the mesh-rendering sequence
+
+**Created 2026-10-05. Nothing in it is started.** Seven tasks that add real-time
+3D mesh rendering to `ui_core`, in service of the demo application above: a mesh
+is **loaded at runtime and rasterised on the GPU every frame**, which is the
+operator's decision of that date and the reason this is a `TASK_UI_PRIM_n`
+sequence and not a `TASK_UI_DEMO_n` one — it changes the library, not the demo.
+
+It was designed against a fact the plan had assumed wrongly and the source
+disproved: **the renderer is strictly 2D** — `set_depth_size(0)`, no matrix
+anywhere, four vertex shaders hard-coding `gl_Position.z = 0.0`, and every
+primitive expanded to a quad. So "pre-render the car to PNGs at build time" was
+never going to give real-time rotation, and the operator ruled it out by choosing
+the mesh path. Gap `L2` (*no transform reaches the GPU*) moves from **deferred**
+to **required**, and it is task 36.
+
+**Order matters and is fixed by dependency, not preference:** 34 (depth) → 35
+(vertex format and GPU buffers) → 36 (matrix maths) → 37 (draw command, shader,
+batching) → 38 (model format and loader) → 39 (asset pipeline) → 40 (gesture).
+34 precedes everything because the depth policy is what lets 2D and 3D coexist;
+36 precedes 37 because the shader needs a matrix to consume; 38 precedes 39
+because the pipeline writes the format 38 reads.
+
+**The interaction half cannot be exercised on this host.** Task 40's gesture is
+`Drag`, and XTEST pointer injection has never delivered an event to the window —
+so 40 is written with its gesture logic unit-tested through the crate's own event
+path and its ambient rotation driven by the frame clock, and says plainly which
+claims each covers.
+
+**Tier 3 is not in this sequence.** Skeletal animation — joints, skinning, bone
+matrices in the vertex shader, steering or suspension travel — is a **backlog
+item recorded in task 40's `Out of Scope`**, not a task 41. The operator's
+decision was Tier 1 (model-space rotation) and Tier 2 (drag-to-rotate) only.
+
+**Citations in these seven files are by symbol, not by line number.** They were
+drafted while another session was committing to `render.rs`, and one line number
+went stale *inside a single drafting session* — which is the evidence for the
+form, not a stylistic preference. See `AGENTS.md` on citation by section.
+
+**One conflict between two of them is resolved in the files themselves.** Task
+37's acceptance criteria asserted that `ui_core` contains no `std::fs`, which is
+true today and **task 38 makes false by design** — `Mesh::load_from_path` is
+deliberately the crate's first filesystem call, following the existing
+`load_texture` precedent. Both files now say so: 37 scopes its criterion to
+*this task*, and 38 records the amendment with the replacement check.
+
+### Tasks 41–52 — the remaining library gaps
+
+**Created 2026-10-05. Nothing in them is started.** Twelve tasks, one per gap the
+2026-10-05 decision *"every library gap must be closed"* makes mandatory. Every
+gap was re-verified against `75a896c` plus the uncommitted diff before the
+specifications were written, and **all of them were still open** — so this is not
+a re-reading of a stale table, it is a fresh pass.
+
+Each row of `DEMO_APPLICATION.md`'s two gap tables maps to exactly one task, and
+each task names the row it closes:
+
+| Gap | Row | Task | The mechanism it builds |
+|---|---|---|---|
+| `L1` no colour capture | § *second table* | **41** | `ColourTarget` (`GL_RGBA8`) + `DrawCommand::Backdrop` |
+| `#3` no screen system | § *first table* | **42** | `nav::Screens`, back stack, four gates |
+| `#7` no `TabBar` | § *first table* | **43** | `TabBar` + `Button::selected` + a second palette |
+| `#4` no `Icon` | § *first table* | **44** | tint on `DrawCommand::Image` + `Icon` |
+| `#5` clip has no owner | § *first table* | **45** | `LayoutState::clip` → `draw_node_clipped`, caller deleted |
+| `L5` no axis/momentum/snap | § *second table* | **46** | `Property<Offset>`, exact decay, snap points |
+| `L6b` no cross-widget mode | § *second table* | **47** | `mode::ModeScope` + `Segmented` |
+| `L7` layout vocabulary | § *second table* | **48** | `Margin`, `LayoutState::shrink`, cross-axis spacing |
+| `L8` no text measurement | § *second table* | **49** | `width: Option<f32>` on `DrawCommand::Text` |
+| `L9` no theme scoping | § *second table* | **50** | `scope::ThemeScope` + the `FocusRing` token |
+| `L3`/`#2` Grid unimplemented | § *both tables* | **52** | `arrange_grid`, equal columns, row-major |
+| `L10` concave fill | § *second table* | **51** | **not closed** — see below |
+
+**Task 51 is the one that does not close its gap, and that is deliberate.** The
+operator declined ear clipping **and** a stencil pass on **2026-10-02** — recorded
+in three places, and the reason `chart.rs` decomposes its area fill into
+per-segment convex quads instead. The 2026-10-05 instruction withdrew *the
+2026-10-03 deferral by name, naming gaps `#3` and `#7`*; it does not name `L10`
+and does not mention 2026-10-02. Task 51 takes the **narrow reading**, ships the
+instrument that lets a caller check what it is about to record
+(`paint::polygon_is_convex`, the algorithm the crate already has twice in
+private test helpers), and **escalates** the reversal with option (A)'s cost
+already specified so that "yes" is an instruction rather than another round.
+**This one needs the operator.**
+
+**Three of the twelve close a gap item by argument rather than by code**, and say
+so: task 48 closes `flex-basis` because `Constraints` already *is* the declared
+basis and a field would be a fifth way to say a main extent; task 48 declines a
+second spacing parameter because a one-line flex container has one line;
+task 47 defers the theme-token half of `L6b`(a) to task 50, which is where `L9`
+already lives.
+
+**Two tasks found falsities in `DEMO_APPLICATION.md` itself**, both amendments
+recorded: task 48 records that the `L7` evidence column cited `ui/src` by line
+number, which `AGENTS.md` forbids; task 46 withdraws `L5`'s four line-number
+citations. Every task file in this batch cites `ui/src` **by symbol**, and the
+five remaining `file.rs:NNN` strings across the twelve are all *references to*
+line-number citations rather than citations.
+
+**A new finding recorded while specifying these:** `DEMO_APPLICATION.md` § *Library
+gaps* row `#2` and § *Gaps this layout exposes* row `L3` are **the same gap in two
+tables**, with different severities and different `Blocks` entries. Task 52 amends
+both and closes both. This duplication predates 2026-10-05 and was not previously
+recorded.
+
+**Test baseline at HEAD, measured not assumed:** `ui_core` **1450** unit (1
+`#[ignore]`d — the `layout_walk_cost` harness), `ui_demo` **224** unit, `ui_core`
+**220** doctests = **1894**. Earlier prose in this file still cites
+"1428 + 223 + 220" and is stale.
+
+**Every one of the twelve projects its own test count**, and the projections sum
+to 1894 plus roughly 190 new tests. None deletes an existing test.
 
 **Task 24 was superseded on 2026-09-30 and un-superseded on 2026-10-03.** The
 first decision replaced the widget-gallery demo with a Tesla-like infotainment
@@ -4917,8 +5331,8 @@ each has a task file so the work is not carried in prose.
 
 | # | Task | Unmet requirement in task 11 | Symptom today |
 |---|---|---|---|
-| 30 | Font fallback chain | §2 *Font fallback chain* | **Implemented 2026-10-05, uncommitted** — the symptom column is what it was: `Label::font_family` was a property nothing read and a character the font lacked was silently dropped. Both are gone. Two of the three premises were stale: `GlyphKey` has carried the face since task 22, and `FontSet` has existed since the same task. |
-| 31 | Dynamic atlas growth | §3 *Dynamic atlas growth* | The atlas is a fixed `ATLAS_SIZE = 2048`. `allocate` evicts LRU rows and returns `None` when it cannot, and `None` is a **silent** dropped glyph. Live glyphs' UVs and row bookkeeping must survive a re-pack. |
+| 30 | Font fallback chain | §2 *Font fallback chain* | **Done 2026-10-05, `75a896c`** — the symptom column is what it was: `Label::font_family` was a property nothing read and a character the font lacked was silently dropped. Both are gone. Two of the three premises were stale: `GlyphKey` has carried the face since task 22, and `FontSet` has existed since the same task. |
+| 31 | Dynamic atlas growth | §3 *Dynamic atlas growth* | **Implemented 2026-10-05, reviewed** — the symptom is gone: the atlas grows to the next power of two, no past 4096 or the driver's limit, re-packing every live glyph into the larger texture first, and a glyph that still fits nowhere is **counted** rather than dropped. One detail the row above could not know: **the re-pack cannot be done from stored UVs at all**, because a UV cannot be recomputed from a UV — which is why the atlas now holds each glyph's pixel and derives the UV at hand-out. See § *Task 31*. |
 | 32 | Fade and clip truncation, drawn | §4 *Text truncation: ellipsis, clip, fade* | `truncate_line` treats `Clip` and `Fade` identically and `Label::paint` never reads `truncation`, so there is **no fade ramp at all** and `Clip` is a layout cut, not a visual clip. Only the ellipsis third works. |
 
 Task 11's §2 also lists HarfBuzz shaping and bidi. Those are **waived, not

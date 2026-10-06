@@ -382,7 +382,13 @@ impl Drop for ShadowTarget {
 /// [`ShadowTarget::ensure_size`] refuses anything larger than this rather than
 /// letting `glTexImage2D` fail, because a GL error nothing reads is a whole
 /// pass that quietly draws nothing.
-fn max_texture_size(gl: &glow::Context) -> u32 {
+///
+/// **`pub(crate)` because the glyph atlas asks the same question.** The atlas
+/// grows, and a grow that passed this limit would ask GL for a texture the
+/// driver refuses — one call, one unchecked error, and every glyph the atlas had
+/// already packed sampling a texture that was never allocated. The value is read
+/// once per renderer, and both callers clamp against it.
+pub(crate) fn max_texture_size(gl: &glow::Context) -> u32 {
     // SAFETY: The GL context is current on this thread, and `GL_MAX_TEXTURE_SIZE`
     // is a parameter every GLES 3.1 implementation answers.
     let value = unsafe { gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE) };

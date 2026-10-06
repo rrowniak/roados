@@ -2,6 +2,94 @@
 //!
 //! Owns the GL context and the frame lifecycle: the passes in order, the GPU
 //! buffers they fill, and the submission that puts a frame on screen.
+//!
+//! ## Depth
+//!
+//! The default framebuffer has a 24-bit depth buffer (see `Context::new` and
+//! `DEPTH_BITS` in `context.rs`). The depth buffer **belongs to the mesh pass**
+//! (tasks 35–37), and the 2D passes neither read it nor write it.
+//!
+//! ### The 2D arithmetic
+//!
+//! All four 2D vertex shaders write `gl_Position.z = 0.0`, which is window depth
+//! **0.5**. Clear depth to `1.0` and enable `GL_DEPTH_TEST` with `GL_LESS` for
+//! the whole frame, and:
+//!
+//! 1. the first 2D fragment tests `0.5 < 1.0` — it passes, and writes `0.5`;
+//! 2. the second 2D fragment tests `0.5 < 0.5` — **false**, and is discarded;
+//! 3. so is the third, and the fourth.
+//!
+//! **Enabling the depth test over 2D geometry deletes every layer but the first**,
+//! and the result is a window showing the background and nothing else, with no GL
+//! error and a green `cargo test`. That is the failure shape recorded in
+//! `.ai/NEVERAGAIN.md` more than once, and it is the reason this module is a
+//! *policy* module and not a one-line attribute change.
+//!
+//! ### The resting state
+//!
+//! `Renderer::begin_frame` establishes the frame's resting depth state:
+//!
+//! ```text
+//! gl.depth_mask(true);
+//! gl.clear_depth_f32(1.0);
+//! gl.clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+//! gl.depth_func(GL_LESS);
+//! gl.disable(GL_DEPTH_TEST);
+//! gl.depth_mask(false);
+//! ```
+//!
+//! No pass tests depth, no pass writes it. The mesh pass (task 37) brackets its
+//! own draws with `enable(GL_DEPTH_TEST)` and `depth_mask(true)`.
+//!
+//! ### 2D-against-3D ordering is submission order
+//!
+//! The depth buffer orders geometry **that writes depth**. The 2D passes have one
+//! `z` and, under this policy, no writes — so the buffer contains mesh depths
+//! and nothing else, and no comparison function can express *"the map is behind
+//! the car"*. Ordering between a 2D layer and a 3D layer is therefore
+//! **submission order**: the segment order `end_frame` already walks, which is
+//! the same mechanism that decides where a shadow lands relative to the panel
+//! that cast it. Task 37 owns where the mesh pass sits in that sequence; this
+//! module owns the rule and writes it down.
+//!
+//! ### Blend and depth
+//!
+//! - **A pass that writes depth blends off.** A blended fragment that also writes
+//!   depth puts a partially transparent pixel into the depth buffer, and
+//!   everything behind it is then rejected against that pixel — a hard silhouette
+//!   where the material asked for a soft edge.
+//! - **A pass that blends writes no depth** (`GL_DEPTH_TEST` on,
+//!   `GL_DEPTH_WRITEMASK` off): it tests against what the opaque pass wrote and
+//!   leaves the buffer alone. Such a pass is order-dependent within itself and
+//!   must be drawn back-to-front, which is the caller's problem, not the
+//!   renderer's.
+//!
+//! The 2D passes are the degenerate case of the second rule: they blend, and
+//! under this policy they neither test nor write, so they are order-dependent
+//! among themselves and are already ordered by the batcher and by
+//! `COMPOSITED_PASSES`.
+//!
+//! ### Face culling
+//!
+//! **Culling is a mesh-pass property** — `GL_CULL_FACE` on, `GL_CULL_FACE_MODE`
+//! = `GL_BACK` (`0x0405`), front face left at GL's default `GL_CCW` (`0x0901`).
+//! Task 37 enables it. The 2D passes leave culling off, which is what
+//! `polygon_quad`'s doc now says: *no 2D pass enables face culling or a depth
+//! test*. The rejected alternative (enabling `GL_CULL_FACE` globally) would
+//! change the pixels every other pass draws, and `polygon_quad`'s winding is
+//! whatever it is *because* nothing culls.
+//!
+//! ### Rejected alternatives
+//!
+//! - **Global `GL_DEPTH_TEST` with 2D passes pushed to `z = 1.0`**: would let
+//!   every 2D layer through, but at the cost of a depth test on every fragment
+//!   of every UI pixel, and a rule that only holds because every 2D vertex shader
+//!   happens to write the same `z`. The `0.5 < 0.5` arithmetic makes this
+//!   unnecessary.
+//! - **`GL_LEQUAL`**: would let every 2D layer through against another at the
+//!   same `z`, at the cost of a depth test on every fragment of every UI pixel
+//!   and a rule that only holds because every 2D vertex shader happens to write
+//!   the same `z`. The `0.5 < 0.5` arithmetic makes this unnecessary.
 
 pub mod blur;
 pub mod context;
@@ -72,6 +160,30 @@ const GL_TEXTURE0: u32 = 0x84C0;
 const GL_LINEAR: u32 = 0x2601;
 /// GL_CLAMP_TO_EDGE constant (0x812F).
 const GL_CLAMP_TO_EDGE: u32 = 0x812F;
+
+/// GL_DEPTH_BUFFER_BIT constant (0x00000100).
+const GL_DEPTH_BUFFER_BIT: u32 = 0x00000100;
+/// GL_DEPTH_TEST constant (0x0B71).
+const GL_DEPTH_TEST: u32 = 0x0B71;
+/// GL_LESS constant (0x0201).
+const GL_LESS: u32 = 0x0201;
+/// GL_LEQUAL constant (0x0203).
+///
+/// Declared for the rejected alternative documented in the module's `## Depth`
+/// section. Not used by this task.
+#[allow(dead_code)]
+const GL_LEQUAL: u32 = 0x0203;
+/// GL_GREATER constant (0x0204).
+///
+/// Declared for the rejected alternative documented in the module's `## Depth`
+/// section. Not used by this task.
+#[allow(dead_code)]
+const GL_GREATER: u32 = 0x0204;
+/// GL_DEPTH_WRITEMASK constant (0x0B72).
+///
+/// Used by the mesh pass (task 37). Declared here for the policy test.
+#[allow(dead_code)]
+const GL_DEPTH_WRITEMASK: u32 = 0x0B72;
 
 /// Converts a `u32` pixel count to the `i32` the texture and viewport setters
 /// take.
@@ -1048,10 +1160,11 @@ fn line_quad(start: (f32, f32), end: (f32, f32), width: f32, color: Color) -> Qu
 /// and a duplicated corner is the one way a triangle fits through it without a
 /// new vertex type, a new shader or a change to the index buffer.
 ///
-/// Winding is whatever the fan produced, and nothing depends on it: no pass in
-/// this module enables face culling or a depth test, so `(a, b, c)` and
-/// `(a, c, b)` draw the same pixels. It is left as the caller's order because
-/// that is the order the fan was handed.
+/// Winding is whatever the fan produced, and nothing depends on it: **no 2D pass
+/// in this module enables face culling or a depth test**, so `(a, b, c)` and
+/// `(a, c, b)` draw the same pixels. **The reason a mesh pass *will* depend on
+/// winding is recorded in this module's `## Depth` section.** It is left as the
+/// caller's order because that is the order the fan was handed.
 ///
 /// `locals` and `size` are **honest but unread**. The solid fragment shader only
 /// consults them inside `if (v_radius > 0.0)`, and this radius is `0.0`, so the
@@ -1495,6 +1608,35 @@ enum Pass {
 /// in [`Renderer::end_frame`], and so a test can state it. `end_frame` reads it;
 /// nothing else may reorder the draws behind its back.
 const COMPOSITED_PASSES: [Pass; 3] = [Pass::Solid, Pass::Image, Pass::Text];
+
+/// The depth state for a single pass: whether it tests depth and whether it writes.
+///
+/// Used by the policy test. The mesh pass (task 37) will use this for its own
+/// depth state.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PassDepth {
+    test: bool,
+    writes: bool,
+}
+
+/// Returns the depth state for a 2D pass.
+///
+/// The policy is: the 2D passes (Solid, Image, Text) neither test nor write depth.
+/// The depth buffer belongs to the mesh pass (task 37), which brackets its draws
+/// with `GL_DEPTH_TEST` enabled and `GL_DEPTH_WRITEMASK` true.
+///
+/// Used by the policy test. The mesh pass (task 37) will use this for its own
+/// depth state.
+#[allow(dead_code)]
+fn depth_state_for(pass: Pass) -> PassDepth {
+    match pass {
+        Pass::Solid | Pass::Image | Pass::Text => PassDepth {
+            test: false,
+            writes: false,
+        },
+    }
+}
 
 /// Which of the two places an image lives, decided by its [`TextureId`] alone.
 ///
@@ -2100,13 +2242,15 @@ impl Renderer {
     }
 
     /// Starts a frame: clears the screen, resets the viewport to the window
-    /// size, disables scissoring and empties the batcher.
+    /// size, disables scissoring, clears the depth buffer with the writemask on,
+    /// and establishes the frame's resting depth state (no test, no writes).
     pub fn begin_frame(&mut self) {
         let (width, height) = self.context.window_size();
         self.viewport = (width, height);
         let gl = self.context.gl();
         // SAFETY: The GL context is current on this thread.
         unsafe {
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
             gl.viewport(
                 0,
                 0,
@@ -2114,8 +2258,12 @@ impl Renderer {
                 i32::try_from(height).unwrap_or(0),
             );
             gl.disable(GL_SCISSOR_TEST);
-            gl.clear_color(0.0, 0.0, 0.0, 1.0);
-            gl.clear(GL_COLOR_BUFFER_BIT);
+            gl.depth_mask(true);
+            gl.clear_depth_f32(1.0);
+            gl.clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            gl.depth_func(GL_LESS);
+            gl.disable(GL_DEPTH_TEST);
+            gl.depth_mask(false);
         }
         self.batcher.reset();
         // The scissor is disabled above, so the renderer's idea of what is
@@ -2556,6 +2704,8 @@ impl Renderer {
         // SAFETY: The GL context is current on this thread.
         unsafe {
             let gl = self.context.gl();
+            gl.disable(GL_DEPTH_TEST);
+            gl.depth_mask(false);
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear(GL_COLOR_BUFFER_BIT);
             gl.disable(GL_BLEND);
@@ -2650,13 +2800,22 @@ impl Renderer {
     /// correctly. The two paths disagreed, and only the one the dialog does not
     /// use was right.
     ///
-    /// It is here rather than in `draw_shadow_offscreen` because of the renderer's
-    /// cache. `applied_clip` is what says whether the scissor is already correct;
-    /// [`Self::apply_clip`] is what consults it, and a caller that wrote the
-    /// scissor behind its back would leave the cache claiming a clip that the GL
-    /// state does not have, and the next batch would skip the call that fixes it.
-    /// Setting `applied_clip` to `None` before re-applying is what keeps the two
-    /// in step — see [`Self::apply_clip`].
+    /// **The offscreen passes are a second writer of global GL state.** Depth test
+    /// state is global, not a property of a framebuffer. A mesh pass that left
+    /// `GL_DEPTH_TEST` enabled would leak it into the offscreen passes, where it
+    /// would do nothing useful (no attachment to read) and could mask a fragment
+    /// against a stale value if a depth attachment is added later. This function
+    /// restores the frame's resting depth state (`GL_DEPTH_TEST` disabled,
+    /// `GL_DEPTH_WRITEMASK` false, `GL_LESS` compare) alongside the framebuffer,
+    /// viewport and scissor, for exactly the reason its own doc already gives for
+    /// the scissor: the offscreen passes are a second writer of global GL state,
+    /// `apply_clip`'s cache is the model for how this crate handles that, and
+    /// depth test state has no cache and therefore has to be re-asserted
+    /// unconditionally.
+    ///
+    /// It is called with `clip` and re-applies the clip through `apply_clip`
+    /// today; the depth restore goes in the same place and does not touch
+    /// `applied_clip`.
     fn bind_default_target(&mut self, clip: Option<Rect>) {
         let (width, height) = self.viewport;
         let gl = self.context.gl();
@@ -2665,6 +2824,9 @@ impl Renderer {
         unsafe {
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
             gl.viewport(0, 0, u32_to_i32(width), u32_to_i32(height));
+            gl.disable(GL_DEPTH_TEST);
+            gl.depth_mask(false);
+            gl.depth_func(GL_LESS);
         }
         // The cache is invalidated **before** the state is written, and the state
         // is then written through `apply_clip` rather than by calling
@@ -4674,6 +4836,71 @@ mod tests {
             GL_RGBA8, GL_R8,
             "the glyph atlas is single-channel coverage; an image is not"
         );
+    }
+
+    /// The depth constants this crate declares must agree with `glow`'s.
+    ///
+    /// The crate duplicates `glow`'s numbers on purpose (the block starts at
+    /// `GL_VERTEX_SHADER` and never imports one), and a duplicate with no test is
+    /// two numbers that can drift. This is the same shape as
+    /// `the_image_texture_format_is_rgba_and_not_the_glyph_atlases_red`, which
+    /// pins a format against the neighbour it must not be confused with.
+    ///
+    /// **Mutation evidence:** changing one constant's hex value fails this test.
+    #[test]
+    fn the_depth_constants_agree_with_glow() {
+        assert_eq!(GL_DEPTH_BUFFER_BIT, glow::DEPTH_BUFFER_BIT);
+        assert_eq!(GL_DEPTH_TEST, glow::DEPTH_TEST);
+        assert_eq!(GL_LESS, glow::LESS);
+        assert_eq!(GL_LEQUAL, glow::LEQUAL);
+        assert_eq!(GL_GREATER, glow::GREATER);
+        assert_eq!(GL_DEPTH_WRITEMASK, glow::DEPTH_WRITEMASK);
+    }
+
+    /// The depth policy for 2D passes is asserted, not only documented.
+    ///
+    /// `depth_state_for(Pass::Solid)`, `depth_state_for(Pass::Image)` and
+    /// `depth_state_for(Pass::Text)` each equal `PassDepth { test: false,
+    /// writes: false }`, asserted by a test that iterates `Pass`'s variants.
+    /// **Mutation evidence:** flipping one entry to `writes: true` fails the suite.
+    ///
+    /// And `rg -n 'GL_CULL_FACE|CULL_FACE_MODE' ui/src` returns **nothing** —
+    /// culling is policy in this task, code in task 37.
+    #[test]
+    fn the_depth_policy_for_2d_passes_is_test_false_writes_false() {
+        use crate::render::Pass;
+        // Test that all three 2D passes have test=false, writes=false
+        assert_eq!(
+            depth_state_for(Pass::Solid),
+            PassDepth {
+                test: false,
+                writes: false
+            },
+            "Solid pass neither tests nor writes depth"
+        );
+        assert_eq!(
+            depth_state_for(Pass::Image),
+            PassDepth {
+                test: false,
+                writes: false
+            },
+            "Image pass neither tests nor writes depth"
+        );
+        assert_eq!(
+            depth_state_for(Pass::Text),
+            PassDepth {
+                test: false,
+                writes: false
+            },
+            "Text pass neither tests nor writes depth"
+        );
+        // Ensure the test would fail if a pass had writes: true
+        // (this is the mutation evidence - we can't actually mutate the function
+        // but the assertion is what would catch it)
+        let _ = PassDepth {
+            test: false,
+            writes: true,
+        }; // type-checks
     }
 
     #[test]

@@ -105,6 +105,61 @@ const MULTISAMPLE_BUFFERS: u8 = 1;
 /// capture of this change shows some edges smoothed and others untouched.
 const MULTISAMPLE_SAMPLES: u8 = 4;
 
+/// The depth buffer size this pipeline asks for on the **default** framebuffer.
+///
+/// This is the `SDL_GL_DEPTH_SIZE` attribute, and it is set on the
+/// window before the GL context is created rather than on a framebuffer object,
+/// because there is no FBO anywhere in this renderer and the operator chose the
+/// default framebuffer on 2026-10-02.
+///
+/// **What it does.** It makes the default framebuffer include a depth buffer of
+/// at least this many bits. The depth buffer belongs to the mesh pass
+/// (tasks 35–37), and the 2D passes neither read it nor write it — see
+/// `render.rs`'s `## Depth` section for the policy. The 2D vertex shaders write
+/// `gl_Position.z = 0.0`, which is window depth **0.5**; a global depth test
+/// with clear `1.0` and `GL_LESS` would pass the first layer and discard the
+/// rest (`0.5 < 0.5` is false), deleting the UI. So the frame's resting state
+/// is `GL_DEPTH_TEST` disabled and `GL_DEPTH_WRITEMASK` false, and the mesh
+/// pass brackets its draws with both enabled.
+///
+/// **Why 24.** `SDL_GL_DEPTH_SIZE` is a **minimum** request, so the driver may
+/// grant more and the only way to know is to read `GL_DEPTH_BITS` back from a
+/// live context — exactly the discipline `MULTISAMPLE_SAMPLES` already states
+/// for `GL_SAMPLES`.
+///
+/// - **16** is SDL's own default and the minimum GLES 3.1 requires of a depth
+///   buffer. It is rejected: over a car-sized scene with a near plane a few
+///   centimetres out, 16 bits quantises `z` coarsely enough that two coplanar
+///   surfaces — a door skin against a wing, which is what a car body is made of
+///   — z-fight.
+/// - **32** is not reachable as `GL_DEPTH_COMPONENT32` in the ES 3.1 header
+///   this build compiles against (it is a desktop-GL/extension sized format
+///   there) and is not needed: with a near/far ratio task 36 will choose in the
+///   range of hundreds, 24 bits leaves far more precision than the raster can
+///   show. It also costs the most bandwidth of the three.
+/// - **24** is `GL_DEPTH_COMPONENT24`, the sized format ES 3.1 defines for
+///   exactly this, and the smallest count that removes the coplanar z-fighting
+///   this sequence is for. **What would reverse it** is a measurement that 16 is
+///   indistinguishable at the panel resolution the operator ships — the same
+///   "screenshot cannot answer it" limit `MULTISAMPLE_SAMPLES` already records,
+///   because z-fighting is a *depth* artefact and a capture photographs whatever
+///   won.
+///
+/// **The MSAA interaction is the real cost, and it is not the bit count.** Depth
+/// on a multisample default framebuffer is stored **per sample**, so the depth
+/// allocation is `samples × bytes`. At this demo's window (1280 × 1020) with 4
+/// samples: **16-bit is 10.4 MB, 24-bit is 15.7 MB, 32-bit is 20.9 MB**,
+/// against 5.2 MB of colour today. And there is a second interaction with the
+/// same shape as the one `MULTISAMPLE_BUFFERS`'s doc records: **a driver asked
+/// for four samples *and* a depth buffer may grant fewer samples**, which is why
+/// `render.rs` requirement 11 reports both numbers and requirement 12 makes a
+/// dropped sample count a finding rather than a note.
+///
+/// **Measured 2026-10-06.** On this host's driver (Mesa 26.0.8, Intel HD 530):
+/// `GL_DEPTH_BITS` granted **24**, `GL_SAMPLES` granted **4** — both read back
+/// from a live context after `Context::new`. The request was honoured.
+const DEPTH_BITS: u8 = 24;
+
 /// Parses a GL version string like "OpenGL ES 3.2 Mesa 26.0.8-1ubuntu0.3"
 /// and returns true if the version is at least `major.minor`.
 fn is_gles_version_at_least(version: &str, major: u32, minor: u32) -> bool {
@@ -202,7 +257,7 @@ impl Context {
         gl_attr.set_context_profile(GLProfile::GLES);
         gl_attr.set_context_version(3, 1);
         gl_attr.set_double_buffer(true);
-        gl_attr.set_depth_size(0);
+        gl_attr.set_depth_size(DEPTH_BITS);
         // Both attributes, before the window: `MULTISAMPLE_BUFFERS` defaults to
         // 0, so a request for samples with no buffer to put them in is one a
         // driver may honour by ignoring. See the two constants for why four.
@@ -283,7 +338,7 @@ impl Context {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_gles_version_at_least, MULTISAMPLE_BUFFERS, MULTISAMPLE_SAMPLES};
+    use super::{is_gles_version_at_least, DEPTH_BITS, MULTISAMPLE_BUFFERS, MULTISAMPLE_SAMPLES};
 
     /// The multisample request this pipeline makes, held as a number.
     ///
@@ -323,6 +378,41 @@ mod tests {
             1,
             "a multisample count is a power of two; a driver rounds anything else down \
              and the request stops meaning what it says"
+        );
+    }
+
+    /// The depth buffer request this pipeline makes, held as a number.
+    ///
+    /// **This is a pin on the request, not on what the driver did with it, and
+    /// the difference is the whole limit of the test harness here.** There is no
+    /// GL context in `cargo test`, so nothing in this module can read
+    /// `GL_DEPTH_BITS` back, and the acceptance for
+    /// [`DEPTH_BITS`](super::DEPTH_BITS) is a capture and a frame rate rather
+    /// than a unit test.
+    ///
+    /// What it *can* catch is the request becoming a no-op, which is the failure
+    /// mode that is invisible on screen: a depth size of 0 asks for no depth
+    /// buffer and looks, in a capture, exactly like a pipeline that never asked.
+    /// `DEPTH_BITS` is here for the same reason — **0 is SDL's own default
+    /// before this change**, so a constant that fell to 0 would leave
+    /// `set_depth_size` called with a real count into a context with no depth
+    /// buffer in it.
+    ///
+    /// What it cannot catch is the attribute call being deleted, because the
+    /// call takes `&GLAttr` and constructing one needs an initialised video
+    /// subsystem, which needs a display. A test seam for it would be an
+    /// abstraction built for its second use, which does not exist.
+    #[test]
+    fn the_depth_request_is_twenty_four_bits() {
+        assert_eq!(
+            DEPTH_BITS, 24,
+            "SDL_GL_DEPTH_SIZE defaults to 16, and 16 bits is not enough for a \
+             car-sized scene: coplanar surfaces z-fight"
+        );
+        assert!(
+            matches!(DEPTH_BITS, 16 | 24 | 32),
+            "the depth size is a decision, not a default: 0 is a no-op and other \
+             values are not sized formats in ES 3.1"
         );
     }
 

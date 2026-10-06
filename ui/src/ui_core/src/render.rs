@@ -93,6 +93,7 @@
 
 pub mod blur;
 pub mod context;
+pub mod mesh;
 pub mod target;
 
 use std::collections::HashMap;
@@ -238,6 +239,13 @@ const IMAGE_RADIUS_OFFSET: i32 = 24;
 const IMAGE_OPACITY_OFFSET: i32 = 28;
 /// Byte offset of `ImageVertex::size` within the vertex.
 const IMAGE_SIZE_OFFSET: i32 = 32;
+
+/// Stride of one [`MeshVertex`] in bytes: 8 `f32` fields, no padding.
+const MESH_VERTEX_STRIDE: i32 = 32;
+/// Byte offset of `MeshVertex::normal` within the vertex.
+const MESH_NORMAL_OFFSET: i32 = 12;
+/// Byte offset of `MeshVertex::uv` within the vertex.
+const MESH_UV_OFFSET: i32 = 24;
 
 /// The number of indices one quad contributes to an index buffer: two triangles.
 const INDICES_PER_QUAD: usize = 6;
@@ -1771,6 +1779,15 @@ pub struct Renderer {
     /// The window size `blur_vertices` was built for, and the test for whether
     /// they need rebuilding.
     blur_vertex_size: (u32, u32),
+    /// Mesh VAO, VBO, IBO for triangle mesh rendering (task 35).
+    mesh_vao: glow::VertexArray,
+    mesh_vbo: glow::Buffer,
+    mesh_ibo: glow::Buffer,
+    /// Growth counters for the mesh buffers.
+    mesh_vertex_capacity: usize,
+    mesh_index_capacity: usize,
+    /// CPU-side mesh store, owns no GL objects.
+    meshes: mesh::MeshStore,
 }
 
 impl Renderer {
@@ -1807,6 +1824,15 @@ impl Renderer {
         };
         // SAFETY: The GL context is current on this thread.
         let (image_vao, image_vbo, image_ibo) = unsafe {
+            let gl = context.gl();
+            (
+                gl.create_vertex_array().map_err(RenderError::Gl)?,
+                gl.create_buffer().map_err(RenderError::Gl)?,
+                gl.create_buffer().map_err(RenderError::Gl)?,
+            )
+        };
+        // SAFETY: The GL context is current on this thread.
+        let (mesh_vao, mesh_vbo, mesh_ibo) = unsafe {
             let gl = context.gl();
             (
                 gl.create_vertex_array().map_err(RenderError::Gl)?,
@@ -1982,6 +2008,12 @@ impl Renderer {
             u_composite_source,
             blur_vertices: Vec::new(),
             blur_vertex_size: (0, 0),
+            mesh_vao,
+            mesh_vbo,
+            mesh_ibo,
+            mesh_vertex_capacity: 0,
+            mesh_index_capacity: 0,
+            meshes: mesh::MeshStore::new(),
         };
         // SAFETY: The GL context is current on this thread; `vao`, `vbo` and
         // `ibo` are valid objects created above. The attribute pointers and
@@ -2079,6 +2111,29 @@ impl Renderer {
                 IMAGE_VERTEX_STRIDE,
                 IMAGE_SIZE_OFFSET,
             );
+            gl.bind_vertex_array(None);
+        }
+        // SAFETY: The GL context is current on this thread; the mesh VAO, VBO
+        // and IBO are valid objects created above. The attribute pointers and
+        // the element array binding are captured by the VAO.
+        unsafe {
+            let gl = renderer.context.gl();
+            gl.bind_vertex_array(Some(renderer.mesh_vao));
+            gl.bind_buffer(GL_ARRAY_BUFFER, Some(renderer.mesh_vbo));
+            gl.bind_buffer(GL_ELEMENT_ARRAY_BUFFER, Some(renderer.mesh_ibo));
+            gl.enable_vertex_attrib_array(0);
+            gl.vertex_attrib_pointer_f32(0, 3, GL_FLOAT, false, MESH_VERTEX_STRIDE, 0);
+            gl.enable_vertex_attrib_array(1);
+            gl.vertex_attrib_pointer_f32(
+                1,
+                3,
+                GL_FLOAT,
+                false,
+                MESH_VERTEX_STRIDE,
+                MESH_NORMAL_OFFSET,
+            );
+            gl.enable_vertex_attrib_array(2);
+            gl.vertex_attrib_pointer_f32(2, 2, GL_FLOAT, false, MESH_VERTEX_STRIDE, MESH_UV_OFFSET);
             gl.bind_vertex_array(None);
         }
         renderer.ensure_index_capacity(INITIAL_CAPACITY)?;
@@ -3386,6 +3441,143 @@ impl Renderer {
         }
         self.vertex_capacity = capacity;
         Ok(())
+    }
+
+    /// Grows the mesh index buffer to hold `indices` indices.
+    fn ensure_mesh_index_capacity(&mut self, indices: usize) -> Result<(), RenderError> {
+        if indices <= self.mesh_index_capacity {
+            return Ok(());
+        }
+        let mut capacity = self.mesh_index_capacity.max(INITIAL_CAPACITY);
+        while capacity < indices {
+            capacity = capacity.saturating_mul(2);
+        }
+        let index_bytes = capacity
+            .checked_mul(std::mem::size_of::<u32>())
+            .ok_or_else(|| {
+                RenderError::Gl("mesh index buffer size exceeds the usize range".to_string())
+            })?;
+        let size = i32::try_from(index_bytes).map_err(|_| {
+            RenderError::Gl("mesh index buffer size exceeds the i32 range".to_string())
+        })?;
+        let gl = self.context.gl();
+        // SAFETY: The GL context is current on this thread and `self.mesh_ibo`
+        // is a valid buffer.
+        unsafe {
+            gl.bind_buffer(GL_ELEMENT_ARRAY_BUFFER, Some(self.mesh_ibo));
+            gl.buffer_data_size(GL_ELEMENT_ARRAY_BUFFER, size, GL_STATIC_DRAW);
+        }
+        self.mesh_index_capacity = capacity;
+        Ok(())
+    }
+
+    /// Grows the mesh vertex buffer to hold `vertices` vertices.
+    fn ensure_mesh_vertex_capacity(&mut self, vertices: usize) -> Result<(), RenderError> {
+        if vertices <= self.mesh_vertex_capacity {
+            return Ok(());
+        }
+        let mut capacity = self.mesh_vertex_capacity.max(INITIAL_CAPACITY);
+        while capacity < vertices {
+            capacity = capacity.saturating_mul(2);
+        }
+        let size = vertex_buffer_size(capacity, std::mem::size_of::<mesh::MeshVertex>())?;
+        let gl = self.context.gl();
+        // SAFETY: The GL context is current on this thread and `self.mesh_vbo`
+        // is a valid buffer.
+        unsafe {
+            gl.bind_buffer(GL_ARRAY_BUFFER, Some(self.mesh_vbo));
+            gl.buffer_data_size(GL_ARRAY_BUFFER, size, GL_STATIC_DRAW);
+        }
+        self.mesh_vertex_capacity = capacity;
+        Ok(())
+    }
+
+    /// Uploads a mesh to the GPU and returns a handle to it.
+    ///
+    /// Validates the mesh before any GL call, so a malformed mesh costs nothing
+    /// and names itself: empty vertices, empty indices, or empty sub-meshes is
+    /// an error saying which. An upload that returns a handle whose draws are
+    /// all no-ops is the failure `.ai/NEVERAGAIN.md` records for a buffer sized
+    /// wrong — a batch that disappears with every GL call reporting success.
+    ///
+    /// Validates every sub-mesh: `first_index + index_count <= indices.len()`,
+    /// computed with `checked_add`, naming the sub-mesh in the error. A range
+    /// past the end of the index buffer is what `draw_elements` reads, and
+    /// without robust buffer access that is undefined geometry rather than an
+    /// error.
+    ///
+    /// Validates every index value against the mesh's vertex count:
+    /// `index < vertices.len()`. The loader produces indices that are 0-based
+    /// within the mesh's own vertex buffer; the store concatenates multiple
+    /// meshes and tracks each slot's `vertex_base` and `index_base` for drawing.
+    ///
+    /// Then grows the buffers if needed, uploads the data with `buffer_sub_data`,
+    /// pushes the `MeshStore` slot and returns its `MeshId`.
+    pub fn upload_mesh(&mut self, mesh: mesh::Mesh) -> Result<mesh::MeshId, RenderError> {
+        // Validate before any GL call using the pure validation function.
+        mesh::validate_mesh(&mesh)?;
+
+        let vertex_base = self.meshes.total_vertices();
+        let index_base = self.meshes.total_indices();
+
+        // Validate every index value against the slot's base.
+        // The loader produces indices already offset by the concatenation order.
+        mesh::validate_mesh_indices_against_base(&mesh, vertex_base)?;
+
+        // Grow buffers if needed.
+        let total_vertices = vertex_base + mesh.vertices.len() as u32;
+        let total_indices = index_base + mesh.indices.len() as u32;
+        self.ensure_mesh_vertex_capacity(total_vertices as usize)?;
+        self.ensure_mesh_index_capacity(total_indices as usize)?;
+
+        // Upload vertex data.
+        // SAFETY: `MeshVertex` is `repr(C)` with 8 `f32` fields and no
+        // padding, so the slice is a valid byte view of the vertex array.
+        // `mesh.vertices` outlives this upload.
+        let vertex_bytes = unsafe {
+            std::slice::from_raw_parts(
+                mesh.vertices.as_ptr().cast::<u8>(),
+                mesh.vertices.len() * std::mem::size_of::<mesh::MeshVertex>(),
+            )
+        };
+        let gl = self.context.gl();
+        // SAFETY: The GL context is current on this thread; `self.mesh_vbo` is a
+        // valid buffer and `vertex_bytes` borrows `mesh.vertices` which outlives
+        // the upload.
+        unsafe {
+            gl.bind_buffer(GL_ARRAY_BUFFER, Some(self.mesh_vbo));
+            gl.buffer_sub_data_u8_slice(
+                GL_ARRAY_BUFFER,
+                i32::try_from(vertex_base as usize * std::mem::size_of::<mesh::MeshVertex>())
+                    .unwrap_or(0),
+                vertex_bytes,
+            );
+        }
+
+        // Upload index data.
+        // SAFETY: `indices` is a `Vec<u32>`, so the slice is a valid byte view
+        // of the index array. `mesh.indices` outlives this upload.
+        let index_bytes = unsafe {
+            std::slice::from_raw_parts(
+                mesh.indices.as_ptr().cast::<u8>(),
+                mesh.indices.len() * std::mem::size_of::<u32>(),
+            )
+        };
+        // SAFETY: The GL context is current on this thread; `self.mesh_ibo` is a
+        // valid buffer and `index_bytes` borrows `mesh.indices` which outlives
+        // the upload.
+        unsafe {
+            gl.bind_buffer(GL_ELEMENT_ARRAY_BUFFER, Some(self.mesh_ibo));
+            gl.buffer_sub_data_u8_slice(
+                GL_ELEMENT_ARRAY_BUFFER,
+                i32::try_from(index_base as usize * std::mem::size_of::<u32>()).unwrap_or(0),
+                index_bytes,
+            );
+        }
+
+        // Push to store and return id.
+        let id = self.meshes.push(mesh, vertex_base, index_base);
+        Ok(id)
     }
 }
 

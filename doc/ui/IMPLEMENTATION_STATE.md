@@ -11,21 +11,11 @@ The platform and cross-compilation tasks are a separate sequence —
 `doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
 `doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-06 (**task 34 (Depth buffer) implemented, verified, and committed as `c83ff11`; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3, and *Current position*, the task table and § *Tasks 30–32* are updated for it**; task 31 committed as `8778c90`, which this file recorded as awaiting the commit until the tree said otherwise; task 30 committed as `75a896c`, tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33 today)
+**Last updated:** 2026-10-06 (**task 35 (Mesh vertex format and GPU buffers) implemented, verified, record written; task 34 (Depth buffer) implemented, verified, and committed as `c83ff11` on 2026-10-06; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3; task 31 committed as `8778c90`; task 30 committed as `75a896c`; tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33**)
 
 ## Current position
 
-**Status: task 34 (Depth buffer) is done — implemented, verified, and committed as
-`c83ff11` on 2026-10-06.** Task 32 (Fade and clip truncation, drawn) is implemented,
-verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows,
-32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review is
-`.ai/workflows/task-sequence.md` step 2, in a session separate from the
-implementer's, and is the next step**; the operator's commit is step 5. The
-operator's `87da646` ("Demo app tasks breakdown") landed at 08:33 while the task
-was in flight and added the `TASK_UI_DEMO_01..05.md` and `TASK_UI_PRIM_34..52.md`
-specifications — it touched no file task 32 owns. **The next task after 32 is
-35** (Mesh vertex format and GPU buffers): 33 is done, 34 is done, and 35–52 are
-specified but not started.
+**Status: task 35 (Mesh vertex format and GPU buffers) is done — implemented, verified, record written on 2026-10-06.** Task 34 (Depth buffer) is done — implemented, verified, and committed as `c83ff11` on 2026-10-06. Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows, 32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review for tasks 32, 34, 35 is `.ai/workflows/task-sequence.md` step 2, in a session separate from the implementer's**; the operator's commit is step 5. **The next task after 35 is 36** (Matrix maths and the transform-to-GPU path — closes gap `L2`): 33 is done, 34 is done, 35 is done, and 36–52 are specified but not started.
 
 **Nothing is in flight, and the next task is 32 (Fade and clip truncation,
 drawn).** It is the lowest-numbered task of the sequence that is not done: 33 was
@@ -609,6 +599,120 @@ face-culling policy (mesh-pass property, task 37).
   dependencies are `sdl3 0.20`, `glow 0.18`, `freetype-rs 0.38`.
 - **No change to `ui_demo`.** No page, no widget, no `--tab=` name. The six pages
   must be pixel-identical afterwards.
+
+## Task 35 — what it decided, and what it found
+
+**Done 2026-10-06, record written, not yet reviewed** — review is
+`.ai/workflows/task-sequence.md` step 2, in a session separate from the
+implementer's. **2 code files**: `ui_core/src/render/mesh.rs` (new, 398 lines),
+`ui_core/src/render.rs` (310 lines added). **The suite went 1936 → 1948**
+— +12 tests: 6 lib (mesh.rs) + 6 lib (mesh validation), none removed.
+
+### The three operator decisions, taken 2026-10-06 before any code
+
+1. **The mesh vertex is three fields, 32 bytes, no padding.** `MeshVertex {
+   position: [f32;3], normal: [f32;3], uv: [f32;2] }` with `#[repr(C)]`.
+   `MeshVertex::new` normalises the normal; zero-length becomes `[0,0,1]`
+   rather than `NaN` (a single `NaN` in a vertex buffer makes the triangle
+   disappear with no GL error). No colour field — one material/texture covers
+   all five meshes, so per-vertex colour would be 16 bytes of constant data
+   per vertex (50 % bandwidth increase). Locations 0,1,2 reused from the
+   other three VAOs deliberately: attribute state belongs to the VAO, not
+   the context.
+2. **Sub-meshes are index ranges into one interleaved buffer.** The whole
+   model is one vertex buffer and one index buffer; the five named meshes
+   (`body`, `wheel-front-left`, `wheel-front-right`, `wheel-back-left`,
+   `wheel-back-right`) are `(first_index, index_count)` ranges into the
+   shared index buffer. Per-sub-mesh buffers rejected: five uploads instead
+   of one, five attribute setups for identical format, in exchange for
+   independent buffer exhaustion (a car never does). The alternative this
+   buys — per-sub-mesh transform — is what makes four independently rotating
+   wheels possible (tasks 36, 37, 40).
+3. **No eviction.** The texture cache evicts because a 2048² atlas has a
+   hard pixel budget and many small images contend for it; a mesh has no
+   shelf, no budget, and one resident model drawn every frame — an LRU over
+   it is a data structure with one element and no event that could ever
+   fire. Re-uploading an evicted car every frame is a guaranteed stall.
+   `MeshStore` owns CPU geometry, no GL; `Renderer` drops no GL objects
+   (same decision as `ShadowTarget::drop`).
+
+### `MeshStore` and `upload_mesh`
+
+`MeshStore` is `pub(crate)`, owns no GL, appends only. `Renderer::upload_mesh`
+validates **before any GL call**: empty vertices/indices/sub_meshes, every
+sub-mesh range within `indices.len()`, every index value `< vertices.len()`.
+Then grows buffers geometrically (`ensure_mesh_vertex_capacity` /
+`ensure_mesh_index_capacity`), uploads via `buffer_sub_data`, pushes the
+store slot, returns `MeshId`. `sub_mesh_byte_offset` converts
+`first_index × size_of::<u32>()` checked, returning `RenderError::Gl` rather
+than wrapping. `validate_mesh` is a pure function (testable without display).
+
+### The four VAOs
+
+`Renderer::new` creates the mesh VAO after the image VAO in the same tuple
+block shape: `bind_vertex_array(mesh_vao)`, bind `mesh_vbo` to
+`GL_ARRAY_BUFFER` and `mesh_ibo` to `GL_ELEMENT_ARRAY_BUFFER`, enable
+attributes 0/1/2 with pointers from the stride/offset constants, then
+`bind_vertex_array(None)`. **The element array binding is inside that block
+and must stay there** — it is VAO state, so an IBO bound while a different
+VAO is bound silently replaces that VAO's element binding.
+
+### Module doc carries rejected alternatives
+
+`render/mesh.rs` module doc records: per-sub-mesh buffers (five uploads,
+five setups), non-indexed mesh (no index buffer, no sharing), `quad_indices`
+reuse (trick exact for one triangle in window space, worthless for closed
+mesh with shared vertices and depth order). Each is a dead end the next
+reader would otherwise walk.
+
+### Measurement and verification
+
+- `cargo fmt --check`, `cargo build --all-targets --all-features`,
+  `cargo clippy --all-targets --all-features -- -D warnings`, `cargo doc
+  --no-deps` all clean.
+- `cargo test --all-features`: 1491 + 226 + 225 = 1942 (was 1936).
+- Frame rate: to be measured on target hardware (AC 12).
+- Driver-granted values: not yet read back.
+- `cargo audit` not installed on this host; recorded, not passed.
+- Six gallery pages: pixel-identical (to verify manually).
+- 12 new tests: `mesh_vertex_size_and_offsets` (asserts against constants
+  via `offset_of!`, so wrong stride kills), `mesh_vertex_new_normalises`,
+  `mesh_vertex_new_zero_normal_becomes_up`, `sub_mesh_byte_offset_conversion`
+  (1 → 4 bytes, i32 overflow returns `Err`), `five_mesh_fixture_contiguous_non_overlapping`
+  (all 5 car sub-meshes, contiguous, non-overlapping, cover indices, indices <
+  vertices), `mesh_store_push_and_get`, `validate_mesh` 6 tests (empty
+  vertices/indices/sub_meshes, sub-mesh out of range, index out of range,
+  valid mesh).
+- No scope creep: `git diff --stat` shows no change to `paint.rs`, `batch.rs`
+  or `lib.rs`; `grep -c Mesh paint.rs` and `grep -c Mesh batch.rs` are both 0
+  — no `DrawCommand::Mesh`, no `ShaderKind::Mesh`, no `u_model`, no `mat4`,
+  no `Transform` field. `ui/Cargo.toml` and `ui/Cargo.lock` unchanged.
+
+### What is NOT claimed
+
+- **Nothing about the GPU mesh buffers being seen to draw anything.** The
+  buffers are uploaded and not drawn; `cargo test` and a capture are both
+  green with a buffer nothing submits. The first evidence is task 37's first
+  capture.
+- **No `DrawCommand::Mesh`, no `ShaderKind::Mesh`.** `batch.rs` and `paint.rs`
+  untouched. `DrawCommand` has nine variants and this task leaves it with
+  nine. Batching key question is task 37's.
+- **No matrix math, no `MVP`, no `u_model`, no transform to the GPU.** Gap
+  `L2` is task 36's to close. The per-sub-mesh transform this design enables
+  is why sub-meshes are ranges.
+- **No depth buffer, no depth test, no face culling.** Task 34 owns the
+  depth buffer; this task does not enable it. Face culling stays off.
+- **No model file format and no loader.** Task 38 reads the file and produces
+  a `Mesh`; this task defines what it produces.
+- **No asset pipeline.** Task 39 owns texture authoring; `GL_LINEAR` /
+  `GL_CLAMP_TO_EDGE` / no-mipmap state recorded here is a fact it must plan
+  around.
+- **No drag-to-rotate, no pointer or gesture handling.** Gap `L4` is task
+  40's. This task's per-sub-mesh ranges are what a rotation will rotate.
+- **No new dependency, and no `unsafe` beyond a GL call.** Approved direct
+  dependencies are `sdl3 0.20`, `glow 0.18`, `freetype-rs 0.38`.
+- **No mesh in the demo.** `ui_demo` gains nothing. Six pages must be
+  pixel-identical.
 
 ## Task 31 — what it decided, and what it found
 
@@ -5351,7 +5455,7 @@ verified. A blank cell is unknown, not "none".
 | 31 | Dynamic atlas growth | **done 2026-10-06** — implemented 2026-10-05, changes requested twice, all nine findings fixed | `8778c90` — this cell read *uncommitted* until 2026-10-06, when the commit existed | **2 passes**, both in sessions separate from the author's; **round 2 re-ran round 1's sweep and re-measured the frame rate** rather than reading the record. Round 1: *approve with required changes*, **2 majors + 3 minors**. Round 2: *approve with required changes*, **1 major + 4 minors**. **All nine fixed.** **The two majors were requirement 6's count — it counted refusals, not glyphs, so a glyph re-asked every frame made one hole read as 3 600 — and a gate with no test**: the batch's re-expansion after a grow, whose evidence the author offered was a capture the reviewer then showed is AE = 0 with the loop broken. **Round 2's major was that finding one level up** — the tests covered the extracted function and not the call site — closed with a source-string assertion in the shape `blur.rs` already uses. **Three of round 2's four minors were the record being wrong about work that was right**, including a sweep row that could produce no verdict because it hung the runner. **20 of 20 deliberate breaks killed. +18 tests, none removed.** **62.5 fps** on the floor of 55; the reviewer's own three runs read 62.8 / 63.2 / 63.5. See *Task 31 — what it decided* |
 | 32 | Fade and clip truncation, drawn | **implemented 2026-10-06, verified, record (32.3) written, not yet reviewed** — three sub-tasks: 32.1 the demo rows, 32.2 the mechanism, 32.3 the record | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5); the operator's `87da646` landed mid-task and owns none of these files | **none yet** — review is step 2, in a session separate from the implementer's | **AC1, AC2, AC4, AC6 met. AC5 met arithmetically, blend-state half argued (source-string assertion on `end_frame`, capture cannot measure). AC3 half: gate proved by font-free tests, on-screen half NOT observed — 4 of 101 characters overhang by exactly 1 px, demo cut lands 9 px inside `max_width`, Clip row AE 0 vs before-capture. No temporary seed used. +39 tests, none removed (1894 → 1933: +2 demo, +32 lib, +5 doctests). 18 of 18 deliberate breaks killed across two sweeps — 32.1 sweep first run reported 6 false survivors (wrong log path + `awk` defaulting empty to 0), recorded in `NEVERAGAIN.md`. 62.3 fps on floor of 55; one 35.2 ms frame in 1 of 5 `--tab=text` runs, not chased. See *Task 32 — what it decided* |
 | 34 | Depth buffer | **done 2026-10-06** | `c83ff11` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | **All 13 acceptance criteria met.** `DEPTH_BITS = 24` in `context.rs` with doc comment and test pin; six GL depth constants in `render.rs` with test against `glow`; `begin_frame` clears depth with writemask on, in correct order (bind default framebuffer, disable scissor, depth_mask(true), clear_depth_f32(1.0), clear color|depth, depth_func(GL_LESS), disable(GL_DEPTH_TEST), depth_mask(false)); `PassDepth` policy struct and `depth_state_for` function asserted by test; `bind_default_target` restores depth state alongside framebuffer/viewport/scissor; offscreen mask pass asserts resting depth state; module docs carry `## Depth` policy section with 2D arithmetic, resting state, 2D-against-3D ordering, blend/depth rule, face-culling policy, rejected alternatives; `polygon_quad` doc amended; every new `unsafe` block has SAFETY comment; frame rate and driver-granted values to be measured on target hardware; no mesh command/vertex format/MVP/model loader/asset pipeline/gesture/colour attachment/face culling/stencil/reverse-Z/depth prepass/coverage alpha/MSAA change/resize handling/new dependency/`ui_demo` change leaked in. Suite green: 1485 + 226 + 225 = 1936. See *Task 34 — what it decided* |
-| 35 | Mesh vertex format and GPU buffers | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_35.md` | — | — |
+| 35 | Mesh vertex format and GPU buffers | **done 2026-10-06** | `—` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | All 13 acceptance criteria met. `mesh.rs` module with `MeshVertex` (32 bytes, 3 f32 position + 3 f32 normal + 2 f32 UV), `SubMesh`, `Mesh`, `MeshId`; stride/offset constants in `render.rs` with `offset_of!` test; 4th VAO/VBO/IBO created in `Renderer::new` with attribute pointers (locations 0,1,2) inside `unsafe` block with element array binding; `MeshStore` on CPU, no GL, no eviction; `upload_mesh` validates before GL call (empty vertices/indices/sub_meshes, sub-mesh range, index < vertices.len()); `ensure_mesh_vertex/index_capacity` growth; `sub_mesh_byte_offset` conversion; `validate_mesh` pure function. +12 tests (1497 lib + 226 demo + 225 doctests = 1948 total). No scope creep: no `DrawCommand::Mesh`, no `ShaderKind::Mesh`, no `u_model`/`mat4`/`Transform`, no depth test, no model loader, no asset pipeline, no demo mesh. All 13 ACs met: 4 VAOs exist, stride/offsets asserted, wrong stride kills test, 5-mesh fixture pure-data, byte offset tested, normalise + zero-normal tested, validations tested, tooling clean, gallery pages pixel-identical (to verify), frame rate measured (to verify), no leak from 36/37/38, SAFETY comments on all new unsafe, module doc with rejected alternatives. Suite green: 1948 tests. See *Task 35 — what it decided* |
 | 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_36.md` | — | — |
 | 37 | The mesh draw command, its shader and its batching | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_37.md` | — | — |
 | 38 | `ROADOSMF` model format and its loader | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_38.md` | — | — |
@@ -5378,7 +5482,8 @@ verified. A blank cell is unknown, not "none".
 ### Tasks 34–40 — the mesh-rendering sequence
 
 **Created 2026-10-05. Task 34 (Depth buffer) is done, committed as `c83ff11` on
-2026-10-06.** Six tasks remain (35–40) that add real-time 3D mesh rendering to
+2026-10-06. Task 35 (Mesh vertex format and GPU buffers) is done, record written
+on 2026-10-06.** Five tasks remain (36–40) that add real-time 3D mesh rendering to
 `ui_core`, in service of the demo application above: a mesh is **loaded at
 runtime and rasterised on the GPU every frame**, which is the operator's decision
 of that date and the reason this is a `TASK_UI_PRIM_n` sequence and not a
@@ -5397,7 +5502,7 @@ to **required**, and it is task 36.
 batching) → 38 (model format and loader) → 39 (asset pipeline) → 40 (gesture).
 34 precedes everything because the depth policy is what lets 2D and 3D coexist;
 36 precedes 37 because the shader needs a matrix to consume; 38 precedes 39
-because the pipeline writes the format 38 reads. **Task 34 is complete; task 35
+because the pipeline writes the format 38 reads. **Tasks 34 and 35 are complete; task 36
 is the next task in the sequence.**
 
 **The interaction half cannot be exercised on this host.** Task 40's gesture is

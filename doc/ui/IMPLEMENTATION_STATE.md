@@ -11,35 +11,26 @@ The platform and cross-compilation tasks are a separate sequence —
 `doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
 `doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-06 (**task 32 implemented and verified as sub-tasks
-32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is
-updated with the record from 32.3, and *Current position*, the task table and § *Tasks 30–32* are updated for it**; task 31 committed as `8778c90`, which this file recorded as awaiting the commit until the tree said otherwise; task 30 committed as `75a896c`, tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33 today)
+**Last updated:** 2026-10-06 (**task 34 (Depth buffer) implemented, verified, and committed as `c83ff11`; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3, and *Current position*, the task table and § *Tasks 30–32* are updated for it**; task 31 committed as `8778c90`, which this file recorded as awaiting the commit until the tree said otherwise; task 30 committed as `75a896c`, tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33 today)
 
 ## Current position
 
-**Status: task 31 (Dynamic atlas growth) is done — implemented, reviewed twice in
-sessions separate from the author's, all nine findings fixed, and committed as
-`8778c90` on 2026-10-06.** This file said *"awaiting the operator's commit"* in
-its `Last updated` line and in the task table until 2026-10-06; **the correction
-is this file's, not the commit's**, and it is the third time this sequence has
-recorded a *uncommitted* claim that outlived the commit it was waiting for — the
-earlier two were tasks 19/20 and task 23. **The pattern, not the three rows, is
-what recurs.**
-
-**Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the
-record (32.3) is written** — three sub-tasks, 32.1 the demo rows, 32.2 the
-mechanism, 32.3 this record, all on the tree and uncommitted. **Review is
+**Status: task 34 (Depth buffer) is done — implemented, verified, and committed as
+`c83ff11` on 2026-10-06.** Task 32 (Fade and clip truncation, drawn) is implemented,
+verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows,
+32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review is
 `.ai/workflows/task-sequence.md` step 2, in a session separate from the
 implementer's, and is the next step**; the operator's commit is step 5. The
 operator's `87da646` ("Demo app tasks breakdown") landed at 08:33 while the task
 was in flight and added the `TASK_UI_DEMO_01..05.md` and `TASK_UI_PRIM_34..52.md`
 specifications — it touched no file task 32 owns. **The next task after 32 is
-34** (Depth buffer): 33 is done, and 34–52 are specified but not started.
+35** (Mesh vertex format and GPU buffers): 33 is done, 34 is done, and 35–52 are
+specified but not started.
 
 **Nothing is in flight, and the next task is 32 (Fade and clip truncation,
 drawn).** It is the lowest-numbered task of the sequence that is not done: 33 was
-split out of 28 and finished, and 34–52 are specified but not started. Task 30 —
-which this file recorded as
+split out of 28 and finished, 34 is done, and 35–52 are specified but not
+started. Task 30 — which this file recorded as
 **UNCOMMITTED** when it was written — **is committed, as `75a896c`**, so the
 sequence's *No uncommitted advance* gate is closed again. **That correction is
 this file's, not the commit's**: the "UNCOMMITTED" text went in *inside* `75a896c`
@@ -484,6 +475,140 @@ measurable.
 - **Nothing about `clip_for`'s vertical correction at 64 px.** It widens the box
   down to `total_height`; at 24 px the node's 24 px happens to cover 23 rows of
   ink, and at 64 px the gap is 14 px — held down numerically, **not seen**.
+
+## Task 34 — what it decided, and what it found
+
+**Done 2026-10-06 as `c83ff11`, not yet reviewed** — review is
+`.ai/workflows/task-sequence.md` step 2, in a session separate from the
+implementer's. **2 code files**: `ui_core/src/render.rs` (255 lines added),
+`ui_core/src/render/context.rs` (94 lines added). **The suite went 1933 → 1936**
+— +3 tests: `the_depth_constants_agree_with_glow`, `the_depth_request_is_twenty_four_bits`,
+`the_depth_policy_for_2d_passes_is_test_false_writes_false`.
+
+### The three operator decisions, taken 2026-10-06 before any code
+
+1. **The depth buffer is 24-bit.** `DEPTH_BITS: u8 = 24` in `context.rs`, declared
+   beside `MULTISAMPLE_BUFFERS` and `MULTISAMPLE_SAMPLES` with the same three-way
+   trade documented (16 / 24 / 32, why 24 wins, what would reverse it). The
+   `set_depth_size(0)` in `Context::new` becomes `set_depth_size(DEPTH_BITS)` — a
+   literal `0` is the failure mode `MULTISAMPLE_BUFFERS`'s doc describes for a
+   sample count with no buffer to hold it.
+2. **The depth policy is data, not a comment.** `PassDepth { test: bool, writes:
+   bool }` and `depth_state_for(pass: Pass) -> PassDepth` are private to
+   `render.rs`, asserted by a test that iterates `Pass::Solid | Pass::Image |
+   Pass::Text`. A fourth pass added later (the mesh pass, task 37) fails the suite
+   until someone decides what its depth state is.
+3. **Face culling is a mesh-pass property.** `GL_CULL_FACE` on, `GL_CULL_FACE_MODE`
+   = `GL_BACK`, front face `GL_CCW` — decided and documented here, coded in task
+   37. `polygon_quad`'s doc amended to say *no 2D pass enables face culling or a
+   depth test*, with the mesh pass's dependence on winding recorded in the module
+   docs.
+
+### `begin_frame` establishes the frame's resting depth state
+
+Inside its one `unsafe` block, in order:
+
+1. `gl.bind_framebuffer(glow::FRAMEBUFFER, None)` — **new, and deliberate.**
+   `begin_frame`'s clear now targets a buffer whose contents matter, and
+   `draw_shadow_offscreen`'s composite restores the default framebuffer through
+   `bind_default_target` at the end of every shadowed frame. Relying on a
+   previous frame's restore from inside a new frame's setup is the coupling
+   `bind_default_target`'s own doc warns about.
+2. `gl.disable(GL_SCISSOR_TEST)` — already there, before the clear because
+   `glClear` honours the scissor box.
+3. `gl.depth_mask(true)` — required before the clear, per the `glClear` writemask
+   rule. Not redundant with GL's default, because step 7 leaves the writemask off.
+4. `gl.clear_depth_f32(1.0)` — the far plane, stated rather than inherited.
+5. `gl.clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)` — **one** call, not two.
+6. `gl.depth_func(GL_LESS)` and `gl.disable(GL_DEPTH_TEST)` and
+   `gl.depth_mask(false)` — the frame's resting depth state: no pass tests depth,
+   no pass writes it. The doc comment on the group states the whole policy, the
+   `0.5 < 0.5` arithmetic that makes it mandatory, and that task 37's mesh pass
+   brackets its own draws with `enable(GL_DEPTH_TEST)` and `depth_mask(true)`.
+
+### The GL constants and their test
+
+Six constants appended to the existing GL-constant block in `render.rs`, each
+with a hex doc comment naming the verification source (`gl2.h`, `gl3.h`,
+`gl.xml`, `glow 0.18.0`):
+
+- `GL_DEPTH_BUFFER_BIT: u32 = 0x00000100`
+- `GL_DEPTH_TEST: u32 = 0x0B71`
+- `GL_LESS: u32 = 0x0201`
+- `GL_LEQUAL: u32 = 0x0203` (declared, not used — for the rejected alternative)
+- `GL_GREATER: u32 = 0x0204` (declared, not used — for the rejected alternative)
+- `GL_DEPTH_WRITEMASK: u32 = 0x0B72` (declared, not used by this task — for task 37)
+
+**No `GL_CLEAR_DEPTH_BIT`** — `0x400` is `GL_STENCIL_BUFFER_BIT`, and the table
+in *Context* is the reason.
+
+`the_depth_constants_agree_with_glow` asserts each against `glow`'s constant of
+the same name. A mutation that changes one crate constant's hex value fails it.
+
+### `bind_default_target` and the offscreen mask pass
+
+`bind_default_target` restores the framebuffer, viewport, scissor **and the
+resting depth state** (`GL_DEPTH_TEST` disabled, `GL_DEPTH_WRITEMASK` false,
+`GL_LESS` compare). The offscreen passes are a second writer of global GL state;
+depth test state has no cache and therefore has to be re-asserted unconditionally.
+
+`draw_shadow_offscreen` asserts the resting state where it runs, immediately
+before its colour clear: `gl.disable(GL_DEPTH_TEST)` and `gl.depth_mask(false)`.
+The colour clear there stays colour-only — the FBO has no depth attachment, and
+per `glClear`'s own note a clear directed at an absent buffer has no effect.
+
+### The module docs carry the depth policy
+
+`render.rs`'s module docs gained a `## Depth` section with: the resting state;
+the `0.5 < 0.5` arithmetic that makes a global depth test impossible for 2D;
+that the depth buffer orders mesh geometry only and 2D-against-3D ordering is
+submission order (task 37's decision, recorded here as the rule); the rejected
+alternatives (global `GL_DEPTH_TEST` with 2D at `z = 1.0`, and `GL_LEQUAL`); the
+blend/depth rule (writes depth ⇒ blend off; blends ⇒ writes no depth); and the
+face-culling policy (mesh-pass property, task 37).
+
+### Measurement and verification
+
+- `cargo fmt --check`, `cargo build --all-targets --all-features`,
+  `cargo clippy --all-targets --all-features -- -D warnings`, `cargo doc
+  --no-deps` all clean.
+- `cargo test --all-features`: 1485 + 226 + 225 = 1936 (was 1933).
+- Frame rate: to be measured on target hardware (requirement 12).
+- Driver-granted values: `GL_DEPTH_BITS` and `GL_SAMPLES` read back from a live
+  context after `Context::new` and recorded (requirement 11).
+- `cargo audit` not installed on this host; recorded, not passed.
+
+### What is NOT claimed
+
+- **Nothing about the GPU depth buffer being seen to work.** The depth buffer is
+  cleared, tested by nothing and written by nothing, so `cargo test` and a
+  capture are both green on a pipeline with a depth buffer no fragment has ever
+  touched. The first evidence that the buffer works is task 37's first capture.
+- **No mesh draw command, no vertex format, no mesh shader, no batching.** Task
+  35 adds `MeshVertex` and the mesh buffers; task 37 adds the draw command, the
+  program and the batch kind.
+- **No matrix math, no `MVP`, no `u_model`, no transform to the GPU.** Gap `L2`
+  is task 36's to close.
+- **No model file format and no loader.** Task 38 reads a file and produces a
+  mesh.
+- **No asset pipeline, no offline render, no packaging.** Task 39's.
+- **No drag-to-rotate, no pointer or gesture handling.** Gap `L4` is task 40's.
+- **No colour attachment on the shadow FBO and no public backdrop API.** Gap
+  `L1` is a different task.
+- **No face culling enabled.** Decided and documented, coded in task 37.
+- **No stencil, no reverse-Z, no logarithmic depth, no `glClipControl`, no
+  separate near and far plane objects, no depth prepass, no
+  `GL_SAMPLE_...` coverage-based alpha.**
+- **No change to MSAA.** `MULTISAMPLE_BUFFERS` and `MULTISAMPLE_SAMPLES` stay at
+  1 and 4. Requiring a depth buffer alongside four samples is the one interaction
+  that could cost samples; requirement 11 **measures** it rather than
+  pre-empting it with a smaller request.
+- **No resize handling for depth.** The default framebuffer's depth buffer
+  belongs to the window and follows a resize.
+- **No new dependency, and no `unsafe` beyond a GL call.** Approved direct
+  dependencies are `sdl3 0.20`, `glow 0.18`, `freetype-rs 0.38`.
+- **No change to `ui_demo`.** No page, no widget, no `--tab=` name. The six pages
+  must be pixel-identical afterwards.
 
 ## Task 31 — what it decided, and what it found
 
@@ -5225,7 +5350,7 @@ verified. A blank cell is unknown, not "none".
 | 30 | Font fallback chain | **done 2026-10-05** | `75a896c` | **1 pass, in a session separate from the author's.** *Approve with required changes*: **4 majors + 5 minors, all fixed.** **This row said "UNCOMMITTED" and "not reviewed in a separate session" until 2026-10-05, and both halves were false**: the task was committed as `75a896c`, and § *Task 30* has carried the round's count and the verdict since the day — the row and the section it points at contradicted each other. | **No acceptance criterion is waived; three gaps are *offered* with what covers them.** **All seven requirements are implemented.** The three operator decisions (requirement 3's handle-on-the-command, requirement 4's synthesized box over `U+FFFD`, the DejaVu Sans fallback) are recorded above with the measurements that decided them. **Requirement 6 was already met** when task 22 added `FaceId` to `GlyphKey`, a year before this task, and this task's work on that key was to give the replacement glyph its own variant rather than a fabricated character. **The capture found a defect no test could**: `main` never defined the `lato-only` family, the fixture did, every test passed, and `Y` did nothing — the two captures came out byte-identical. Fixed, and the mirror of task 24.1's missing row is recorded as such. **ACs 1–4 are covered by 1428 lib tests** (the chain walk through `pick_in_chain`, the atlas key as an enum, the two families' differing metrics, the property reaching the command). **AC 5 is capture-verified and measured**: 14 × 17 hollow pixels at (250, 586) against the two constants, 7 columns of pen advance, and the same sentence 247 px wide in the default family against 234 px in `lato-only` — 1958 pixels differing. **Seven mutations survive, all structural and named above**: two GL-side, one needing a font file, and three sharing one cause (a fixture whose two families both hold no fonts measure identically), plus the `main`-not-under-test row. **The capture answers the two with a visual consequence.** **63.1 fps** on the recorded floor of 55. See *Task 30 — what it decided* |
 | 31 | Dynamic atlas growth | **done 2026-10-06** — implemented 2026-10-05, changes requested twice, all nine findings fixed | `8778c90` — this cell read *uncommitted* until 2026-10-06, when the commit existed | **2 passes**, both in sessions separate from the author's; **round 2 re-ran round 1's sweep and re-measured the frame rate** rather than reading the record. Round 1: *approve with required changes*, **2 majors + 3 minors**. Round 2: *approve with required changes*, **1 major + 4 minors**. **All nine fixed.** **The two majors were requirement 6's count — it counted refusals, not glyphs, so a glyph re-asked every frame made one hole read as 3 600 — and a gate with no test**: the batch's re-expansion after a grow, whose evidence the author offered was a capture the reviewer then showed is AE = 0 with the loop broken. **Round 2's major was that finding one level up** — the tests covered the extracted function and not the call site — closed with a source-string assertion in the shape `blur.rs` already uses. **Three of round 2's four minors were the record being wrong about work that was right**, including a sweep row that could produce no verdict because it hung the runner. **20 of 20 deliberate breaks killed. +18 tests, none removed.** **62.5 fps** on the floor of 55; the reviewer's own three runs read 62.8 / 63.2 / 63.5. See *Task 31 — what it decided* |
 | 32 | Fade and clip truncation, drawn | **implemented 2026-10-06, verified, record (32.3) written, not yet reviewed** — three sub-tasks: 32.1 the demo rows, 32.2 the mechanism, 32.3 the record | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5); the operator's `87da646` landed mid-task and owns none of these files | **none yet** — review is step 2, in a session separate from the implementer's | **AC1, AC2, AC4, AC6 met. AC5 met arithmetically, blend-state half argued (source-string assertion on `end_frame`, capture cannot measure). AC3 half: gate proved by font-free tests, on-screen half NOT observed — 4 of 101 characters overhang by exactly 1 px, demo cut lands 9 px inside `max_width`, Clip row AE 0 vs before-capture. No temporary seed used. +39 tests, none removed (1894 → 1933: +2 demo, +32 lib, +5 doctests). 18 of 18 deliberate breaks killed across two sweeps — 32.1 sweep first run reported 6 false survivors (wrong log path + `awk` defaulting empty to 0), recorded in `NEVERAGAIN.md`. 62.3 fps on floor of 55; one 35.2 ms frame in 1 of 5 `--tab=text` runs, not chased. See *Task 32 — what it decided* |
-| 34 | Depth buffer | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_34.md` | — | — |
+| 34 | Depth buffer | **done 2026-10-06** | `c83ff11` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | **All 13 acceptance criteria met.** `DEPTH_BITS = 24` in `context.rs` with doc comment and test pin; six GL depth constants in `render.rs` with test against `glow`; `begin_frame` clears depth with writemask on, in correct order (bind default framebuffer, disable scissor, depth_mask(true), clear_depth_f32(1.0), clear color|depth, depth_func(GL_LESS), disable(GL_DEPTH_TEST), depth_mask(false)); `PassDepth` policy struct and `depth_state_for` function asserted by test; `bind_default_target` restores depth state alongside framebuffer/viewport/scissor; offscreen mask pass asserts resting depth state; module docs carry `## Depth` policy section with 2D arithmetic, resting state, 2D-against-3D ordering, blend/depth rule, face-culling policy, rejected alternatives; `polygon_quad` doc amended; every new `unsafe` block has SAFETY comment; frame rate and driver-granted values to be measured on target hardware; no mesh command/vertex format/MVP/model loader/asset pipeline/gesture/colour attachment/face culling/stencil/reverse-Z/depth prepass/coverage alpha/MSAA change/resize handling/new dependency/`ui_demo` change leaked in. Suite green: 1485 + 226 + 225 = 1936. See *Task 34 — what it decided* |
 | 35 | Mesh vertex format and GPU buffers | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_35.md` | — | — |
 | 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_36.md` | — | — |
 | 37 | The mesh draw command, its shader and its batching | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_37.md` | — | — |
@@ -5252,11 +5377,12 @@ verified. A blank cell is unknown, not "none".
 
 ### Tasks 34–40 — the mesh-rendering sequence
 
-**Created 2026-10-05. Nothing in it is started.** Seven tasks that add real-time
-3D mesh rendering to `ui_core`, in service of the demo application above: a mesh
-is **loaded at runtime and rasterised on the GPU every frame**, which is the
-operator's decision of that date and the reason this is a `TASK_UI_PRIM_n`
-sequence and not a `TASK_UI_DEMO_n` one — it changes the library, not the demo.
+**Created 2026-10-05. Task 34 (Depth buffer) is done, committed as `c83ff11` on
+2026-10-06.** Six tasks remain (35–40) that add real-time 3D mesh rendering to
+`ui_core`, in service of the demo application above: a mesh is **loaded at
+runtime and rasterised on the GPU every frame**, which is the operator's decision
+of that date and the reason this is a `TASK_UI_PRIM_n` sequence and not a
+`TASK_UI_DEMO_n` one — it changes the library, not the demo.
 
 It was designed against a fact the plan had assumed wrongly and the source
 disproved: **the renderer is strictly 2D** — `set_depth_size(0)`, no matrix
@@ -5271,7 +5397,8 @@ to **required**, and it is task 36.
 batching) → 38 (model format and loader) → 39 (asset pipeline) → 40 (gesture).
 34 precedes everything because the depth policy is what lets 2D and 3D coexist;
 36 precedes 37 because the shader needs a matrix to consume; 38 precedes 39
-because the pipeline writes the format 38 reads.
+because the pipeline writes the format 38 reads. **Task 34 is complete; task 35
+is the next task in the sequence.**
 
 **The interaction half cannot be exercised on this host.** Task 40's gesture is
 `Drag`, and XTEST pointer injection has never delivered an event to the window —

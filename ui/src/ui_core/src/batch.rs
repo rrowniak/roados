@@ -216,6 +216,14 @@ impl Batcher {
     /// GPU state the renderer has to set between draw calls: one batch is one
     /// draw call, and a draw call has one scissor.
     ///
+    /// **`clip` is intersected with the clip the command carries**, and the
+    /// *effective* clip is what the batches are compared on — see
+    /// `DrawCommand::clip`. A command clipped to its own box and recorded
+    /// inside a scrolling viewport is clipped to **both**, because a node's own
+    /// box is not the window: taking either one alone would either clip the run
+    /// to the viewport and let it spill out of its own box, or clip it to its own
+    /// box and let it spill out of the viewport.
+    ///
     /// **A command whose key [`BatchKey::is_singleton`] seals the open segment
     /// and starts the next**, so it is alone in its batch *and* nothing recorded
     /// after it can merge into a batch recorded before it. That second half is
@@ -227,6 +235,11 @@ impl Batcher {
     /// on top of. The panel would be dimmed, which is the defect
     /// [`Segment`] exists to fix, arrived at by a different road.
     pub fn add_clipped(&mut self, command: DrawCommand, clip: Option<Rect>) {
+        let clip = match (clip, command.clip()) {
+            (Some(outer), Some(inner)) => Some(outer.intersection(inner)),
+            (only @ Some(_), None) | (None, only @ Some(_)) => only,
+            (None, None) => None,
+        };
         let key = command.batch_key();
         if key.is_singleton() {
             let mut finished = std::mem::take(&mut self.open);
@@ -368,6 +381,25 @@ impl Batcher {
 }
 
 impl DrawCommand {
+    /// Returns the clip this command carries itself, in window coordinates.
+    ///
+    /// **`None` for every variant but [`Text`](DrawCommand::Text)**, which is the
+    /// only one with a box of its own — a label that truncates with
+    /// [`Truncation::Clip`](crate::widgets::label::Truncation::Clip) records the
+    /// box it is cut at, and no other primitive in the enum has a reason to
+    /// carry one.
+    ///
+    /// **Read here rather than in [`Batcher::add_clipped`], so the intersection
+    /// has one shape to get right.** A new variant that clips would be a missing
+    /// arm in one match rather than a rule spread over a `match` in the batcher
+    /// and a `match` in the renderer.
+    pub(crate) fn clip(&self) -> Option<Rect> {
+        match self {
+            DrawCommand::Text { clip, .. } => *clip,
+            _ => None,
+        }
+    }
+
     /// Returns the batch key for this command.
     pub(crate) fn batch_key(&self) -> BatchKey {
         match self {
@@ -381,6 +413,23 @@ impl DrawCommand {
                 blend_mode: BlendMode::from_color(*color),
                 shader: ShaderKind::Solid,
             },
+            // **A run with a fade ramp is batched as `from_color` says and not as
+            // `Transparent`, and that is read from the frame's submission order
+            // rather than guessed at.** `BlendMode::from_color` sees the
+            // command's colour, and a faded corner is a vertex the renderer
+            // scales long after the key was taken — so a ramped run of opaque
+            // text lands in the opaque group with `BlendMode::Opaque` written on
+            // it. It composites correctly anyway: `Renderer::end_frame` disables
+            // blending for the *solid* pass only and then enables it **once**,
+            // before `COMPOSITED_PASSES`, and that loop draws `segment.opaque` as
+            // well as `segment.transparent` with the blend still on and never
+            // disabled again. `text_faded_text_is_still_drawn_with_blending_on`
+            // pins that in `render.rs` by asserting over `end_frame`'s own text,
+            // with a control — a caption here would be the one part of this
+            // decision nothing checks.
+            //
+            // The alternative is one extra batch per ramped run, in exchange for
+            // an assurance about a state change that is not made.
             DrawCommand::Text { color, .. } => BatchKey {
                 texture: None,
                 blend_mode: BlendMode::from_color(*color),
@@ -503,6 +552,8 @@ mod tests {
             extra_advance: 0.0,
             family: FamilyId::default(),
             weight: FontWeight::Regular,
+            fade: None,
+            clip: None,
         });
         batcher.add(rect(opaque()));
 
@@ -527,6 +578,8 @@ mod tests {
             extra_advance: 0.0,
             family: FamilyId::default(),
             weight: FontWeight::Regular,
+            fade: None,
+            clip: None,
         });
 
         let batched = batcher.finish();
@@ -712,6 +765,193 @@ mod tests {
         assert_eq!(batched.opaque[1].commands.len(), 1);
         assert_eq!(batched.opaque[1].clip, b);
         assert_eq!(batched.opaque[2].clip, None, "unclipped is its own batch");
+    }
+
+    /// A text run of `color` clipped to `clip`, recorded through the painter so
+    /// the test builds the command the way production does.
+    fn clipped_text(color: Color, clip: Option<Rect>) -> DrawCommand {
+        let mut painter = crate::paint::Painter::new();
+        painter.text_run(crate::paint::TextRun {
+            x: 4.0,
+            y: 8.0,
+            text: "a run",
+            color,
+            font_size: 16.0,
+            clip,
+            ..crate::paint::TextRun::default()
+        });
+        let commands = painter.finish();
+        match commands.into_iter().next() {
+            Some(command) => command,
+            None => panic!("a text run records one command"),
+        }
+    }
+
+    #[test]
+    fn two_text_runs_whose_own_clips_differ_do_not_share_a_batch() {
+        // Requirement 4's "per-node clip must not leak", at the layer where it is
+        // decided: a scissor is a draw call's state, so two runs in one batch
+        // would be drawn under whichever rect the batch happened to carry.
+        let a = Some(Rect::new(0.0, 0.0, 100.0, 20.0));
+        let b = Some(Rect::new(0.0, 400.0, 100.0, 20.0));
+        let mut batcher = Batcher::new();
+        batcher.add_clipped(clipped_text(opaque(), a), None);
+        batcher.add_clipped(clipped_text(opaque(), b), None);
+
+        let batched = batcher.finish();
+        assert_eq!(
+            batched.opaque.len(),
+            2,
+            "**the batch split on the effective clip**, which is the split the \
+             renderer needs: one batch is one draw call and a draw call has one \
+             scissor"
+        );
+        assert_eq!(batched.opaque[0].clip, a);
+        assert_eq!(batched.opaque[1].clip, b);
+        assert_eq!(
+            batched.opaque[0].commands.len(),
+            1,
+            "and neither batch holds the other's run"
+        );
+    }
+
+    #[test]
+    fn a_commands_own_clip_is_intersected_with_the_batchs_clip_and_not_replacing_it() {
+        // The two clips are two *different* claims — a node's own box and the
+        // viewport it is inside — and the run has to obey both. Taking either one
+        // alone is a wrong picture in one direction: the node's box alone lets
+        // the run spill out of the viewport, and the viewport alone lets it spill
+        // out of its own box.
+        let viewport = Some(Rect::new(0.0, 0.0, 200.0, 200.0));
+        let own = Some(Rect::new(0.0, 10.0, 120.0, 20.0));
+        let mut batcher = Batcher::new();
+        batcher.add_clipped(clipped_text(opaque(), own), viewport);
+
+        let batched = batcher.finish();
+        assert_eq!(batched.opaque.len(), 1);
+        assert_eq!(
+            batched.opaque[0].clip,
+            Some(Rect::new(0.0, 10.0, 120.0, 20.0)),
+            "**the node's box is inside the viewport, so the overlap is the node's \
+             box** — and not `Some(viewport)`, which is what replacing rather than \
+             intersecting would leave"
+        );
+
+        // And the other way round, where the viewport is the smaller claim: the
+        // overlap is then the viewport, and a run recorded inside a node that
+        // hangs off the bottom of the window is cut at the window.
+        let tall = Some(Rect::new(0.0, 180.0, 400.0, 400.0));
+        let mut batcher = Batcher::new();
+        batcher.add_clipped(clipped_text(opaque(), tall), viewport);
+        let batched = batcher.finish();
+        assert_eq!(
+            batched.opaque[0].clip,
+            Some(Rect::new(0.0, 180.0, 200.0, 20.0)),
+            "the window is inside the node here, and the overlap is the window's \
+             20 pixels of it"
+        );
+    }
+
+    #[test]
+    fn two_runs_whose_effective_clip_is_the_same_share_a_batch_and_two_that_differ_do_not() {
+        // The merge predicate compares the **effective** clip, so two runs that
+        // arrive by different routes to the same box are one draw call and two
+        // runs that arrive at different boxes are two. A predicate that compared
+        // the caller's clip instead would split this first pair in two, which is
+        // one draw call a frame for nothing.
+        let viewport = Some(Rect::new(0.0, 0.0, 200.0, 200.0));
+        let own = Some(Rect::new(0.0, 10.0, 120.0, 20.0));
+        let mut batcher = Batcher::new();
+        // Three routes to `own`: it alone, it under a viewport that contains it,
+        // and it under a caller that claims the very same box.
+        batcher.add_clipped(clipped_text(opaque(), own), viewport);
+        batcher.add_clipped(clipped_text(opaque(), own), own);
+        batcher.add_clipped(
+            clipped_text(opaque(), Some(Rect::new(0.0, 10.0, 120.0, 20.0))),
+            None,
+        );
+        // And one route to the viewport, which is a different box.
+        batcher.add_clipped(clipped_text(opaque(), None), viewport);
+
+        let batched = batcher.finish();
+        assert_eq!(
+            batched.opaque.len(),
+            2,
+            "**two effective clips, two batches** — a predicate that compared the \
+             caller's clip instead of the effective one would make four"
+        );
+        assert_eq!(
+            batched.opaque[0].commands.len(),
+            3,
+            "the three that are all `own`"
+        );
+        assert_eq!(batched.opaque[0].clip, own);
+        assert_eq!(batched.opaque[1].commands.len(), 1);
+        assert_eq!(batched.opaque[1].clip, viewport);
+    }
+
+    #[test]
+    fn two_unclipped_text_runs_still_share_one_batch() {
+        // The no-regression half of the same seam. Two runs with no clip
+        // anywhere are the same batch they were before any of this existed: the
+        // merge predicate's new term is `None == None`.
+        let mut batcher = Batcher::new();
+        batcher.add(clipped_text(opaque(), None));
+        batcher.add(clipped_text(opaque(), None));
+        let batched = batcher.finish();
+        assert_eq!(batched.opaque.len(), 1, "one draw call, as before");
+        assert_eq!(batched.opaque[0].commands.len(), 2);
+        assert_eq!(batched.opaque[0].clip, None);
+    }
+
+    #[test]
+    fn a_clip_that_cuts_a_run_out_of_its_own_box_leaves_a_batch_that_draws_nothing() {
+        // The one case where the intersection is empty, and it is the reason
+        // `Rect::intersection` answers a box rather than a `None`: an unset clip
+        // means *the whole window*, so a `None` here would un-clip the run and
+        // draw the very thing the clip was there to cut. A box of no width is
+        // what a scissor reads as "nothing".
+        let mut batcher = Batcher::new();
+        batcher.add_clipped(
+            clipped_text(opaque(), Some(Rect::new(0.0, 0.0, 10.0, 10.0))),
+            Some(Rect::new(500.0, 500.0, 10.0, 10.0)),
+        );
+        let batched = batcher.finish();
+        let clip = batched.opaque[0]
+            .clip
+            .expect("the effective clip is a box, not a None");
+        assert!(
+            clip.is_empty(),
+            "an overlap of no area, at the nearer origin"
+        );
+        assert_eq!(clip, Rect::new(500.0, 500.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn a_clip_is_not_part_of_the_batch_key_and_a_ramp_is_not_either() {
+        // The reason [`BatchKey`] holds three fields and not four (or five), and
+        // the reason a ramp rides the command rather than the key. Keying on the
+        // clip would split one scrolling list into one batch per row — the exact
+        // defect `Batch::clip`'s own doc names — and keying on the *presence of a
+        // ramp* would do the same for every truncated line on the screen.
+        let mut with_ramp = Batcher::new();
+        with_ramp.add_clipped(
+            clipped_text(opaque(), Some(Rect::new(0.0, 0.0, 200.0, 20.0))),
+            None,
+        );
+        with_ramp.add_clipped(clipped_text(opaque(), None), None);
+        let ramped = with_ramp.finish();
+        assert_eq!(
+            ramped.opaque.len(),
+            2,
+            "two clips, two batches — the clip splits"
+        );
+        assert_eq!(
+            ramped.opaque[0].key, ramped.opaque[1].key,
+            "**while the keys are equal**, which is what says the clip is not in \\
+             them: `Batch::clip` is a field on the batch, and one text batch still \\
+             covers every run in the frame that shares a clip"
+        );
     }
 
     #[test]

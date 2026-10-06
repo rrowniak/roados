@@ -3386,6 +3386,8 @@ mod tests {
             extra_advance: 0.0,
             family: FamilyId::default(),
             weight: FontWeight::Regular,
+            fade: None,
+            clip: None,
         };
         assert_eq!(
             command_bounds(&text),

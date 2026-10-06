@@ -409,6 +409,21 @@ Unchanged geometry stays in GPU memory between frames. Only dirty nodes re-uploa
 
 Clipped widgets use `glScissor` to avoid overdraw. Scissor rect = intersection of all ancestor clip rects.
 
+**Note (2026-10-06, task 32):** a command-level clip now exists alongside the
+per-node ancestor clip. `DrawCommand::Text` carries a `clip` field (the command's
+own rect), `Batcher::add_clipped` intersects it with the batch's clip, the merge
+predicate `batch.clip == clip` splits the batch for free, and the cut is made by
+the existing scissor path (`Batch::clip` → `apply_clip` → `set_scissor`). A clip
+deliberately does **not** go in `BatchKey` — `Batch::clip`'s doc explains why: a
+clip is not a property of the material, and keying on it would split a single
+list into one batch per command. Task 45 owns the per-node ancestor clip
+(resolved in `Renderer::draw_node_clipped`, explicitly not the node's own box);
+the two clips answer different questions (*what is this command's box* versus
+*what may this node draw inside*) and neither subsumes the other. `paint::Rect::intersection`
+is the new total function for command clips; `layout::intersect` remains private
+for ancestor clips. `DrawCommand::Text` still carries no width, so
+`command_bounds` remains `None` for text runs.
+
 ## Input Handling
 
 ### Event flow

@@ -11,16 +11,35 @@ The platform and cross-compilation tasks are a separate sequence —
 `doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
 `doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-05 (task 31 implemented, reviewed and fixed, **awaiting
-the operator's commit**;
-task 30 committed as `75a896c`, tasks 24 and 33 as `e567634` and `1aa28e6`)
+**Last updated:** 2026-10-06 (**task 32 implemented and verified as sub-tasks
+32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is
+updated with the record from 32.3, and *Current position*, the task table and § *Tasks 30–32* are updated for it**; task 31 committed as `8778c90`, which this file recorded as awaiting the commit until the tree said otherwise; task 30 committed as `75a896c`, tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33 today)
 
 ## Current position
 
-**Status: task 31 (Dynamic atlas growth) is implemented, reviewed once in a
-separate session, and every finding fixed** — 2 majors and 3 minors, all closed.
-**It is awaiting the operator's commit, which is step 5 of
-`.ai/workflows/task-sequence.md` and the only step left.** Nothing else is in flight, and task 30 — which this file recorded as
+**Status: task 31 (Dynamic atlas growth) is done — implemented, reviewed twice in
+sessions separate from the author's, all nine findings fixed, and committed as
+`8778c90` on 2026-10-06.** This file said *"awaiting the operator's commit"* in
+its `Last updated` line and in the task table until 2026-10-06; **the correction
+is this file's, not the commit's**, and it is the third time this sequence has
+recorded a *uncommitted* claim that outlived the commit it was waiting for — the
+earlier two were tasks 19/20 and task 23. **The pattern, not the three rows, is
+what recurs.**
+
+**Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the
+record (32.3) is written** — three sub-tasks, 32.1 the demo rows, 32.2 the
+mechanism, 32.3 this record, all on the tree and uncommitted. **Review is
+`.ai/workflows/task-sequence.md` step 2, in a session separate from the
+implementer's, and is the next step**; the operator's commit is step 5. The
+operator's `87da646` ("Demo app tasks breakdown") landed at 08:33 while the task
+was in flight and added the `TASK_UI_DEMO_01..05.md` and `TASK_UI_PRIM_34..52.md`
+specifications — it touched no file task 32 owns. **The next task after 32 is
+34** (Depth buffer): 33 is done, and 34–52 are specified but not started.
+
+**Nothing is in flight, and the next task is 32 (Fade and clip truncation,
+drawn).** It is the lowest-numbered task of the sequence that is not done: 33 was
+split out of 28 and finished, and 34–52 are specified but not started. Task 30 —
+which this file recorded as
 **UNCOMMITTED** when it was written — **is committed, as `75a896c`**, so the
 sequence's *No uncommitted advance* gate is closed again. **That correction is
 this file's, not the commit's**: the "UNCOMMITTED" text went in *inside* `75a896c`
@@ -253,9 +272,218 @@ what it decided*.
 implemented and the other two are not started.** The gallery
 is kept, grouped into six pages behind a tab bar at the **top** of the window,
 with `--tab=<name>` to land on a page without clicking. See § *Task table* for
-the split and the three measured facts behind it. **24.1 is next, and it is the
-one that makes the other two addressable** — it is what makes a page reachable
+the split and the three measured facts behind it. **24.1 is next, and it is
+the one that makes the other two addressable** — it is what makes a page reachable
 without a pointer, which is this host's only capture route.
+
+## Task 32 — what it decided, and what it found
+
+**Implemented 2026-10-06 as three sub-tasks — 32.1 the demo rows (`ui_demo`
+only), 32.2 the mechanism (`ui_core`), 32.3 this record — and verified. Not
+reviewed.** Review is `.ai/workflows/task-sequence.md` step 2, in a session
+separate from the implementer's. **7 code files**: `ui_core/src/{paint,batch,
+render}.rs`, `ui_core/src/widgets/{label,list,scroll}.rs`,
+`ui_demo/src/main.rs`, and four documents (this file, `TASK_UI_PRIM_32.md`,
+`.ai/NEVERAGAIN.md`, `PRIMITIVES_ARCHITECTURE.md` § *Scissor optimization*).
+**The suite went 1894 → 1933** — 1450 + 224 + 220 → 1482 + 226 + 225 — **+39
+tests: +2 demo (32.1), +32 lib and +5 doctests (32.2), none removed and none
+weakened**, four existing tests extended and two renamed. **The 32.2 hand-over
+said "a baseline of 1896"; that is 32.2's own baseline, post-32.1** — 1450 + 226
++ 220 — and the baseline 32.1 found was **1894**, which is what 32.1's own sweep
+logs show (1450 + 224 + 220 before its first mutation). Both are true; the tree
+wins and the two are recorded rather than reconciled by picking one. **The
+operator's commit `87da646` ("Demo app tasks breakdown") landed at 08:33 while
+the task was in flight** and added the `TASK_UI_DEMO_01..05.md` and
+`TASK_UI_PRIM_34..52.md` specifications; it touched no file this task owns, and
+nothing below claims it introduced anything here.
+
+### The three operator decisions, taken 2026-10-06 before any code
+
+1. **The fade is a per-corner vertex alpha.** `paint::FadeRamp { start_x, end_x }`
+   in window coordinates rides `DrawCommand::Text` as a new `fade` field, and
+   `render::text_quad` asks `text_corner_color(ramp, x, color)` for **each
+   corner's own x**. Because the rasteriser already interpolates `v_color`, the
+   ramp is smooth *inside* a glyph — **no shader change, no vertex-format change
+   (`TextVertex` stays 32 bytes, `TEXT_VERTEX_STRIDE = 32`), no batching
+   change.** Chosen over per-glyph alpha (which quantises the ramp to glyph
+   boundaries) and over a shader term (a uniform is per draw call, and one text
+   batch holds every run on the frame, so a per-run ramp needs either one draw
+   per ramp or a new per-vertex attribute).
+2. **Every truncated line ramps, at its own cut edge** — not only the last. That
+   needed a per-line `Line::truncated`, because the layout-wide flag was an `||`
+   over the same answers and could not say which line was cut.
+3. **`Clip` is a clip rect on the command** (`DrawCommand::Text`'s new `clip`
+   field). `Batcher::add_clipped` intersects it with the batch's own clip, the
+   existing `batch.clip == clip` merge predicate splits the batch for free, and
+   the cut is made by the scissor that already existed (`Batch::clip` →
+   `Renderer::apply_clip` → `set_scissor`). **A clip deliberately does not go in
+   `BatchKey`** — `Batch::clip`'s own doc says why: a clip is not a property of
+   the material, and keying on it would split a single list into one batch per
+   command.
+
+**Premultiplication.** `paint::faded_color` interpolates the colour toward
+transparent black, which scales all four channels — the one line
+`button::with_opacity` writes. Scaling only the alpha gives text that keeps its
+full brightness and lets the background through, which reads as a wrong colour
+rather than a fade.
+
+**The ramp's far end is the drawn run's end, not the container's** — `left +
+line.width` for a flat line and the last word's end for a justified one (a
+justified line's words are placed into a small buffer before recording, because
+the window's far end is a number no word knows until the last has been measured).
+
+### The ramp's width is a design constant, not a measurement
+
+`FADE_WIDTH_EM = 2.0`, pinned by `the_ramp_is_pinned_to_two_ems_of_the_font_size`,
+which also asserts the 64 px case where `FadeRamp::to_run_end`'s floor on
+`start_x` bites. **2 ems is a reasoned design constant, not a measurement** — the
+doc says so, and says what would change it.
+
+### The clip is a command-level rect, and task 45 owns a different one
+
+This task's clip is one command's own rect, intersected with the batch's in
+`Batcher::add_clipped`. Task 45's is the **node's own ancestors' intersection**,
+resolved in `Renderer::draw_node_clipped`, and task 45 explicitly does *not*
+clip a node to its own box. **They are different clips and neither subsumes the
+other** — they answer different questions (*what is this command's box* versus
+*what may this node draw inside*), and neither mechanism can express the other's
+answer. `layout.rs` was left alone: `paint::Rect::intersection` is total and
+takes one rect, `layout::intersect` is private, takes two `Option<layout::Rect>`s
+and has a different answer for empty. `Rect::intersection`'s doc names the
+overlap and says merging the two is `TASK_UI_PRIM_45.md` requirement 1's
+decision, with both call sites in front of it.
+
+### `Painter::text_run` and `paint::TextRun` are the new recording path
+
+`Painter::text_in` and `text_in_weight` keep their signatures, because six
+widgets call them (button, chart, dialog, keyboard, text_input and toast, through
+`Painter::text`); only a truncating `Label` records through `text_run`, because
+only it has a ramp and a clip to say. **Two production files beyond the four the
+plan named**: `widgets/list.rs`'s `translate_commands` moves the ramp window and
+the clip with the command (a fade window is in window coordinates, so not moving
+it would put the ramp in the wrong place), and `widgets/scroll.rs` needed **one
+test literal** (`fade: None, clip: None`) — an eleventh constructing site the
+orchestrator's brief had missed. Nothing was lost — the compiler found it and
+the fix was two fields on one literal — but the enumeration was an assertion
+made from an earlier session's reading rather than a command, and it is now
+recorded in `NEVERAGAIN.md`.
+
+### The task's number: Clip vs Fade, AE 0 → 410, read out of pixels
+
+The "before" capture is 32.1's, `/tmp/opencode/task32_before.png`, a
+`--tab=text` release-build capture in which **the `Clip` row and the `Fade` row
+are the same file by md5 and AE 0**, while the `Ellipsis` row differs by 134
+pixels. The "after" capture, row for row, on re-measured bands (they did not
+move):
+
+| row | crop | AE | pixel signature before → after |
+|---|---|---|---|
+| Ellipsis | `297x29+60+538` | **0** | unchanged |
+| Clip | `297x29+60+579` | **0** | unchanged |
+| **Fade** | `297x29+60+620` | **410** | `55817f4fba407625` → `a0abab30871b4dda` |
+| fallback | `297x29+60+661` | **0** | unchanged |
+
+**The ramp was read out of pixels, not inferred from the AE.** Ink-weighted alpha
+per 12-column band, ratio of the Fade row to the Clip row, against what the ramp
+predicts at that band's centre: `1.000` (predicted 1.000, identical to Clip
+pixel for pixel), 0.972 (0.969), 0.874 (0.885), 0.628 (0.635), 0.417 (0.385),
+0.155 (0.135), 0.000 (0.000, no ink — the run ends at x 348 = 60 + 288). Mean
+grey of the first 8 columns: Clip 0.262779, Fade **0.262779 — the same to six
+digits**. Mean grey of the last 8 inked columns (x 340..347): Clip 0.231744,
+Fade **0.0848377 — 2.7x lighter**. The last 8 columns of the crop (x 349..356)
+read 0.0705882 in both: bare background. **Every figure in this paragraph was
+re-measured for this record** (`magick compare -metric AE` on the crops, `ink.py`
+on the bands, `magick -format %[fx:mean]` on the column groups).
+
+**No regression**, named crops because a whole-window AE is not evidence (the fps
+readout moves, and on the text page its own band reads AE 212): the other five
+pages' `1280x735+0+0` and `1280x220+0+800` are **AE 0**; the text page's eight
+labels above the truncation rows (`1280x460+0+64`) is **AE 0**; the fallback row
+is AE 0; below the readout AE 0. **All re-measured for this record.**
+
+### The overhang measurement, and the clip cutting nothing on screen
+
+**Requirement 3's on-screen half did NOT happen, and is recorded as not
+observed.** The overhang was measured rather than assumed, with a scratch crate
+outside the repository (a test may not open a font file): Lato-Medium at 24 px
+over all 101 characters of the sentence — **4 overhang, always by exactly 1 px**
+(`'A'` advance 16.0, bearing_x 0, width 17; `'f'` twice, 8.0/0/9; `'v'`,
+12.0/0/13; spaces rasterize to zero-width bitmaps). And the demo's cut lands on
+`'p'`: `fit` keeps 29 characters, `"A line far too long for the p"`, width 288.0
+of a 297 budget, the first dropped character `'a'` would end at 300.0 — so the
+last kept glyph's ink ends **9 px inside `max_width`**, and the node's box covers
+the row's ink exactly (23 rows of ink in a 24-tall box). **The Clip row is
+therefore AE 0 against its own before-capture: the clip is wired, batched and set
+as a scissor, and it cut nothing.** The gate is proved by font-free tests
+instead, and **no temporary seed was used to manufacture an overhanging cut.**
+
+### The two sweeps, and the runner that reported six false survivors
+
+**32.2: a 12-row sweep, 12 killed, 0 survived, 0 guarded** — the ramp ignored; the
+window built from `max_width` instead of the run's end; `Clip` no longer
+narrowing; the ramp quantised per glyph; only the alpha scaled; the clip
+replacing the batch's clip instead of intersecting; the clip in the key; the clip
+dropped from the merge predicate; the per-corner colour applied to all four
+corners alike; the ramp window not moved by `translate_commands`; the fade
+recorded for an untruncated line; a monotonic ramp built backwards. The runner
+aborts rather than defaults (a search string not found exactly once prints
+`GUARD`, never a kill; a build failure prints `BUILD FAILED`; a log missing any
+of the three `test result:` lines prints `UNPARSED`). Restore proved by md5
+before and after the whole run.
+
+**32.1: a 6-row sweep, 6 killed** — and the first version of that sweep reported
+**six false survivors**, which is the failure mode worth recording rather than
+the kills. The runner wrote each log to the wrong path; `grep` on a missing file
+exits non-zero, so the failure count came back empty, and `awk '{s+=$1} END
+{print s+0}'` over no input prints `0` — so "0 failed" printed as "SURVIVED".
+**Six false results in the direction that makes the work look finished.** The
+same sweep's second defect fired on three of the six rows at once: rustfmt had
+wrapped the search anchor across two lines since the row was written, so the
+guard printed `ANCHOR NOT FOUND — not a result` **and the runner printed
+`SURVIVED` anyway**, because the missing log defaulted to zero below the guard —
+two contradictory verdicts on one row, and the one that survived on the page was
+the false one. Both were fixed and the sweep re-run from scratch. Extended into
+`NEVERAGAIN.md`.
+
+### The frame rate
+
+`fps-check.sh 12 55` → **62.3 fps**, 0 frames over 33 ms (two surviving logs at
+62.3 fps read worst frame 23.4 and 24.2 ms; **the hand-over's 18.7 ms is not
+re-derivable from the logs on disk** and is recorded here as the hand-over's
+figure, not a re-measured one). `--tab=text` named separately, five runs:
+**62.1 / 62.1 / 62.3 / 62.0 / 62.2 fps**, and **one run in five showed one frame
+at 35.2 ms out of 746**, which did not reproduce in four further runs and was not
+chased. `roados-glyphs atlas_size=2048 dropped=0` on every run. The recorded band
+for `text` is 62.4–62.9 and for `pads` 61.8–63.5, so two extra rows cost nothing
+measurable.
+
+### What is NOT claimed
+
+- **Nothing about the GPU clip being seen to cut anything.** The clip is wired,
+  batched and set as a scissor, and it cut nothing on screen — the overhang
+  measurement above is why. The gate is proved by font-free tests.
+- **Nothing about the blend state being measured.** `end_frame`'s blend state
+  was read, not measured: it disables blending for the solid pass only, enables
+  it once with `GL_ONE, GL_ONE_MINUS_SRC_ALPHA`, then loops `COMPOSITED_PASSES`
+  over `segment.opaque` as well as `segment.transparent` with the blend still
+  on — so a ramped run keyed `BlendMode::Opaque` still composites correctly, and
+  no faded run was routed into `segment.transparent`. Pinned by
+  `a_faded_text_batch_is_still_drawn_with_blending_on`, a source-string
+  assertion scoped to `end_frame` and searched over the part of the file above
+  the test module with two control assertions, because **a capture cannot see
+  blend state**. The premultiplied claim in `batch_key`'s `Text` arm is a claim
+  about a GL state machine, and `cargo test` is not evidence for it.
+- **Nothing about the fade at 64 px.** The demo's `+`/`-` size keys cannot be
+  driven on this host, so the fade at 64 px and the clip's vertical correction at
+  64 px are unit-tested and not seen.
+- **Nothing about the 8-bit quantisation being invisible at a one-pixel ramp.**
+  The fade is quantised to 8 bits per corner — about 5 alpha levels per pixel
+  over the demo's 48 px ramp, measured invisible; a ramp one pixel wide would
+  show it, and a float ramp would cost a `[f32; 4]` on the command that nothing
+  here needs.
+- **Nothing about `clip_for`'s vertical correction at 64 px.** It widens the box
+  down to `total_height`; at 24 px the node's 24 px happens to cover 23 rows of
+  ink, and at 64 px the gap is 14 px — held down numerically, **not seen**.
 
 ## Task 31 — what it decided, and what it found
 
@@ -4995,7 +5223,8 @@ verified. A blank cell is unknown, not "none".
 | 24.3 | The tab bar | done | `e567634` | **3 passes**: 1 major + 7 minors, 0 + 6, **approve**. The major was `release_tab`'s `animate_to_state` held down by nothing on the ordinary gesture — press and release the button of the page **already on show** leaves `show_page` early-returning, measured `left: 0.95, right: 1.0`, a button stuck at the pressed scale with 1836 green. Round 2's six minors were prose, and its reviewer **found the orchestrator's own amendment asserting a false mechanism about `ui_core`** — "at most one `InputEvent` per SDL event", refuted by a four-line probe | **All twelve criteria met.** AC 11 (a pressed button mid-transition) needed a **temporary, reverted seed** — XTEST delivered nothing — and the arithmetic was corrected from a false 96 % to a measured **22 %**. **Requirement 4's call and duration are different numbers**: `Motion::from_theme` is 150 ms, not `THEME_TRANSITION`'s 300, pinned with an `assert_ne!`, and **on `T` the bar and its buttons arrive 150 ms apart, which nobody has seen.** Deliberate break 2 is **not expressible** (`Callback` is `Fn`) |
 | 33 | Set the SDL options no cargo feature can reach | nothing — **done 2026-10-05**, split out of task 28, **reviewed 2026-10-05** | `doc/ui/TASK_UI_PRIM_33.md` | | none waived: 8 of 8 verified — AC 1 and AC 2's native half by cache/header greps, AC 3 and AC 4 by grepping the same header for the settings that must *not* have moved, AC 2's cross half by a cross build, AC 5 and AC 6 by `ls` and `nm`, AC 7 by 1 839 tests plus three `fps-check.sh` runs, AC 8 by this review finding its command broken and it being fixed |
 | 30 | Font fallback chain | **done 2026-10-05** | `75a896c` | **1 pass, in a session separate from the author's.** *Approve with required changes*: **4 majors + 5 minors, all fixed.** **This row said "UNCOMMITTED" and "not reviewed in a separate session" until 2026-10-05, and both halves were false**: the task was committed as `75a896c`, and § *Task 30* has carried the round's count and the verdict since the day — the row and the section it points at contradicted each other. | **No acceptance criterion is waived; three gaps are *offered* with what covers them.** **All seven requirements are implemented.** The three operator decisions (requirement 3's handle-on-the-command, requirement 4's synthesized box over `U+FFFD`, the DejaVu Sans fallback) are recorded above with the measurements that decided them. **Requirement 6 was already met** when task 22 added `FaceId` to `GlyphKey`, a year before this task, and this task's work on that key was to give the replacement glyph its own variant rather than a fabricated character. **The capture found a defect no test could**: `main` never defined the `lato-only` family, the fixture did, every test passed, and `Y` did nothing — the two captures came out byte-identical. Fixed, and the mirror of task 24.1's missing row is recorded as such. **ACs 1–4 are covered by 1428 lib tests** (the chain walk through `pick_in_chain`, the atlas key as an enum, the two families' differing metrics, the property reaching the command). **AC 5 is capture-verified and measured**: 14 × 17 hollow pixels at (250, 586) against the two constants, 7 columns of pen advance, and the same sentence 247 px wide in the default family against 234 px in `lato-only` — 1958 pixels differing. **Seven mutations survive, all structural and named above**: two GL-side, one needing a font file, and three sharing one cause (a fixture whose two families both hold no fonts measure identically), plus the `main`-not-under-test row. **The capture answers the two with a visual consequence.** **63.1 fps** on the recorded floor of 55. See *Task 30 — what it decided* |
-| 31 | Dynamic atlas growth | **implemented 2026-10-05, changes requested** | — | **2 passes**, both in sessions separate from the author's; **round 2 re-ran round 1's sweep and re-measured the frame rate** rather than reading the record. Round 1: *approve with required changes*, **2 majors + 3 minors**. Round 2: *approve with required changes*, **1 major + 4 minors**. **All nine fixed.** **The two majors were requirement 6's count — it counted refusals, not glyphs, so a glyph re-asked every frame made one hole read as 3 600 — and a gate with no test**: the batch's re-expansion after a grow, whose evidence the author offered was a capture the reviewer then showed is AE = 0 with the loop broken. **Round 2's major was that finding one level up** — the tests covered the extracted function and not the call site — closed with a source-string assertion in the shape `blur.rs` already uses. **Three of round 2's four minors were the record being wrong about work that was right**, including a sweep row that could produce no verdict because it hung the runner. **20 of 20 deliberate breaks killed. +18 tests, none removed.** **62.5 fps** on the floor of 55; the reviewer's own three runs read 62.8 / 63.2 / 63.5. See *Task 31 — what it decided* |
+| 31 | Dynamic atlas growth | **done 2026-10-06** — implemented 2026-10-05, changes requested twice, all nine findings fixed | `8778c90` — this cell read *uncommitted* until 2026-10-06, when the commit existed | **2 passes**, both in sessions separate from the author's; **round 2 re-ran round 1's sweep and re-measured the frame rate** rather than reading the record. Round 1: *approve with required changes*, **2 majors + 3 minors**. Round 2: *approve with required changes*, **1 major + 4 minors**. **All nine fixed.** **The two majors were requirement 6's count — it counted refusals, not glyphs, so a glyph re-asked every frame made one hole read as 3 600 — and a gate with no test**: the batch's re-expansion after a grow, whose evidence the author offered was a capture the reviewer then showed is AE = 0 with the loop broken. **Round 2's major was that finding one level up** — the tests covered the extracted function and not the call site — closed with a source-string assertion in the shape `blur.rs` already uses. **Three of round 2's four minors were the record being wrong about work that was right**, including a sweep row that could produce no verdict because it hung the runner. **20 of 20 deliberate breaks killed. +18 tests, none removed.** **62.5 fps** on the floor of 55; the reviewer's own three runs read 62.8 / 63.2 / 63.5. See *Task 31 — what it decided* |
+| 32 | Fade and clip truncation, drawn | **implemented 2026-10-06, verified, record (32.3) written, not yet reviewed** — three sub-tasks: 32.1 the demo rows, 32.2 the mechanism, 32.3 the record | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5); the operator's `87da646` landed mid-task and owns none of these files | **none yet** — review is step 2, in a session separate from the implementer's | **AC1, AC2, AC4, AC6 met. AC5 met arithmetically, blend-state half argued (source-string assertion on `end_frame`, capture cannot measure). AC3 half: gate proved by font-free tests, on-screen half NOT observed — 4 of 101 characters overhang by exactly 1 px, demo cut lands 9 px inside `max_width`, Clip row AE 0 vs before-capture. No temporary seed used. +39 tests, none removed (1894 → 1933: +2 demo, +32 lib, +5 doctests). 18 of 18 deliberate breaks killed across two sweeps — 32.1 sweep first run reported 6 false survivors (wrong log path + `awk` defaulting empty to 0), recorded in `NEVERAGAIN.md`. 62.3 fps on floor of 55; one 35.2 ms frame in 1 of 5 `--tab=text` runs, not chased. See *Task 32 — what it decided* |
 | 34 | Depth buffer | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_34.md` | — | — |
 | 35 | Mesh vertex format and GPU buffers | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_35.md` | — | — |
 | 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_36.md` | — | — |
@@ -5015,7 +5244,11 @@ verified. A blank cell is unknown, not "none".
 | 50 | Theme scoping and the `FocusRing` token — **closes gap `L9`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_50.md` | — | — |
 | 51 | Convexity pre-test; `L10` escalated, **not closed** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_51.md` | — | — |
 | 52 | `LayoutMode::Grid` — **closes gap `L3` / `#2`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_52.md` | — | — |
-| — | Tesla-like demo application | pending | | | see `doc/ui/DEMO_APPLICATION.md` |
+| DEMO-01 | The map surface — **gap `#1`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_DEMO_01.md` | — | — |
+| DEMO-02 | The tab shell and the persistent chrome | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_DEMO_02.md` | — | — |
+| DEMO-03 | The car-status pane and its three states | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_DEMO_03.md` | — | — |
+| DEMO-04 | The indicator-light column | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_DEMO_04.md` | — | — |
+| DEMO-05 | Card carousel, callout hotspots, the two-axis reshape | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_DEMO_05.md` | — | — |
 
 ### Tasks 34–40 — the mesh-rendering sequence
 
@@ -5128,6 +5361,63 @@ recorded.
 
 **Every one of the twelve projects its own test count**, and the projections sum
 to 1894 plus roughly 190 new tests. None deletes an existing test.
+
+### Tasks `DEMO_01`–`DEMO_05` — the demo application sequence proper
+
+**Created 2026-10-05. Nothing in them is started.** Five tasks, and `DEMO_APPLICATION.md`
+§ *Relationship to task 24* says of this sequence what had to be written before
+any of it could be: *"the shape of that tab is not settled here — a
+`TASK_UI_DEMO_1.md` has not been written, and nothing below has been re-derived
+against a tabbed shell."* **This is that file, and the first five of the
+sequence.** Everything before it in § *Scope*, § *Design principles*, § *Screens*
+and § *Layout is now re-derived against a tabbed shell**, or explicitly is not.
+
+**They are `DEMO`, not `PRIM`,** because they change `ui_demo/src/main.rs` and
+`ui_demo`'s assets and not `ui_core` — except where a row needed a library, and
+those went to 41–52 instead. The direction document's rule held: *"Each gap must
+be addressed — by a `TASK_UI_PRIM_n` amendment or a `TASK_UI_DEMO_n` task."*
+**Gap `#1`, the map, is the one gap deliberately left to this sequence**, as
+`DEMO_APPLICATION.md` decided: *"the map is the demo's own asset and no library
+owns it."*
+
+**Every one of the five declares its `TASK_UI_PRIM_n` prerequisites explicitly**,
+and two name what they need *nothing* from and why — task 03 records that
+`nav::Screens` is gap `#3`'s closure and not its own.
+
+**Two findings this sequence surfaced that are not about the demo.**
+
+First, **`.ai/workflows/task-sequence.md` § *Scope* does not name this sequence** —
+it lists `TASK_UI_PRIM_*.md` and `TASK_CROSSPLATFORM_*.md` and nothing else, so
+the workflow this sequence runs under does not currently apply to it.
+`TASK_UI_DEMO_01` amends that section and creates
+`doc/ui/IMPLEMENTATION_STATE_DEMO.md`; **until 01 lands, these five tasks have no
+workflow and no state file**, and this row is the only place that is written down.
+
+Second, `DEMO_APPLICATION.md` § *Relationship to task 24* ends with a standing
+instruction: *"**It will need one** if a `TASK_UI_DEMO_n` task ever puts a tab bar
+on a Tesla surface, and that is the sentence to amend when it does."* `DEMO_02`
+does put the gallery's tab bar on screen over the map, so `DEMO_02` amends it.
+
+**The one evidence problem these tasks could not design around.** `DEMO_01` makes
+the map source a **provisional** decision — procedural, seeded, no geography — and
+**leaves `DEMO_APPLICATION.md` § *Open questions* item 2 on the list** rather than
+settling it by omission. It records the two facts that make it reversible: the
+real reason a raster tile layer is unavailable is that `Renderer`'s only texture
+entry point is `load_texture(path)` and **no task in 41–52 adds
+`textures_mut`/`from_pixels`**, so a committed PNG would work today.
+
+**Where a source sentence is `[C]`, no task treats it as a specification.**
+`DEMO_05` carries the two-axis reshape, whose only source is the
+visualisation-resize sentence — `[C]`, corpus unreachable from this host — and
+its rule is that *"a `[C]` sentence is not implemented because it is written
+down"* but implemented where a repository-owned decision exists independently of
+it. It found two: the photograph pair records two observed pane widths at `[A]`,
+and composite row 16's *demands* column is this repository's own design demand.
+
+**One operator decision surfaced by `DEMO_03`:** it appends a library gap row for
+per-mesh winding and cull control, with evidence by symbol and the reversal
+specified to the point of being built — but **opening a gap row is the operator's
+call, not an agent's**, so it is recorded and not taken.
 
 **Task 24 was superseded on 2026-09-30 and un-superseded on 2026-10-03.** The
 first decision replaced the widget-gallery demo with a Tesla-like infotainment
@@ -5332,8 +5622,8 @@ each has a task file so the work is not carried in prose.
 | # | Task | Unmet requirement in task 11 | Symptom today |
 |---|---|---|---|
 | 30 | Font fallback chain | §2 *Font fallback chain* | **Done 2026-10-05, `75a896c`** — the symptom column is what it was: `Label::font_family` was a property nothing read and a character the font lacked was silently dropped. Both are gone. Two of the three premises were stale: `GlyphKey` has carried the face since task 22, and `FontSet` has existed since the same task. |
-| 31 | Dynamic atlas growth | §3 *Dynamic atlas growth* | **Implemented 2026-10-05, reviewed** — the symptom is gone: the atlas grows to the next power of two, no past 4096 or the driver's limit, re-packing every live glyph into the larger texture first, and a glyph that still fits nowhere is **counted** rather than dropped. One detail the row above could not know: **the re-pack cannot be done from stored UVs at all**, because a UV cannot be recomputed from a UV — which is why the atlas now holds each glyph's pixel and derives the UV at hand-out. See § *Task 31*. |
-| 32 | Fade and clip truncation, drawn | §4 *Text truncation: ellipsis, clip, fade* | `truncate_line` treats `Clip` and `Fade` identically and `Label::paint` never reads `truncation`, so there is **no fade ramp at all** and `Clip` is a layout cut, not a visual clip. Only the ellipsis third works. |
+| 31 | Dynamic atlas growth | §3 *Dynamic atlas growth* | **Implemented 2026-10-05, reviewed, committed as `8778c90` on 2026-10-06** — the symptom is gone: the atlas grows to the next power of two, no past 4096 or the driver's limit, re-packing every live glyph into the larger texture first, and a glyph that still fits nowhere is **counted** rather than dropped. One detail the row above could not know: **the re-pack cannot be done from stored UVs at all**, because a UV cannot be recomputed from a UV — which is why the atlas now holds each glyph's pixel and derives the UV at hand-out. See § *Task 31*. |
+| 32 | Fade and clip truncation, drawn | §4 *Text truncation: ellipsis, clip, fade* | **Done 2026-10-06, implemented, verified, record (32.3) written, not yet reviewed** — the symptom is gone: the fade is a per-corner vertex alpha on `DrawCommand::Text`, the clip is a command-level rect intersected in `Batcher::add_clipped`, and the two modes differ on screen by AE 410 on the Fade row against a before-capture where Clip and Fade were the same file by md5. **Three of the file's premises were checked against the source on 2026-10-06 and two are false**: there is **no per-line `truncated` flag** — `truncate_line`'s bool is folded into one `TextLayout::truncated` and discarded per line — and **`Label::paint` re-runs `layout_text` itself** rather than being handed a layout, so a fade needs the truncation decision carried on `Line`. The third premise holds: the file's requirement 3, a clip at the *label's own* rect, is **not** task 45's per-node clip, which is the ancestors' intersection and explicitly refuses the node's own box. **The premise corrections are kept above and not duplicated here; the outcome — the three operator decisions, the overhang measurement, the two sweeps and what is not claimed — is § *Task 32 — what it decided, and what it found*.** |
 
 Task 11's §2 also lists HarfBuzz shaping and bidi. Those are **waived, not
 deferred**: the operator dropped HarfBuzz on 2026-09-30 because its safe binding

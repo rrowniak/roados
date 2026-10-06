@@ -443,6 +443,29 @@ else, and make the parser's failure mode **loud** — an unparseable log must
 abort, never default to "0 failures", because "0" is the one value that turns a
 broken runner into a confident report that the code is untested.
 
+**Extended 2026-10-06 (task 32.1): the log was missing, and "missing" parsed as
+"0 failed" — and a guard that fired was outvoted below it.** The first
+deliberate-break sweep wrote each run's log to the wrong path. `grep` on a
+missing file exits non-zero, so the failure count came back empty, and `awk
+'{s+=$1} END {print s+0}'` over no input prints `0` — so **six rows printed
+`SURVIVED` and none of them had survived.** Six false results in the direction
+that makes the work look finished. The same sweep's second defect fired on three
+of the six rows at once: rustfmt had wrapped the search anchor across two lines
+since the row was written, so the guard printed `ANCHOR NOT FOUND — not a
+result` **and the runner printed `SURVIVED` anyway**, because the missing log
+defaulted to zero below the guard. Two contradictory verdicts on one row, and
+the one that survived on the page was the false one.
+
+**The rule is the same one, from the other direction.** *A mutation the runner
+refused to apply was recorded as a kill* and *A guard that reported why only
+when the why was the easy one* are the two neighbours, and all three mechanisms
+are one bug: **a runner that cannot prove a result must not print one.** A guard
+that fires and is then outvoted by a default is not a guard; a count that
+defaults to zero on an empty input is not a count. The fix is the one above —
+parse the field, and abort on an unparseable log — plus this: **the abort must
+sit on the path that produces the verdict, not on a guard above it**, and an
+empty input to a summing parser is an error, not zero.
+
 ## 2026-10-01 — A drawn control with nothing behind it
 
 The operator reported the list's scrollbar two ways — *"is too narrow, I have
@@ -1543,3 +1566,52 @@ wrong**, not on how often the question was asked — `HashSet` before `usize`. A
 sentence from the call path rather than from the intention**: the intent was to
 avoid pointless work, and the honest statement of it is "a retry costs a cache
 miss", which does not change what the number means.
+
+## 2026-10-06 — A brief's list of what a change touches is a list somebody has to compile
+
+Task 32.2's orchestrator brief listed the files the mechanism would touch:
+`paint.rs`, `batch.rs`, `render.rs`, `widgets/label.rs`, `widgets/list.rs`. **It
+missed `widgets/scroll.rs`** — a test literal there (`fade: None, clip: None`) on
+one of the eleven `DrawCommand::Text` constructing sites. The compiler found it,
+the fix was two fields on one literal, and nothing was lost — but the enumeration
+was an assertion made from an earlier session's reading rather than a command.
+This is the same failure mode as *a sweep of a mechanism's call sites is not a
+sweep of the data it is built from* (2026-10-04) and *a survivor is a missing
+assertion, and only a sweep finds it* (2026-10-04): **a brief that claims "these
+are the files" without a command that proves it is a hypothesis, not a fact**.
+The blast-radius entries (`A drawn control with nothing behind it` /
+`A draw-command assertion cannot see where a command lands`) are the same trap in
+the widget — the code that *must* change is not the code the brief *says* changes.
+
+**Rule:** before writing a brief that lists files, **run the command that proves
+the list** — `grep -r "DrawCommand::Text" --include="*.rs" | grep -v test |
+cut -d: -f1 | sort -u` — and paste its output into the brief. A list that was
+read from a previous session's output is stale the moment the tree changes, and
+the cost of missing one is a build failure the reviewer finds, not the author.
+
+## 2026-10-06 — A log that cannot be parsed must abort
+
+Task 32.1's first deliberate-break sweep wrote each run's log to the wrong path.
+`grep` on a missing file exits non-zero, so the failure count came back empty,
+and `awk '{s+=$1} END {print s+0}'` over no input prints `0` — so **six rows
+printed `SURVIVED` and none of them had survived**. Six false results in the
+direction that makes the work look finished. The same sweep's second defect fired
+on three of the six rows at once: rustfmt had wrapped the search anchor across
+two lines since the row was written, so the guard printed `ANCHOR NOT FOUND — not
+a result` **and the runner printed `SURVIVED` anyway**, because the missing log
+defaulted to zero below the guard — two contradictory verdicts on one row, and
+the one that survived on the page was the false one.
+
+This extends the existing guard/runner entries (*A mutation runner whose
+reporting pipe is `head` never restores*, *A failure count parsed off the whole
+log*, *A guard that reported why only when the why was the easy one*). All three
+mechanisms are one bug: **a runner that cannot prove a result must not print
+one**. A guard that fires and is then outvoted by a default is not a guard; a
+count that defaults to zero on an empty input is not a count.
+
+**Rule:** the abort must sit on the path that produces the verdict, not on a
+guard above it. Parse the `test result:` line's failure field specifically —
+`sed -n 's/.*[^0-9]\([0-9]\+\) failed.*/\1/p'` — and **an unparseable log (missing,
+no `test result:` line, or the field not a number) must abort the runner with a
+loud error, never default to "0 failures"**. An empty input to a summing parser
+is an error, not zero.

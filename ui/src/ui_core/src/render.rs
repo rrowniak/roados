@@ -14,7 +14,7 @@ use crate::arena::{Arena, Handle};
 use crate::batch::{Batch, Batcher, ShaderKind};
 use crate::font::{Font, FontSet, FontWeight, GlyphAtlas, GlyphPlacement, PickedFont};
 use crate::node::WidgetNode;
-use crate::paint::{DrawCommand, Rect, UvRect};
+use crate::paint::{faded_color, DrawCommand, FadeRamp, Rect, UvRect};
 use crate::property::Color;
 use crate::texture::{self, TextureCache, TextureError, TextureHandle};
 use blur::BlurQuad;
@@ -681,6 +681,19 @@ struct ImageVertex {
 /// `(x, y)` is the quad's top-left corner in window coordinates, `(w, h)` its
 /// size, `(u0, v0)`–`(u1, v1)` its rect in the atlas, and `color` the
 /// premultiplied fill.
+///
+/// **`ramp` is why the colour is computed twice rather than once.** A ramped run
+/// scales **each corner by its own x**, so the left pair carries the colour at
+/// `x` and the right pair the colour at `x + w` — and because `v_color` is
+/// interpolated across the quad, the ramp is smooth *inside* the glyph. One
+/// `quad_color` for all four, which is what this did before `TASK_UI_PRIM_32`,
+/// steps the ramp once per glyph: four flat alphas at four glyph boundaries is
+/// not a fade.
+///
+/// No vertex-format change rides on it. [`TEXT_VERTEX_STRIDE`] is 32 bytes and
+/// stays 32, the four attributes are the four that were bound, and the shader is
+/// untouched — the fade is entirely in the four colour words a vertex already
+/// carries.
 fn text_quad(
     x: f32,
     y: f32,
@@ -688,31 +701,46 @@ fn text_quad(
     h: f32,
     uv: (f32, f32, f32, f32),
     color: Color,
+    ramp: Option<FadeRamp>,
 ) -> [TextVertex; 4] {
     let (u0, v0, u1, v1) = uv;
-    let c = quad_color(color);
+    let near_left = text_corner_color(ramp, x, color);
+    let near_right = text_corner_color(ramp, x + w, color);
     [
         TextVertex {
             pos: [x, y],
             uv: [u0, v0],
-            color: c,
+            color: near_left,
         },
         TextVertex {
             pos: [x + w, y],
             uv: [u1, v0],
-            color: c,
+            color: near_right,
         },
         TextVertex {
             pos: [x + w, y + h],
             uv: [u1, v1],
-            color: c,
+            color: near_right,
         },
         TextVertex {
             pos: [x, y + h],
             uv: [u0, v1],
-            color: c,
+            color: near_left,
         },
     ]
+}
+
+/// Returns the premultiplied components of one glyph quad's corner at `x`.
+///
+/// **The single place a text corner's colour is decided**, so a run with no ramp
+/// cannot pick up one and a ramped run cannot quietly lose it. The `None` arm is
+/// [`quad_color`] unchanged: a run that does not fade is drawn at the colour it
+/// was recorded with, exactly as it was before [`FadeRamp`] existed.
+fn text_corner_color(ramp: Option<FadeRamp>, x: f32, color: Color) -> [f32; 4] {
+    match ramp {
+        Some(ramp) => quad_color(faded_color(ramp, x, color)),
+        None => quad_color(color),
+    }
 }
 
 /// Builds the four vertices of one textured quad.
@@ -863,6 +891,8 @@ fn text_vertices(atlas: &mut GlyphAtlas, fonts: &FontSet, batch: &Batch) -> Vec<
             extra_advance,
             family,
             weight,
+            fade,
+            clip: _,
         } = command
         else {
             continue;
@@ -899,7 +929,14 @@ fn text_vertices(atlas: &mut GlyphAtlas, fonts: &FontSet, batch: &Batch) -> Vec<
                 let w = u32_to_f32(placement.width);
                 let h = u32_to_f32(placement.height);
                 let uv = (placement.u0, placement.v0, placement.u1, placement.v1);
-                vertices.extend_from_slice(&text_quad(gx, gy, w, h, uv, *color));
+                // The ramp rides the command and reaches the quad by
+                // `text_quad`, which scales each corner by its own x. The glyph's
+                // *quad* is not the run's *box*: the quad is where the ink is,
+                // so a glyph before the ramp is drawn whole and a glyph after it
+                // draws nothing, and one straddling it fades across its own ink.
+                // That is the property a per-glyph alpha does not have, and it is
+                // why nothing here needs the glyph's advance.
+                vertices.extend_from_slice(&text_quad(gx, gy, w, h, uv, *color, *fade));
             },
         );
     }
@@ -2141,12 +2178,28 @@ impl Renderer {
     /// matching [`Rect`]; GL's scissor origin is the bottom left, so the Y
     /// axis is flipped.
     ///
-    /// The scissor applies to the whole frame: draw commands are recorded
-    /// during [`Renderer::draw_node`] and submitted together in
-    /// [`Renderer::end_frame`], so there is no per-node clip to hook a
-    /// scissor to yet. [`crate::layout::LayoutState::clip`] already carries
-    /// the per-node rect; applying it per node is deferred, because a
-    /// recorded command has no scissor state of its own to carry.
+    /// **Set at submission and not while recording**, which is the whole of how a
+    /// per-node clip is possible at all: draw commands are recorded during
+    /// [`Renderer::draw_node`] and submitted together in
+    /// [`Renderer::end_frame`], so a scissor set while recording was set for the
+    /// wrong moment and the last one won for the whole frame. The clip rides on
+    /// the **batch** — see [`Batch::clip`](crate::batch::Batch::clip) — and
+    /// `apply_clip` sets it here, once per batch, as a draw call is about to
+    /// happen. [`crate::layout::LayoutState::clip`] carries the per-node rect
+    /// for the layout pass; the renderer's own per-node clip is whatever
+    /// [`Renderer::draw_node_clipped`] was handed.
+    ///
+    /// **A recorded command may carry a box of its own too**, which is how a
+    /// truncating label cuts a glyph that overhangs its text: the batcher
+    /// intersects the two — see [`Batcher::add_clipped`](crate::batch::Batcher::add_clipped)
+    /// — and the result is what arrives here. See
+    /// [`DrawCommand::Text`]'s `clip`.
+    ///
+    /// **This paragraph used to say there was no per-node clip to hook a scissor
+    /// to yet**, and that was true until `TASK_UI_PRIM_32`; a reader arriving now
+    /// would have found it contradicted by the paragraphs above it. The test that
+    /// names the submission order it now rests on is
+    /// `a_faded_text_batch_is_still_drawn_with_blending_on`.
     pub fn set_scissor(&self, rect: Option<Rect>) {
         let gl = self.context.gl();
         // SAFETY: The GL context is current on this thread.
@@ -3178,7 +3231,7 @@ impl Renderer {
 mod tests {
     use super::*;
     use crate::font::resolve_slot;
-    use crate::paint::{FamilyId, Painter, TextureId};
+    use crate::paint::{faded_color, ramp_factor, FamilyId, Painter, TextureId};
     use blur::MAX_TAPS;
 
     #[test]
@@ -3384,6 +3437,263 @@ mod tests {
             Vec::new()
         });
         assert_eq!(passes, 1, "and still one on the next frame");
+    }
+
+    // ------------------------------------------------- the truncation fade
+
+    /// The ramp the two quad tests below read: the last 48 pixels of a run that
+    /// ends at 288, so it begins at 240.
+    fn ramp() -> FadeRamp {
+        FadeRamp::new(240.0, 288.0)
+    }
+
+    #[test]
+    fn a_glyph_quad_inside_a_ramp_carries_the_fade_on_its_own_corners() {
+        // The whole of the operator's first decision, as four numbers. **The
+        // per-corner scale is the difference between a fade and four steps**: a
+        // glyph whose quad straddles the window has a left edge at the colour it
+        // was recorded with and a right edge at nothing, and the rasteriser
+        // interpolates `v_color` between them, so the ink fades across its own
+        // width. One `quad_color` for all four corners — which is what this
+        // function did before `TASK_UI_PRIM_32` — steps the ramp once per glyph.
+        let quad = text_quad(
+            250.0,
+            20.0,
+            8.0,
+            16.0,
+            (0.1, 0.2, 0.3, 0.4),
+            Color::new(200, 200, 200, 255),
+            Some(ramp()),
+        );
+        let left = quad[0].color;
+        let right = quad[1].color;
+        assert_ne!(
+            left, right,
+            "**the two ends of one quad disagree**, which is the whole claim"
+        );
+        // Corner order is top left, top right, bottom right, bottom left, so the
+        // pairs are 0/1 and 3/2 — and each pair is one x, not one glyph.
+        assert_eq!(
+            quad[0].color, quad[3].color,
+            "both left corners are the left x"
+        );
+        assert_eq!(
+            quad[1].color, quad[2].color,
+            "and both right corners are the right x"
+        );
+        assert_eq!(
+            left,
+            quad_color(faded_color(ramp(), 250.0, Color::new(200, 200, 200, 255))),
+            "the left pair is the colour at x 250"
+        );
+        assert_eq!(
+            right,
+            quad_color(faded_color(ramp(), 258.0, Color::new(200, 200, 200, 255))),
+            "**and the right pair the colour at x 258** — the glyph's own right \\
+             edge, not the run's and not the glyph's advance"
+        );
+        // And the numbers, read off the ramp: 250 is a quarter of the way in and
+        // 258 is three quarters.
+        assert_eq!(
+            ramp_factor(ramp(), 250.0),
+            0.791_666_7,
+            "a quarter of the way through 240..288"
+        );
+        assert_eq!(
+            ramp_factor(ramp(), 258.0),
+            0.625,
+            "and 18 of the 48 pixels in leaves five eighths of the colour"
+        );
+        assert!(
+            right[3] < left[3],
+            "**the alpha falls across the quad**: {} then {}",
+            left[3],
+            right[3]
+        );
+        // Every channel of both ends moved, which is requirement 5 read at the
+        // vertex rather than at the colour type.
+        for channel in 0..3 {
+            assert!(
+                right[channel] < left[channel],
+                "channel {channel} did not fade"
+            );
+        }
+    }
+
+    #[test]
+    fn a_glyph_quad_with_no_ramp_is_one_colour_on_all_four_corners() {
+        // The no-regression half, and it is a claim about *this* function rather
+        // than about a mode: a run with no ramp must come out byte-identical to
+        // the run this drew before `TASK_UI_PRIM_32`, which is `quad_color` of
+        // the command's own colour on every corner.
+        let quad = text_quad(
+            10.0,
+            20.0,
+            8.0,
+            16.0,
+            (0.1, 0.2, 0.3, 0.4),
+            Color::new(17, 34, 51, 200),
+            None,
+        );
+        let expected = quad_color(Color::new(17, 34, 51, 200));
+        for (index, vertex) in quad.iter().enumerate() {
+            assert_eq!(
+                vertex.color, expected,
+                "corner {index} is the recorded colour"
+            );
+        }
+        // And a ramp is what changes it, not the quad's own position: the same
+        // quad drawn at x 60 with the same ramp is *also* one colour, because
+        // 68 is before the window.
+        let outside = text_quad(
+            60.0,
+            20.0,
+            8.0,
+            16.0,
+            (0.1, 0.2, 0.3, 0.4),
+            Color::new(17, 34, 51, 200),
+            Some(ramp()),
+        );
+        for (index, vertex) in outside.iter().enumerate() {
+            assert_eq!(
+                vertex.color, expected,
+                "corner {index} is left of the window and so untouched"
+            );
+        }
+    }
+
+    #[test]
+    fn the_text_pass_hands_the_commands_ramp_to_the_quad_builder() {
+        // **The seam, and it is the shape task 31's round 2 required for the
+        // settle loop.** `text_quad`'s own tests hand it a ramp they built, so
+        // they pass whether or not the text pass ever reads the command's — and
+        // *quantising the ramp per glyph instead of per corner* is a mutation of
+        // `text_vertices`, not of `text_quad`, so it would sail through every
+        // other test in this module with the whole suite green. The seam is the
+        // only place the two halves are joined.
+        //
+        // A source-string assertion, as in
+        // `the_text_pass_expands_its_batch_through_the_settle_loop`: the file's
+        // own text is the artefact, the search is over the part of it **above the
+        // test module** so it cannot be satisfied by this test's own words, and
+        // it is scoped to `text_vertices`. Brittle to renaming and says so.
+        let source = include_str!("render.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("no test module in this file");
+        let start = production
+            .find("fn text_vertices")
+            .expect("the text expansion is in this file");
+        let rest = &production[start..];
+        let end = rest[1..].find("\nfn ").map_or(rest.len(), |at| at + 1);
+        let expand = &rest[..end];
+        assert!(
+            expand.contains("fade"),
+            "**the expansion reads the command's ramp.** It destructures `fade` \\
+             off the `Text` command, and a `text_quad` call that passed `None` or \\
+             a per-glyph colour instead would quantise the ramp to glyph \\
+             boundaries — four flat alphas, which is not a fade"
+        );
+        assert!(
+            expand.contains("text_quad(gx, gy, w, h, uv, *color, *fade)"),
+            "**and it passes the ramp straight through to the quad builder**, \\
+             which is what scales each corner by its own x. Read as one claim: \\
+             the fade reaches the vertex buffer by exactly this call"
+        );
+        // The controls, so a rename fails here rather than quietly unsatisfying
+        // the searches above.
+        assert!(
+            production.contains("fn text_quad("),
+            "the control: `text_quad` is named the way this search expects"
+        );
+        assert!(
+            production.contains("fn text_vertices("),
+            "and `text_vertices` is named the way the search above expects"
+        );
+        assert!(
+            production.contains("fn text_corner_color("),
+            "and the per-corner colour is one named function rather than an \\
+             expression repeated in the quad builder"
+        );
+    }
+
+    #[test]
+    fn a_faded_text_batch_is_still_drawn_with_blending_on() {
+        // Requirement 5's other half, and it is a claim about **`end_frame`'s own
+        // submission order** rather than about a colour.
+        //
+        // A run with a ramp is batched by `BlendMode::from_color` of the colour
+        // the *command* carries, so a ramped run of opaque text lands in
+        // `segment.opaque` with `BlendMode::Opaque` written on its key — and the
+        // fade is applied per corner long after the key was taken, at draw time.
+        // If the opaque group were drawn with blending off, the ramped run would
+        // be drawn *unblended* and a faded glyph would overwrite what is behind
+        // it instead of thinning over it. **This is therefore the assertion that
+        // says the frame is correct, and it cannot be made by reading a colour.**
+        //
+        // **A source-string assertion, in the shape `blur.rs` uses for its
+        // `#[repr(C)]` and in the shape task 31's round 2 required for the settle
+        // loop**: the file's own text is the artefact, the search is over the part
+        // of it **above the test module** so the assertion cannot be satisfied by
+        // its own words, and it is scoped to `end_frame` so it says what it means.
+        // Brittle to renaming and says so; a rename should fail here rather than
+        // quietly unsatisfy the search.
+        let source = include_str!("render.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("no test module in this file");
+        let start = production
+            .find("fn end_frame")
+            .expect("the frame is submitted in this file");
+        let rest = &production[start..];
+        let end = rest[1..].find("\n    fn ").map_or(rest.len(), |at| at + 1);
+        let frame = &rest[..end];
+        assert!(
+            frame.contains("gl.enable(GL_BLEND);"),
+            "**the frame turns blending on** after the opaque pass"
+        );
+        assert!(
+            frame.contains("gl.blend_func(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)"),
+            "**with the premultiplied blend func**, which is what a ramped run \\
+             needs: the colour is premultiplied, so `ONE, ONE_MINUS_SRC_ALPHA` \\
+             is the composition and not `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`"
+        );
+        assert!(
+            frame.contains("for batch in &segment.opaque {"),
+            "**and the opaque group is drawn again inside the composited passes**, \\
+             which is the half that matters: that loop is where a ramped run is \\
+             drawn, because it is in the opaque group. Without it the text pass \\
+             would skip the group entirely and the fade would composite with the \\
+             blend state of whatever ran before it"
+        );
+        assert!(
+            frame.contains("for pass in COMPOSITED_PASSES {"),
+            "and it is the composited pass loop that does it"
+        );
+        assert!(
+            frame.contains("self.draw_pass("),
+            "**and the batch is drawn through `draw_pass`**, which is where the \
+             batch's own clip becomes a scissor"
+        );
+        // The control, in the shape task 31's round 2 required: searched over the
+        // whole production part, because the *definition* is not inside
+        // `end_frame`'s body. A rename of either name must fail here rather than
+        // quietly unsatisfy the searches above.
+        assert!(
+            production.contains("fn draw_pass"),
+            "the control: `draw_pass` is named the way this search expects"
+        );
+        assert!(
+            production.contains("fn end_frame"),
+            "and `end_frame` is named the way the search above expects"
+        );
+        assert!(
+            production.contains("fn apply_clip"),
+            "and the clip is set there, so a batch's scissor is applied between \\
+             draw calls rather than while recording"
+        );
     }
 
     #[test]
@@ -3712,6 +4022,7 @@ mod tests {
             16.0,
             (0.1, 0.2, 0.3, 0.4),
             Color::new(0, 0, 0, 255),
+            None,
         );
         assert_eq!(quad[0].pos, [10.0, 20.0], "top left");
         assert_eq!(quad[0].uv, [0.1, 0.2], "with the atlas rect's top left");
@@ -3738,6 +4049,8 @@ mod tests {
             extra_advance: 0.0,
             family: FamilyId::default(),
             weight: FontWeight::Regular,
+            fade: None,
+            clip: None,
         });
         assert!(text.is_empty());
 

@@ -3,6 +3,9 @@
 //! Owns the cached paint state of a node, and the recording of the draw
 //! commands a frame is made of.
 
+use crate::animation::Interpolate;
+use crate::layout::Offset;
+
 pub use crate::font::{FamilyId, FontWeight};
 pub use crate::property::Color;
 
@@ -30,6 +33,217 @@ impl Rect {
             height,
         }
     }
+
+    /// Returns the box both rectangles cover, edges included.
+    ///
+    /// **Total, and an empty box rather than a `None`.** Two boxes that do not
+    /// overlap have an overlap of no area, and saying so with a zero-width or
+    /// zero-height rect is what a scissor already understands: [`GL_SCISSOR`]
+    /// with a zero extent draws nothing, which is the right answer for a command
+    /// clipped out of its own viewport. An `Option` here would have to invent a
+    /// second answer for "clipped away" beside `None`'s own, which is *no
+    /// clip* — and a caller that read a vanished clip as an unbounded one would
+    /// draw the very thing the clip was there to cut.
+    ///
+    /// **A second intersection in the tree, beside
+    /// `layout::intersect`, and `TASK_UI_PRIM_45.md` requirement 1 owns the
+    /// reconciliation.** That one is private and takes two `Option<layout::Rect>`s
+    /// to answer "what does a node inherit from its ancestors", where an unset
+    /// clip means *no ancestor clips it*; this one is total, over one
+    /// `paint::Rect` — the command's own box against the batch's — where an
+    /// absent clip means *the whole window*. The two differ in their empty answer
+    /// as well as in their type, and this paragraph records which is which rather
+    /// than merging them: a merge is requirement 1's decision to make, with both
+    /// call sites in front of it, and not something a task that needed an
+    /// intersection today should decide by copying a number across.
+    ///
+    /// `# Examples`
+    ///
+    /// ```
+    /// use ui_core::paint::Rect;
+    ///
+    /// let outer = Rect::new(0.0, 0.0, 100.0, 50.0);
+    /// let inner = Rect::new(80.0, 10.0, 40.0, 80.0);
+    /// assert_eq!(outer.intersection(inner), Rect::new(80.0, 10.0, 20.0, 40.0));
+    ///
+    /// // Boxes that miss each other overlap by nothing, which is a box of no
+    /// // area and not the whole window.
+    /// let missed = Rect::new(200.0, 0.0, 10.0, 10.0);
+    /// assert_eq!(outer.intersection(missed).width, 0.0);
+    /// assert!(outer.intersection(missed).width < outer.width);
+    /// ```
+    ///
+    /// [`GL_SCISSOR`]: crate::render::Renderer::set_scissor
+    #[must_use]
+    pub fn intersection(self, other: Rect) -> Rect {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = (self.x + self.width).min(other.x + other.width);
+        let bottom = (self.y + self.height).min(other.y + other.height);
+        Rect::new(x, y, (right - x).max(0.0), (bottom - y).max(0.0))
+    }
+
+    /// Returns the rectangle moved by `by`.
+    #[must_use]
+    pub fn translated(self, by: Offset) -> Rect {
+        Rect::new(self.x + by.x, self.y + by.y, self.width, self.height)
+    }
+
+    /// Returns whether the rectangle covers no area, and so is a clip that
+    /// draws nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.width <= 0.0 || self.height <= 0.0
+    }
+}
+
+/// The window a text run's colour ramps out over, in window coordinates.
+///
+/// **The ramp is a per-corner vertex alpha and nothing else.** Every one of a
+/// glyph quad's four corners is scaled by its *own* x against this window, and
+/// the text shader interpolates `v_color` across the quad, so the ramp is smooth
+/// inside a glyph and not stepped at glyph boundaries.
+///
+/// # Why per corner, and not the two alternatives
+///
+/// The operator chose this on 2026-10-06, and the reasoning is worth keeping
+/// because the two rejected answers look cheaper:
+///
+/// - **Per glyph**, one alpha per glyph quad: the ramp quantises to glyph
+///   boundaries, so a 48-pixel fade across four 12-pixel glyphs is four flat
+///   steps — which is not a fade. It needs no renderer change either, and that
+///   is the whole of its case.
+/// - **A shader term**: smooth, but a uniform is per draw call, and one text
+///   batch holds every run in the frame. A per-run ramp would then cost one draw
+///   call per ramped run — the opposite of what batching is for — unless the
+///   window became a per-vertex attribute, which is a stride change to
+///   `TextVertex` and a new attribute in every text vertex layout.
+///
+/// So the window rides the command, the corners carry the scale, and
+/// `TextVertex` stays 32 bytes with no shader change and no batching change.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::paint::{faded_color, ramp_factor, Color, FadeRamp};
+///
+/// let ramp = FadeRamp::new(240.0, 288.0);
+/// assert_eq!(ramp_factor(ramp, 240.0), 1.0, "untouched at the start");
+/// assert_eq!(ramp_factor(ramp, 264.0), 0.5, "halfway is half");
+/// assert_eq!(ramp_factor(ramp, 288.0), 0.0, "gone at the end");
+///
+/// // Every channel moves: the colour is premultiplied, so a fade that scaled
+/// // only the alpha would leave the text at full brightness over the background.
+/// let colour = Color::new(200, 180, 160, 255);
+/// let faded = faded_color(ramp, 264.0, colour);
+/// assert_eq!((faded.r, faded.g, faded.b, faded.a), (100, 90, 80, 128));
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FadeRamp {
+    /// Where the ramp begins: at and to the left of this, the run is drawn at
+    /// the colour it was recorded with.
+    pub start_x: f32,
+    /// Where the ramp ends: at and to the right of this, the run draws nothing.
+    pub end_x: f32,
+}
+
+impl FadeRamp {
+    /// A ramp that leaves the colour alone at and before `start_x` and has
+    /// reached nothing at and after `end_x`.
+    #[must_use]
+    pub const fn new(start_x: f32, end_x: f32) -> Self {
+        FadeRamp { start_x, end_x }
+    }
+
+    /// The ramp a truncation fade runs over: the last `width` pixels of a drawn
+    /// run that ends at `run_end` and starts at `left`.
+    ///
+    /// **`left` is a floor on where the ramp begins, and that is what keeps a
+    /// short line from being dimmed at its start.** A run narrower than the ramp
+    /// would otherwise begin part-way down it and be drawn at a uniform partial
+    /// opacity — a line that looks like a wrong colour rather than a fade. With
+    /// the floor, the whole run ramps, which is the same claim as a longer one:
+    /// this text is cut here.
+    #[must_use]
+    pub fn to_run_end(left: f32, run_end: f32, width: f32) -> Self {
+        FadeRamp::new((run_end - width).max(left), run_end)
+    }
+
+    /// Returns the window moved by `by`.
+    ///
+    /// **Both edges, and both are positions.** A ramp is a place on the screen
+    /// rather than a property of the text, which is what
+    /// [`list::translate_commands`](crate::widgets::list::translate_commands)
+    /// needs it to be — see the `Text` row of that function's own table.
+    #[must_use]
+    pub fn translated(self, by: Offset) -> Self {
+        FadeRamp::new(self.start_x + by.x, self.end_x + by.x)
+    }
+}
+
+/// Returns how much of a text run's own colour reaches the screen at `at_x`.
+///
+/// **Free, and over nothing but numbers**, for the reason
+/// `crate::render`'s `walk_run` is: `AGENTS.md` forbids a unit test to open a GL
+/// context, so a rule that can only be exercised through the renderer is a rule
+/// with a capture as its only evidence.
+///
+/// Monotonic non-increasing by construction, which is the whole of the
+/// requirement: `1.0` at and before `start_x`, `0.0` at and after `end_x`, and a
+/// straight line between. A window of no width reaches both ends at the same `x`
+/// and therefore reads as `1.0` there rather than dividing by zero — the run is
+/// drawn whole, which is the answer for a ramp with nothing to ramp over.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::paint::{ramp_factor, FadeRamp};
+///
+/// let ramp = FadeRamp::new(100.0, 200.0);
+/// assert_eq!(ramp_factor(ramp, 0.0), 1.0);
+/// assert_eq!(ramp_factor(ramp, 100.0), 1.0);
+/// assert_eq!(ramp_factor(ramp, 150.0), 0.5);
+/// assert_eq!(ramp_factor(ramp, 200.0), 0.0);
+/// assert_eq!(ramp_factor(ramp, 9999.0), 0.0);
+/// ```
+#[must_use]
+pub fn ramp_factor(ramp: FadeRamp, at_x: f32) -> f32 {
+    if at_x <= ramp.start_x {
+        1.0
+    } else if at_x >= ramp.end_x {
+        0.0
+    } else {
+        1.0 - (at_x - ramp.start_x) / (ramp.end_x - ramp.start_x)
+    }
+}
+
+/// Returns `color` as `ramp_factor(ramp, at_x)` of itself.
+///
+/// **All four channels, and that is not a detail.** A [`Color`] is premultiplied
+/// by construction — every colour in this pipeline is — so scaling only the
+/// alpha produces the classic non-premultiplied fade: a run that keeps its full
+/// brightness and lets the background through it, which reads as text drawn in
+/// the wrong colour rather than as text fading out. Interpolating toward
+/// transparent black *is* the premultiplied fade, which is why this is the one
+/// line [`button::with_opacity`](crate::widgets::button) writes and this is a
+/// call to the same arithmetic rather than a fourth copy of it.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::paint::{faded_color, Color, FadeRamp};
+///
+/// let ramp = FadeRamp::new(0.0, 10.0);
+/// assert_eq!(faded_color(ramp, 0.0, Color::new(9, 9, 9, 9)), Color::new(9, 9, 9, 9));
+/// assert_eq!(faded_color(ramp, 10.0, Color::new(9, 9, 9, 9)), Color::new(0, 0, 0, 0));
+/// ```
+#[must_use]
+pub fn faded_color(ramp: FadeRamp, at_x: f32, color: Color) -> Color {
+    Color::interpolate(
+        &color,
+        &Color::new(0, 0, 0, 0),
+        1.0 - ramp_factor(ramp, at_x),
+    )
 }
 
 /// A handle to a texture the renderer has bound.
@@ -259,6 +473,64 @@ pub enum DrawCommand {
         /// `ui_core::font`'s [`resolve_slot`](crate::font::resolve_slot) and
         /// [`Family`](crate::font::FontSet::pick), which is where that rule lives.
         weight: FontWeight,
+        /// Where this run's colour ramps out, in window coordinates, or `None`
+        /// for a run drawn at one colour throughout.
+        ///
+        /// **A window and not a colour per glyph**, because the ramp is applied
+        /// per *corner* at draw time and the rasteriser interpolates between
+        /// them — see [`FadeRamp`], which is where the choice and the two
+        /// rejected alternatives are recorded.
+        ///
+        /// The command carries the window rather than the alphas because the
+        /// alphas are four evaluations of it, one per corner of every glyph quad,
+        /// and a run of thirty glyphs would then carry a hundred and twenty
+        /// numbers where two say the same thing. It also means the fade is
+        /// arithmetic a unit test can reach: `AGENTS.md` forbids a test to open a
+        /// GL context, so a rule that only the renderer could evaluate would have
+        /// a screenshot as its only evidence.
+        ///
+        /// **In window coordinates, and so it moves with the run** — see
+        /// [`list::translate_commands`](crate::widgets::list::translate_commands),
+        /// which is the one function that moves a recorded command.
+        fade: Option<FadeRamp>,
+        /// The box this run is clipped to, in window coordinates, or `None` for
+        /// the whole window.
+        ///
+        /// **The cut is made by the scissor, not by this field** — see
+        /// [`Batch::clip`](crate::batch::Batch::clip): the batcher intersects it
+        /// with the clip its own caller asked for, splits the batch when the
+        /// effective clip changes, and `Renderer::apply_clip` sets
+        /// `glScissor` between draw calls. A `DrawCommand` with no scissor of
+        /// its own is what deferred per-node clipping for as long as it did.
+        ///
+        /// **A glyph that overhangs the box is cut by the GPU**, which is the one
+        /// thing here that no assertion on a recorded command can see: the
+        /// command records the box, and whether a quad crosses its right edge is
+        /// a question about the font's own bearings. The layout's cut is a cut of
+        /// whole characters ([`label::fit`](crate::widgets::label::layout_text)),
+        /// so the two are different cuts of different things and this is the one
+        /// that catches a glyph's last pixel column. **Measured**, on Lato Medium
+        /// at 24 px: `A`, `f` and `v` overhang their advance by exactly 1.0 px and
+        /// nothing else in the demo's sentence does, so a cut that lands on one of
+        /// them is a glyph the scissor removes and the layout could not have.
+        ///
+        /// **A clipped text run still travels whole through a scroll's CPU-side
+        /// clipping, and that is unchanged.** [`command_bounds`](crate::widgets::scroll::command_bounds)
+        /// answers `None` for a `Text` command — it carries no width, which is the
+        /// reason it answers `None` for *every* `Text` command — so
+        /// [`clip_commands`](crate::widgets::scroll::clip_commands) keeps it
+        /// whatever the viewport is. This box does not change that, and it is not
+        /// the place it could: `clip_commands` has to decide from a *bounds*, and
+        /// a bounds for a run of text is a width this command does not carry and
+        /// did not before. The consequence to state rather than fix is that a
+        /// clipped run inside a scrolling viewport is clipped by the **scissor**
+        /// and not by the command list, so it is drawn and cut by the GPU
+        /// instead of being dropped on the CPU — which is the whole of the
+        /// `A draw-command assertion cannot see where a command *lands*` entry in
+        /// `.ai/NEVERAGAIN.md`, unchanged by this field.
+        ///
+        /// **In window coordinates, and so it moves with the run.**
+        clip: Option<Rect>,
     },
     /// A textured rectangle.
     ///
@@ -379,6 +651,96 @@ pub enum DrawCommand {
         /// Fill color, premultiplied alpha.
         color: Color,
     },
+}
+
+/// Everything [`Painter::text_run`] records, in one named struct.
+///
+/// **The command's own fields, gathered.** [`Painter::text_in`] takes seven of
+/// them positionally and `text_in_weight` eight, and `too_many_arguments` is on
+/// with `-D warnings`, so the two extra things a truncation needs — where the run
+/// ramps out and what box it is clipped to — cannot be two more parameters on
+/// either. They *could* have been two parameters on a third sibling and the lint
+/// would still be right to complain, which is why the whole run arrives as one
+/// value instead.
+///
+/// The alternative the existing code argues for — "a struct to hold them would be
+/// a public API change to every call site in the tree for a type whose only use
+/// is to be destructured again on the other side of the function" — is answered
+/// here by **not touching those call sites**: `text_in` and `text_in_weight` keep
+/// their signatures and build a `TextRun` with `fade` and `clip` of their own.
+///
+/// A widget that has nothing to say about the ramp or the clip — every one of
+/// them but a truncating [`Label`](crate::widgets::label::Label) — records
+/// through [`Painter::text_in`] and never names this type.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::paint::{Color, DrawCommand, FadeRamp, Painter, Rect, TextRun};
+///
+/// let mut painter = Painter::new();
+/// painter.text_run(TextRun {
+///     x: 60.0,
+///     y: 170.0,
+///     text: "a line cut here",
+///     color: Color::new(220, 220, 220, 255),
+///     font_size: 24.0,
+///     extra_advance: 0.0,
+///     fade: Some(FadeRamp::new(120.0, 168.0)),
+///     clip: Some(Rect::new(60.0, 170.0, 108.0, 29.0)),
+///     ..TextRun::default()
+/// });
+///
+/// let commands = painter.finish();
+/// assert_eq!(commands.len(), 1);
+/// let DrawCommand::Text { fade, clip, .. } = &commands[0] else {
+///     panic!("a text run records a text command");
+/// };
+/// assert_eq!(fade, &Some(FadeRamp::new(120.0, 168.0)));
+/// assert_eq!(clip, &Some(Rect::new(60.0, 170.0, 108.0, 29.0)));
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextRun<'a> {
+    /// X offset of the line's left edge.
+    pub x: f32,
+    /// Y offset of the *top* of the line's box, not the baseline.
+    pub y: f32,
+    /// The text to draw.
+    pub text: &'a str,
+    /// Fill color, premultiplied alpha, before any ramp.
+    pub color: Color,
+    /// The font size in pixels, used to rasterize the glyphs.
+    pub font_size: f32,
+    /// Pixels added after every glyph, including the last.
+    pub extra_advance: f32,
+    /// Which family the run is drawn in. The default family.
+    pub family: FamilyId,
+    /// Which face the run is drawn with. The regular one.
+    pub weight: FontWeight,
+    /// Where the run's colour ramps out, or `None` for one flat colour.
+    pub fade: Option<FadeRamp>,
+    /// The box the run is clipped to, or `None` for the whole window.
+    pub clip: Option<Rect>,
+}
+
+impl<'a> TextRun<'a> {
+    /// Returns the run's window positions moved by `by`, everything else
+    /// unchanged.
+    ///
+    /// **The ramp and the clip move and the text does not**, which is the same
+    /// split [`list::translate_commands`](crate::widgets::list::translate_commands)
+    /// records for every field of every variant: a window is a position and the
+    /// text is not, so a ramp left behind fades the wrong part of the screen.
+    #[must_use]
+    pub fn translated(self, by: Offset) -> TextRun<'a> {
+        TextRun {
+            x: self.x + by.x,
+            y: self.y + by.y,
+            fade: self.fade.map(|ramp| ramp.translated(by)),
+            clip: self.clip.map(|rect| rect.translated(by)),
+            ..self
+        }
+    }
 }
 
 /// The cached paint state of one widget node.
@@ -649,6 +1011,16 @@ impl Painter {
     /// tree for nothing a caller could see — so the lint is answered here rather
     /// than by inventing a type whose only purpose is to be destructured again
     /// inside the function.
+    ///
+    /// **The argument has grown since that was written and the answer has not.**
+    /// The command carries ten fields now, nine of them positional here, and the
+    /// two the ramp and the clip need cannot be two more. So the struct the
+    /// paragraph above argues against exists as [`TextRun`] — for the callers
+    /// that have something to say about the ramp or the clip, which is the
+    /// truncating label and nothing else. **This method is that type's front door
+    /// for every caller that does not**, and it keeps the eight-argument
+    /// signature it had rather than forcing the change on the six widgets that
+    /// call it.
     #[allow(clippy::too_many_arguments)]
     fn text_in_weight(
         &mut self,
@@ -661,15 +1033,40 @@ impl Painter {
         extra_advance: f32,
         weight: FontWeight,
     ) {
-        self.commands.push(DrawCommand::Text {
+        self.text_run(TextRun {
             x,
             y,
-            text: text.to_string(),
+            text,
             color,
             font_size,
             extra_advance,
             family,
             weight,
+            fade: None,
+            clip: None,
+        });
+    }
+
+    /// Records a text run with a ramp and a clip box, in one named value.
+    ///
+    /// [`TextRun`]'s own docs are where the two extra fields are argued for; this
+    /// is the recorder, and it is the **only** place a `DrawCommand::Text` is
+    /// built, which is what stops the ramp and the clip from being a field some
+    /// of the painters forget — the defect
+    /// `Painter::text_in_weight` exists to prevent for the family and the
+    /// weight, one level up.
+    pub fn text_run(&mut self, run: TextRun<'_>) {
+        self.commands.push(DrawCommand::Text {
+            x: run.x,
+            y: run.y,
+            text: run.text.to_string(),
+            color: run.color,
+            font_size: run.font_size,
+            extra_advance: run.extra_advance,
+            family: run.family,
+            weight: run.weight,
+            fade: run.fade,
+            clip: run.clip,
         });
     }
 
@@ -1277,6 +1674,8 @@ mod tests {
             extra_advance: regular_tracking,
             family: regular_family,
             weight: regular,
+            fade: regular_fade,
+            clip: regular_clip,
         } = &commands[0]
         else {
             panic!("not text");
@@ -1290,6 +1689,8 @@ mod tests {
             extra_advance: bold_tracking,
             family: bold_family,
             weight: bold,
+            fade: bold_fade,
+            clip: bold_clip,
         } = &commands[1]
         else {
             panic!("not text");
@@ -1322,6 +1723,344 @@ mod tests {
             *bold,
             FontWeight::Bold,
             "and the two are not the same request"
+        );
+        // The two fields that came with the ramp and the clip, in the same
+        // spirit as the paragraph above: a bold run must not pick up a fade or a
+        // scissor because it was drawn through a different method.
+        assert_eq!(regular_fade, bold_fade, "and neither run carries a ramp");
+        assert_eq!(regular_clip, bold_clip, "and neither is clipped");
+    }
+
+    // ---------------------------------------------------------------- fade ramp
+
+    /// The ramp every test below reads, unless it is about a different one:
+    /// 48 pixels wide, so a factor is a sixteenth per pixel and a half is 24.
+    fn ramp() -> FadeRamp {
+        FadeRamp::new(240.0, 288.0)
+    }
+
+    #[test]
+    fn the_ramp_is_whole_before_its_window_and_gone_at_and_after_its_end() {
+        let ramp = ramp();
+        assert_eq!(ramp_factor(ramp, 0.0), 1.0, "far to the left of the window");
+        assert_eq!(ramp_factor(ramp, 239.0), 1.0, "and one pixel before it");
+        assert_eq!(
+            ramp_factor(ramp, 240.0),
+            1.0,
+            "**at** the start, not a hair into it: the start edge is the last x \\
+             that is untouched, so a glyph whose left edge is exactly here is \\
+             drawn whole"
+        );
+        assert_eq!(ramp_factor(ramp, 288.0), 0.0, "**at** the end is nothing");
+        assert_eq!(ramp_factor(ramp, 289.0), 0.0, "and past it stays nothing");
+        assert_eq!(ramp_factor(ramp, 9999.0), 0.0);
+    }
+
+    #[test]
+    fn the_ramp_falls_monotonically_across_its_window() {
+        // Acceptance criterion 1's "the ramp is monotonic", as arithmetic: every
+        // sample is at or below the one before it, and the ends are the two
+        // extremes the requirement names. A ramp built backwards is rising
+        // rather than falling, and this is what sees it.
+        let ramp = ramp();
+        let mut previous = f32::INFINITY;
+        let mut samples = 0;
+        let mut x = 200.0;
+        while x <= 320.0 {
+            let factor = ramp_factor(ramp, x);
+            assert!(
+                factor <= previous,
+                "the ramp rose: {factor} at x {x} after {previous}"
+            );
+            previous = factor;
+            samples += 1;
+            x += 0.25;
+        }
+        assert_eq!(
+            samples, 481,
+            "the whole neighbourhood was sampled, not three points"
+        );
+        assert_eq!(
+            ramp_factor(ramp, 264.0),
+            0.5,
+            "and the midpoint is the midpoint, which is what makes the fall linear \\
+             rather than merely non-increasing"
+        );
+        assert_eq!(
+            ramp_factor(ramp, 252.0),
+            0.75,
+            "and a quarter in is three quarters"
+        );
+        assert_eq!(
+            ramp_factor(ramp, 276.0),
+            0.25,
+            "and three quarters in is a quarter"
+        );
+    }
+
+    #[test]
+    fn the_fade_scales_all_four_channels_of_a_premultiplied_colour() {
+        // Requirement 5, and the whole of it. A `Color` is premultiplied by
+        // construction, so a fade that moved only the alpha would leave `r`, `g`
+        // and `b` at full brightness while the background showed through them —
+        // text at the wrong colour rather than text fading out. The assertion is
+        // on all four channels *independently*, because the failure this guards
+        // is three of them holding still.
+        let ramp = ramp();
+        let color = Color::new(200, 180, 160, 255);
+        let half = faded_color(ramp, 264.0, color);
+        assert_eq!(
+            half,
+            Color::new(100, 90, 80, 128),
+            "every channel is halved"
+        );
+        assert_ne!(
+            half.a, color.a,
+            "**the alpha moved**, which is the half that is easy to see"
+        );
+        assert_ne!(
+            half.r, color.r,
+            "and the red moved, which is the half that is not"
+        );
+        assert_ne!(half.g, color.g);
+        assert_ne!(half.b, color.b);
+        // And the channels kept their ratio to each other, which is what
+        // "premultiplied" means for a fade: nothing about the hue changed.
+        assert_eq!(
+            (half.r, half.g, half.b),
+            (color.r / 2, color.g / 2, color.b / 2),
+            "**and the ratio between the colour channels is untouched**, so this \\
+             is a fade rather than a tint"
+        );
+    }
+
+    #[test]
+    fn a_fade_at_full_factor_is_the_colour_it_was_given_and_at_zero_transparent() {
+        let ramp = ramp();
+        let color = Color::new(7, 11, 13, 255);
+        assert_eq!(
+            faded_color(ramp, 0.0, color),
+            color,
+            "left of the window the run is the colour it was recorded with"
+        );
+        assert_eq!(
+            faded_color(ramp, 240.0, color),
+            color,
+            "and so is a corner exactly on the start edge"
+        );
+        assert_eq!(
+            faded_color(ramp, 288.0, color),
+            Color::new(0, 0, 0, 0),
+            "**transparent black and not black at zero alpha**: the channels are \\
+             premultiplied, so an opaque-looking black here is a colour at \\
+             opacity zero, which composites as black"
+        );
+    }
+
+    #[test]
+    fn a_fade_keeps_the_alpha_it_was_given_and_multiplies_it() {
+        // The inherited-opacity half of requirement 5, as arithmetic: a colour
+        // that arrived at alpha 128 and a colour that arrived at 255 fade by the
+        // *same* factor, and the dimmer one stays proportionally dimmer. So a
+        // ramp composes with whatever opacity the run already had rather than
+        // replacing it.
+        let ramp = ramp();
+        let opaque = faded_color(ramp, 252.0, Color::new(200, 200, 200, 255));
+        let dimmed = faded_color(ramp, 252.0, Color::new(200, 200, 200, 128));
+        assert_eq!(opaque.a, 191, "a quarter of the way out of 255");
+        assert_eq!(dimmed.a, 96, "and a quarter of the way out of 128");
+        assert!(
+            dimmed.a < opaque.a,
+            "**the run that was already dimmer stays dimmer**, which is what \\
+             composes with an inherited opacity instead of overwriting it"
+        );
+    }
+
+    #[test]
+    fn a_window_of_no_width_fades_nothing_and_does_not_divide_by_zero() {
+        // The degenerate window a caller can build by hand, and the one
+        // `FadeRamp::to_run_end` cannot produce. A zero-width window reaches both
+        // of its ends at the same x, so it is read as whole there — one branch
+        // wins and the division never happens.
+        let degenerate = FadeRamp::new(100.0, 100.0);
+        assert_eq!(ramp_factor(degenerate, 99.0), 1.0);
+        assert_eq!(
+            ramp_factor(degenerate, 100.0),
+            1.0,
+            "the shared end reads as whole"
+        );
+        assert_eq!(ramp_factor(degenerate, 101.0), 0.0);
+        // And a window whose ends are the wrong way round, which is what a
+        // caller gets from a negative width. Non-increasing still holds.
+        let reversed = FadeRamp::new(200.0, 100.0);
+        assert_eq!(ramp_factor(reversed, 50.0), 1.0);
+        assert_eq!(
+            ramp_factor(reversed, 150.0),
+            1.0,
+            "between the ends, still whole"
+        );
+        assert_eq!(ramp_factor(reversed, 200.0), 1.0);
+        assert_eq!(ramp_factor(reversed, 300.0), 0.0);
+    }
+
+    #[test]
+    fn a_ramps_start_never_precedes_the_run_it_belongs_to() {
+        // The floor `FadeRamp::to_run_end` puts on `start_x`, and the reason it is
+        // there: a run narrower than the ramp would otherwise begin part-way
+        // down it and be drawn at a uniform partial opacity, which reads as a
+        // wrong colour rather than as a fade.
+        let narrow = FadeRamp::to_run_end(100.0, 130.0, 48.0);
+        assert_eq!(
+            narrow,
+            FadeRamp::new(100.0, 130.0),
+            "**the window starts at the run's left edge**, so the whole run ramps"
+        );
+        assert_eq!(
+            ramp_factor(narrow, 100.0),
+            1.0,
+            "and the run's first glyph is whole"
+        );
+        assert_eq!(ramp_factor(narrow, 130.0), 0.0, "and its last is nothing");
+        // A run wider than the ramp is unaffected by the floor.
+        let wide = FadeRamp::to_run_end(100.0, 400.0, 48.0);
+        assert_eq!(wide, FadeRamp::new(352.0, 400.0));
+        assert_eq!(ramp_factor(wide, 100.0), 1.0);
+        assert_eq!(ramp_factor(wide, 352.0), 1.0);
+        assert_eq!(ramp_factor(wide, 400.0), 0.0);
+    }
+
+    #[test]
+    fn a_text_run_records_its_ramp_and_its_clip_and_its_window_moves_them() {
+        let ramp = FadeRamp::new(100.0, 148.0);
+        let clip = Rect::new(60.0, 170.0, 90.0, 29.0);
+        let mut painter = Painter::new();
+        painter.text_run(TextRun {
+            x: 60.0,
+            y: 170.0,
+            text: "cut here",
+            color: Color::new(1, 2, 3, 255),
+            font_size: 24.0,
+            extra_advance: 0.0,
+            fade: Some(ramp),
+            clip: Some(clip),
+            ..TextRun::default()
+        });
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 1);
+        let DrawCommand::Text {
+            x,
+            y,
+            text,
+            fade: recorded_ramp,
+            clip: recorded_clip,
+            ..
+        } = &commands[0]
+        else {
+            panic!("a text run records a text command");
+        };
+        assert_eq!(*x, 60.0);
+        assert_eq!(*y, 170.0);
+        assert_eq!(text, "cut here");
+        assert_eq!(*recorded_ramp, Some(ramp), "**the ramp is on the command**");
+        assert_eq!(*recorded_clip, Some(clip), "**and so is the box**");
+
+        // `TextRun::translated` is the other half of `list::translate_commands`:
+        // both ends of the window and every edge of the box are positions.
+        let by = Offset::new(400.0, 30.0);
+        let moved = TextRun {
+            x: 60.0,
+            y: 170.0,
+            text: "cut here",
+            color: Color::new(1, 2, 3, 255),
+            font_size: 24.0,
+            fade: Some(ramp),
+            clip: Some(clip),
+            ..TextRun::default()
+        }
+        .translated(by);
+        assert_eq!((moved.x, moved.y), (460.0, 200.0));
+        assert_eq!(
+            moved.fade,
+            Some(FadeRamp::new(500.0, 548.0)),
+            "both edges move"
+        );
+        assert_eq!(
+            moved.clip,
+            Some(Rect::new(460.0, 200.0, 90.0, 29.0)),
+            "and so does the box"
+        );
+        assert_eq!(moved.text, "cut here", "and the text is untouched");
+        assert_eq!(moved.font_size, 24.0, "and so is the size");
+    }
+
+    #[test]
+    fn a_plain_text_recorder_records_no_ramp_and_no_clip() {
+        // The other side of the same seam: the eight-argument path has nothing to
+        // say about either, so it says `None` for both, and every caller that was
+        // not a truncating label is unaffected.
+        let mut painter = Painter::new();
+        painter.text(1.0, 2.0, "hi", Color::new(9, 9, 9, 255), 16.0, 0.0);
+        painter.text_in(
+            FamilyId::default(),
+            1.0,
+            2.0,
+            "hi",
+            Color::new(9, 9, 9, 255),
+            16.0,
+            0.0,
+        );
+        painter.text_bold(1.0, 2.0, "hi", Color::new(9, 9, 9, 255), 16.0, 0.0);
+        for command in painter.finish() {
+            let DrawCommand::Text { fade, clip, .. } = command else {
+                panic!("three text recorders make text commands");
+            };
+            assert_eq!(fade, None, "no ramp without a ramp");
+            assert_eq!(clip, None, "and no clip without a box");
+        }
+    }
+
+    #[test]
+    fn two_rectangles_intersect_to_the_box_both_of_them_cover() {
+        let outer = Rect::new(0.0, 0.0, 100.0, 50.0);
+        assert_eq!(
+            outer.intersection(Rect::new(80.0, 10.0, 40.0, 80.0)),
+            Rect::new(80.0, 10.0, 20.0, 40.0),
+            "the overlap is where they agree, not either of them"
+        );
+        assert_eq!(
+            outer.intersection(outer),
+            outer,
+            "and a rect is its own overlap"
+        );
+        assert_eq!(
+            outer.intersection(Rect::new(10.0, 5.0, 20.0, 10.0)),
+            Rect::new(10.0, 5.0, 20.0, 10.0),
+            "**the intersection is the smaller of the two**, so a rect wholly \
+             inside another is not shrunk by it"
+        );
+        assert_eq!(
+            outer.intersection(Rect::new(-40.0, -40.0, 60.0, 140.0)),
+            Rect::new(0.0, 0.0, 20.0, 50.0),
+            "and one that hangs off every edge is cut on all four"
+        );
+        // **Not `None` for a miss.** An unset clip means *the whole window*, so a
+        // `None` here would be read as "unbounded" and the clip would cut
+        // nothing — the opposite of what the caller asked for.
+        let missed = outer.intersection(Rect::new(200.0, 0.0, 10.0, 10.0));
+        assert_eq!(
+            missed,
+            Rect::new(200.0, 0.0, 0.0, 10.0),
+            "an overlap of no width"
+        );
+        assert!(missed.is_empty(), "**and it says so**");
+        assert!(!outer.is_empty(), "while a real box does not");
+        assert!(
+            Rect::new(0.0, 0.0, 100.0, 0.0).is_empty(),
+            "a zero height is empty too"
+        );
+        assert!(
+            Rect::new(0.0, 0.0, -1.0, 10.0).is_empty(),
+            "and so is a negative width"
         );
     }
 }

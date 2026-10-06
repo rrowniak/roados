@@ -1440,7 +1440,7 @@ pub fn index_at(content_y: f32, item_count: usize, item_height: f32) -> Option<u
 /// | Variant | moves | does not move |
 /// | --- | --- | --- |
 /// | [`Rect`](DrawCommand::Rect), [`RoundedRect`](DrawCommand::RoundedRect) | the rect's `x` and `y` | its width and height, and its radius |
-/// | [`Text`](DrawCommand::Text) | the run's `x` and `y` | the text, its colour, its font size and its tracking |
+/// | [`Text`](DrawCommand::Text) | the run's `x` and `y`, its ramp's `start_x` and `end_x`, and its clip rect | the text, its colour, its font size and its tracking |
 /// | [`Image`](DrawCommand::Image) | the quad's rect | `uv`, `opacity`, `radius` and the texture — a `uv` is in the **texture's** coordinates and has no window position to move |
 /// | [`Line`](DrawCommand::Line) | both ends | its width |
 /// | [`Circle`](DrawCommand::Circle) | the centre | its radius |
@@ -1510,6 +1510,8 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 extra_advance,
                 family,
                 weight,
+                fade,
+                clip,
             } => DrawCommand::Text {
                 x: x + by.x,
                 y: y + by.y,
@@ -1522,6 +1524,20 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 // where the text is on screen.
                 family: *family,
                 weight: *weight,
+                // **The ramp moves and the text does not**, which is the same
+                // split as the family's and for the same reason read the other
+                // way round: `start_x` and `end_x` are positions on the screen,
+                // and a ramp left behind while its run moves fades a different
+                // part of the screen than the one it was recorded for — a run
+                // moved 600 px to the right with its window at the old place
+                // would draw at a factor of zero.
+                fade: fade.map(|ramp| ramp.translated(by)),
+                // **The clip moves for the same reason and because it is the one
+                // field whose being left behind is a wrong picture rather than a
+                // missing one**: a scissor is a box in window coordinates, so a
+                // clip that did not move would cut the wrong box and the run
+                // would disappear or spill.
+                clip: clip.map(|rect| rect.translated(by)),
             },
             DrawCommand::Image {
                 rect,
@@ -1697,7 +1713,7 @@ mod tests {
     use super::*;
     use crate::font::FontSet;
     use crate::layout::{Layout, LayoutState as State};
-    use crate::paint::{Color, FontWeight, PaintState, Painter, TextureId, UvRect};
+    use crate::paint::{Color, FadeRamp, FontWeight, PaintState, Painter, TextureId, UvRect};
     use std::cell::{Cell, RefCell};
 
     /// The list every virtualisation test scrolls: 100 rows 100 tall in a
@@ -2396,6 +2412,8 @@ mod tests {
             extra_advance: 1.5,
             family: heading,
             weight: FontWeight::Bold,
+            fade: Some(FadeRamp::new(107.0, 123.0)),
+            clip: Some(Rect::new(7.0, 8.0, 120.0, 20.0)),
         };
         let moved = translate_commands(std::slice::from_ref(&command), Offset::new(664.0, 120.0));
         let DrawCommand::Text {
@@ -2407,6 +2425,8 @@ mod tests {
             extra_advance,
             family,
             weight,
+            fade,
+            clip,
         } = &moved[0]
         else {
             panic!("a text run translated into something that is not a text run");
@@ -2428,6 +2448,22 @@ mod tests {
             "and it keeps its family too, for the same reason: a translated run \
              that fell back to the default family would be drawn from a different \
              chain, at different widths, with nothing to say so"
+        );
+        assert_eq!(
+            fade,
+            &Some(FadeRamp::new(771.0, 787.0)),
+            "**and the ramp moves with it.** Both of its edges are positions on \
+             the screen, so a ramp left at 107..123 while its run went to 671 \
+             fades a window the run is nowhere near — every corner of every glyph \
+             would be read at a factor of zero and the row would draw as nothing"
+        );
+        assert_eq!(
+            clip,
+            &Some(Rect::new(671.0, 128.0, 120.0, 20.0)),
+            "**and the clip moves with it**, and this one is a wrong picture rather \
+             than a missing one: a scissor is a box in window coordinates, so a \
+             clip left behind cuts the wrong box and the row either disappears or \
+             spills outside its own viewport"
         );
     }
 

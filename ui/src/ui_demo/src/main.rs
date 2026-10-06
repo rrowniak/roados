@@ -137,7 +137,7 @@
 //! **That is what dissolves the crowding the window's size forced.** Every widget
 //! for tasks 11 to 22 shares one canvas because they all had to, and the panel the
 //! dialog puts over the middle of it is the operator's accepted answer to that. One
-//! canvas holding one page's worth is the second answer: the twenty-six widgets were
+//! canvas holding one page's worth is the second answer: the twenty-eight widgets were
 //! never crowded by their own sizes, they were crowded by sharing a window.
 //!
 //! In the bottom left of the window a readout names how fast the loop is running:
@@ -581,7 +581,7 @@ const FALLBACK_TEXT: &str = "Fallback \u{26a0} \u{2713} and \u{4e2d} end";
 /// The size the fallback label's text is drawn at.
 ///
 /// **Its own constant, at [`TEXT_SIZE_START`]'s value, and deliberately not the
-/// panel's `text_size`.** The `+` and `-` keys re-lay the panel's seven labels
+/// panel's `text_size`.** The `+` and `-` keys re-lay the panel's nine labels
 /// through `Demo::set_text_size`, which measures each of them with the demo's own
 /// metrics; this label is measured through its own family's metrics instead, so
 /// following `text_size` would mean a second path through that method for one
@@ -592,9 +592,29 @@ const FALLBACK_FONT: f32 = 24.0;
 /// The panel the text is laid out in: the width its wrapping label wraps at,
 /// and the height the text column is given.
 ///
-/// The height is the column's height at [`TEXT_SIZE_START`]; the column is
-/// not clipped to it, so a larger `+` size overflows the window bottom by
-/// design.
+/// **The height is nominal and the column is not clipped to it, and task 32.1 is
+/// what turned that from a near-miss into a stated fact.** Before this sub-task
+/// the column measured **374** px against a 380 panel — ten lines of 29 plus seven
+/// gaps of [`LABEL_SPACING`] — so it fitted with six pixels to spare and this doc
+/// was right to within the difference. It now measures **456**: the same ten lines
+/// plus the two single-line rows [`TRUNCATION_ROWS`] added, so twelve lines of 29
+/// and nine gaps of 12, `348 + 108`. From [`TEXT_PANEL_ORIGIN`]'s 170 and
+/// [`CONTENT_TOP`]'s 64 the column runs **234 → 690** and the panel's own bottom
+/// is at **614**, which is **76 px** of overflow.
+///
+/// **The number was left alone, and the arithmetic is why.** The panel is a
+/// container with no background, so its height is not on screen and growing it
+/// would move nothing; the height that matters is the column's, and that is
+/// measured from the font's own line height at run time rather than written
+/// down here — `+` moves it and the doc above already says a larger size
+/// overflows the window bottom by design. **What the overflow has to clear is
+/// real and is held down by two tests rather than by this sentence**: the
+/// frame-rate readout's box is at [`FPS_READOUT_ORIGIN`]'s 684 plus
+/// [`CONTENT_TOP`]'s 64, which is **748**, so **58 px** separates the column's
+/// last row from the one box below it, and the window is 1020 tall.
+/// `the_readout_sits_below_the_text_column_and_left_of_the_controls` is the first
+/// and `every_placed_rect_is_inside_the_window` is the second, and both are
+/// measured over the laid-out rects rather than over this paragraph.
 const TEXT_PANEL: Size = Size {
     width: 900.0,
     height: 380.0,
@@ -627,6 +647,45 @@ const TEXT_SIZE_START: f32 = 24.0;
 const TEXT_SIZE_MIN: f32 = 10.0;
 const TEXT_SIZE_MAX: f32 = 64.0;
 const TEXT_SIZE_STEP: f32 = 2.0;
+
+/// The sentence **every** truncation row on the text page draws, verbatim.
+///
+/// **One string for three rows, and that is `TASK_UI_PRIM_32.md` requirement 7's
+/// *"all three modes on comparable text"***: a reader has to be able to tell the
+/// three apart with their eyes, so the three rows differ in the truncation mode
+/// and in nothing else — the same words, the same half of
+/// [`TEXT_COLUMN_WIDTH`], the same [`TEXT_SIZE_START`] and the same theme colour.
+/// `the_three_truncation_rows_draw_one_sentence_at_one_width` is the assertion,
+/// and it is a gate a dropped row cannot pass because it compares **three** rows
+/// and a missing one leaves two.
+///
+/// **The words name one of the three modes, and that is a wart left standing.**
+/// *"closed with an ellipsis"* is true of [`Truncation::Ellipsis`] and false of
+/// the other two for as long as the fade and the clip are one layout cut — which
+/// is what the sub-task after this one exists to remove. Rewording it is the fix
+/// and it is **not this sub-task's**: this sentence is task 11's evidence, and
+/// the capture this sub-task takes is the reference the mechanism is compared
+/// against row for row.
+const TRUNCATION_ROW_TEXT: &str = "A line far too long for the panel it is given is \
+     cut at the panel's edge and closed with an ellipsis.";
+
+/// The truncation modes the text page draws [`TRUNCATION_ROW_TEXT`] with, in the
+/// order the rows appear in the column — which is the order a capture shows them
+/// in, top to bottom.
+///
+/// **Three of the four variants, and [`Truncation::None`] is the one left out:**
+/// a row that is not truncated at all would run past its half-width instead of
+/// being cut, so it would be the same drawing as the paragraph above the three at
+/// a different width, and there would be nothing to compare.
+///
+/// **The order is this sub-task's decision, and it is the one the before-capture
+/// fixes.** The three rows cannot name their own mode — [`TRUNCATION_ROW_TEXT`]
+/// says why — so the order is the only thing that says which row is which, and a
+/// comparison against a later capture reads them off it.
+/// `the_text_page_carries_one_row_per_truncation_mode` writes the three out again
+/// rather than reading this array back, because an expected answer read out of
+/// the thing it checks agrees with whatever that thing says.
+const TRUNCATION_ROWS: [Truncation; 3] = [Truncation::Ellipsis, Truncation::Clip, Truncation::Fade];
 
 /// The theme tokens the labels' colour cycles through on `C`, in that order.
 ///
@@ -1285,7 +1344,10 @@ const IMAGE_CORNER_RADIUS: f32 = 10.0;
 /// text column and left of the control column.
 ///
 /// Measured rather than guessed, and the two numbers below are what the measuring
-/// found. The text column's last label ends at y 501, the control column starts at
+/// found. **The text column's last label ends at y 626 in these coordinates** — it
+/// was 501 when this was written and 544 after task 24.2's shift, and task 32.1's
+/// two truncation rows put it at 626; [`TEXT_PANEL`]'s doc carries the arithmetic.
+/// The control column starts at
 /// x 664 and the chart's column is at x 1000, so the strip from (0, 505) to
 /// (664, 720) is the one region of the window nothing is in. 684 is also where
 /// the chart's own readout's line is — it is at 694, ten above this one — so the
@@ -2479,7 +2541,7 @@ fn read_only_label(
 
 /// Records `demo_label`'s draw commands into the node at `handle`, in `rect`.
 ///
-/// The one place a label is painted, for the panel's seven and the band's nine
+/// The one place a label is painted, for the panel's nine and the band's nine
 /// readouts between them. `rect` is the node's own **laid-out** rect converted to
 /// the painter's.
 ///
@@ -3641,7 +3703,7 @@ impl Demo {
                 .set_constraints(Constraints::tight(size));
         }
         let label_nodes: Vec<Handle> = labels.iter().map(|demo| demo.label.handle()).collect();
-        // **The fallback label, and it is not one of the seven.** It is built here,
+        // **The fallback label, and it is not one of the nine.** It is built here,
         // beside them, and kept out of `labels` and `label_nodes` for two reasons
         // that are the same reason: both of those are the panel's list, and this
         // label is measured through **its own family's** chain rather than through
@@ -4941,7 +5003,7 @@ impl Demo {
         // row rather than a second list.
         //
         // **The order within a page is the tree's paint order**, which is what
-        // makes a row readable: the seven text labels are in the order
+        // makes a row readable: the nine text labels are in the order
         // `demo_labels` builds them and the controls are in the order they were
         // added to the layer. `Tab` does not read this order — `Focus` re-derives
         // the order by walking the tree — but a table whose rows are in no
@@ -4977,7 +5039,7 @@ impl Demo {
         for pad in &pads {
             on(Page::Pads, pad.node, false);
         }
-        // `text`: the panel, the column inside it, the seven labels and the fallback
+        // `text`: the panel, the column inside it, the nine labels and the fallback
         // label. The column is here rather than left out because it is the node the
         // labels are children of, and `hit_test` skips the whole subtree of an
         // invisible node — hiding the labels alone would leave a container that is
@@ -8100,7 +8162,7 @@ impl Demo {
     /// everything overlaps everything and prove nothing.
     ///
     /// What a reader can actually see is a set of boxes with names, and this is
-    /// that set: the card the pads sit in, the seven labels of the text panel, the
+    /// that set: the card the pads sit in, the nine labels of the text panel, the
     /// gauge and its readout, the slider and its readout, and then the things
     /// tasks 15 to 21 added. Two tests read it —
     /// `every_placed_rect_is_inside_the_window` and
@@ -8175,8 +8237,8 @@ impl Demo {
             // different failure every run.
             handles.push(("text panel label", handle));
         }
-        // **A name of its own, and not an eighth "text panel label".** It is
-        // named apart from the other seven because it behaves apart from them: it
+        // **A name of its own, and not a tenth "text panel label".** It is
+        // named apart from the other nine because it behaves apart from them: it
         // is the one label whose rect changes with something other than `+`/`-`,
         // so a failure about it is about the family and a failure named "text
         // panel label" would be about the size.
@@ -8221,7 +8283,7 @@ impl Demo {
     /// dissolved. What it strengthens is each page's own layout, which is the
     /// thing a reader switching tabs actually sees.
     ///
-    /// **Twenty-five of them, and the number is checked** —
+    /// **Twenty-eight of them, and the number is checked** —
     /// [`expected_placed_rect_names`] holds the whole set and
     /// [`assert_placed_handles_is_complete`] asserts its length. The three pads are
     /// three more widgets on screen and are **not** in it: they are the card's
@@ -8554,16 +8616,32 @@ const GALLERY_SHORTCUTS: [GalleryShortcut; 19] = [
 /// This is the visual proof for the label work, so it shows what the pipeline
 /// does rather than one string: the greeting, a paragraph that wraps at the
 /// panel's width, the three alignments across the same width, a letter-spaced
-/// line, and a line too long for the panel, truncated with an ellipsis. A
-/// change to a font size, a colour or a layout is visible in the running demo
+/// line, and then **one sentence drawn three times, once per truncation mode**.
+/// A change to a font size, a colour or a layout is visible in the running demo
 /// because of what is on this list.
+///
+/// **The last three rows are the truncation comparison, and they are built by one
+/// closure over [`TRUNCATION_ROWS`] rather than written out three times.** Every
+/// field but `truncation` has to be the same value in all three — that is what
+/// makes the three comparable and what makes the difference visible in one
+/// screenshot — so the shared part is written once and the part that differs is
+/// the argument. `the_three_truncation_rows_draw_one_sentence_at_one_width` is
+/// what holds the sharing down against a row edited on its own.
+///
+/// **And they do not say which mode they are, which the other rows do.** The
+/// alignment and letter-spacing rows name themselves in their own text
+/// (`"left aligned"`, `"centred"`, `"right aligned"`, `"letter spacing widens
+/// every gap"`), and these three cannot: a mode name in the row would move the
+/// cut point and the three lines would stop being like for like, which is the
+/// one thing requirement 7 asks for. [`TRUNCATION_ROWS`] is where their order
+/// lives and [`TRUNCATION_ROW_TEXT`] records why they are anonymous.
 fn demo_labels() -> Vec<(&'static str, LayoutOptions)> {
     let alignment = |align| LayoutOptions {
         max_width: TEXT_COLUMN_WIDTH,
         align,
         ..LayoutOptions::default()
     };
-    vec![
+    let mut labels = vec![
         (
             "Hello, World!",
             LayoutOptions {
@@ -8590,17 +8668,19 @@ fn demo_labels() -> Vec<(&'static str, LayoutOptions)> {
                 ..LayoutOptions::default()
             },
         ),
-        (
-            "A line far too long for the panel it is given is cut at the panel's \
-             edge and closed with an ellipsis.",
-            LayoutOptions {
-                max_width: TEXT_COLUMN_WIDTH * 0.5,
-                wrap: WrapMode::None,
-                truncation: Truncation::Ellipsis,
-                ..LayoutOptions::default()
-            },
-        ),
-    ]
+    ];
+    let truncation = |mode| LayoutOptions {
+        max_width: TEXT_COLUMN_WIDTH * 0.5,
+        wrap: WrapMode::None,
+        truncation: mode,
+        ..LayoutOptions::default()
+    };
+    labels.extend(
+        TRUNCATION_ROWS
+            .iter()
+            .map(|&mode| (TRUNCATION_ROW_TEXT, truncation(mode))),
+    );
+    labels
 }
 
 /// Returns the handles of the tree below `root` in paint order: a parent, then
@@ -9058,7 +9138,14 @@ mod tests {
     }
 
     #[test]
-    fn the_last_panel_label_is_cut_with_an_ellipsis() {
+    fn the_ellipsis_truncation_row_is_cut_with_an_ellipsis() {
+        // **Renamed by task 32.1, and index 6 is the row it always read.** It said
+        // *"the last panel label"*, which index 6 was while the panel held seven
+        // labels; it now holds nine and index 6 is the first of the three
+        // truncation rows — still [`Truncation::Ellipsis`], because
+        // [`TRUNCATION_ROWS`] puts it first. The assertions below are untouched.
+        // The last row is `Fade`, and asserting an ellipsis on it would be
+        // asserting the defect this row set exists to show.
         let demo = laid_out_on(Page::Text);
         let runs = label_runs(&demo, 6);
         assert_eq!(runs.len(), 1, "the long label is one line, not wrapped");
@@ -9072,6 +9159,153 @@ mod tests {
             "the text is cut before its end, got {:?}",
             runs[0]
         );
+    }
+
+    /// The text page carries **one row per truncation mode**, in the order
+    /// [`TRUNCATION_ROWS`] names, and every one of them is a row of the page table.
+    ///
+    /// **The three are written out here rather than read back out of
+    /// [`TRUNCATION_ROWS`]**, for the reason
+    /// [`expected_placed_rect_names`]'s own doc gives: an expected answer read out
+    /// of the thing it checks agrees with whatever that thing says, so a mode
+    /// dropped from the array would sail past a test that iterated the array. This
+    /// is the gate that makes a **dropped row** a failure rather than a shorter
+    /// gallery.
+    ///
+    /// **The page-table half is the complement assertion done by hand.** A node
+    /// missing from `page_members` is trivially *"always painted"* — which is the
+    /// state task 24.1's round-3 major was about — so reading the row for each of
+    /// the three handles is what says these three are page content and not six
+    /// more widgets drawn on every page.
+    #[test]
+    fn the_text_page_carries_one_row_per_truncation_mode() {
+        let demo = laid_out_on(Page::Text);
+        let rows: Vec<&DemoLabel> = demo
+            .labels
+            .iter()
+            .filter(|demo_label| demo_label.label.text.get() == TRUNCATION_ROW_TEXT)
+            .collect();
+        let modes: Vec<Truncation> = rows
+            .iter()
+            .map(|demo_label| demo_label.options.truncation)
+            .collect();
+        assert_eq!(
+            modes,
+            vec![Truncation::Ellipsis, Truncation::Clip, Truncation::Fade],
+            "one row per truncation mode, in `TRUNCATION_ROWS`' order. A capture \
+             therefore shows them top to bottom in that order, which is what a \
+             later capture is compared against row for row"
+        );
+
+        let nodes = demo.nodes.borrow();
+        for row in &rows {
+            let handle = row.label.handle();
+            let page = demo
+                .page_members
+                .iter()
+                .find(|member| member.handle == handle)
+                .map(|member| member.page);
+            assert_eq!(
+                page,
+                Some(Page::Text),
+                "{handle:?} is a row of the page table naming the text page. A node \
+                 that is in no row is always-painted by definition, so it would \
+                 draw on all six pages"
+            );
+            let node = nodes.get(handle).expect("a laid-out label node");
+            assert!(
+                node.layout().visible(),
+                "{handle:?} is visible on the text page, which is the gate \
+                 `Demo::sync_page_visibility` writes"
+            );
+        }
+    }
+
+    /// The three truncation rows are **comparable**: the same sentence, at the same
+    /// width, wrapped the same way, at the same size and in the same colour, and
+    /// differing in nothing but the truncation mode.
+    ///
+    /// **This is `TASK_UI_PRIM_32.md` requirement 7's "comparable text", and it
+    /// is the half that makes a screenshot answer anything.** Three rows of
+    /// different text, widths or sizes could differ in any number of ways at once,
+    /// so a reader comparing them would be comparing the wrong thing; one field
+    /// that differs is what turns the picture into evidence.
+    ///
+    /// **It is a gate a dropped row cannot pass**, because it compares **three**
+    /// rows and a missing one leaves two: the length is asserted first, so a
+    /// dropped row fails on the count rather than passing vacuously.
+    #[test]
+    fn the_three_truncation_rows_draw_one_sentence_at_one_width() {
+        let demo = laid_out_on(Page::Text);
+        let rows: Vec<&DemoLabel> = demo
+            .labels
+            .iter()
+            .filter(|demo_label| demo_label.label.text.get() == TRUNCATION_ROW_TEXT)
+            .collect();
+        assert_eq!(
+            rows.len(),
+            3,
+            "the shared sentence is drawn by three rows, one per truncation mode, \
+             and a row that is missing has left two to compare"
+        );
+
+        let first = rows[0];
+        for row in &rows {
+            assert_eq!(
+                row.label.text.get(),
+                TRUNCATION_ROW_TEXT,
+                "every row draws the sentence verbatim"
+            );
+            assert_eq!(
+                row.options.max_width, first.options.max_width,
+                "and every row is cut at the same width, or the three lines are not \
+                 comparable"
+            );
+            assert_eq!(
+                row.options.wrap, first.options.wrap,
+                "and every row wraps the same way: a row that wrapped would be two \
+                 lines tall and the three would not be side by side"
+            );
+            assert_eq!(
+                row.label.font_size.get(),
+                first.label.font_size.get(),
+                "and every row is drawn at one size — the only thing \
+                 `Demo::set_text_size` does for all of them at once"
+            );
+            assert_eq!(
+                row.label.color.get(),
+                first.label.color.get(),
+                "and every row takes its colour from the same bound property, so \
+                 `C` and a theme switch reach the three together"
+            );
+        }
+
+        // **Three distinct modes, and pairwise rather than through a set**: the
+        // three must tell each other apart, and two rows sharing a mode is two
+        // photographs of the same drawing.
+        for (index, row) in rows.iter().enumerate() {
+            for other in &rows[index + 1..] {
+                assert_ne!(
+                    row.options.truncation, other.options.truncation,
+                    "two of the three rows share a truncation mode, so the pair \
+                     differs in nothing at all"
+                );
+            }
+        }
+
+        // And each of the three records **one** run, which is what `WrapMode::None`
+        // at this width buys and what makes the rows line up on screen.
+        for (index, demo_label) in demo.labels.iter().enumerate() {
+            if demo_label.label.text.get() != TRUNCATION_ROW_TEXT {
+                continue;
+            }
+            assert_eq!(
+                label_runs(&demo, index).len(),
+                1,
+                "the truncation row at index {index} records one line, not a wrapped \
+                 paragraph"
+            );
+        }
     }
 
     #[test]
@@ -9155,7 +9389,7 @@ mod tests {
     /// The tests below are the demo's half of task 30. What they can establish is
     /// that the label exists, that its text is the text requirement 7 asks for,
     /// that `Y` writes the one property the whole mechanism reads, and that the
-    /// label is measured through a **different** function from the other seven.
+    /// label is measured through a **different** function from the other nine.
     ///
     /// What they cannot establish, and the reason is the same one the library
     /// tests give: **whether Lato covers a warning sign is a fact about a file on
@@ -9373,16 +9607,26 @@ mod tests {
     }
 
     #[test]
-    fn the_fallback_label_is_not_one_of_the_panels_own_seven() {
+    fn the_fallback_label_is_not_one_of_the_panels_own_rows() {
         // The structural half of the reason it is kept out of `labels`: if it were
         // in the list, `set_text_size` would measure it with the panel's metrics and
         // the paint loop would draw it with the panel's family, and nothing would
         // say so. This is the assertion that keeps it out.
+        //
+        // **Renamed, and the number it holds went from seven to nine with task
+        // 32.1's two truncation rows.** The name carried the count and the count
+        // moved, so a name saying seven over an assertion saying nine is the
+        // shape of the prose-against-the-number failure `expected_placed_rect_
+        // names`'s doc records — a number in a doc is a claim and only the
+        // `assert_eq!` is a test. The count is still written out rather than
+        // derived: nine is what `demo_labels` builds today, and a panel that grew
+        // a tenth row would have to come here and say so.
         let demo = laid_out_on(Page::Text);
         assert_eq!(
             demo.labels.len(),
-            7,
-            "the panel still holds the seven labels `demo_labels` builds"
+            9,
+            "the panel holds the nine labels `demo_labels` builds — six of them and \
+             the three truncation rows"
         );
         assert!(
             !demo.label_nodes.contains(&demo.fallback_handle),
@@ -12841,14 +13085,16 @@ mod tests {
     /// this helper's own doc cited while making exactly that mistake — is task
     /// 24.1's round-3 major, and this is the same one a table further down.
     ///
-    /// **Seven `text panel label` rows, and the repetition is load-bearing**: the
+    /// **Nine `text panel label` rows, and the repetition is load-bearing**: the
     /// comparison is over sorted lists with duplicates intact, so losing *one* of
-    /// the seven labels fails it. A set of names would not notice. The eighth
-    /// label is named `fallback label` and is one row rather than an eighth
-    /// repetition, for the reason [`Demo::placed_handles`] gives.
+    /// the nine labels fails it. A set of names would not notice. The tenth label
+    /// is named `fallback label` and is one row rather than a tenth repetition,
+    /// for the reason [`Demo::placed_handles`] gives.
     fn expected_placed_rect_names() -> Vec<&'static str> {
         vec![
             "pads card",
+            "text panel label",
+            "text panel label",
             "text panel label",
             "text panel label",
             "text panel label",
@@ -12894,18 +13140,18 @@ mod tests {
         let mut want = expected_placed_rect_names();
         want.sort_unstable();
         // **The count, checked rather than asserted in a doc comment.** One card,
-        // seven text-panel labels, one fallback label and seventeen controls and
+        // nine text-panel labels, one fallback label and seventeen controls and
         // readouts — and the second review of this task caught the prose above
         // claiming twenty-six while the list held twenty-five, which is the shape of
         // the same failure a number nobody computed is a number nobody checked.
         // Adding a leaf now has to change this line as well as the list, which is
-        // two edits and is the point. Task 30 is the second time this line has had
-        // to change, which is the evidence that it is the right place for the
-        // number rather than a doc comment.
+        // two edits and is the point. Task 30 and task 32.1 are the second and
+        // third times this line has had to change, which is the evidence that it is
+        // the right place for the number rather than a doc comment.
         assert_eq!(
             want.len(),
-            26,
-            "the written-out list holds one card, seven text-panel labels, one \
+            28,
+            "the written-out list holds one card, nine text-panel labels, one \
              fallback label and seventeen controls and readouts"
         );
         assert_eq!(
@@ -12919,7 +13165,7 @@ mod tests {
     }
 
     /// The nodes that draw something, have a box, and are **not** one of
-    /// [`Demo::placed_handles`]'s twenty-five — written out, and named individually
+    /// [`Demo::placed_handles`]'s twenty-eight — written out, and named individually
     /// rather than derived from anything the demo already believes.
     ///
     /// **Twelve, and nine of them are laid out by a container rather than placed by
@@ -14428,7 +14674,9 @@ mod tests {
     #[test]
     fn the_readout_sits_below_the_text_column_and_left_of_the_controls() {
         // The bottom left of the window is the one region nothing else is in: the
-        // text column's last label ends at y 501, the controls column starts at
+        // text column's last label ends at y 626 in content coordinates, which is
+        // 690 in the window and 58 above this readout's own box — the arithmetic is
+        // `TEXT_PANEL`'s — the controls column starts at
         // x 664 and the list's readout is at x 1000. `no_two_placed_rects_overlap`
         // says no two boxes touch; this says which boxes this one is clear of, so a
         // failure names the neighbour.
@@ -15346,7 +15594,7 @@ mod tests {
             "the card of pads is the one node whose origin was implicit, and it is \
              at the tab bar's height and nowhere else"
         );
-        let first_label = at(*demo.label_nodes.first().expect("seven labels"));
+        let first_label = at(*demo.label_nodes.first().expect("nine labels"));
         assert_eq!(
             (first_label.x, first_label.y),
             (TEXT_PANEL_ORIGIN.0, TEXT_PANEL_ORIGIN.1 + CONTENT_TOP),

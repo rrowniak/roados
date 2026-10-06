@@ -35,7 +35,7 @@
 //! claimed otherwise.
 
 use crate::arena::{Arena, Handle};
-use crate::font::FamilyId;
+use crate::font::{FamilyId, FontWeight};
 use crate::layout::LayoutState;
 use crate::node::{self, WidgetNode};
 use crate::property::{Color, Property};
@@ -71,13 +71,41 @@ pub enum WrapMode {
 pub enum Truncation {
     /// No truncation: text overflows the container.
     None,
-    /// Cut at the container's edge.
+    /// Cut at the container's edge, and every glyph past it is cut away by a
+    /// scissor.
+    ///
+    /// **Two cuts, and both are needed.** [`layout_text`] drops whole
+    /// characters past `max_width`, which is a cut of *text*: no glyph starts
+    /// where the box ends. A glyph whose ink overhangs its own advance — which is
+    /// a fact about the font's bearings and not about the layout — is left
+    /// standing past the edge, and [`Label::paint`] records the box on each
+    /// command so the GPU cuts it. The command's `clip` is the box;
+    /// `Batcher::add_clipped` intersects it with whatever clip the command's own
+    /// caller recorded under, and `Renderer::apply_clip` sets the scissor
+    /// between draw calls.
     Clip,
     /// Cut at the container's edge and append an ellipsis (`…`).
     Ellipsis,
-    /// Cut at the container's edge. Layout-wise identical to
-    /// [`Truncation::Clip`]: the fade is a rendering effect, and the renderer
-    /// that will apply it does not exist yet.
+    /// Cut at the container's edge, then ramped to nothing over the last
+    /// [`FADE_WIDTH_EM`] of the drawn run.
+    ///
+    /// **The layout cut is [`Truncation::Clip`]'s**, because a run of text has
+    /// to stop somewhere and dropping whole characters is the only cut the
+    /// advance widths can measure. **The ramp is applied at draw time, per
+    /// corner**: each glyph quad's four corners are scaled by their own x
+    /// against the window [`Label::paint`] records, so the fade is smooth inside
+    /// a glyph rather than stepped at glyph boundaries, and `TextVertex` stays 32
+    /// bytes with no shader change. [`FadeRamp`](crate::paint::FadeRamp) is where
+    /// that choice and its two rejected alternatives are argued.
+    ///
+    /// **Every truncated line ramps, at its own cut edge** — the operator decided
+    /// this on 2026-10-06, and it is not the last line only: a paragraph cut
+    /// across three lines has three cut edges and three windows.
+    ///
+    /// **The window is at the drawn run's far end, not at the container's edge.**
+    /// Under [`TextAlign::Right`] or [`TextAlign::Center`] the text ends
+    /// somewhere other than `max_width`, and it is the text's own end that is the
+    /// cut.
     Fade,
 }
 
@@ -133,6 +161,23 @@ pub struct Line {
     /// Extra pixels between two words on this line, beyond letter spacing.
     /// Zero unless the line is justified.
     pub word_gap: f32,
+    /// Whether **this line** had text cut from it.
+    ///
+    /// **Per line, and not [`TextLayout::truncated`], which is the whole layout.**
+    /// That flag folds every line's answer together with an `||`, so it cannot
+    /// say *which* line was cut, and a fade needs to know: the operator's policy
+    /// is that **every** truncated line ramps at its own cut edge, so a layout
+    /// whose first of three lines was cut and whose other two fit produces two
+    /// un-ramped runs and one ramped one — a question only this field can answer.
+    ///
+    /// **It is `true` for a line cut by the vertical limit as well as by its own
+    /// width**, which is `truncate_line`'s own answer: a line the height cut
+    /// off is truncated for the purposes of every caller of this flag, and a fade
+    /// at the end of the last visible line is the one place a vertical cut wants
+    /// one. The layout's `truncated` answers the same question the same way, so
+    /// this field is the per-line half of that one answer rather than a second
+    /// rule about it.
+    pub truncated: bool,
 }
 
 /// The result of laying a text out.
@@ -144,6 +189,11 @@ pub struct TextLayout {
     /// height.
     pub total_height: f32,
     /// Whether any text was cut to fit the container.
+    ///
+    /// **An `||` over every [`Line::truncated`], plus the vertical cut**, so it
+    /// answers "did anything at all go missing" and not "which line lost
+    /// something". A caller that draws has the second question and reads the
+    /// first.
     pub truncated: bool,
 }
 
@@ -236,6 +286,7 @@ pub fn layout_text(
             width,
             x_offset,
             word_gap,
+            truncated: line_truncated,
         });
         total_height += options.line_height;
     }
@@ -513,6 +564,12 @@ impl Label {
     /// recorded word by word, because its extra gap belongs between words and
     /// not after every glyph.
     ///
+    /// **The layout is run here rather than handed in**, and that is why the
+    /// fade is computed here too: the ramp's far end is the drawn run's end,
+    /// which is a number this method produces and no earlier layer has. A caller
+    /// that laid the label out itself cannot hand the answer over without this
+    /// method taking a second way of getting the same lines.
+    ///
     /// **The `advance` callback and the recorded family must be the same
     /// chain**, and the caller is the only thing that can see both: this method
     /// knows the family (from the property) and is handed the advances (from
@@ -532,42 +589,173 @@ impl Label {
         let color = self.color.get();
         let family = self.font_family.get();
         let space = measure(" ", options.letter_spacing, advance);
+        let clip = clip_for(rect, options, layout.total_height);
+        let fading = options.truncation == Truncation::Fade;
         let mut painter = crate::paint::Painter::new();
         let mut top = rect.y;
         for line in &layout.lines {
             let left = rect.x + line.x_offset;
             if line.word_gap > 0.0 {
+                // **The words are placed first and recorded second, and that is
+                // the only reason this branch has two loops.** Every command of a
+                // justified line carries one ramp, and the ramp's far end is where
+                // the last word ends — a number no word knows until the last one
+                // has been measured. Measuring them into a buffer first is what
+                // keeps the window and the word positions derived from the *same*
+                // pass; the alternative, a second expression for where the run
+                // ends, is the one place the two could disagree and the tests
+                // would be reading the wrong one.
+                let mut words: Vec<(f32, &str)> = Vec::new();
                 let mut x = left;
                 for (index, word) in line.text.split_whitespace().enumerate() {
                     if index > 0 {
                         x += space + line.word_gap;
                     }
-                    painter.text_in(
-                        family,
-                        x,
-                        top,
-                        word,
-                        color,
-                        font_size,
-                        options.letter_spacing,
-                    );
+                    words.push((x, word));
                     x += measure(word, options.letter_spacing, advance);
                 }
+                let fade = ramp_for(line, fading, left, x, font_size);
+                for (word_x, word) in words {
+                    painter.text_run(crate::paint::TextRun {
+                        family,
+                        x: word_x,
+                        y: top,
+                        text: word,
+                        color,
+                        font_size,
+                        extra_advance: options.letter_spacing,
+                        // **Named, not taken from `Default::default()`.** The
+                        // `..` fills `weight` in, and a `Default` that changed from
+                        // `Regular` would silently draw every label in the
+                        // application bold — which a `Label` property says nothing
+                        // about, because it has no weight property.
+                        weight: FontWeight::Regular,
+                        fade,
+                        clip,
+                    });
+                }
             } else {
-                painter.text_in(
+                // `left + line.width` is where the pen ends, and not an estimate
+                // of it: `measure` is the sum this loop and `render::walk_run`
+                // both add, one `advance(ch) + extra_advance` per character
+                // including the last. So the window's far end is the run's own
+                // end under every alignment, which is what requirement 2 asks
+                // for — with `Right` and `Center` this is well short of
+                // `rect.x + max_width`, and the overflow is at *this* end.
+                let fade = ramp_for(line, fading, left, left + line.width, font_size);
+                painter.text_run(crate::paint::TextRun {
                     family,
-                    left,
-                    top,
-                    &line.text,
+                    x: left,
+                    y: top,
+                    text: &line.text,
                     color,
                     font_size,
-                    options.letter_spacing,
-                );
+                    extra_advance: options.letter_spacing,
+                    // Named rather than defaulted — see the note in the branch above.
+                    weight: FontWeight::Regular,
+                    fade,
+                    clip,
+                });
             }
             top += options.line_height;
         }
         painter.finish()
     }
+}
+
+/// The truncation fade's width, in ems of the run's own font size.
+///
+/// **Two, and it is pinned by a test** because nothing can prove a chosen
+/// constant is the right one — the number is a decision, not a measurement, and
+/// the one thing a reader can check is that it has not moved.
+///
+/// The reasoning it rests on is about the text rather than about a number in
+/// pixels: a ramp narrower than the text's own glyph advance quantises into
+/// steps, because it only has room to move one glyph's alpha and a reader sees a
+/// band rather than a fade; and a ramp wide enough to swallow a whole short line
+/// stops reading as a fade at all and starts reading as a wrong opacity. **Two
+/// ems is between those**, and it scales with the text because an em does — a
+/// constant in pixels would be a legible fade at 10 px and an illegible one at
+/// 64, and the demo's `+`/`-` moves the size by 2 px at a time.
+///
+/// Change it with a recorded reason, the way this paragraph is the reason for
+/// the number above.
+pub const FADE_WIDTH_EM: f32 = 2.0;
+
+/// The ramp a laid-out line fades out over, or `None` for a run drawn flat.
+///
+/// **Two conditions, and they are not one.** `truncated` is the line's own
+/// [`Line::truncated`]: a line that fit has no cut edge to fade at, and fading
+/// one anyway would dim a paragraph for no reason. `fading` is the label's mode:
+/// the other three modes do not fade, and a ramp recorded under them would be
+/// applied by the renderer whether or not anything asked for it.
+///
+/// **`run_end` is where the drawn run ends, not where the container ends.** Every
+/// branch of [`align_line`] floors its offset with `.max(0.0)`, so an overlong
+/// line under `Right` or `Center` is drawn from `rect.x` — left-aligned in
+/// practice — and its run ends at `rect.x + line.width`, which is *shorter* than
+/// `rect.x + max_width` by the width the cut removed. That arithmetic is the
+/// reason the window is the run's and not the container's.
+fn ramp_for(
+    line: &Line,
+    fading: bool,
+    left: f32,
+    run_end: f32,
+    font_size: f32,
+) -> Option<crate::paint::FadeRamp> {
+    if !fading || !line.truncated {
+        return None;
+    }
+    Some(crate::paint::FadeRamp::to_run_end(
+        left,
+        run_end,
+        FADE_WIDTH_EM * font_size,
+    ))
+}
+
+/// The box a truncating label's commands are clipped to, or `None`.
+///
+/// **`None` for every mode but [`Truncation::Clip`]**, which is the only one
+/// whose name is a claim about a paint-time cut. An ellipsis's `…` and a fade's
+/// ramp are both about the text itself, and recording a scissor for them would
+/// be a state change per run for nothing.
+///
+/// **Narrowed to `max_width`, and the `.min` is load-bearing in both
+/// directions.** `LayoutOptions::default` has `max_width` of `f32::INFINITY`, and
+/// a label that is *not* truncated by width still gets a clip: the `.min` is what
+/// makes that the label's own box rather than an unbounded one. And a caller
+/// whose `rect` is narrower than its own `max_width` — a node given a tight
+/// constraint by the layout pass — is clipped to the node, because the node's box
+/// is the smaller claim and the label does not get to draw outside it.
+///
+/// **`total_height` widens the box downwards, and that is a correction rather
+/// than a fudge.** [`Label::size`] answers **a font size** for the height and a
+/// line box is a *line height* — the demo's `metrics.line_height(24.0)` — so a
+/// node given the label's own size is **shorter than the text it holds**, and a
+/// descender is what lives in the difference. Clipping to `rect.height` alone
+/// would cut the tail off a `g`, `p` or `y` on a `Truncation::Clip` label at
+/// every size, and `Truncation::Clip` claims to cut overflow and nothing else.
+///
+/// **Measured at 64 px, not asserted about the demo.** At the demo's 24 px the
+/// node's box happens to cover this sentence's ink exactly — 23 rows of ink in a
+/// 24-tall box — so the difference is invisible on screen and the claim above is
+/// arithmetic over [`Label::size`] and `options.line_height`.
+/// `a_clipping_labels_box_covers_the_text_it_draws` holds it down where the gap
+/// is 14 pixels rather than 5.
+fn clip_for(
+    rect: crate::paint::Rect,
+    options: &LayoutOptions,
+    total_height: f32,
+) -> Option<crate::paint::Rect> {
+    if options.truncation != Truncation::Clip {
+        return None;
+    }
+    Some(crate::paint::Rect::new(
+        rect.x,
+        rect.y,
+        options.max_width.min(rect.width),
+        rect.height.max(total_height),
+    ))
 }
 
 #[cfg(test)]
@@ -899,7 +1087,18 @@ mod tests {
 #[cfg(test)]
 mod paint_tests {
     use super::*;
-    use crate::paint::{DrawCommand, Rect};
+    use crate::paint::{DrawCommand, FadeRamp, Rect};
+
+    /// The 5-pixel monospace advance this module's fixture is built on, so a
+    /// character count is a pixel count and the numbers below are readable.
+    ///
+    /// **Its own copy rather than the one `tests` holds.** A private helper in a
+    /// `#[cfg(test)]` module is not reachable from a sibling, and the two are
+    /// fixtures rather than a rule: this module asserts its own numbers against
+    /// this one and `tests` asserts its own against that one.
+    fn mono(_: char) -> f32 {
+        5.0
+    }
 
     /// The x, y, text and tracking of every command a label records.
     fn runs(label: &Label, rect: Rect, options: &LayoutOptions) -> Vec<(f32, f32, String, f32)> {
@@ -992,6 +1191,558 @@ mod paint_tests {
         assert_eq!(painted[1].0, 45.0);
         assert_eq!(painted[2].0, 90.0);
         assert_eq!(painted[3].2, "dd ee ff");
+    }
+
+    /// The commands a label recorded, as `(x, ramp, clip)` — the two fields this
+    /// task added and nothing else, so a test about either is not also a test
+    /// about the text.
+    fn windows(
+        label: &Label,
+        rect: Rect,
+        options: &LayoutOptions,
+    ) -> Vec<(f32, Option<FadeRamp>, Option<Rect>)> {
+        label
+            .paint(rect, options, &mono)
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Text { x, fade, clip, .. } => Some((*x, *fade, *clip)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A label showing `text` at 24 pixels, which is the size the demo draws its
+    /// text at and the size every width below is a number for.
+    fn at_size(text: &str, size: f32) -> (Arena<WidgetNode>, Label) {
+        let (nodes, label) = label(text);
+        label.font_size.set(size);
+        (nodes, label)
+    }
+
+    /// A single line long enough to be cut at 100, in the mode asked for.
+    fn truncating(mode: Truncation) -> LayoutOptions {
+        LayoutOptions {
+            max_width: 100.0,
+            line_height: 20.0,
+            wrap: WrapMode::None,
+            truncation: mode,
+            ..LayoutOptions::default()
+        }
+    }
+
+    /// 30 characters of `mono` is 150, so a 100-pixel box keeps 20 of them and
+    /// the run ends 100 pixels after its left edge.
+    const CUT_TEXT: &str = "abcdefghijklmnopqrstuvwxyz";
+
+    #[test]
+    fn a_label_records_its_runs_in_the_regular_face_whatever_the_truncation() {
+        // `Label::paint` names `FontWeight::Regular` rather than letting
+        // `TextRun::default()` fill it in, because a `Default` that changed would
+        // draw every label in the application bold and nothing in `Label`'s API says
+        // a label has a weight. This asserts every mode, because `paint` records
+        // through two different literals and the clip only narrows the third.
+        for mode in [
+            Truncation::None,
+            Truncation::Ellipsis,
+            Truncation::Fade,
+            Truncation::Clip,
+        ] {
+            let (_nodes, label) = at_size(CUT_TEXT, 24.0);
+            let painted = label.paint(
+                Rect::new(60.0, 170.0, 150.0, 29.0),
+                &truncating(mode),
+                &mono,
+            );
+            assert!(!painted.is_empty(), "{mode:?} records something");
+            for command in &painted {
+                let DrawCommand::Text { weight, .. } = command else {
+                    panic!("a label records text commands");
+                };
+                assert_eq!(
+                    *weight,
+                    FontWeight::Regular,
+                    "{mode:?} records a run in the regular face"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_fading_line_carries_a_ramp_that_ends_at_the_drawn_run_not_the_container() {
+        // Requirement 1 and requirement 2 together, left-aligned, where the two
+        // ends happen to agree and the assertion therefore says nothing about
+        // which one the code used. The four-alignment test below is the one that
+        // tells them apart.
+        let (_nodes, label) = at_size(CUT_TEXT, 24.0);
+        let options = truncating(Truncation::Fade);
+        let rect = Rect::new(60.0, 170.0, 150.0, 29.0);
+        let painted = windows(&label, rect, &options);
+        assert_eq!(painted.len(), 1, "one line, one command");
+        let (x, ramp, clip) = painted[0];
+        assert_eq!(x, 60.0, "and it starts at the rect's left edge");
+        let ramp = ramp.expect("a truncated fading line carries a ramp");
+        assert_eq!(
+            ramp.end_x, 160.0,
+            "**the window ends at the run's end**, 60 + 100"
+        );
+        assert_eq!(
+            ramp.start_x, 112.0,
+            "**and begins two ems of 24 px before it** — `FADE_WIDTH_EM` pinned"
+        );
+        assert_eq!(clip, None, "a fading label is not clipped: only `Clip` is");
+    }
+
+    #[test]
+    fn the_ramp_sits_at_the_drawn_runs_own_edge_under_every_alignment() {
+        // Requirement 2, and the acceptance criterion that names it. `mono` is 5
+        // pixels per character, so the run is exactly 100 wide and `fit` keeps 20
+        // characters — and **`align_line` floors every offset with `.max(0.0)`**, so
+        // an overlong line is drawn from `rect.x` under `Right` and `Center` too:
+        // `max_width - line_width` is 0, not negative, because the *cut* line is
+        // measured after the cut. So all four alignments put the run's end at
+        // `rect.x + 100` and the window moves with the run, not with the
+        // container. `rect.width` is 150 here, so a window that used the
+        // container's edge would end at 210 and this assertion would fail.
+        let (_nodes, label) = at_size(CUT_TEXT, 24.0);
+        let rect = Rect::new(60.0, 170.0, 150.0, 29.0);
+        for align in [
+            TextAlign::Left,
+            TextAlign::Center,
+            TextAlign::Right,
+            TextAlign::Justify,
+        ] {
+            let options = LayoutOptions {
+                align,
+                ..truncating(Truncation::Fade)
+            };
+            let painted = windows(&label, rect, &options);
+            assert_eq!(painted.len(), 1, "{align:?} records one run");
+            let ramp = painted[0]
+                .1
+                .unwrap_or_else(|| panic!("{align:?} carries a ramp, or this proves nothing"));
+            assert_eq!(
+                ramp.end_x, 160.0,
+                "{align:?}: the window ends at the run's end, not at rect.x + width"
+            );
+            assert_ne!(
+                ramp.end_x,
+                rect.x + rect.width,
+                "**and explicitly not at the container's edge**, which is the \
+                 other number requirement 2 names"
+            );
+            assert_eq!(ramp.start_x, 112.0, "{align:?}: two ems of 24 px before it");
+        }
+    }
+
+    #[test]
+    fn the_ramps_far_end_is_the_runs_end_and_not_the_budget_the_layout_was_given() {
+        // **The fixture that separates `left + line.width` from
+        // `left + max_width`,** and without it the alignment test above cannot
+        // tell which of the two the code computed: with a whole-pixel advance and
+        // a whole-pixel budget, `fit` keeps exactly the budget and the two
+        // numbers are the same one.
+        //
+        // 6.5 pixels a character against a 100-pixel budget: fifteen characters
+        // are 97.5 and sixteen are 104, so the cut is 2.5 pixels short of the
+        // budget. **That 2.5 is the whole of this test** — a window built from
+        // `max_width` would put the ramp's far end inside the last glyph.
+        let adv = 6.5;
+        let advance = |_: char| adv;
+        let (_nodes, label) = at_size(CUT_TEXT, 24.0);
+        let options = truncating(Truncation::Fade);
+        let layout = label.layout(&options, &advance);
+        assert_eq!(layout.lines[0].text.len(), 15, "**fifteen characters fit**");
+        assert!(
+            (layout.lines[0].width - 97.5).abs() < 0.001,
+            "and they are 97.5 wide, not 100: {}",
+            layout.lines[0].width
+        );
+
+        let painted = label.paint(Rect::new(60.0, 170.0, 150.0, 29.0), &options, &advance);
+        let ramp = match &painted[0] {
+            DrawCommand::Text { fade, .. } => *fade,
+            _ => panic!("a label records text commands"),
+        };
+        let ramp = ramp.expect("a truncated fading line carries a ramp");
+        assert_eq!(
+            ramp.end_x, 157.5,
+            "**the window ends at the run's end**, 60 + 97.5"
+        );
+        assert_eq!(
+            ramp.end_x,
+            60.0 + options.max_width - 2.5,
+            "and 2.5 pixels short of the budget, which is what `fit` left over"
+        );
+        assert_ne!(
+            ramp.end_x,
+            60.0 + options.max_width,
+            "**not at the budget** — and this is the assertion that fails if the \
+             window is ever built from `max_width` instead of from the drawn run"
+        );
+        assert_ne!(
+            ramp.end_x,
+            60.0 + 150.0,
+            "**nor at the container's edge**, which is the other number requirement \
+             2 names"
+        );
+    }
+
+    #[test]
+    fn the_ramp_is_pinned_to_two_ems_of_the_font_size() {
+        // Requirement 1's "a documented width", as a number nothing can move.
+        // **A design constant cannot be proved right by a test**, so the test
+        // proves it has not changed, and the paragraph on `FADE_WIDTH_EM` is the
+        // reason it is what it is.
+        assert_eq!(
+            FADE_WIDTH_EM, 2.0,
+            "two ems: narrower than a glyph advance and it steps, wider than a \
+             short line and it stops reading as a fade"
+        );
+        // The run here is `CUT_TEXT` cut to 100 pixels, and the sizes below are
+        // the ones where two ems still fits inside it — so the window's width is
+        // the ems and nothing else is in the way.
+        for size in [8.0, 16.0, 24.0, 32.0] {
+            let (_nodes, label) = at_size(CUT_TEXT, size);
+            let painted = windows(
+                &label,
+                Rect::new(0.0, 0.0, 100.0, 29.0),
+                &truncating(Truncation::Fade),
+            );
+            let ramp = painted[0]
+                .1
+                .expect("a truncated fading line carries a ramp");
+            let width = ramp.end_x - ramp.start_x;
+            let expected = FADE_WIDTH_EM * size;
+            assert!(
+                (width - expected).abs() < 0.001,
+                "at {size} px the window is {width} wide and two ems is {expected}"
+            );
+        }
+        // And the one case where it does not fit: 64 px puts two ems at 128
+        // against a 100-pixel run, so the window is the whole run rather than
+        // 128 pixels of it — which is `FadeRamp::to_run_end`'s floor and is
+        // asserted here because a mutation that dropped the floor would widen
+        // this window off the left end of the text.
+        let (_nodes, label) = at_size(CUT_TEXT, 64.0);
+        let painted = windows(
+            &label,
+            Rect::new(0.0, 0.0, 100.0, 29.0),
+            &truncating(Truncation::Fade),
+        );
+        let ramp = painted[0]
+            .1
+            .expect("a truncated fading line carries a ramp");
+        assert_eq!(
+            ramp,
+            FadeRamp::new(0.0, 100.0),
+            "**at 64 px two ems is wider than the run, so the window is the run**"
+        );
+    }
+
+    #[test]
+    fn a_line_that_was_not_truncated_carries_no_ramp() {
+        // The mutation "record a fade for every line" is a wrong picture — a
+        // whole paragraph dimmed at its right-hand end for no reason — and the
+        // only thing that sees it is the per-line flag.
+        let (_nodes, label) = label("abcdef");
+        // 6 characters at 5 pixels is 30, inside the 100-pixel box.
+        let options = truncating(Truncation::Fade);
+        let painted = windows(&label, Rect::new(0.0, 0.0, 100.0, 29.0), &options);
+        assert_eq!(painted.len(), 1);
+        assert_eq!(
+            painted[0].1, None,
+            "**a line that fits has no cut edge to fade at**"
+        );
+    }
+
+    #[test]
+    fn only_the_truncated_line_of_a_wrapped_fade_carries_a_ramp() {
+        // The operator's policy: **every** truncated line ramps, at its own cut
+        // edge — not only the last. A paragraph whose middle line is the one that
+        // got cut is the shape that distinguishes "the last line" from "the cut
+        // lines", so this is the assertion that holds the policy down rather than
+        // the flag.
+        // A word longer than the box, which is the one way a *wrapped* line gets
+        // truncated: word wrapping leaves an overlong word on its own line
+        // rather than breaking it, and `truncate_line` then cuts it.
+        let long = "x".repeat(40);
+        let (_nodes, label) = label(&format!("hi {long} bye"));
+        let options = LayoutOptions {
+            max_width: 60.0,
+            line_height: 20.0,
+            truncation: Truncation::Fade,
+            ..LayoutOptions::default()
+        };
+        let layout = label.layout(&options, &mono);
+        let truncated: Vec<bool> = layout.lines.iter().map(|l| l.truncated).collect();
+        assert_eq!(
+            truncated,
+            vec![false, true, false],
+            "**the middle line is the \
+            one that was cut**, and the other two fit: 10, 60 of 60 and 15 pixels"
+        );
+        assert!(layout.truncated, "and the layout-wide flag still says so");
+
+        let painted = windows(&label, Rect::new(0.0, 0.0, 100.0, 200.0), &options);
+        assert_eq!(painted.len(), layout.lines.len(), "one command per line");
+        for (index, (x, ramp, _)) in painted.iter().enumerate() {
+            let expected = layout.lines[index].truncated;
+            if expected {
+                let ramp = ramp.expect("a truncated line ramps");
+                assert_eq!(
+                    ramp.end_x,
+                    *x + layout.lines[index].width,
+                    "**line {index} ramps at its own cut edge**: the drawn run's \\
+                     end, which is where the characters this line lost would have \\
+                     gone"
+                );
+            } else {
+                assert_eq!(
+                    *ramp, None,
+                    "**line {index} was not cut and must not fade**"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_justified_fading_line_ramps_at_the_end_of_its_last_word() {
+        // The branch with one command per word, where the window cannot be known
+        // until the last word has been measured. `mono` is 5 per character, so
+        // "aa bb cc" is 45 wide and the two 5-pixel gaps take 10 of the 100,
+        // leaving 45 for the stretch: 22.5 each, so the words are at 0, 52.5 and
+        // 105 and the run ends at 135.
+        let (_nodes, short) = label("aa bb cc");
+        let options = LayoutOptions {
+            max_width: 57.0,
+            line_height: 20.0,
+            wrap: WrapMode::None,
+            truncation: Truncation::Fade,
+            align: TextAlign::Justify,
+            ..LayoutOptions::default()
+        };
+        // 45 < 57, so this fits: a sanity check on the fixture, because the
+        // second half of it only means something if the first really was cut.
+        let fitted = short.layout(&options, &mono);
+        assert!(
+            !fitted.lines[0].truncated,
+            "the short fixture fits: 45 of 57"
+        );
+
+        // So make it too long to fit and justify what is left. `fit` keeps whole
+        // characters, so 57 pixels is 11 of them: "aa bb cc dd", which is four
+        // words and **no trailing space** — and that matters, because a line cut
+        // after a space measures the same as its budget and is justified by
+        // nothing at all. Four words, three gaps, 55 pixels used and 2 to
+        // stretch: `word_gap` is 2/3.
+        //
+        // **Two paragraphs, and that is not decoration.** `align_line`
+        // justifies nothing that is its paragraph's last line, so a single
+        // paragraph under `WrapMode::None` is one last line and gets
+        // `word_gap = 0` — the second line here is what makes the first one
+        // justifyable. It also has to be *short*, or it would be the one cut.
+        let (_nodes, justified) = label("aa bb cc dd ee ff\nshort");
+        let layout = justified.layout(&options, &mono);
+        assert_eq!(
+            layout.lines[0].text, "aa bb cc dd",
+            "**the fixture is cut at 57**"
+        );
+        assert!(layout.lines[0].truncated, "and the line says so");
+        assert!(
+            !layout.lines[1].truncated,
+            "while the second line is not cut"
+        );
+        assert!(
+            layout.lines[0].word_gap > 0.0,
+            "and justified, or there is no word branch to read: {}",
+            layout.lines[0].word_gap
+        );
+        let painted = justified.paint(Rect::new(0.0, 0.0, 57.0, 20.0), &options, &mono);
+        // **Only the first line's commands.** The fixture has two lines and the
+        // second is not justified, so reading "the last command of the paint"
+        // would read the wrong line's last word — which is the trap this test
+        // exists to walk into, so it is named rather than hidden.
+        let words: Vec<(f32, String, Option<FadeRamp>)> = painted
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Text {
+                    x, y, text, fade, ..
+                } if *y == 0.0 => Some((*x, text.clone(), *fade)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            words.len() > 1,
+            "a justified line is one command per word, and this one is not \
+             justified otherwise: {} command(s)",
+            words.len()
+        );
+        let last = words.last().expect("at least one word");
+        let last_end = last.0 + measure(&last.1, options.letter_spacing, &mono);
+        for (x, word, ramp) in &words {
+            let ramp = ramp.expect("every word of a truncated justified line carries the ramp");
+            assert_eq!(
+                ramp.end_x, last_end,
+                "**every word carries the same window**, and it ends at the last \
+                 word's end ({last_end}), not at the container's 57"
+            );
+            let word_end = x + measure(word, options.letter_spacing, &mono);
+            assert!(
+                word_end <= last_end,
+                "and no word ends past it: {word:?} ends at {word_end}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_clipping_label_records_its_box_and_the_other_modes_record_none() {
+        // Requirement 3, on the recorded command. The box is **narrowed to
+        // `max_width`**, which is the box the text is cut at and — where the
+        // layout pass gave the node a rect of the text's natural size, which is
+        // what the demo does — not the node's own width.
+        let (_nodes, label) = label(CUT_TEXT);
+        let rect = Rect::new(60.0, 170.0, 150.0, 29.0);
+        let painted = windows(&label, rect, &truncating(Truncation::Clip));
+        assert_eq!(painted.len(), 1);
+        assert_eq!(
+            painted[0].2,
+            Some(Rect::new(60.0, 170.0, 100.0, 29.0)),
+            "**the box is the cut at 100, not the 150-wide node rect**"
+        );
+        assert_eq!(painted[0].1, None, "and a clipped line does not fade");
+
+        for mode in [Truncation::None, Truncation::Ellipsis, Truncation::Fade] {
+            let painted = windows(&label, rect, &truncating(mode));
+            assert_eq!(painted[0].2, None, "{mode:?} records no clip");
+        }
+    }
+
+    #[test]
+    fn a_clipping_label_is_clipped_to_its_own_box_when_the_box_is_the_smaller_claim() {
+        // The `.min` the other way round, and the reason it is there: a node given
+        // a tight constraint narrower than the text's `max_width` is clipped to
+        // the *node*, because the node's box is the smaller claim.
+        let (_nodes, narrow_node) = label(CUT_TEXT);
+        let painted = windows(
+            &narrow_node,
+            Rect::new(60.0, 170.0, 40.0, 29.0),
+            &truncating(Truncation::Clip),
+        );
+        assert_eq!(painted[0].2, Some(Rect::new(60.0, 170.0, 40.0, 29.0)));
+
+        // And `LayoutOptions::default`'s `max_width` of infinity, which is the
+        // case a caller that never set it is in: the clip is the node's box, not
+        // an unbounded one.
+        let (_nodes, unbounded) = label(CUT_TEXT);
+        let painted = windows(
+            &unbounded,
+            Rect::new(60.0, 170.0, 150.0, 29.0),
+            &LayoutOptions {
+                truncation: Truncation::Clip,
+                wrap: WrapMode::None,
+                line_height: 20.0,
+                ..LayoutOptions::default()
+            },
+        );
+        assert_eq!(
+            painted[0].2,
+            Some(Rect::new(60.0, 170.0, 150.0, 29.0)),
+            "**an unset `max_width` does not make the clip unbounded**"
+        );
+    }
+
+    #[test]
+    fn a_clipping_labels_box_covers_the_text_it_draws() {
+        // The vertical half of `clip_for`, at a size where the gap is visible in
+        // the arithmetic. `Label::size` answers a **font size** for the height,
+        // and a line box is a **line height**: 64 against 78, so a clip taken at
+        // the node's own height would cut 14 pixels off the bottom of the text —
+        // and a descender is exactly what lives there. `Truncation::Clip` claims
+        // to cut overflow, so a clip that cuts a `p` in half is not that.
+        let (_nodes, label) = at_size(CUT_TEXT, 64.0);
+        let options = LayoutOptions {
+            max_width: 100.0,
+            line_height: 78.0,
+            wrap: WrapMode::None,
+            truncation: Truncation::Clip,
+            ..LayoutOptions::default()
+        };
+        let painted = windows(&label, Rect::new(60.0, 170.0, 100.0, 64.0), &options);
+        let clip = painted[0].2.expect("a clipping label records its box");
+        assert_eq!(
+            clip,
+            Rect::new(60.0, 170.0, 100.0, 78.0),
+            "**the box is 78 tall, not the node's 64**: it reaches the bottom of \
+             the one line box the layout drew"
+        );
+        // And a node *taller* than its text keeps its own height, because then
+        // the node's box is the larger claim and nothing is cut either way.
+        let painted = windows(&label, Rect::new(60.0, 170.0, 100.0, 200.0), &options);
+        assert_eq!(
+            painted[0].2,
+            Some(Rect::new(60.0, 170.0, 100.0, 200.0)),
+            "a node taller than its text is clipped to the node"
+        );
+        // And a node taller than its text with two lines is the *text*, which is
+        // 156, so it is still the node.
+        let multi = LayoutOptions {
+            max_width: 40.0,
+            ..options
+        };
+        let painted = windows(&label, Rect::new(60.0, 170.0, 40.0, 200.0), &multi);
+        assert_eq!(
+            painted[0].2,
+            Some(Rect::new(60.0, 170.0, 40.0, 200.0)),
+            "two line boxes of 78 are 156, inside the node's 200"
+        );
+    }
+
+    #[test]
+    fn the_cut_leaves_the_last_glyph_inside_the_box_and_the_clip_is_what_would_cut_it() {
+        // Requirement 3's acceptance criterion, as far as a font-free test can
+        // reach it, and the honest statement of what is left for the GPU.
+        //
+        // `fit` keeps whole characters whose accumulated advance fits the budget,
+        // so **the layout's cut never starts a glyph past the box** — that is the
+        // half of the criterion a unit test can hold, and it is what makes the
+        // other half a question about bearings rather than about this code. What
+        // the GPU adds is the glyph's *ink* width, which is `bearing_x + width`
+        // and is not in the command: `A`, `f` and `v` in Lato Medium overhang
+        // their advance by exactly 1.0 px at 24 px, measured, and a cut that
+        // happened to land on one of them is a glyph the scissor removes and the
+        // layout could not have. So the gate is the box, and the box is asserted
+        // here: a point inside the box is inside the clip and a point past it is
+        // not.
+        let (_nodes, label) = label(CUT_TEXT);
+        let rect = Rect::new(60.0, 170.0, 150.0, 29.0);
+        let painted = windows(&label, rect, &truncating(Truncation::Clip));
+        let (x, _, clip) = painted[0];
+        let clip = clip.expect("a clipping label records its box");
+        let layout = label.layout(&truncating(Truncation::Clip), &mono);
+        let last = &layout.lines[0];
+        assert!(
+            x + last.width <= clip.x + clip.width,
+            "**every glyph the layout kept starts inside the box**: the run ends \
+             at {} and the box at {}",
+            x + last.width,
+            clip.x + clip.width
+        );
+        let inside = clip.x + clip.width - 0.5;
+        let outside = clip.x + clip.width + 0.5;
+        assert!(
+            inside >= clip.x && inside <= clip.x + clip.width,
+            "**a glyph inside the box is not cut**: {inside} is inside \
+             {}..={}",
+            clip.x,
+            clip.x + clip.width
+        );
+        assert!(
+            !(outside >= clip.x && outside <= clip.x + clip.width),
+            "**and a glyph past the edge is**: {outside} is outside \
+             {}..={}",
+            clip.x,
+            clip.x + clip.width
+        );
     }
 
     #[test]

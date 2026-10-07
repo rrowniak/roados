@@ -11,11 +11,11 @@ The platform and cross-compilation tasks are a separate sequence —
 `doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
 `doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-07 (**task 36 (Matrix maths and the transform-to-GPU path) implemented, verified, record written; task 35 (Mesh vertex format and GPU buffers) implemented, verified, record written; task 34 (Depth buffer) implemented, verified, and committed as `c83ff11` on 2026-10-06; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3; task 31 committed as `8778c90`; task 30 committed as `75a896c`; tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33**)
+**Last updated:** 2026-10-07 (**task 37 (The mesh draw command, its shader and its batching) implemented, verified, record written; task 36 (Matrix maths and the transform-to-GPU path) implemented, verified, record written; task 35 (Mesh vertex format and GPU buffers) implemented, verified, record written; task 34 (Depth buffer) implemented, verified, and committed as `c83ff11` on 2026-10-06; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3; task 31 committed as `8778c90`; task 30 committed as `75a896c`; tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33**)
 
 ## Current position
 
-**Status: task 36 (Matrix maths and the transform-to-GPU path) is done — implemented, verified, record written on 2026-10-07.** Task 35 (Mesh vertex format and GPU buffers) is done — implemented, verified, record written on 2026-10-06. Task 34 (Depth buffer) is done — implemented, verified, and committed as `c83ff11` on 2026-10-06. Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows, 32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review for tasks 32, 34, 35, 36 is `.ai/workflows/task-sequence.md` step 2, in a session separate from the implementer's**; the operator's commit is step 5. **The next task after 36 is 37** (The mesh draw command, its shader and its batching): 33 is done, 34 is done, 35 is done, 36 is done, and 37–52 are specified but not started.
+**Status: task 37 (The mesh draw command, its shader and its batching) is done — implemented, verified, record written on 2026-10-07.** Task 36 (Matrix maths and the transform-to-GPU path) is done — implemented, verified, record written on 2026-10-07. Task 35 (Mesh vertex format and GPU buffers) is done — implemented, verified, record written on 2026-10-06. Task 34 (Depth buffer) is done — implemented, verified, and committed as `c83ff11` on 2026-10-06. Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows, 32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review for tasks 32, 34, 35, 36, 37 is `.ai/workflows/task-sequence.md` step 2, in a session separate from the implementer's**; the operator's commit is step 5. **The next task after 37 is 38** (`ROADOSMF` model format and its loader): 33 is done, 34–37 are done, and 38–52 are specified but not started. **Advancing past uncommitted tasks 32–37 to 38 on 2026-10-07 was the operator's explicit decision** ("move to the next task"), recorded here rather than skipped quietly — the *No uncommitted advance* gate is stepped over deliberately, as with 24's three sub-tasks in one commit.
 
 **Nothing is in flight, and the next task is 32 (Fade and clip truncation,
 drawn).** It is the lowest-numbered task of the sequence that is not done: 33 was
@@ -713,6 +713,146 @@ reader would otherwise walk.
   dependencies are `sdl3 0.20`, `glow 0.18`, `freetype-rs 0.38`.
 - **No mesh in the demo.** `ui_demo` gains nothing. Six pages must be
   pixel-identical.
+
+## Task 37 — what it decided, and what it found
+
+**Implemented 2026-10-07, verified, not yet reviewed** — review is
+`.ai/workflows/task-sequence.md` step 2, in a session separate from the
+implementer's. **4 code files** (`paint.rs`, `batch.rs`, `render.rs`,
+`render/mesh.rs`) plus compiler-forced arms in two demo test helpers and two
+widget helpers — 7 files in `git diff --stat`, 1160 insertions. **The suite
+went 1519 → 1531 lib, demo 226 unmoved, doctests 225 → 226** (+12 lib: 6
+batch, 1 mesh agreement, 5 render; +1 `Painter::mesh` doctest), none removed,
+one renamed (depth policy test, recorded below), none weakened.
+
+### Ten variants, five kinds, four passes, two boundary slots
+
+`DrawCommand::Mesh` (tenth, after `Polygon`: `mesh`, `range`, `mvp`, `tint`,
+`opacity`, `texture`) with `Painter::mesh` and a display-free doctest.
+`ShaderKind::Mesh` (fifth, beside `Shadow`).
+`BatchKey::is_singleton` is `Shadow | Mesh`; the key carries the colormap and
+`Opaque` only at exactly `1.0` (Image's arm by reference). `Segment` gains
+`mesh: Option<Batch>` with the at-most-one invariant as a test, and
+`submit_order` classifies the popped boundary by `key.shader`, pushing back
+what is not a singleton. `Pass::Mesh` (fourth) routes through `draw_pass` to
+`draw_mesh_batch`; `COMPOSITED_PASSES` stays `[Solid, Image, Text]` — a mesh
+draws at its recorded segment boundary, not at a fixed place. `end_frame`
+draws shadow, then mesh, after the composited walk.
+
+### The normal matrix is the identity, and why nothing else was expressible
+
+`u_normal_matrix` uploads [`IDENTITY_MAT3`] every mesh batch. The command
+carries only the composed `mvp`, and the model-view cannot be recovered from
+it: inverse-transposing the mvp's upper 3×3 folds the projection in, and the
+projection's z-row flips the facing — lighting comes out roughly inverted,
+which is worse than approximate. So the uniform exists (task 40's req 11
+mandates "nine ones" for its identity-model scene, with the honest limit in
+the demo's comment) and the value is the only one currently expressible; a
+rotating car needs a real inverse transpose, which `Mat4` does not have.
+**Not nine ones**: the identity is `1` on the diagonal, `0` elsewhere — nine
+`1.0`s is the singular all-ones matrix, and the constant's doc says so
+because a reader "fixing" it breaks every mesh with no GL error. With
+identity and a view-space light, an orbited camera's shading stays fixed to
+the model — the legibility sentence in the task file describes the uniform
+design, not the current value, and this paragraph is the correction.
+
+### Light, ambient, tint, and the defect not fixed
+
+`MESH_LIGHT_DIR = [0.36, 0.48, 0.8]` (9-12-20 over 25: exactly unit in the
+reals; front-right-above), `MESH_AMBIENT = 0.35` (shade in `0.35..=1.0` by
+construction) — both first-principles choices, stated as such. `mesh_tint`
+scales alpha only (`rgb` untouched; `a × opacity.clamp`); `mesh_fragment`
+mirrors the shader's three lines for the display-free proof. The `chart.rs`
+straight-colour defect is cited, not fixed — fixing `Color` would change all
+nine existing variants' pixels.
+
+### The probe: a real triangle, error `0x0`, seed reverted
+
+A temporary, reverted seed drew one window-mapped triangle through the real
+path on the data page (the colormap needs the atlas uploaded, which the
+image pass does there): `roados-mesh-probe: mesh=Some((MeshId(0),
+TextureId(1))) standalone=false` then **`roados-mesh-probe: error=0x0 after
+first mesh draw`**. Execution proved by pixels, not by the flag: 653,714 px
+differ from the clean capture in the triangle's shape (base along the bottom
+edge, apex top-center — the unflipped ortho mapping), bright texels sampled
+up to 1.0 where the picture shelf sits. The one-shot design was a trap worth
+recording: the first seed drew on frame 1 only, so mid-run captures showed
+nothing and `0x0` was evidence of a skip-or-draw; the seed was reworked to
+draw every frame before the reading counted. Both seed files are
+byte-identical to their pre-seed snapshots afterwards (`diff -q` clean,
+`grep probe_` empty). **First pixels of a mesh in this codebase, and the
+first capture of task 38's baseline**: one triangle costs one draw call, one
+uniform set, one `use_program` — a five-sub-mesh car is five of each per
+frame.
+
+### Mutations: 8 breaks, 8 kills, 2 findings
+
+Snapshot-`cp` before each, `diff` after each restore: is_singleton minus Mesh
+(3 kills); key `== 1.0` → `>= 0.999` (1); boundary misclassified as shadow
+(2 — see finding); depth `Mesh`+`Opaque` writes→false (1); mirror shade
+dropped (1 — see finding); tint `rgb×a` (1). **Finding 1:** the
+misclassification is killed by the order test, *not* the invariant test as
+the task claims — with every boundary filed as shadow, no segment ever holds
+both, so the invariant passes vacuously. Strengthened with "a frame holding
+meshes has a mesh boundary" (a survivor is a missing assertion); both tests
+kill it now. **Finding 2:** shade-dropped *survives* the premultiplication
+grid — an unshaded premultiplied base is still premultiplied, so the task's
+prescribed mutation is invisible to the invariant by construction. Added the
+exact-value shade test (`[1,1,1,1]×0.5 → [0.5,0.5,0.5,1]`, alpha never
+shaded); it kills the mutation and the grid's doc now says what it cannot
+see.
+
+### What is NOT claimed, and three greps that count docs
+
+- **No page draws a mesh yet** — no widget records one (38's loader is the
+  first), so the six-page AE-0 and the fps numbers below are demanding
+  rather than merely met. First mesh pixels in the demo are task 38's
+  capture.
+- `ui_demo` gained **two panic arms** (exhaustive test helpers that panic on
+  variants the demo never records, `Path`'s precedent) — compiler-forced, not
+  a feature: no page, widget, tab, or asset changed. The task's "no change
+  under `ui/src/ui_demo/`" is unsatisfiable for a new variant with
+  exhaustive matches there; the arms are the honest form.
+- `list.rs` `translate_commands` passes meshes through (an mvp maps to clip
+  space; a window-space move cannot be composed into it without a viewport
+  the function is not given) and `scroll.rs` `command_bounds` returns `None`
+  (kept, cut by the batch scissor at draw) — both documented limits, both
+  arms never fire today.
+- Task 36's context line ("TASK_UI_PRIM_36.md does not exist") is false at
+  implementation time: the doc exists and 36 is on this tree — so `u_mvp`
+  comes from 36's `MESH_MVP_UNIFORM` and only `u_normal_matrix` is named
+  here, and the fallback paragraph never triggers.
+- `get_uniform_location` is 16→22 code sites (six new mesh queries; the mesh
+  program did not exist before). The lighting `grep -in` over the file hits
+  one doc line ("tangent" in the fragment shader's own doc comment) and
+  nothing inside either GLSL string — the in-code test asserts on the
+  constants' text. `TRANSFORM`/`Transform` counts moved the same way in 36.
+  `ui/Cargo.toml`/`lock` unchanged; `SAFETY` 71→82, every new `unsafe`
+  block commented; no `transmute`/`static mut`; no `unwrap`/`expect`/`panic`
+  in production paths.
+
+### Capture and rate (final tree, release)
+
+Before binary: pristine `HEAD` (`dce37a5`) worktree build — i.e. the
+comparison spans 36+37, both validated no-rendering-change, stated as such.
+After: this tree. Window id re-read per capture, `pgrep` in the same call as
+`magick import`, kill by PID:
+
+| page | full-window AE | AE over y 0–679 |
+|---|---|---|
+| pads | 203 | **0** |
+| text | 0 | **0** |
+| input | 215 | **0** |
+| controls | 327 | **0** |
+| data | 410 | **0** |
+| overlays | 608 | **0** |
+
+`.ai/tools/fps-check.sh 10 55` → **630 frames in 10.011s, average 62.9 fps,
+worst 19.5 ms, 0 over 33 ms — PASS.** Per page: **pads 62.7, text 62.5,
+input 62.7, controls 62.5, data 62.2** (one 40.3 ms frame), **overlays
+61.8** — every page above 55 and inside 61.1–63.9. Expected result, stated
+not left as coincidence: no page records a mesh, so the per-frame addition
+is one `if let` per segment and one program link at startup.
 
 ## Task 36 — what it decided, and what it found
 
@@ -5613,7 +5753,7 @@ verified. A blank cell is unknown, not "none".
 | 34 | Depth buffer | **done 2026-10-06** | `c83ff11` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | **All 13 acceptance criteria met.** `DEPTH_BITS = 24` in `context.rs` with doc comment and test pin; six GL depth constants in `render.rs` with test against `glow`; `begin_frame` clears depth with writemask on, in correct order (bind default framebuffer, disable scissor, depth_mask(true), clear_depth_f32(1.0), clear color|depth, depth_func(GL_LESS), disable(GL_DEPTH_TEST), depth_mask(false)); `PassDepth` policy struct and `depth_state_for` function asserted by test; `bind_default_target` restores depth state alongside framebuffer/viewport/scissor; offscreen mask pass asserts resting depth state; module docs carry `## Depth` policy section with 2D arithmetic, resting state, 2D-against-3D ordering, blend/depth rule, face-culling policy, rejected alternatives; `polygon_quad` doc amended; every new `unsafe` block has SAFETY comment; frame rate and driver-granted values to be measured on target hardware; no mesh command/vertex format/MVP/model loader/asset pipeline/gesture/colour attachment/face culling/stencil/reverse-Z/depth prepass/coverage alpha/MSAA change/resize handling/new dependency/`ui_demo` change leaked in. Suite green: 1485 + 226 + 225 = 1936. See *Task 34 — what it decided* |
 | 35 | Mesh vertex format and GPU buffers | **done 2026-10-06** | `—` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | All 13 acceptance criteria met. `mesh.rs` module with `MeshVertex` (32 bytes, 3 f32 position + 3 f32 normal + 2 f32 UV), `SubMesh`, `Mesh`, `MeshId`; stride/offset constants in `render.rs` with `offset_of!` test; 4th VAO/VBO/IBO created in `Renderer::new` with attribute pointers (locations 0,1,2) inside `unsafe` block with element array binding; `MeshStore` on CPU, no GL, no eviction; `upload_mesh` validates before GL call (empty vertices/indices/sub_meshes, sub-mesh range, index < vertices.len()); `ensure_mesh_vertex/index_capacity` growth; `sub_mesh_byte_offset` conversion; `validate_mesh` pure function. +12 tests (1497 lib + 226 demo + 225 doctests = 1948 total). No scope creep: no `DrawCommand::Mesh`, no `ShaderKind::Mesh`, no `u_model`/`mat4`/`Transform`, no depth test, no model loader, no asset pipeline, no demo mesh. All 13 ACs met: 4 VAOs exist, stride/offsets asserted, wrong stride kills test, 5-mesh fixture pure-data, byte offset tested, normalise + zero-normal tested, validations tested, tooling clean, gallery pages pixel-identical (to verify), frame rate measured (to verify), no leak from 36/37/38, SAFETY comments on all new unsafe, module doc with rejected alternatives. Suite green: 1948 tests. See *Task 35 — what it decided* |
 | 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`'s "no matrix" half** | **implemented 2026-10-07, verified, record written, not yet reviewed** — `render/matrix.rs` (new, 17 tests) + `render.rs` (+112, 2 tests); `L2` amended dated 2026-10-07 | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | All 14 requirements met bar three AC greps that count doc comments (recorded in § *Task 36* with code-level numbers). Suite 1500 → 1519 lib (+19, none removed), demo 226, doctests 225. Six pages AE 0 outside y≥680; fps 62.0 script line, per-page 58.7–62.2 (overlays ~59 on both binaries, above floor 55). 2 of 2 mutations killed with restore proved by diff. See *Task 36 — what it decided* |
-| 37 | The mesh draw command, its shader and its batching | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_37.md` | — | — |
+| 37 | The mesh draw command, its shader and its batching | **implemented 2026-10-07, verified, record written, not yet reviewed** — 4 code files + 3 helper arms; ten variants, five kinds, four passes, two boundary slots | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | Suite 1519 → 1531 lib (+12), demo 226, doctests 225 → 226. Six pages AE 0 outside y≥680; fps 62.9 script line, per-page 61.8–62.7. Real-triangle probe error `0x0`, seed reverted byte-clean. 8 of 8 mutations killed (2 findings → 2 strengthened tests). No page draws a mesh; first pixels are 38's. See *Task 37 — what it decided* |
 | 38 | `ROADOSMF` model format and its loader | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_38.md` | — | — |
 | 39 | Offline asset pipeline | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_39.md` | — | — |
 | 40 | Drag-to-rotate — **partially closes gap `L4`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_40.md` | — | — |
@@ -5658,7 +5798,7 @@ to **required**, and it is task 36.
 batching) → 38 (model format and loader) → 39 (asset pipeline) → 40 (gesture).
 34 precedes everything because the depth policy is what lets 2D and 3D coexist;
 36 precedes 37 because the shader needs a matrix to consume; 38 precedes 39
-because the pipeline writes the format 38 reads. **Tasks 34, 35 and 36 are complete; task 37
+because the pipeline writes the format 38 reads. **Tasks 34, 35, 36 and 37 are complete; task 38
 is the next task in the sequence.**
 
 **The interaction half cannot be exercised on this host.** Task 40's gesture is

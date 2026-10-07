@@ -135,6 +135,55 @@
 //! hazard row `L6a` in `DEMO_APPLICATION.md` records for a mode that must not
 //! change mid-frame — and a batch key built from a `Vec<Mat4>` in `MeshStore`
 //! would compare sixteen floats to decide whether two draws merge.
+//!
+//! ## Meshes
+//!
+//! The vertex format is task 35's — `MeshVertex`, three fields, stride 32,
+//! locations 0..2 — and the matrix maths is task 36's — `Mat4`, both
+//! projections, `Transform::to_matrix` — cited by name because neither is
+//! re-decided here.
+//!
+//! `Pass::Mesh` is a **boundary and not a composited pass**: a composited pass
+//! is drawn over the opaque and transparent groups at a fixed place in the
+//! frame's layering, and a mesh must be drawn where it was recorded — its
+//! segment's boundary, after the segment's opaque and transparent groups,
+//! beside the shadow, before the next segment's anything. A mesh and a shadow
+//! never share a segment, so their relative order in the code is unobservable.
+//!
+//! The ordering contract is the answer to "the car is over the map but the map
+//! is 2D with no depth": **record the map first and the chrome second.** Mesh
+//! against mesh is the depth buffer; mesh against 2D is submission order and
+//! nothing else — a 2D command recorded before the mesh is under it, one
+//! recorded after it is over it, whatever the mesh's depth says, because the
+//! 2D passes neither test nor write depth. A mesh recorded *before* the map is
+//! under the map: correct for submission order, not a defect, and no flag will
+//! ever change it.
+//!
+//! The lighting model is flat Lambert — one directional light in view space
+//! plus ambient — and nothing past it: no specular (no view vector, no gloss
+//! channel — the material is one texture with regions distinguished by UV), no
+//! normal map (needs a tangent frame; `MeshVertex` is three fields at stride
+//! 32 by 35's decision), no shadow mapping (needs a depth-only FBO; the shadow
+//! FBO is `GL_R8` with no depth attachment by 34's decision, and a 3D backdrop
+//! needing one is gap `L1`'s work), no fog, no tone mapping, no second light.
+//! The demo's need is shape legibility, not realism.
+//!
+//! The premultiplication proof is arithmetic: the texel is premultiplied on
+//! load, the tint is premultiplied by `mesh_tint`'s alpha-only scale, their
+//! product is premultiplied, and shading scales `rgb` by `shade <= 1` while
+//! `alpha` is deliberately not shaded. What it does **not** fix is the defect
+//! `chart.rs` § *What made the first attempt at this measurement wrong*
+//! records — `Palette::fill` handing the solid pass a straight colour: a caller
+//! passing a straight tint gets the same wrong picture here, and fixing
+//! `Color`'s contract would change all nine existing variants' pixels.
+//!
+//! Face culling is a mesh-pass property, as 34 recorded: `GL_CULL_FACE` on,
+//! `GL_CULL_FACE_MODE` = `GL_BACK`, front face at GL's default `GL_CCW`, and
+//! no 2D pass enables culling or a depth test. The uniform-count requirement
+//! on 36 is paid: one `mat4` (`u_mvp`) and one `mat3` (`u_normal_matrix`) — a
+//! `mat3` rather than a `mat4` because a normal is a direction — and the
+//! normal matrix is [`IDENTITY_MAT3`] until a task with a rotating car brings a
+//! real inverse transpose, which `Mat4` does not have.
 
 pub mod blur;
 pub mod context;
@@ -212,6 +261,17 @@ const GL_CLAMP_TO_EDGE: u32 = 0x812F;
 const GL_DEPTH_BUFFER_BIT: u32 = 0x00000100;
 /// GL_DEPTH_TEST constant (0x0B71).
 const GL_DEPTH_TEST: u32 = 0x0B71;
+/// GL_CULL_FACE constant (0x0B44).
+const GL_CULL_FACE: u32 = 0x0B44;
+/// GL_CULL_FACE_MODE constant (0x0B45).
+///
+/// Declared for the cull-face policy the mesh pass implements: the pass sets
+/// the mode's value with `cull_face(GL_BACK)` and never reads it back, so the
+/// constant is pinned by the policy test and used by nothing else.
+#[allow(dead_code)]
+const GL_CULL_FACE_MODE: u32 = 0x0B45;
+/// GL_BACK constant (0x0405).
+const GL_BACK: u32 = 0x0405;
 /// GL_LESS constant (0x0201).
 const GL_LESS: u32 = 0x0201;
 /// GL_LEQUAL constant (0x0203).
@@ -304,6 +364,42 @@ const MESH_UV_OFFSET: i32 = 24;
 /// reserved name nothing sets is a name a later task sets by accident.
 #[allow(dead_code)]
 pub(crate) const MESH_MVP_UNIFORM: &str = "u_mvp";
+
+/// The mesh pass's normal matrix: the identity 3x3, column-major.
+///
+/// The shader takes a `mat3` normal matrix because a fragment normal must not
+/// be transformed by the MVP — and the value uploaded is the identity, because
+/// no command carries the model-view the real one is derived from. Exact when
+/// the model-view 3x3 is the identity; for an orbited camera the shading stays
+/// fixed to the model rather than turning with the view, which is the honest
+/// limit task 40 records demo-side. A future task that rotates the *car* needs
+/// a real inverse transpose, which `Mat4` does not have — and the uniform
+/// exists so the shader does not change when that value arrives.
+///
+/// **Not nine ones.** The identity is `1` on the diagonal and `0` elsewhere;
+/// nine `1.0`s is the all-ones matrix, which is singular and maps every normal
+/// onto one diagonal. A reader "fixing" this constant to all ones breaks every
+/// mesh's lighting with no GL error.
+const IDENTITY_MAT3: [f32; 9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+
+/// The mesh pass's light direction, in view space, unit length.
+///
+/// A first-principles choice, explicitly not a transcribed value: from the
+/// front, above and to the right, so a car facing the camera shows a lit
+/// upper-right and a shaded lower-left. `9-12-20` scaled by `1/25` —
+/// `0.36² + 0.48² + 0.8² = 1.0` exactly in the reals — so the constant is
+/// already normalised and the shader never divides by its length.
+const MESH_LIGHT_DIR: [f32; 3] = [0.36, 0.48, 0.8];
+
+/// The mesh pass's ambient term: the fraction of the colormap a fragment keeps
+/// with no direct light on it.
+///
+/// `0.35`, so `shade = ambient + (1 - ambient) * lambert` stays in
+/// `0.0..=1.0` by construction — which is what the premultiplication proof in
+/// [`mesh_fragment`] needs. A first-principles choice: high enough that a
+/// surface turned fully away reads as shade rather than as a hole, low enough
+/// that turning toward the light is visible.
+const MESH_AMBIENT: f32 = 0.35;
 
 /// The number of indices one quad contributes to an index buffer: two triangles.
 const INDICES_PER_QUAD: usize = 6;
@@ -533,6 +629,78 @@ void main() {
     float opacity = clamp(v_opacity, 0.0, 1.0);
     vec4 texel = texture(u_image, v_uv);
     frag_color = vec4(texel.rgb * opacity, texel.a * opacity);
+}
+"#;
+
+/// The mesh vertex shader: object-space positions, normals and UVs, placed by
+/// one pre-multiplied matrix.
+///
+/// `layout(location = 0..2)` with these names and component counts must match
+/// the `MeshVertex` table in [`crate::render::mesh`] exactly — `a_position`
+/// 3x`GL_FLOAT` at 0, `a_normal` 3x`GL_FLOAT` at `MESH_NORMAL_OFFSET`,
+/// `a_uv` 2x`GL_FLOAT` at `MESH_UV_OFFSET` — and a test asserts the three
+/// declarations are present in this source, which is the only check that
+/// catches a mismatch between two files that are otherwise free to disagree.
+///
+/// `precision highp float`, not `mediump` as the four 2D shaders use: those
+/// shaders work in window coordinates, `0.0` to `1280.0`, which `mediump`
+/// spans comfortably, while a 4.5 m car at a near plane in the range of
+/// hundreds needs more than `mediump`'s roughly three decimal digits. GLES 3.1
+/// **requires** `highp` support in fragment shaders, so this asks for nothing
+/// the target may refuse.
+///
+/// There is deliberately no `u_resolution` here: the mesh shader does not work
+/// in window coordinates, so a resolution uniform would be a uniform nothing
+/// reads — and a test asserts it stays absent.
+const MESH_VERTEX_SHADER_SRC: &str = r#"#version 300 es
+precision highp float;
+layout(location = 0) in vec3 a_position;
+layout(location = 1) in vec3 a_normal;
+layout(location = 2) in vec2 a_uv;
+uniform mat4 u_mvp;
+uniform mat3 u_normal_matrix;
+out vec3 v_normal;
+out vec2 v_uv;
+void main() {
+    gl_Position = u_mvp * vec4(a_position, 1.0);
+    v_normal = u_normal_matrix * a_normal;
+    v_uv = a_uv;
+}
+"#;
+
+/// The mesh fragment shader: one directional light plus ambient over a
+/// premultiplied colormap — flat Lambert, and nothing past it.
+///
+/// Four lines of this are contracts rather than taste. The texel is
+/// **premultiplied** (`Pixels::premultiply`, called from `decode` in
+/// `texture.rs`) and the tint is **premultiplied** ([`mesh_tint`]), so their
+/// product is premultiplied; **`shade` is in `0.0..=1.0`** because `u_ambient`
+/// is a scalar in that range and `lambert` is a clamped `dot`; **`base.a` is
+/// not shaded**, because a lit surface must not become more transparent; and
+/// there is **no specular, no reflection vector, no tangent attribute, no
+/// second sampler, and no shadow lookup** — one directional light plus ambient
+/// is the whole of the lighting model, and a test greps this source for the
+/// terms that would say otherwise.
+///
+/// The GLSL string and [`mesh_fragment`] **must be edited together**: the
+/// function is a CPU mirror of the three arithmetic lines below, and it is what
+/// lets the premultiplication invariant be asserted with no display.
+const MESH_FRAGMENT_SHADER_SRC: &str = r#"#version 300 es
+precision highp float;
+in vec3 v_normal;
+in vec2 v_uv;
+uniform sampler2D u_colormap;
+uniform vec3 u_light_dir;
+uniform float u_ambient;
+uniform vec4 u_tint;
+out vec4 frag_color;
+void main() {
+    vec3 normal = normalize(v_normal);
+    float lambert = max(dot(normal, u_light_dir), 0.0);
+    vec4 texel = texture(u_colormap, v_uv);
+    vec4 base = vec4(texel.rgb * u_tint.rgb, texel.a * u_tint.a);
+    float shade = u_ambient + (1.0 - u_ambient) * lambert;
+    frag_color = vec4(base.rgb * shade, base.a);
 }
 "#;
 
@@ -1168,6 +1336,49 @@ fn quad_color(color: Color) -> [f32; 4] {
     ]
 }
 
+/// Scales a premultiplied [`Color`] by `opacity`, alpha only.
+///
+/// An alpha-only scale is the operation that preserves premultiplication, and
+/// it is the operation the image fragment shader already uses
+/// (`vec4(texel.rgb * opacity, texel.a * opacity)`). It never multiplies `rgb`
+/// by `a`, because `Color`'s r, g and b are already premultiplied; doing it
+/// twice darkens every honest caller. What a *straight* input costs is measured
+/// in `chart.rs` § *What made the first attempt at this measurement wrong* —
+/// and fixing `Color`'s contract is a separate decision that would change all
+/// nine existing variants' pixels, so this function honours the contract rather
+/// than repairing it.
+fn mesh_tint(tint: Color, opacity: f32) -> [f32; 4] {
+    [
+        f32::from(tint.r) / 255.0,
+        f32::from(tint.g) / 255.0,
+        f32::from(tint.b) / 255.0,
+        f32::from(tint.a) / 255.0 * opacity.clamp(0.0, 1.0),
+    ]
+}
+
+/// A CPU mirror of the mesh fragment shader's three arithmetic lines.
+///
+/// `texel` is the premultiplied colormap sample, `tint` is [`mesh_tint`]'s
+/// premultiplied output, and `shade` is `ambient + (1 - ambient) * lambert` in
+/// `0.0..=1.0`. It exists so the premultiplication invariant — every result
+/// satisfies `r <= a && g <= a && b <= a` componentwise — can be asserted with
+/// no display. The GLSL string and this function **must be edited together**,
+/// the same obligation `IMAGE_FRAGMENT_SHADER_SRC`'s doc states for the
+/// corner-clipping expression it shares with the solid shader.
+///
+/// Read by the invariant test and by nothing else: the production draw happens
+/// in GLSL, and this function is the obligation that the two stay the same.
+#[allow(dead_code)]
+fn mesh_fragment(texel: [f32; 4], tint: [f32; 4], shade: f32) -> [f32; 4] {
+    let base = [
+        texel[0] * tint[0],
+        texel[1] * tint[1],
+        texel[2] * tint[2],
+        texel[3] * tint[3],
+    ];
+    [base[0] * shade, base[1] * shade, base[2] * shade, base[3]]
+}
+
 /// Builds the quad for an axis-aligned rectangle, clamping the corner radius
 /// to half the smaller side so the SDF stays well-defined.
 fn rect_quad(rect: Rect, color: Color, radius: f32) -> Quad {
@@ -1347,9 +1558,14 @@ fn command_quads(command: &DrawCommand) -> Vec<Quad> {
         // thing that knows which. Returning empty rather than a quad means a
         // shadow that reached the solid pass would draw nothing at all, which is
         // a missing shadow rather than a wrong picture.
-        DrawCommand::Shadow { .. } | DrawCommand::Text { .. } | DrawCommand::Image { .. } => {
-            Vec::new()
-        }
+        //
+        // A mesh expands to nothing here for the stronger version of the same
+        // reason: it is not quads at all but indexed triangles through the mesh
+        // program, and `draw_mesh_batch` is the only thing that knows which.
+        DrawCommand::Shadow { .. }
+        | DrawCommand::Text { .. }
+        | DrawCommand::Image { .. }
+        | DrawCommand::Mesh { .. } => Vec::new(),
     }
 }
 
@@ -1568,6 +1784,37 @@ fn create_image_program(gl: &glow::Context) -> Result<glow::Program, RenderError
     Ok(program)
 }
 
+/// Links the mesh program, following [`create_image_program`]'s shape exactly:
+/// compile both, create, attach, link, detach, delete both shaders, and on a
+/// failed link `delete_program` and return `Err(RenderError::ProgramLink(log))`.
+///
+/// # Errors
+///
+/// Returns [`RenderError::ShaderCompile`] or [`RenderError::ProgramLink`] with
+/// the info log on failure.
+fn create_mesh_program(gl: &glow::Context) -> Result<glow::Program, RenderError> {
+    let vertex_shader = compile_shader(gl, GL_VERTEX_SHADER, MESH_VERTEX_SHADER_SRC)?;
+    let fragment_shader = compile_shader(gl, GL_FRAGMENT_SHADER, MESH_FRAGMENT_SHADER_SRC)?;
+    // SAFETY: The GL context is current on this thread.
+    let program = unsafe { gl.create_program() }.map_err(RenderError::Gl)?;
+    // SAFETY: `program` and both shaders are valid objects.
+    unsafe {
+        gl.attach_shader(program, vertex_shader);
+        gl.attach_shader(program, fragment_shader);
+        gl.link_program(program);
+        gl.detach_shader(program, vertex_shader);
+        gl.detach_shader(program, fragment_shader);
+        gl.delete_shader(vertex_shader);
+        gl.delete_shader(fragment_shader);
+        if !gl.get_program_link_status(program) {
+            let log = gl.get_program_info_log(program);
+            gl.delete_program(program);
+            return Err(RenderError::ProgramLink(log));
+        }
+    }
+    Ok(program)
+}
+///
 /// Links the shadow programs: the offscreen mask and the unblurred shadow.
 ///
 /// Both share the **solid vertex shader** and differ only in what they write,
@@ -1658,6 +1905,8 @@ enum Pass {
     Image,
     /// Glyph quads from the glyph atlas.
     Text,
+    /// A triangle mesh, through the mesh program, with the depth test on.
+    Mesh,
 }
 
 /// The passes [`Renderer::end_frame`] draws, in order.
@@ -1673,6 +1922,11 @@ enum Pass {
 /// The constant exists so the order is one list rather than the order of lines
 /// in [`Renderer::end_frame`], and so a test can state it. `end_frame` reads it;
 /// nothing else may reorder the draws behind its back.
+///
+/// A mesh is deliberately **not** one of the three: a composited pass is drawn
+/// over the opaque and transparent groups at a fixed place in the frame's
+/// layering, and a mesh must be drawn at its recorded position — its segment's
+/// boundary — rather than at a fixed one.
 const COMPOSITED_PASSES: [Pass; 3] = [Pass::Solid, Pass::Image, Pass::Text];
 
 /// The depth state for a single pass: whether it tests depth and whether it writes.
@@ -1686,19 +1940,33 @@ struct PassDepth {
     writes: bool,
 }
 
-/// Returns the depth state for a 2D pass.
+/// Returns the depth state for a pass drawing with `blend`.
 ///
-/// The policy is: the 2D passes (Solid, Image, Text) neither test nor write depth.
-/// The depth buffer belongs to the mesh pass (task 37), which brackets its draws
-/// with `GL_DEPTH_TEST` enabled and `GL_DEPTH_WRITEMASK` true.
+/// The policy is: the 2D passes (Solid, Image, Text) neither test nor write depth,
+/// whatever the blend mode — the depth buffer belongs to the mesh pass, which
+/// brackets its draws with `GL_DEPTH_TEST` enabled and `GL_DEPTH_WRITEMASK`
+/// true. The mesh's own state depends on its blend mode, which is task 34's
+/// blend/depth rule: *a pass that writes depth blends off; a pass that blends
+/// writes no depth* — so a `Pass`-only signature cannot express the correct
+/// answer for the pass 34 said task 37 would add, and the blend rides along.
 ///
-/// Used by the policy test. The mesh pass (task 37) will use this for its own
-/// depth state.
+/// Used by the policy test. A fifth pass added later fails the suite until
+/// someone decides its depth state, which is the whole reason the policy is
+/// data.
 #[allow(dead_code)]
-fn depth_state_for(pass: Pass) -> PassDepth {
-    match pass {
-        Pass::Solid | Pass::Image | Pass::Text => PassDepth {
+fn depth_state_for(pass: Pass, blend: crate::batch::BlendMode) -> PassDepth {
+    use crate::batch::BlendMode;
+    match (pass, blend) {
+        (Pass::Solid, _) | (Pass::Image, _) | (Pass::Text, _) => PassDepth {
             test: false,
+            writes: false,
+        },
+        (Pass::Mesh, BlendMode::Opaque) => PassDepth {
+            test: true,
+            writes: true,
+        },
+        (Pass::Mesh, BlendMode::Transparent) => PassDepth {
+            test: true,
             writes: false,
         },
     }
@@ -1846,6 +2114,24 @@ pub struct Renderer {
     mesh_index_capacity: usize,
     /// CPU-side mesh store, owns no GL objects.
     meshes: mesh::MeshStore,
+    /// Draws one sub-mesh per command, through `u_mvp`, with the depth test on.
+    mesh_program: glow::Program,
+    /// `u_mvp` for the mesh program: the pre-multiplied matrix, queried from
+    /// the mesh program and from nothing else — a location belongs to the
+    /// program it was queried from, and the 2D programs' locations would leave
+    /// the mesh shader's at the identity.
+    u_mvp: Option<glow::UniformLocation>,
+    /// `u_normal_matrix` for the mesh program, uploaded as [`IDENTITY_MAT3`].
+    u_normal_matrix: Option<glow::UniformLocation>,
+    /// The sampler the mesh program reads the colormap from, set to unit 0
+    /// explicitly rather than left at its default.
+    u_colormap: Option<glow::UniformLocation>,
+    /// The view-space light direction and the ambient term, uploaded on every
+    /// mesh batch from [`MESH_LIGHT_DIR`] and [`MESH_AMBIENT`].
+    u_light_dir: Option<glow::UniformLocation>,
+    u_ambient: Option<glow::UniformLocation>,
+    /// The material tint for the mesh program, per command.
+    u_tint: Option<glow::UniformLocation>,
 }
 
 impl Renderer {
@@ -1927,6 +2213,44 @@ impl Renderer {
         // SAFETY: The GL context is current on this thread and `image_program`
         // is the linked program.
         let u_image = unsafe { context.gl().get_uniform_location(image_program, "u_image") };
+        let mesh_program = create_mesh_program(context.gl())?;
+        // SAFETY: The GL context is current on this thread and `mesh_program`
+        // is the linked program. A location belongs to the program it was
+        // queried from, so every one of these is a separate query on the mesh
+        // program rather than a shared handle — and `u_mvp` is queried through
+        // `MESH_MVP_UNIFORM`, the name task 36 reserved for exactly this call.
+        let u_mvp = unsafe {
+            context
+                .gl()
+                .get_uniform_location(mesh_program, MESH_MVP_UNIFORM)
+        };
+        // SAFETY: The GL context is current on this thread and `mesh_program`
+        // is the linked program.
+        let u_normal_matrix = unsafe {
+            context
+                .gl()
+                .get_uniform_location(mesh_program, "u_normal_matrix")
+        };
+        // SAFETY: The GL context is current on this thread and `mesh_program`
+        // is the linked program.
+        let u_colormap = unsafe {
+            context
+                .gl()
+                .get_uniform_location(mesh_program, "u_colormap")
+        };
+        // SAFETY: The GL context is current on this thread and `mesh_program`
+        // is the linked program.
+        let u_light_dir = unsafe {
+            context
+                .gl()
+                .get_uniform_location(mesh_program, "u_light_dir")
+        };
+        // SAFETY: The GL context is current on this thread and `mesh_program`
+        // is the linked program.
+        let u_ambient = unsafe { context.gl().get_uniform_location(mesh_program, "u_ambient") };
+        // SAFETY: The GL context is current on this thread and `mesh_program`
+        // is the linked program.
+        let u_tint = unsafe { context.gl().get_uniform_location(mesh_program, "u_tint") };
         // SAFETY: The GL context is current on this thread.
         let atlas_texture = unsafe { context.gl().create_texture().map_err(RenderError::Gl)? };
         // The image atlas is a texture object and nothing more: its storage is
@@ -2072,6 +2396,13 @@ impl Renderer {
             mesh_vertex_capacity: 0,
             mesh_index_capacity: 0,
             meshes: mesh::MeshStore::new(),
+            mesh_program,
+            u_mvp,
+            u_normal_matrix,
+            u_colormap,
+            u_light_dir,
+            u_ambient,
+            u_tint,
         };
         // SAFETY: The GL context is current on this thread; `vao`, `vbo` and
         // `ibo` are valid objects created above. The attribute pointers and
@@ -2492,7 +2823,11 @@ impl Renderer {
     ///   the passes in `COMPOSITED_PASSES` order over the opaque group and then
     ///   the transparent group;
     /// - then, if the segment ended at a shadow, that shadow — see
-    ///   `Renderer::draw_shadow_batch`.
+    ///   `Renderer::draw_shadow_batch` — and if it ended at a mesh, that mesh
+    ///   — see `Renderer::draw_mesh_batch`. A mesh is **not** drawn here, in
+    ///   the composited walk: `COMPOSITED_PASSES` is the fixed place in the
+    ///   frame's layering, and a mesh must be drawn where it was recorded, at
+    ///   its segment's boundary, not at a fixed place.
     ///
     /// **A frame with no shadow is one segment, and that is the whole frame's
     /// old submission order.** The segmentation exists for one case — a
@@ -2546,11 +2881,17 @@ impl Renderer {
                     self.draw_pass(pass, batch)?;
                 }
             }
-            // The shadow comes after everything the segment recorded and before
-            // everything the next one will, which is the whole of what the
-            // segmentation is for.
+            // The shadow and the mesh both come after everything the segment recorded
+            // and before everything the next one will, which is the whole of what the
+            // segmentation is for. They cannot both be here — a seal consumes exactly
+            // one singleton command — so their order relative to each other is not
+            // observable; the shadow is drawn first because a composited full-window
+            // effect belongs above everything else in its segment.
             if let Some(shadow) = &segment.shadow {
                 self.draw_shadow_batch(shadow)?;
+            }
+            if let Some(mesh) = &segment.mesh {
+                self.draw_mesh_batch(mesh)?;
             }
         }
         self.context.swap();
@@ -2568,6 +2909,7 @@ impl Renderer {
             Pass::Solid => self.draw_solid_batch(batch),
             Pass::Image => self.draw_image_batch(batch),
             Pass::Text => self.draw_text_batch(batch),
+            Pass::Mesh => self.draw_mesh_batch(batch),
         }
     }
 
@@ -3037,6 +3379,147 @@ impl Renderer {
             gl.bind_vertex_array(None);
         }
         self.image_vertices = vertices;
+        Ok(())
+    }
+
+    /// Draws one mesh batch: one sub-mesh per command, through the mesh
+    /// program, with the depth test on.
+    ///
+    /// 1. A batch that is not `ShaderKind::Mesh` is skipped — `return Ok(())`,
+    ///    the shape all three existing `draw_*_batch` functions use, so a batch
+    ///    reaching the wrong function draws nothing rather than drawing as
+    ///    something it is not.
+    /// 2. `apply_clip` first, because a draw call has one scissor and a mesh
+    ///    clipped to a scrolling viewport must be clipped in window space like
+    ///    every other batch.
+    /// 3. The colormap is resolved the way the image pass resolves its sampler
+    ///    — through the ordinary cache — and a texture the cache no longer
+    ///    holds skips the batch rather than sampling whatever was packed into
+    ///    the space afterwards.
+    /// 4. An unknown `MeshId` is a skip, not a panic, and a range past the end
+    ///    of the index buffer is skipped rather than drawn: a range past the
+    ///    end is what `draw_elements` reads, and without robust buffer access
+    ///    that is undefined geometry rather than an error.
+    /// 5. The mesh program is bound and its uniforms written: `u_mvp` from the
+    ///    command through 36's column-major accessor with **`transpose: false`**
+    ///    — GLSL matrices are column-major — `u_normal_matrix` as
+    ///    [`IDENTITY_MAT3`], the colormap on unit 0, the light and the ambient
+    ///    from [`MESH_LIGHT_DIR`] and [`MESH_AMBIENT`], the tint per command
+    ///    from [`mesh_tint`]. **The mesh shader reads no `u_resolution`**,
+    ///    because it does not work in window coordinates.
+    /// 6. The draws are bracketed with the depth and culling state, restored
+    ///    after: `GL_CULL_FACE` on with `GL_BACK` (front face left at GL's
+    ///    default `GL_CCW` — no `front_face` call, per 34's policy), then
+    ///    `GL_DEPTH_TEST` with `GL_LESS` and `depth_mask(writes)`, where
+    ///    `writes` is [`depth_state_for`]'s answer for this batch's own blend
+    ///    mode. The element array buffer is **not** bound here — it is 35's
+    ///    hazard, and the mesh VAO's own binding is what makes this draw read
+    ///    the right indices. **Blending** follows the batch key: the boundary
+    ///    runs after the composited walk left blending on, so `Opaque`
+    ///    disables `GL_BLEND` and `Transparent` re-enables it with the
+    ///    premultiplied `GL_ONE, GL_ONE_MINUS_SRC_ALPHA`, in the image pass's
+    ///    shape.
+    /// 7. `MESH_LIGHT_DIR` and `MESH_AMBIENT` are uploaded on every mesh batch
+    ///    rather than once per frame: the mesh program is only current inside
+    ///    this function, there is no "mesh pass begins here" hook that runs
+    ///    once per frame, and five sub-meshes cost three extra GL calls each —
+    ///    while a per-frame upload would need `use_program` during `begin_frame`
+    ///    for no measurable gain.
+    fn draw_mesh_batch(&mut self, batch: &Batch) -> Result<(), RenderError> {
+        use crate::batch::BlendMode;
+        if batch.key.shader != ShaderKind::Mesh {
+            return Ok(());
+        }
+        self.apply_clip(batch.clip);
+        let Some(texture) = batch.key.texture else {
+            return Ok(());
+        };
+        let handle = TextureHandle::new(texture);
+        let Some(bound) = self.image_texture(handle)? else {
+            return Ok(());
+        };
+        let depth = depth_state_for(Pass::Mesh, batch.key.blend_mode);
+        // SAFETY: The GL context is current on this thread;
+        // `self.mesh_program` is the linked program, and every location below
+        // was queried from it in `Renderer::new` — a location belongs to the
+        // program it was queried from.
+        unsafe {
+            let gl = self.context.gl();
+            gl.use_program(Some(self.mesh_program));
+            gl.active_texture(GL_TEXTURE0);
+            gl.bind_texture(GL_TEXTURE_2D, Some(bound));
+            gl.uniform_1_i32(self.u_colormap.as_ref(), 0);
+            gl.uniform_3_f32(
+                self.u_light_dir.as_ref(),
+                MESH_LIGHT_DIR[0],
+                MESH_LIGHT_DIR[1],
+                MESH_LIGHT_DIR[2],
+            );
+            gl.uniform_1_f32(self.u_ambient.as_ref(), MESH_AMBIENT);
+            match batch.key.blend_mode {
+                BlendMode::Opaque => gl.disable(GL_BLEND),
+                BlendMode::Transparent => {
+                    gl.enable(GL_BLEND);
+                    gl.blend_func(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+                }
+            }
+            gl.enable(GL_CULL_FACE);
+            gl.cull_face(GL_BACK);
+            gl.enable(GL_DEPTH_TEST);
+            gl.depth_func(GL_LESS);
+            gl.depth_mask(depth.writes);
+            gl.bind_vertex_array(Some(self.mesh_vao));
+        }
+        for command in &batch.commands {
+            let DrawCommand::Mesh {
+                mesh,
+                range,
+                mvp,
+                tint,
+                opacity,
+                ..
+            } = command
+            else {
+                continue;
+            };
+            let Some(record) = self.meshes.get(*mesh) else {
+                continue;
+            };
+            let len = u32::try_from(record.indices_len())
+                .map_err(|_| RenderError::Gl("index count exceeds the u32 range".to_string()))?;
+            let Some(end) = range.first_index.checked_add(range.index_count) else {
+                continue;
+            };
+            if end > len {
+                continue;
+            }
+            let count = i32::try_from(range.index_count)
+                .map_err(|_| RenderError::Gl("index count exceeds the i32 range".to_string()))?;
+            let offset = range.byte_offset()?;
+            let tint = mesh_tint(*tint, *opacity);
+            // SAFETY: The GL context is current on this thread;
+            // `self.mesh_program` is the program the two locations were
+            // queried from, and `mvp`'s array is already column-major — so the
+            // transpose flag is `false`, and `true` would silently transpose
+            // the matrix with no GL error.
+            unsafe {
+                let gl = self.context.gl();
+                gl.uniform_matrix_4_f32_slice(self.u_mvp.as_ref(), false, mvp.as_slice());
+                gl.uniform_matrix_3_f32_slice(self.u_normal_matrix.as_ref(), false, &IDENTITY_MAT3);
+                gl.uniform_4_f32(self.u_tint.as_ref(), tint[0], tint[1], tint[2], tint[3]);
+                gl.draw_elements(GL_TRIANGLES, count, GL_UNSIGNED_INT, offset);
+            }
+        }
+        // SAFETY: The GL context is current on this thread. The resting state
+        // is 34's: no pass tests depth and none writes it, so the test, the
+        // writemask and the culling the draws above needed are all restored.
+        unsafe {
+            let gl = self.context.gl();
+            gl.bind_vertex_array(None);
+            gl.depth_mask(false);
+            gl.disable(GL_DEPTH_TEST);
+            gl.disable(GL_CULL_FACE);
+        }
         Ok(())
     }
 
@@ -5044,6 +5527,13 @@ mod tests {
         // having an order of its own, so the order is asserted here and not
         // restated in a comment as the truth.
         assert_eq!(COMPOSITED_PASSES, [Pass::Solid, Pass::Image, Pass::Text]);
+        // A mesh is drawn at its recorded position — its segment's boundary —
+        // rather than at a fixed place in the frame's layering, so it is not
+        // one of the composited three.
+        assert!(
+            !COMPOSITED_PASSES.contains(&Pass::Mesh),
+            "a mesh is a boundary, not a composited pass"
+        );
     }
 
     #[test]
@@ -5105,44 +5595,59 @@ mod tests {
         assert_eq!(GL_LEQUAL, glow::LEQUAL);
         assert_eq!(GL_GREATER, glow::GREATER);
         assert_eq!(GL_DEPTH_WRITEMASK, glow::DEPTH_WRITEMASK);
+        assert_eq!(GL_CULL_FACE, glow::CULL_FACE);
+        assert_eq!(GL_CULL_FACE_MODE, glow::CULL_FACE_MODE);
+        assert_eq!(GL_BACK, glow::BACK);
     }
 
-    /// The depth policy for 2D passes is asserted, not only documented.
+    /// The depth policy for four passes × two blend modes is asserted, not only
+    /// documented.
     ///
-    /// `depth_state_for(Pass::Solid)`, `depth_state_for(Pass::Image)` and
-    /// `depth_state_for(Pass::Text)` each equal `PassDepth { test: false,
-    /// writes: false }`, asserted by a test that iterates `Pass`'s variants.
-    /// **Mutation evidence:** flipping one entry to `writes: true` fails the suite.
+    /// Eight rows: the three 2D passes are `{ test: false, writes: false }`
+    /// for both blend modes — asserted identically before and after task 37's
+    /// signature widening — and `Mesh` is `{ test: true, writes: true }` when
+    /// `Opaque` and `{ test: true, writes: false }` when `Transparent`, which
+    /// is 34's blend/depth rule (*a pass that writes depth blends off; a pass
+    /// that blends writes no depth*). A fifth pass added later fails the suite
+    /// until someone decides its depth state. **Mutation evidence:** flipping
+    /// the `Mesh` + `Opaque` row's `writes` to `false` fails this test.
     ///
-    /// And `rg -n 'GL_CULL_FACE|CULL_FACE_MODE' ui/src` returns **nothing** —
-    /// culling is policy in this task, code in task 37.
+    /// Renamed from `the_depth_policy_for_2d_passes_is_test_false_writes_false`
+    /// when the signature widened past the 2D passes; the three 2D rows keep
+    /// their assertions.
     #[test]
-    fn the_depth_policy_for_2d_passes_is_test_false_writes_false() {
+    fn the_depth_policy_for_four_passes_and_two_blend_modes() {
+        use crate::batch::BlendMode;
         use crate::render::Pass;
-        // Test that all three 2D passes have test=false, writes=false
+        // The three 2D passes neither test nor write depth, for both blend modes.
+        for pass in [Pass::Solid, Pass::Image, Pass::Text] {
+            for blend in [BlendMode::Opaque, BlendMode::Transparent] {
+                assert_eq!(
+                    depth_state_for(pass, blend),
+                    PassDepth {
+                        test: false,
+                        writes: false
+                    },
+                    "{pass:?} neither tests nor writes depth, whatever the blend"
+                );
+            }
+        }
+        // The mesh tests depth either way and writes it only when opaque.
         assert_eq!(
-            depth_state_for(Pass::Solid),
+            depth_state_for(Pass::Mesh, BlendMode::Opaque),
             PassDepth {
-                test: false,
-                writes: false
+                test: true,
+                writes: true
             },
-            "Solid pass neither tests nor writes depth"
+            "an opaque mesh sorts itself and writes depth"
         );
         assert_eq!(
-            depth_state_for(Pass::Image),
+            depth_state_for(Pass::Mesh, BlendMode::Transparent),
             PassDepth {
-                test: false,
+                test: true,
                 writes: false
             },
-            "Image pass neither tests nor writes depth"
-        );
-        assert_eq!(
-            depth_state_for(Pass::Text),
-            PassDepth {
-                test: false,
-                writes: false
-            },
-            "Text pass neither tests nor writes depth"
+            "a blending mesh sorts against the scene but writes no depth"
         );
         // Ensure the test would fail if a pass had writes: true
         // (this is the mutation evidence - we can't actually mutate the function
@@ -5151,6 +5656,134 @@ mod tests {
             test: false,
             writes: true,
         }; // type-checks
+    }
+
+    #[test]
+    fn the_mesh_vertex_shader_declares_the_attributes_task_35_laid_out() {
+        // `layout(location = 0..2)` with these names and component counts must
+        // match the `MeshVertex` table exactly — a mismatch is a vertex read at
+        // the wrong offset with no GL error. A grep over the whole file would
+        // not do this: the four existing 2D shaders already hold eleven
+        // `layout(location = …)` lines, so the assertion is against this
+        // constant's own text.
+        for declaration in [
+            "layout(location = 0) in vec3 a_position",
+            "layout(location = 1) in vec3 a_normal",
+            "layout(location = 2) in vec2 a_uv",
+        ] {
+            assert!(
+                MESH_VERTEX_SHADER_SRC.contains(declaration),
+                "the mesh vertex shader no longer declares `{declaration}`"
+            );
+        }
+        // The mesh shader does not work in window coordinates, so a resolution
+        // uniform would be a uniform nothing reads.
+        assert!(
+            !MESH_VERTEX_SHADER_SRC.contains("u_resolution"),
+            "the mesh vertex shader grew a window-space uniform"
+        );
+    }
+
+    #[test]
+    fn the_mesh_fragment_shader_is_lambert_and_nothing_past_it() {
+        // The lighting model as grep: the Lambert term and its two uniforms
+        // are present, and no shading term past Lambert is. This is the model
+        // requirement 6 defends — one directional light plus ambient — checked
+        // with one test rather than left in a doc comment.
+        for term in ["max(dot(", "u_ambient", "u_light_dir"] {
+            assert!(
+                MESH_FRAGMENT_SHADER_SRC.contains(term),
+                "the mesh fragment shader lost its Lambert term `{term}`"
+            );
+        }
+        for past in [
+            "specular",
+            "reflect(",
+            "pow(",
+            "texturelod",
+            "normal_map",
+            "tangent",
+            "u_shadow",
+        ] {
+            assert!(
+                !MESH_FRAGMENT_SHADER_SRC.to_lowercase().contains(past),
+                "the mesh fragment shader grew a term past Lambert: `{past}`"
+            );
+        }
+    }
+
+    #[test]
+    fn mesh_tint_scales_alpha_only() {
+        // `rgb` untouched by `opacity`, `a` scaled by it: an alpha-only scale
+        // is the operation that preserves premultiplication. Multiplying `rgb`
+        // by `a` here is the specific thing `chart.rs`'s recorded defect would
+        // look like in this pass, and that mutation fails this test.
+        assert_eq!(
+            mesh_tint(Color::new(255, 0, 0, 128), 0.5),
+            [1.0, 0.0, 0.0, 128.0 / 255.0 * 0.5]
+        );
+        assert_eq!(
+            mesh_tint(Color::new(10, 20, 30, 255), 1.0),
+            [10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0, 1.0]
+        );
+        assert_eq!(
+            mesh_tint(Color::new(10, 20, 30, 255), 2.0),
+            [10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0, 1.0],
+            "an opacity past one is clamped at draw time"
+        );
+    }
+
+    #[test]
+    fn mesh_fragment_applies_the_shade_to_rgb_and_not_to_alpha() {
+        // The invariant test cannot see this: dropping `* shade` leaves a
+        // premultiplied base premultiplied, so the grid above stays green on a
+        // shader that shades nothing. The values are asserted here instead —
+        // all halves and ones, so every product is exact in binary.
+        assert_eq!(
+            mesh_fragment([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], 0.5),
+            [0.5, 0.5, 0.5, 1.0]
+        );
+        assert_eq!(
+            mesh_fragment([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], 0.0),
+            [0.0, 0.0, 0.0, 1.0],
+            "shade zero kills the rgb and leaves the alpha: a lit surface must \
+             not become more transparent"
+        );
+        assert_eq!(
+            mesh_fragment([0.5, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5], 1.0),
+            [0.25, 0.25, 0.25, 0.25]
+        );
+    }
+
+    #[test]
+    fn mesh_fragment_keeps_premultiplication_over_a_grid() {
+        // The proof without a display: over a grid of contract-honouring
+        // texels, tints (both premultiplied, so every `rgb <= a`) and shades
+        // in `0.0..=1.0`, every result satisfies `r <= a && g <= a && b <= a`
+        // componentwise. What it cannot see is shade dropped or rgb dimmed:
+        // both keep a premultiplied base premultiplied, so those mutations
+        // stay green here and fail `mesh_fragment_applies_the_shade_to_rgb`
+        // instead — a survivor is a missing assertion, and that test is it.
+        let levels = [0.0, 0.5, 1.0];
+        for rgb in levels {
+            for alpha in levels {
+                if rgb > alpha {
+                    continue;
+                }
+                let texel = [rgb, rgb, rgb, alpha];
+                let tint = [rgb, rgb, rgb, alpha];
+                for shade in levels {
+                    let out = mesh_fragment(texel, tint, shade);
+                    for (index, channel) in out.iter().enumerate().take(3) {
+                        assert!(
+                            *channel <= out[3],
+                            "channel {index} {channel} exceeds alpha {} at rgb {rgb}, alpha {alpha}, shade {shade}",
+                            out[3]
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// The four 2D vertex shaders still write the same clip position, and none

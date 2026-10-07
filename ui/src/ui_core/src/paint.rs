@@ -5,6 +5,8 @@
 
 use crate::animation::Interpolate;
 use crate::layout::Offset;
+use crate::render::matrix::Mat4;
+use crate::render::mesh::{MeshId, SubMeshRange};
 
 pub use crate::font::{FamilyId, FontWeight};
 pub use crate::property::Color;
@@ -651,6 +653,49 @@ pub enum DrawCommand {
         /// Fill color, premultiplied alpha.
         color: Color,
     },
+    /// A triangle mesh: one named sub-mesh of one uploaded mesh, through one
+    /// transform, in one tint.
+    ///
+    /// **The transform is on the command and not on the mesh**, because the five
+    /// sub-meshes of one car share one buffer and differ only in the transform
+    /// they are drawn through — which is why task 35 made them index ranges into
+    /// one interleaved pair rather than five buffer pairs.
+    ///
+    /// **Where it lands in the frame is the caller's recording order, and there is
+    /// no flag that changes it.** A command recorded before this one is submitted
+    /// first and is under it; a command recorded after it is submitted later and is
+    /// over it, whatever this mesh's depth says — the 2D passes neither test nor
+    /// write depth, so the depth buffer cannot express "the map is behind the car"
+    /// and no comparison function on it ever will. Record the map first and the
+    /// chrome second. A mesh recorded *before* the map is under the map: that is
+    /// correct for submission order, not a defect.
+    Mesh {
+        /// The mesh to draw from, as returned by `Renderer::upload_mesh`.
+        mesh: MeshId,
+        /// Which part of that mesh: one sub-mesh's `(first_index, index_count)`
+        /// range, with **absolute** indices into the shared index buffer.
+        range: SubMeshRange,
+        /// Model-view-projection, from the renderer's transform path.
+        mvp: Mat4,
+        /// Material tint, premultiplied, like every other colour on this enum.
+        tint: Color,
+        /// How much of the mesh reaches the screen, `0.0..=1.0`, clamped when
+        /// drawn.
+        ///
+        /// **A scalar and not part of `tint`,** because it decides the blend mode
+        /// and the blend mode must not depend on how the caller chose to express
+        /// the alpha: a tint of alpha 0 draws nothing and is transparent, while
+        /// `opacity: 1.0` says the draw is opaque whatever the tint. This is the
+        /// same split `DrawCommand::Image`'s `opacity` makes against the texture.
+        opacity: f32,
+        /// The material's colormap, sampled by the mesh pass.
+        ///
+        /// **On the command rather than on the mesh**, because `BatchKey`'s
+        /// `texture` is what the pass reads the sampler from — the same field
+        /// `draw_image_batch` reads — and because one model may be drawn with a
+        /// different colormap without re-uploading its geometry.
+        texture: TextureId,
+    },
 }
 
 /// Everything [`Painter::text_run`] records, in one named struct.
@@ -1146,6 +1191,54 @@ impl Painter {
         self.commands.push(DrawCommand::Polygon {
             points: points.to_vec(),
             color,
+        });
+    }
+
+    /// Records one sub-mesh of an uploaded mesh, drawn through `mvp` in `tint`.
+    ///
+    /// The recorder's contract is the other nine methods': store what was
+    /// handed over. The transform rides the command because the sub-meshes of
+    /// one model share one buffer and differ only in the matrix they are drawn
+    /// through — see [`DrawCommand::Mesh`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ui_core::paint::{Color, Painter, TextureId};
+    /// use ui_core::render::matrix::Mat4;
+    /// use ui_core::render::mesh::{MeshId, SubMeshRange};
+    ///
+    /// let mut painter = Painter::new();
+    /// painter.mesh(
+    ///     MeshId::new(0),
+    ///     SubMeshRange {
+    ///         first_index: 0,
+    ///         index_count: 3,
+    ///     },
+    ///     Mat4::identity(),
+    ///     Color::new(255, 255, 255, 255),
+    ///     1.0,
+    ///     TextureId::new(7),
+    /// );
+    /// let commands = painter.finish();
+    /// assert_eq!(commands.len(), 1);
+    /// ```
+    pub fn mesh(
+        &mut self,
+        mesh: MeshId,
+        range: SubMeshRange,
+        mvp: Mat4,
+        tint: Color,
+        opacity: f32,
+        texture: TextureId,
+    ) {
+        self.commands.push(DrawCommand::Mesh {
+            mesh,
+            range,
+            mvp,
+            tint,
+            opacity,
+            texture,
         });
     }
 

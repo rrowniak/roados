@@ -1603,6 +1603,12 @@ pub fn command_bounds(command: &DrawCommand) -> Option<Rect> {
             ))
         }
         DrawCommand::Text { .. } => None,
+        // A mesh carries no window-space box to bound: its position is its
+        // `mvp`, which maps to clip space, so no `Rect` here can say where it
+        // lands. `None` keeps the command — `clip_commands` drops only a
+        // command whose bounds miss the clip, and a mesh with no bounds is
+        // kept and cut to the viewport by the batch scissor at draw time.
+        DrawCommand::Mesh { .. } => None,
         // A shadow is **not** bounded by its own rect, and **not** by its rect
         // moved by its offset either — although both of those are inside the
         // answer. The renderer draws the shadow's shape at `rect` **moved by

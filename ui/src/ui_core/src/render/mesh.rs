@@ -115,6 +115,41 @@ impl MeshVertex {
     }
 }
 
+/// One sub-mesh's range in the shared index buffer.
+///
+/// A newtype rather than two `u32` fields on the command: the two cannot be
+/// transposed by accident, and `first_index: 1` is **4 bytes**, not 1 — the
+/// conversion [`SubMeshRange::byte_offset`] is the single place that knows it.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SubMeshRange {
+    /// First index of the range, absolute into `Mesh::indices`.
+    pub first_index: u32,
+    /// How many indices the range holds; a multiple of three.
+    pub index_count: u32,
+}
+
+impl SubMeshRange {
+    /// Converts `first_index` to the byte offset GL's `draw_elements` expects.
+    ///
+    /// The conversion is `first_index × size_of::<u32>()`, checked, returning
+    /// [`RenderError::Gl`](crate::render::RenderError::Gl) rather than
+    /// wrapping. A range past the end of the index buffer is what
+    /// `draw_elements` reads, and without robust buffer access that is
+    /// undefined geometry rather than an error — so the draw site
+    /// bounds-checks first and this conversion only refuses an offset no
+    /// address can hold.
+    pub fn byte_offset(&self) -> Result<i32, RenderError> {
+        let byte_offset = self
+            .first_index
+            .checked_mul(std::mem::size_of::<u32>() as u32)
+            .ok_or_else(|| {
+                RenderError::Gl("sub-mesh byte offset exceeds the u32 range".to_string())
+            })?;
+        i32::try_from(byte_offset)
+            .map_err(|_| RenderError::Gl("sub-mesh byte offset exceeds the i32 range".to_string()))
+    }
+}
+
 /// A named index range into the shared index buffer.
 ///
 /// The whole model is one vertex buffer and one index buffer, and the five
@@ -128,6 +163,17 @@ pub struct SubMesh {
     pub first_index: u32,
     /// The number of indices in this sub-mesh.
     pub index_count: u32,
+}
+
+impl SubMesh {
+    /// Returns this sub-mesh's range in the shared index buffer.
+    #[must_use]
+    pub fn range(&self) -> SubMeshRange {
+        SubMeshRange {
+            first_index: self.first_index,
+            index_count: self.index_count,
+        }
+    }
 }
 
 /// A complete mesh: vertices, indices, and named sub-mesh ranges.
@@ -155,6 +201,21 @@ pub struct Mesh {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MeshId(pub(crate) u32);
 
+impl MeshId {
+    /// Creates a mesh handle from a raw store slot.
+    ///
+    /// The slot is what the store's `push` returns, and a handle for a slot
+    /// the store does not hold draws nothing: the draw site skips an unknown
+    /// id rather than panicking, so a handle is never a promise the mesh
+    /// exists. The constructor is public so a caller can name the handle a
+    /// recording needs — including [`Painter::mesh`](crate::paint::Painter::mesh)'s
+    /// doc example, which records without opening a window.
+    #[must_use]
+    pub fn new(id: u32) -> Self {
+        MeshId(id)
+    }
+}
+
 /// CPU-side record of an uploaded mesh.
 ///
 /// The renderer appends to `meshes` and every mesh lives until the renderer
@@ -166,6 +227,18 @@ pub(crate) struct MeshRecord {
     vertex_base: u32,
     #[expect(dead_code)]
     index_base: u32,
+}
+
+impl MeshRecord {
+    /// How many indices the stored mesh holds.
+    ///
+    /// The draw site bounds-checks a command's range against this before
+    /// issuing the draw: a range past the end of the index buffer is what
+    /// `draw_elements` reads, and without robust buffer access that is
+    /// undefined geometry rather than an error.
+    pub(crate) fn indices_len(&self) -> usize {
+        self.mesh.indices.len()
+    }
 }
 
 /// The store that owns all uploaded meshes' CPU geometry.
@@ -221,15 +294,11 @@ impl MeshStore {
 /// Converts a sub-mesh's `first_index` to the byte offset GL's
 /// `draw_elements` expects.
 ///
-/// The conversion is `first_index × size_of::<u32>()`, checked, returning
-/// `RenderError::Gl` rather than wrapping.
+/// A one-line delegate to [`SubMeshRange::byte_offset`]: a duplicate with no
+/// test is two numbers that can drift, so a test asserts the two return the
+/// same value for a fixture of ranges.
 pub fn sub_mesh_byte_offset(sub: &SubMesh) -> Result<i32, RenderError> {
-    let byte_offset = sub
-        .first_index
-        .checked_mul(std::mem::size_of::<u32>() as u32)
-        .ok_or_else(|| RenderError::Gl("sub-mesh byte offset exceeds the u32 range".to_string()))?;
-    i32::try_from(byte_offset)
-        .map_err(|_| RenderError::Gl("sub-mesh byte offset exceeds the i32 range".to_string()))
+    sub.range().byte_offset()
 }
 
 /// Validates that all indices in `mesh` fall within the slot's vertex range
@@ -382,6 +451,33 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("exceeds the i32 range"));
+    }
+
+    #[test]
+    fn sub_mesh_byte_offset_agrees_with_range_byte_offset() {
+        // `sub_mesh_byte_offset` is a one-line delegate to
+        // `SubMeshRange::byte_offset`: a duplicate with no test is two numbers
+        // that can drift, so both are asserted to return the same value for a
+        // fixture of ranges — including `first_index: 1`, which is **4 bytes**,
+        // not 1, and an offset past `i32`, which is `Err` on both.
+        for first_index in [0, 1, 7, 1_000_000, (i32::MAX as u32 / 4) + 1] {
+            let sub = SubMesh {
+                name: "test".to_string(),
+                first_index,
+                index_count: 6,
+            };
+            assert_eq!(
+                sub_mesh_byte_offset(&sub).map_err(|e| e.to_string()),
+                sub.range().byte_offset().map_err(|e| e.to_string()),
+                "delegate and method disagree at first_index {first_index}"
+            );
+        }
+        let one = SubMesh {
+            name: "test".to_string(),
+            first_index: 1,
+            index_count: 3,
+        };
+        assert_eq!(one.range().byte_offset().unwrap(), 4);
     }
 
     #[test]

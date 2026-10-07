@@ -47,6 +47,15 @@ pub enum ShaderKind {
     /// quad carries. Giving it a kind of its own also means it can never merge
     /// into a solid batch — see [`BatchKey::is_singleton`].
     Shadow,
+    /// A triangle mesh, drawn through the mesh program with the depth test on.
+    ///
+    /// **A shader kind and not a batch**, because a mesh command can never
+    /// merge into another batch: a mesh's per-command state is a transform and
+    /// an index range, and neither can ride in a vertex buffer the way a
+    /// rounded rectangle's radius and size do, so two mesh commands are two
+    /// draw calls however their keys compare — see
+    /// [`BatchKey::is_singleton`].
+    Mesh,
 }
 
 /// The key that groups draw commands into batches.
@@ -66,12 +75,19 @@ pub struct BatchKey {
 impl BatchKey {
     /// Returns whether a batch under this key must hold exactly one command.
     ///
-    /// **The only such key is the shadow's**, and the reason is about *where* a
+    /// **The only such keys are the shadow's and the mesh's**, and the reason is about *where* a
     /// command draws rather than what it draws. [`Batcher::submit_order`]
     /// splits a frame into [`Segment`]s at every shadow, so a shadow that shared
     /// a batch with anything else — with the shadow before it, or with a solid
     /// rect — would take that neighbour across the boundary with it, and the
     /// composite would land one command too early or too late.
+    ///
+    /// Two keys are singletons and they are singletons for the same reason, which is that
+    /// `submit_order` splits the frame at each of them: a command recorded after a
+    /// mesh or a shadow must not merge into a batch recorded before it, or it lands on
+    /// the wrong side of it. They differ in the second reason — a shadow needs an
+    /// offscreen target, a mesh needs a per-command transform — and in neither does
+    /// merging buy anything: each is one draw call already.
     ///
     /// Merging is otherwise strictly good: it is the difference between one draw
     /// call and two. A singleton batch pays a second draw call every frame, which
@@ -79,7 +95,7 @@ impl BatchKey {
     /// to remember to set.
     #[must_use]
     pub fn is_singleton(&self) -> bool {
-        matches!(self.shader, ShaderKind::Shadow)
+        matches!(self.shader, ShaderKind::Shadow | ShaderKind::Mesh)
     }
 }
 
@@ -176,7 +192,20 @@ pub struct Segment {
     /// A [`Batch`] and not a [`DrawCommand`] so that the shadow's clip rides
     /// along the way [`Batch::clip`] says every other batch's does: the
     /// composite is a draw call, and a draw call has one scissor.
+    ///
+    /// The boundary the segment ends with — see `mesh`.
     pub shadow: Option<Batch>,
+    /// The mesh to draw once this segment is on screen, as a batch holding
+    /// that one command and the clip it was recorded under.
+    ///
+    /// A [`Batch`] and not a [`DrawCommand`] for the same reason as `shadow`:
+    /// the draw is a draw call, and a draw call has one scissor.
+    ///
+    /// The boundary the segment ends with — at most one of `shadow` and
+    /// `mesh` is `Some`, because a seal consumes exactly one singleton
+    /// command. Not a sum type: the invariant needs a test rather than a
+    /// type, and a sum would rename a `pub` field twenty-three tests name.
+    pub mesh: Option<Batch>,
 }
 
 /// Groups draw commands into batches by [`BatchKey`].
@@ -339,11 +368,11 @@ impl Batcher {
         let mut segments: Vec<Segment> = Vec::new();
         for sealed in self.sealed.drain(..) {
             let mut batches = sealed;
-            // Sealing puts the shadow last and nothing merges into it, so the
-            // last batch is the shadow. The `match` rather than an `expect`
+            // Sealing puts the singleton last and nothing merges into it, so the
+            // last batch is the boundary. The `match` rather than an `expect`
             // because a batch that turned out not to be one has to go back into
             // the segment it came from, not vanish.
-            let shadow = match batches.pop() {
+            let popped = match batches.pop() {
                 Some(batch) if batch.key.is_singleton() => Some(batch),
                 other => {
                     if let Some(batch) = other {
@@ -351,6 +380,15 @@ impl Batcher {
                     }
                     None
                 }
+            };
+            // A seal consumes exactly one singleton command, so the boundary is
+            // whichever kind it was — and a mesh and a shadow never share a
+            // segment, which is the invariant the suite asserts rather than the
+            // type.
+            let (shadow, mesh) = match popped {
+                Some(batch) if batch.key.shader == ShaderKind::Shadow => (Some(batch), None),
+                Some(batch) => (None, Some(batch)),
+                None => (None, None),
             };
             let BatchedCommands {
                 opaque,
@@ -360,10 +398,11 @@ impl Batcher {
                 opaque,
                 transparent,
                 shadow,
+                mesh,
             });
         }
-        // The trailing run after the last shadow is a segment with no shadow of
-        // its own. A frame that ended on a shadow still has one, and it is empty
+        // The trailing run after the last boundary is a segment with no boundary
+        // of its own. A frame that ended on a shadow still has one, and it is empty
         // — which keeps "the frame is a list of segments" true whatever the last
         // command was, instead of leaving the caller to ask whether the list ends
         // in one.
@@ -375,6 +414,7 @@ impl Batcher {
             opaque,
             transparent,
             shadow: None,
+            mesh: None,
         });
         segments
     }
@@ -474,6 +514,23 @@ impl DrawCommand {
                 blend_mode: BlendMode::from_color(*color),
                 shader: ShaderKind::Shadow,
             },
+            // A mesh draws in the opaque pass only when it asks for no blending
+            // of its own: exactly `1.0`, not "at least", for the same reason
+            // `DrawCommand::Image`'s arm says — an opacity past one is clamped
+            // at draw time, so it draws the same as `1.0` and is batched as
+            // blending all the same. The colormap rides `texture` the way the
+            // image pass's does: it is what the pass reads the sampler from.
+            DrawCommand::Mesh {
+                texture, opacity, ..
+            } => BatchKey {
+                texture: Some(*texture),
+                blend_mode: if *opacity == 1.0 {
+                    BlendMode::Opaque
+                } else {
+                    BlendMode::Transparent
+                },
+                shader: ShaderKind::Mesh,
+            },
         }
     }
 }
@@ -482,6 +539,8 @@ impl DrawCommand {
 mod tests {
     use super::*;
     use crate::paint::{FamilyId, FontWeight, Rect, UvRect};
+    use crate::render::matrix::Mat4;
+    use crate::render::mesh::{MeshId, SubMeshRange};
 
     fn rect(color: Color) -> DrawCommand {
         DrawCommand::Rect {
@@ -1133,6 +1192,22 @@ mod tests {
             .collect()
     }
 
+    /// A mesh command at `opacity`, through the identity matrix in opaque
+    /// white, sampling texture 7.
+    fn mesh(opacity: f32) -> DrawCommand {
+        DrawCommand::Mesh {
+            mesh: MeshId::new(0),
+            range: SubMeshRange {
+                first_index: 0,
+                index_count: 3,
+            },
+            mvp: Mat4::identity(),
+            tint: Color::new(255, 255, 255, 255),
+            opacity,
+            texture: TextureId::new(7),
+        }
+    }
+
     #[test]
     fn a_frame_with_no_shadow_is_one_segment_and_the_groups_it_has_always_had() {
         // The control for everything below: the same three commands with no
@@ -1417,6 +1492,191 @@ mod tests {
         // application would be a draw call of its own.
         assert!(!rect(opaque()).batch_key().is_singleton());
         assert!(!image(1).batch_key().is_singleton());
+    }
+
+    #[test]
+    fn a_mesh_is_a_singleton_and_no_2d_command_is() {
+        // The mesh seals the segment for the same reason the shadow does: a
+        // command recorded after it must not merge into a batch recorded before
+        // it, or it lands on the wrong side of the car.
+        assert!(mesh(1.0).batch_key().is_singleton());
+        assert!(mesh(0.5).batch_key().is_singleton());
+
+        // The controls: no 2D command seals anything, and the shadow still
+        // seals for its own reason.
+        assert!(!rect(opaque()).batch_key().is_singleton());
+        assert!(!rounded_at(0, opaque()).batch_key().is_singleton());
+        assert!(!image(1).batch_key().is_singleton());
+        assert!(shadow().batch_key().is_singleton());
+    }
+
+    #[test]
+    fn a_mesh_key_carries_its_colormap_and_opacity_decides_the_blend() {
+        // Exactly `1.0`, not "at least" — the precedent is `Image`'s
+        // `an_opacity_a_hair_below_one_blends`, and the reason is the same: an
+        // opacity past one is clamped at draw time, so it draws as `1.0` and
+        // is batched as blending all the same.
+        let opaque = mesh(1.0).batch_key();
+        assert_eq!(opaque.shader, ShaderKind::Mesh);
+        assert_eq!(opaque.texture, Some(TextureId::new(7)));
+        assert_eq!(opaque.blend_mode, BlendMode::Opaque);
+
+        let hair_below = mesh(0.999).batch_key();
+        assert_eq!(hair_below.shader, ShaderKind::Mesh);
+        assert_eq!(hair_below.texture, Some(TextureId::new(7)));
+        assert_eq!(hair_below.blend_mode, BlendMode::Transparent);
+
+        let above = mesh(1.5).batch_key();
+        assert_eq!(
+            above.blend_mode,
+            BlendMode::Transparent,
+            "an opacity past one draws as one and blends"
+        );
+    }
+
+    #[test]
+    fn a_frame_with_no_mesh_and_no_shadow_has_no_boundary() {
+        // The trailing-run literal sets both boundary slots: a frame with
+        // neither kind of boundary is one segment whose two slots are `None`.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, opaque()));
+        batcher.add(rounded_at(1, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 1);
+        assert!(segments[0].shadow.is_none());
+        assert!(segments[0].mesh.is_none());
+    }
+
+    #[test]
+    fn alternating_shadows_and_meshes_yield_one_boundary_per_segment_in_order() {
+        // Three boundaries — shadow, mesh, shadow — seal three segments in
+        // recorded order, and the frame after the last one is the fourth.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, opaque()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(1, opaque()));
+        batcher.add(mesh(1.0));
+        batcher.add(rounded_at(2, opaque()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(3, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 4);
+        assert!(segments[0].shadow.is_some());
+        assert!(segments[0].mesh.is_none());
+        assert!(segments[1].shadow.is_none());
+        assert!(segments[1].mesh.is_some());
+        assert!(segments[2].shadow.is_some());
+        assert!(segments[2].mesh.is_none());
+        assert!(segments[3].shadow.is_none());
+        assert!(segments[3].mesh.is_none());
+        assert_eq!(
+            segments[0].opaque[0].commands.len(),
+            1,
+            "the rect recorded before the shadow"
+        );
+        assert_eq!(
+            segments[3].opaque[0].commands.len(),
+            1,
+            "and the one recorded after the last boundary is in a batch of its own"
+        );
+    }
+
+    #[test]
+    fn no_segment_holds_a_shadow_and_a_mesh() {
+        // A seal consumes exactly one singleton command, so at most one of the
+        // two boundary slots is `Some` — the invariant a two-`Option` type
+        // cannot say for itself. A mesh and a shadow can never share a
+        // segment, so their draw order relative to each other is unobservable.
+        let mut batcher = Batcher::new();
+        batcher.add(shadow());
+        batcher.add(mesh(1.0));
+        batcher.add(mesh(0.5));
+        batcher.add(shadow());
+        batcher.add(rounded_at(0, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 5);
+        assert!(
+            segments.iter().any(|segment| segment.mesh.is_some()),
+            "a frame holding meshes has a mesh boundary — without this, a \
+             classification that files every boundary as a shadow passes the \
+             invariant below vacuously"
+        );
+        for (index, segment) in segments.iter().enumerate() {
+            assert!(
+                segment.shadow.is_none() || segment.mesh.is_none(),
+                "segment {index} holds two boundaries"
+            );
+        }
+    }
+
+    #[test]
+    fn every_variant_has_a_key_and_every_kind_routes() {
+        // The compiler is the stronger check: one `match` over all ten
+        // `DrawCommand` variants and one over all five `ShaderKind`s, so a
+        // variant added without a key — or a kind added without a route — is a
+        // non-exhaustive match, which is a compile error rather than a silent
+        // pass.
+        let commands = [
+            rect(opaque()),
+            rounded_at(0, opaque()),
+            shadow(),
+            image(1),
+            DrawCommand::Text {
+                x: 0.0,
+                y: 0.0,
+                text: "a".to_string(),
+                color: opaque(),
+                font_size: 16.0,
+                extra_advance: 0.0,
+                family: FamilyId::default(),
+                weight: FontWeight::Regular,
+                fade: None,
+                clip: None,
+            },
+            DrawCommand::Line {
+                start: (0.0, 0.0),
+                end: (1.0, 1.0),
+                width: 1.0,
+                color: opaque(),
+            },
+            DrawCommand::Circle {
+                center: (0.0, 0.0),
+                radius: 1.0,
+                color: opaque(),
+            },
+            DrawCommand::Path {
+                points: Vec::new(),
+                width: 1.0,
+                color: opaque(),
+                closed: false,
+            },
+            DrawCommand::Polygon {
+                points: Vec::new(),
+                color: opaque(),
+            },
+            mesh(1.0),
+        ];
+        assert_eq!(commands.len(), 10, "one command per DrawCommand variant");
+        for command in &commands {
+            let _ = command.batch_key();
+        }
+        for kind in [
+            ShaderKind::Solid,
+            ShaderKind::Text,
+            ShaderKind::Image,
+            ShaderKind::Shadow,
+            ShaderKind::Mesh,
+        ] {
+            let _ = BatchKey {
+                texture: None,
+                blend_mode: BlendMode::Opaque,
+                shader: kind,
+            }
+            .is_singleton();
+        }
     }
 
     #[test]

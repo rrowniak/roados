@@ -13571,7 +13571,7 @@ mod tests {
                 ),
                 ui_core::render::blur::reach(*blur),
             ),
-            DrawCommand::Path { .. } => {
+            DrawCommand::Path { .. } | DrawCommand::Mesh { .. } => {
                 panic!(
                     "the demo records no {command:?}, and this test does not know \
                      how to place one"
@@ -14409,7 +14409,10 @@ mod tests {
             // Added 2026-10-02 for `DrawCommand::Shadow`, an exhaustive match that
             // could not be taught the new variant without an arm. The chart
             // records no shadow and none is placed through this helper.
-            DrawCommand::Shadow { .. } | DrawCommand::Image { .. } | DrawCommand::Path { .. } => {
+            DrawCommand::Shadow { .. }
+            | DrawCommand::Image { .. }
+            | DrawCommand::Path { .. }
+            | DrawCommand::Mesh { .. } => {
                 panic!(
                     "the chart records no {command:?}, and this test does not know \
                         how to place one"

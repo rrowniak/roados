@@ -1623,6 +1623,18 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 blur: *blur,
                 offset: *offset,
             },
+            // The mesh is passed through unchanged, and that is a limit rather
+            // than a preservation: the command's position is its `mvp`, which
+            // maps to clip space rather than window pixels, so a window-space
+            // move cannot be composed into it here — `translate_commands` is
+            // given no viewport and no projection, and a pixel offset applied
+            // to a clip-space matrix is a different picture. A mesh recorded
+            // inside translated content therefore keeps its recorded transform
+            // while its siblings move; the batch clip still cuts it to the
+            // viewport at draw time. No widget records a mesh inside
+            // translated content today, so the arm never fires — it exists
+            // because the match is exhaustive.
+            DrawCommand::Mesh { .. } => command.clone(),
         })
         .collect()
 }

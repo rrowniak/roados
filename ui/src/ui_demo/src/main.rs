@@ -115,8 +115,9 @@
 //!
 //! **The bar's nodes are in no page's list, and that is what 24.1 settled.** A
 //! [`PageMember`] carries one page per row and cannot express "all six", so a
-//! control on every page belongs to `tests::always_painted_handles` — twelve
-//! nodes now — and not to [`Demo::page_members`]. The same shape is why the
+//! control on every page belongs to `tests::always_painted_handles` — thirteen
+//! nodes now, twelve of them the tab bar's shape and the thirteenth the
+//! model-status line — and not to [`Demo::page_members`]. The same shape is why the
 //! addition to the `Tab` order is in [`Demo::focus_navigation`] and not in
 //! [`Demo::focusables`], which filters on `member.page == self.page` and so
 //! **cannot** return a node that is on every page.
@@ -235,11 +236,13 @@ use ui_core::layout::{
     MainAxisAlignment, Offset, Padding, Size,
 };
 use ui_core::node::{self, WidgetNode};
-use ui_core::paint::{Color, PaintState, Painter, Rect};
+use ui_core::paint::{Color, PaintState, Painter, Rect, TextureId};
 #[cfg(test)]
 use ui_core::paint::{DrawCommand, UvRect};
 use ui_core::property::Property;
 use ui_core::render::context::Context;
+use ui_core::render::mesh::{MeshId, SubMeshRange};
+use ui_core::render::meshio;
 use ui_core::render::Renderer;
 use ui_core::texture::{Pixels, TextureCache, TextureHandle};
 use ui_core::theme::{PropertyValue, Theme, ThemeToken};
@@ -1387,6 +1390,35 @@ const FPS_READOUT_ORIGIN: (f32, f32) = (60.0, 684.0);
 /// text is drawn from the box's own left edge.
 const FPS_READOUT_WIDTH: f32 = 400.0;
 
+/// The line the demo shows when the car model did not load.
+///
+/// On every page, because the model is loaded once in `main` rather than per
+/// page: a line on one page's own would make the six pages' placed rects differ
+/// and fail `every_page_places_every_rect_where_the_gallery_placed_it`, which
+/// compares all six. The em dash is U+2014, which Lato-Medium covers
+/// (measured out of its character map, beside task 30's ⚠ and ✓ which it does
+/// not) — so the line draws in the default family with no fallback involved.
+const MODEL_STATUS_TEXT: &str = "car model not loaded — see the log";
+
+/// Where the model-status line sits: the fps readout's own column, one line
+/// above it.
+///
+/// Content coordinates, so [`CONTENT_TOP`] takes the window y to 716: inside
+/// the frame-rate band the pixel criterion allows to differ (`y ≥ 680`), which
+/// is what makes a line the before-build does not have compatible with six
+/// otherwise pixel-identical pages. Above rather than below the readout
+/// because the text column's last row ends 58 px above the readout's own box
+/// and the input band's field starts below it — this is the one strip of the
+/// left column no page draws in.
+const MODEL_STATUS_ORIGIN: (f32, f32) = (60.0, 652.0);
+
+/// The width the model-status line is given: the fps readout's own width.
+///
+/// Written out rather than measured for the fps readout's reason — a box wider
+/// than the line in it costs nothing, and the text is drawn from the box's own
+/// left edge — and the same 400 keeps the two boxes' right edges on one line.
+const MODEL_STATUS_WIDTH: f32 = 400.0;
+
 // ------------------------------------------------------------------ task 19
 
 /// The y at which the text-entry band begins: the bottom of the window less
@@ -2080,6 +2112,24 @@ struct Picture {
     source: ImageSource,
 }
 
+/// The uploaded car model: a mesh, its sub-mesh ranges, and its colormap.
+///
+/// The colormap is `renderer.load_texture` on the same search, and `ranges`
+/// carries **all** the file's sub-meshes **in file order**, with no field
+/// selecting one: the draw command's `range` is what selects one, and this
+/// struct must not pre-empt it.
+struct Model {
+    /// The uploaded mesh's handle.
+    #[expect(dead_code, reason = "drawn by a later task; stored, not shown")]
+    mesh: MeshId,
+    /// Every sub-mesh range in the file, in file order.
+    #[expect(dead_code, reason = "drawn by a later task; stored, not shown")]
+    ranges: Vec<SubMeshRange>,
+    /// The colormap's texture.
+    #[expect(dead_code, reason = "drawn by a later task; stored, not shown")]
+    texture: TextureId,
+}
+
 /// The fits the demo's image cycles through, in the order `F` walks them.
 ///
 /// It is the task's four in the task's order, and `Cover` comes second on
@@ -2099,12 +2149,33 @@ const IMAGE_FIT_NAMES: [&str; 4] = ["Contain", "Cover", "Fill", "None"];
 /// The file name of the demo's image, under whichever directory is found.
 const ASSET_FILE: &str = "demo.png";
 
+/// The file name of the demo's car model, under whichever directory is found.
+const ASSET_MODEL_FILE: &str = "sedan.roados";
+
+/// The file name of the demo's car model, under whichever directory is found.
+///
+/// Beside the image in the same `assets/` directory, and the model file does
+/// not name it: the `ROADOSMF` format carries no texture reference, so the
+/// demo names the colormap, which is the arrangement the format's third reason
+/// argues for.
+const COLORMAP_FILE: &str = "colormap.png";
+
 /// Where the image is, relative to a directory in the workspace's own layout.
 ///
 /// The path from the workspace root — `ui/` — and not from the repository root,
 /// because the asset belongs to the `ui_demo` crate and the executable is built
 /// under `ui/target`.
 const ASSET_RELATIVE: &str = "src/ui_demo/assets/demo.png";
+
+/// Where the car model is, relative to a directory in the workspace's own layout.
+///
+/// `sedan.roados` is the `ROADOSMF` file task 39's converter writes from
+/// Kenney's `sedan.glb`. **It is not in this repository in this task** — the
+/// asset is 39's — so the demo's search finds nothing, `load_model` returns
+/// `None`, and the demo says so on stderr and in the model-status line. That is
+/// the expected state, and the reason the six pages are pixel-identical outside
+/// the frame-rate band. `ROADOS_ASSET_DIR` is how a caller supplies one.
+const ASSET_MODEL_RELATIVE: &str = "src/ui_demo/assets/sedan.roados";
 
 /// The environment variable that overrides where the image is looked for.
 ///
@@ -2200,12 +2271,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // caller gets `None`, says so once on stderr, and the demo stands in a
     // transparent image of the same shape — see `stand_in_picture`.
     let picture = load_picture(&mut renderer);
+    // The car model, loaded the same way and with the same non-fatal failure:
+    // `None` means the demo draws no car and says so, on stderr and in the
+    // model-status line. There is no stand-in mesh — see `load_model`.
+    let model = load_model(&mut renderer);
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
     let mut demo = Demo::new(
         TextMetrics::new(fonts.clone(), fonts.default_family()),
         fonts,
         picture,
+        model,
         page,
     )?;
     let run_for = run_seconds();
@@ -2389,6 +2465,74 @@ fn load_picture(renderer: &mut Renderer) -> Option<Picture> {
     }
 }
 
+/// Loads the demo's car model and returns it, or `None` after saying why.
+///
+/// Beside [`load_picture`] and in its shape: the candidate list comes from the
+/// **same** [`asset_candidates_from`] helper with [`ASSET_MODEL_RELATIVE`]
+/// rather than [`ASSET_RELATIVE`], the first candidate that `is_file()` wins,
+/// and on no candidate one `eprintln!` names every path it looked at through
+/// [`join_paths`] — the same message shape, the same helper, the same
+/// override.
+///
+/// **A missing model is non-fatal, exactly as a missing image is** — and for
+/// the same reason a missing image is not: the demo draws everything else.
+/// What differs is the stand-in. `stand_in_picture` can hand the widget a
+/// transparent image of the asset's own shape because `Image` needs only a
+/// handle and a source; a mesh command needs a `MeshId`, a `SubMeshRange`, a
+/// matrix and a `TextureId`, and there is no "no mesh" value any of those four
+/// can take that is not a lie — a zero-length range is skipped, an unknown
+/// `MeshId` draws nothing, and a unit-cube stand-in is a picture of a mesh
+/// pretending to be the car. So the demo draws no car and prints why: one line
+/// on stderr here, and one line in the model-status label
+/// ([`MODEL_STATUS_TEXT`]) saying so. A wireframe box is a shape a defect
+/// looks like, and a car-shaped `Mesh` built in Rust is an asset pipeline in
+/// `ui_demo`, which is task 39's and not this task's.
+fn load_model(renderer: &mut Renderer) -> Option<Model> {
+    let candidates = model_candidates();
+    let path = candidates.iter().find(|path| path.is_file());
+    let Some(path) = path else {
+        eprintln!(
+            "ui_demo: {} not found; looked in {}",
+            ASSET_MODEL_FILE,
+            join_paths(&candidates)
+        );
+        return None;
+    };
+    let mesh = match meshio::load_from_path(path) {
+        Ok(mesh) => mesh,
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
+            return None;
+        }
+    };
+    let ranges: Vec<SubMeshRange> = mesh.sub_meshes.iter().map(|sub| sub.range()).collect();
+    let mesh = match renderer.upload_mesh(mesh) {
+        Ok(mesh) => mesh,
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
+            return None;
+        }
+    };
+    // The colormap sits beside the model, and the model file does not name
+    // it: the format carries no texture reference, so the demo names it.
+    let colormap = path.parent().unwrap_or(Path::new("")).join(COLORMAP_FILE);
+    let texture = match renderer.load_texture(&colormap) {
+        Ok(texture) => texture.id(),
+        Err(error) => {
+            eprintln!(
+                "ui_demo: {}: {error}; standing in for it",
+                colormap.display()
+            );
+            return None;
+        }
+    };
+    Some(Model {
+        mesh,
+        ranges,
+        texture,
+    })
+}
+
 /// Returns `paths` as one comma-separated string, for a message about where
 /// something was looked for.
 ///
@@ -2416,26 +2560,50 @@ fn asset_candidates() -> Vec<PathBuf> {
     let Ok(exe) = std::env::current_exe() else {
         return Vec::new();
     };
-    asset_candidates_from(&exe, std::env::var_os(ASSET_DIR_VAR).as_deref())
+    asset_candidates_from(
+        &exe,
+        std::env::var_os(ASSET_DIR_VAR).as_deref(),
+        ASSET_RELATIVE,
+    )
 }
 
-/// Returns the candidates for an executable at `exe` and an override directory
-/// of `dir`, in the order [`asset_candidates`] looks in them.
+/// Returns the paths the demo's car model may be at, in the order it looks.
+///
+/// The same walk as [`asset_candidates`] with a different relative path: a
+/// second search-path walker would be a second answer to one question.
+fn model_candidates() -> Vec<PathBuf> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    asset_candidates_from(
+        &exe,
+        std::env::var_os(ASSET_DIR_VAR).as_deref(),
+        ASSET_MODEL_RELATIVE,
+    )
+}
+
+/// Returns the candidates for an executable at `exe`, an override directory
+/// of `dir` and a workspace-relative path of `relative`, in the order
+/// [`asset_candidates`] looks in them.
 ///
 /// This is the half of the search that is arithmetic rather than the filesystem,
 /// which is what makes it a function a test can call: the `is_file` check that
-/// picks between them is one line in [`load_picture`].
-fn asset_candidates_from(exe: &Path, dir: Option<&OsStr>) -> Vec<PathBuf> {
+/// picks between them is one line in [`load_picture`]. `load_picture` passes
+/// [`ASSET_RELATIVE`] and [`load_model`] passes [`ASSET_MODEL_RELATIVE`], so
+/// the two searches share one walker rather than each owning one.
+fn asset_candidates_from(exe: &Path, dir: Option<&OsStr>, relative: &str) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(dir) = dir {
-        candidates.push(Path::new(dir).join(ASSET_FILE));
+    // The override names the same file the walk looks for: the directory
+    // holds the file, so the file's name is written down once in `relative`.
+    if let (Some(dir), Some(file)) = (dir, Path::new(relative).file_name()) {
+        candidates.push(Path::new(dir).join(file));
     }
     // `ancestors` starts at the executable itself, which is a file and not a
     // directory to walk out of, so the first candidate is its own directory.
     candidates.extend(
         exe.ancestors()
             .skip(1)
-            .map(|directory| directory.join(ASSET_RELATIVE)),
+            .map(|directory| directory.join(relative)),
     );
     candidates
 }
@@ -3233,6 +3401,15 @@ struct Demo {
     fps_text: Property<String>,
     /// The label showing the frame rate, in the bottom left of the window.
     fps_readout: DemoLabel,
+    /// The uploaded model, or `None` — which means the page shows the line
+    /// saying so, and never a shape pretending to be the car.
+    #[expect(dead_code, reason = "drawn by a later task; stored, not shown")]
+    model: Option<Model>,
+    /// The line saying the car model did not load, above the frame-rate
+    /// readout on every page — or `None` when a model did load, which removes
+    /// the line. `None` here is task 39's expected state: the asset exists, the
+    /// demo holds a `Model`, and the pages show no line about it.
+    model_status: Option<DemoLabel>,
     /// The demo's text field, under the gallery.
     ///
     /// A plain owned field, **not** an `Rc`. The first version of this wiring
@@ -3452,6 +3629,7 @@ impl Demo {
         metrics: TextMetrics,
         fonts: FontSet,
         picture: Option<Picture>,
+        model: Option<Model>,
         page: Page,
     ) -> Result<Self, &'static str> {
         let theme = Theme::new();
@@ -4213,6 +4391,37 @@ impl Demo {
                 .set_constraints(Constraints::tight(size));
         }
 
+        // The model-status line, above the frame-rate readout — and only when
+        // no model loaded. A static string rather than a bound property: the
+        // model is loaded once before the first frame and never changes, so
+        // there is nothing to recompute from. `None` removes the line, which
+        // is task 39's expected state rather than a second demo mode.
+        let model_status = if model.is_none() {
+            let status = read_only_label(
+                &mut nodes,
+                &metrics,
+                READOUT_FONT,
+                MODEL_STATUS_WIDTH,
+                Property::new(String::from(MODEL_STATUS_TEXT)),
+                &color_token,
+                &token_properties,
+            )?;
+            {
+                let size = Size {
+                    width: MODEL_STATUS_WIDTH,
+                    height: metrics.line_height(READOUT_FONT),
+                };
+                nodes
+                    .get_mut(status.label.handle())
+                    .ok_or("ui_demo: the model-status line is missing")?
+                    .layout_mut()
+                    .set_constraints(Constraints::tight(size));
+            }
+            Some(status)
+        } else {
+            None
+        };
+
         // ------------------------------------------------- task 19: text entry
         //
         // The field and the keyboard are wired to each other by
@@ -4676,6 +4885,20 @@ impl Demo {
                 .layout_mut()
                 .set_position(Some(Offset::new(origin.0, origin.1 + CONTENT_TOP)));
         }
+        // The model-status line, positioned like the band's own nodes and for
+        // the same reason: every `*_ORIGIN` here is a content coordinate and
+        // `CONTENT_TOP` is added at the placement. Separate from the loop
+        // above because the line is an `Option` — absent when a model loaded.
+        if let Some(status) = &model_status {
+            nodes
+                .get_mut(status.label.handle())
+                .ok_or("ui_demo: a node in the band is missing")?
+                .layout_mut()
+                .set_position(Some(Offset::new(
+                    MODEL_STATUS_ORIGIN.0,
+                    MODEL_STATUS_ORIGIN.1 + CONTENT_TOP,
+                )));
+        }
         // The layer is the window, not a box of its own: it is an `Absolute`
         // child, and an `Absolute` parent places a child at the position the child
         // declares, so the offsets written above are window coordinates whatever
@@ -4729,6 +4952,15 @@ impl Demo {
             || !controls.add_child(&mut nodes, keyboard.handle())
         {
             return Err("ui_demo: the controls layer could not be assembled");
+        }
+        // The model-status line paints with the controls layer, beside the
+        // frame-rate readout it sits above — and only when no model loaded.
+        // After the chain above because `add_child` returns rather than
+        // throws, and the line has no `Tab` order to keep.
+        if let Some(status) = &model_status {
+            if !controls.add_child(&mut nodes, status.label.handle()) {
+                return Err("ui_demo: the controls layer could not be assembled");
+            }
         }
 
         // A stack: the background fills the window behind the row of pads, the
@@ -5168,6 +5400,8 @@ impl Demo {
             fps: FrameRate::new(),
             fps_text,
             fps_readout,
+            model,
+            model_status,
             text_input,
             pending_key,
             keyboard,
@@ -7196,6 +7430,26 @@ impl Demo {
                 .map(Into::into);
             record_label(&mut nodes, handle, readout, &self.metrics, font, rect);
         }
+        // The model-status line, recorded like the layer's own labels and for
+        // the same reason — a number is on top of nothing here, but the walk
+        // above is the one place a label is painted, and a second one would be
+        // a second thing to keep in step. Separate because the line is an
+        // `Option`: absent when a model loaded.
+        if let Some(status) = &self.model_status {
+            let handle = status.label.handle();
+            let rect = nodes
+                .get(handle)
+                .and_then(|node| node.layout().rect())
+                .map(Into::into);
+            record_label(
+                &mut nodes,
+                handle,
+                status,
+                &self.metrics,
+                READOUT_FONT,
+                rect,
+            );
+        }
 
         // The text field, after its readouts rather than with the other
         // rect-only widgets, for one reason: its `paint` needs an **advance
@@ -8262,15 +8516,24 @@ impl Demo {
             ("submit readout", self.submit_readout.label.handle()),
             ("keyboard", self.keyboard.handle()),
         ]);
+        // The model-status line, named apart like the fallback label: it is
+        // the one leaf whose presence depends on what `main` found on disk, so
+        // a demo holding a model lists twenty-eight and one without lists
+        // twenty-nine, and `expected_placed_rect_names` is what says which.
+        if let Some(status) = &self.model_status {
+            handles.push(("model status", status.label.handle()));
+        }
         handles
     }
 
     /// [`Demo::placed_rects`] narrowed to **the page on show**: that page's own
     /// members, plus the leaves that are on every page.
     ///
-    /// **The always-painted half is one node — the frame-rate readout** — and it is
-    /// on every page because the operator's instruction was *"Keep fps label"*.
-    /// It is asked of [`Demo::on_show`] rather than of a list written out here,
+    /// **The always-painted half is two nodes — the frame-rate readout and the
+    /// model-status line** — and the readout is on every page because the
+    /// operator's instruction was *"Keep fps label"*. The status joins it
+    /// because the model is loaded once in `main` rather than per page.
+    /// Both are asked of [`Demo::on_show`] rather than of a list written out here,
     /// because that is the predicate the paint gate itself uses and a second
     /// answer would be a second thing to disagree with it.
     ///
@@ -8283,7 +8546,7 @@ impl Demo {
     /// dissolved. What it strengthens is each page's own layout, which is the
     /// thing a reader switching tabs actually sees.
     ///
-    /// **Twenty-eight of them, and the number is checked** —
+    /// **Twenty-eight with a model and twenty-nine without one — and the number is checked** —
     /// [`expected_placed_rect_names`] holds the whole set and
     /// [`assert_placed_handles_is_complete`] asserts its length. The three pads are
     /// three more widgets on screen and are **not** in it: they are the card's
@@ -8764,7 +9027,7 @@ mod tests {
     /// **`Page::DEFAULT` is `pads`,** so the tests whose subject really is on the
     /// default page are unchanged and the ones that are not name theirs.
     fn demo_on(page: Page) -> Demo {
-        Demo::new(mono_metrics(), demo_fonts(), None, page).unwrap()
+        Demo::new(mono_metrics(), demo_fonts(), None, None, page).unwrap()
     }
 
     /// Lays the demo out once, the way the first frame does, so a test can ask
@@ -13090,8 +13353,13 @@ mod tests {
     /// the nine labels fails it. A set of names would not notice. The tenth label
     /// is named `fallback label` and is one row rather than a tenth repetition,
     /// for the reason [`Demo::placed_handles`] gives.
-    fn expected_placed_rect_names() -> Vec<&'static str> {
-        vec![
+    ///
+    /// The `with_model_status` half is the one leaf whose presence depends on
+    /// what `main` found on disk: a demo holding a model has no status line and
+    /// lists twenty-eight, one without lists twenty-nine. The flag is read from
+    /// the demo beside it, never written out twice.
+    fn expected_placed_rect_names(with_model_status: bool) -> Vec<&'static str> {
+        let mut names = vec![
             "pads card",
             "text panel label",
             "text panel label",
@@ -13120,7 +13388,11 @@ mod tests {
             "text readout",
             "submit readout",
             "keyboard",
-        ]
+        ];
+        if with_model_status {
+            names.push("model status");
+        }
+        names
     }
 
     /// Asserts that [`Demo::placed_handles`] names exactly what
@@ -13137,7 +13409,8 @@ mod tests {
         };
         let mut got = named(&demo.placed_handles());
         got.sort_unstable();
-        let mut want = expected_placed_rect_names();
+        let with_model_status = demo.model_status.is_some();
+        let mut want = expected_placed_rect_names(with_model_status);
         want.sort_unstable();
         // **The count, checked rather than asserted in a doc comment.** One card,
         // nine text-panel labels, one fallback label and seventeen controls and
@@ -13147,12 +13420,15 @@ mod tests {
         // Adding a leaf now has to change this line as well as the list, which is
         // two edits and is the point. Task 30 and task 32.1 are the second and
         // third times this line has had to change, which is the evidence that it is
-        // the right place for the number rather than a doc comment.
+        // the right place for the number rather than a doc comment. The model
+        // status is the twenty-ninth, present exactly when the demo holds no
+        // model — which is every test fixture, and every run until task 39.
         assert_eq!(
             want.len(),
-            28,
+            if with_model_status { 29 } else { 28 },
             "the written-out list holds one card, nine text-panel labels, one \
-             fallback label and seventeen controls and readouts"
+             fallback label and seventeen controls and readouts, and the model \
+             status when the demo holds no model"
         );
         assert_eq!(
             got, want,
@@ -13165,7 +13441,7 @@ mod tests {
     }
 
     /// The nodes that draw something, have a box, and are **not** one of
-    /// [`Demo::placed_handles`]'s twenty-eight — written out, and named individually
+    /// [`Demo::placed_handles`]'s twenty-eight-or-twenty-nine — written out, and named individually
     /// rather than derived from anything the demo already believes.
     ///
     /// **Twelve, and nine of them are laid out by a container rather than placed by
@@ -14522,6 +14798,7 @@ mod tests {
         let candidates = asset_candidates_from(
             Path::new("/w/ui/target/debug/ui_demo"),
             Some(OsStr::new("/somewhere/else")),
+            ASSET_RELATIVE,
         );
         assert_eq!(
             candidates[0],
@@ -14543,13 +14820,80 @@ mod tests {
 
         // Without an override the walk starts at the executable's own directory,
         // which is `target/debug`, and climbs.
-        let plain = asset_candidates_from(Path::new("/w/ui/target/debug/ui_demo"), None);
+        let plain = asset_candidates_from(
+            Path::new("/w/ui/target/debug/ui_demo"),
+            None,
+            ASSET_RELATIVE,
+        );
         assert_eq!(
             plain.first().map(PathBuf::as_path),
             Some(Path::new("/w/ui/target/debug/src/ui_demo/assets/demo.png")),
             "it starts one above the executable, which is not a directory to walk out of"
         );
         assert_eq!(plain.len(), 5, "and it walks every ancestor it has");
+    }
+
+    #[test]
+    fn the_model_is_looked_for_by_the_same_walk_with_a_different_name() {
+        // One walker, two relative paths: `load_picture` passes
+        // `ASSET_RELATIVE` and `load_model` passes `ASSET_MODEL_RELATIVE`, so
+        // the two searches share the override-first, executable-up shape
+        // rather than each owning one.
+        let candidates = asset_candidates_from(
+            Path::new("/w/ui/target/debug/ui_demo"),
+            Some(OsStr::new("/somewhere/else")),
+            ASSET_MODEL_RELATIVE,
+        );
+        assert_eq!(
+            candidates[0],
+            PathBuf::from("/somewhere/else/sedan.roados"),
+            "the override directory names the model, not the image"
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|path| path == Path::new("/w/ui/src/ui_demo/assets/sedan.roados")),
+            "and the workspace root is in there: {candidates:?}"
+        );
+        assert_eq!(
+            candidates.len(),
+            asset_candidates_from(
+                Path::new("/w/ui/target/debug/ui_demo"),
+                Some(OsStr::new("/somewhere/else")),
+                ASSET_RELATIVE,
+            )
+            .len(),
+            "and the walk is the same length for either file"
+        );
+    }
+
+    #[test]
+    fn the_model_status_names_the_missing_car_on_every_page() {
+        // No model loads in a test — a test may not need a filesystem — so
+        // every fixture holds `None` and every page shows the line saying so,
+        // above the frame-rate readout it shares a column with. The literal is
+        // written out rather than read from `MODEL_STATUS_TEXT`, so a change
+        // to the line on screen fails here: task 39 removes exactly this line
+        // by supplying the asset, and a line that drifted from it would make
+        // that removal unrecognisable.
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+            let status = demo
+                .model_status
+                .as_ref()
+                .expect("a demo with no model shows the status line");
+            assert_eq!(
+                demo.readout_text_of(status).as_deref(),
+                Some("car model not loaded — see the log"),
+                "{page:?} names the missing car"
+            );
+            assert!(
+                demo.page_rects()
+                    .iter()
+                    .any(|(what, _)| *what == "model status"),
+                "{page:?} places the status line"
+            );
+        }
     }
 
     /// Returns the text the frame-rate readout is showing, as the last frame
@@ -18384,7 +18728,8 @@ mod tests {
 
     /// Returns the nodes that are on **every** page, in paint order.
     ///
-    /// **Twelve: the five of 2026-10-04 and the tab bar's seven.** The fifth of the
+    /// **Thirteen: the five of 2026-10-04, the tab bar's seven, and the model
+    /// status.** The fifth of the
     /// five was the toast host, which is deliberately absent from
     /// [`Demo::page_members`] — it records no commands of its own, and a row for it
     /// would overwrite the `PaintState::new()` the walk gives it with a dirty empty
@@ -18416,8 +18761,17 @@ mod tests {
         handles.extend([
             demo.controls_layer().handle(),
             demo.fps_readout.label.handle(),
-            demo.toasts.handle(),
         ]);
+        // The model-status line, on every page like the frame-rate readout —
+        // and only when no model loaded, which is every fixture and every run
+        // until task 39 supplies the asset. Beside the readout rather than
+        // after the toast host, because that is where the paint walk meets it:
+        // the walk is parent-first from the root, and the line is a child of
+        // the controls layer while the host hangs off the root behind it.
+        if let Some(status) = &demo.model_status {
+            handles.push(status.label.handle());
+        }
+        handles.push(demo.toasts.handle());
         handles
     }
 
@@ -18427,9 +18781,10 @@ mod tests {
 
         // **The completeness half, and it is the one that matters.** Every node in
         // `Demo::order` that is **not** a row of the table must be one of the
-        // **twelve** `always_painted_handles` names — twelve, not the five the list
+        // **thirteen** `always_painted_handles` names — twelve, not the five the list
         // held before the tab bar, because the bar and its six buttons are always
-        // painted and are on no page's own. One `Vec` difference, and it kills
+        // painted and are on no page's own, and thirteen with the model-status
+        // line beside the frame-rate readout. One `Vec` difference, and it kills
         // *every* row-deletion mutation rather than one.
         //
         // **And it could not be done by `a_page_records_no_command_on_a_node_that_
@@ -18450,9 +18805,9 @@ mod tests {
             unlisted,
             always_painted_handles(&demo),
             "every node in the paint order that the table does not name is one of the \
-             twelve a node on every page belongs to — the root, the background, the \
-             tab bar and its six buttons, the controls layer, the frame-rate readout \
-             and the toast host. A node here that is not on that list is a node no \
+             thirteen a node on every page belongs to — the root, the background, the \
+             tab bar and its six buttons, the controls layer, the frame-rate readout, \
+             the model-status line and the toast host. A node here that is not on that list is a node no \
              gate can see: it is drawn on every page, `set_visible` is never written \
              for it, and deleting one row of `Demo::new`'s table is all it takes"
         );

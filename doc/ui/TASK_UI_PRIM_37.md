@@ -766,11 +766,17 @@ one developer's change.
       narrower one: **this task introduces no filesystem access.** A reviewer who
       sees this grep fail at task 38 should read task 38's own
       `Out of Scope` and the amendment recorded there, not treat it as a
-      regression. No image decoder, no
-      pointer or gesture handling, no rotation state. (`Drag` and `Rotation` are
-      **not** usable as the check here: `InputEventKind::Drag` and
-      `property.rs`'s `Transform::rotation` already exist and predate this
-      sequence.) **No new dependency**: `ui/Cargo.toml` and `ui/Cargo.lock` are
+       regression. No image decoder, no
+       pointer or gesture handling, no rotation state. (`Drag` and `Rotation` are
+       **not** usable as the check here: `InputEventKind::Drag` and
+       `property.rs`'s `Transform::rotation` already exist and predate this
+       sequence.) **Amended 2026-10-07, on task 38's landing: the entry point is
+       `meshio::load_from_path` in `render/meshio.rs`, not `Mesh::load_from_path`
+       as the paragraph above names it** — task 38's requirement 7 puts the two
+       functions and four constants in `meshio` beside task 35's `Mesh` rather
+       than on it, and the `rg -n 'std::fs|File::open' ui/src/` check task 38
+       records returns exactly that one line. The criterion above is otherwise
+       confirmed as written: superseded, not failed. **No new dependency**: `ui/Cargo.toml` and `ui/Cargo.lock` are
       unchanged, and the approved direct dependencies remain `sdl3 0.20`, `glow
       0.18` and `freetype-rs 0.38` — per `AGENTS.md`, a maths crate for a 4×4
       multiply that task 36 already supplies is a licence decision against GPLv3

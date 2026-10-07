@@ -11,11 +11,11 @@ The platform and cross-compilation tasks are a separate sequence —
 `doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
 `doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-07 (**task 37 (The mesh draw command, its shader and its batching) implemented, verified, record written; task 36 (Matrix maths and the transform-to-GPU path) implemented, verified, record written; task 35 (Mesh vertex format and GPU buffers) implemented, verified, record written; task 34 (Depth buffer) implemented, verified, and committed as `c83ff11` on 2026-10-06; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3; task 31 committed as `8778c90`; task 30 committed as `75a896c`; tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33**)
+**Last updated:** 2026-10-07 (**task 38 (ROADOSMF model format and its loader) implemented, verified, record written; task 37 (The mesh draw command, its shader and its batching) implemented, verified, record written; task 36 (Matrix maths and the transform-to-GPU path) implemented, verified, record written; task 35 (Mesh vertex format and GPU buffers) implemented, verified, record written; task 34 (Depth buffer) implemented, verified, and committed as `c83ff11` on 2026-10-06; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3; task 31 committed as `8778c90`; task 30 committed as `75a896c`; tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33**)
 
 ## Current position
 
-**Status: task 37 (The mesh draw command, its shader and its batching) is done — implemented, verified, record written on 2026-10-07.** Task 36 (Matrix maths and the transform-to-GPU path) is done — implemented, verified, record written on 2026-10-07. Task 35 (Mesh vertex format and GPU buffers) is done — implemented, verified, record written on 2026-10-06. Task 34 (Depth buffer) is done — implemented, verified, and committed as `c83ff11` on 2026-10-06. Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows, 32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review for tasks 32, 34, 35, 36, 37 is `.ai/workflows/task-sequence.md` step 2, in a session separate from the implementer's**; the operator's commit is step 5. **The next task after 37 is 38** (`ROADOSMF` model format and its loader): 33 is done, 34–37 are done, and 38–52 are specified but not started. **Advancing past uncommitted tasks 32–37 to 38 on 2026-10-07 was the operator's explicit decision** ("move to the next task"), recorded here rather than skipped quietly — the *No uncommitted advance* gate is stepped over deliberately, as with 24's three sub-tasks in one commit.
+**Status: task 38 (`ROADOSMF` model format and its loader) is done — implemented, verified, record written on 2026-10-07.** Task 37 (The mesh draw command, its shader and its batching) is done — implemented, verified, record written on 2026-10-07. Task 36 (Matrix maths and the transform-to-GPU path) is done — implemented, verified, record written on 2026-10-07. Task 35 (Mesh vertex format and GPU buffers) is done — implemented, verified, record written on 2026-10-06. Task 34 (Depth buffer) is done — implemented, verified, and committed as `c83ff11` on 2026-10-06. Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows, 32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review for tasks 32, 34, 35, 36, 37, 38 is `.ai/workflows/task-sequence.md` step 2, in a session separate from the implementer's**; the operator's commit is step 5. **The next task after 38 is 39** (the asset pipeline): 33 is done, 34–38 are done, and 39–52 are specified but not started. **Advancing past uncommitted tasks 32–38 to 39 is the operator's decision to make** — advancing past 32–37 to 38 on 2026-10-07 was the operator's explicit decision ("move to the next task"), recorded here rather than skipped quietly — the *No uncommitted advance* gate is stepped over deliberately, as with 24's three sub-tasks in one commit.
 
 **Nothing is in flight, and the next task is 32 (Fade and clip truncation,
 drawn).** It is the lowest-numbered task of the sequence that is not done: 33 was
@@ -713,6 +713,166 @@ reader would otherwise walk.
   dependencies are `sdl3 0.20`, `glow 0.18`, `freetype-rs 0.38`.
 - **No mesh in the demo.** `ui_demo` gains nothing. Six pages must be
   pixel-identical.
+
+- **No mesh in the demo.** `ui_demo` gains nothing. Six pages must be
+  pixel-identical.
+
+## Task 38 — what it decided, and what it found
+
+**Implemented 2026-10-07, verified, not yet reviewed** — review is
+`.ai/workflows/task-sequence.md` step 2, in a session separate from the
+implementer's. **3 code files**: `ui_core/src/render/meshio.rs` (new, with 21
+unit tests and 1 doctest), `ui_core/src/render.rs` (`pub mod meshio;`,
+`RenderError::Mesh`, `From<MeshError>`), `ui_demo/src/main.rs` (`Model`,
+`load_model`, `ASSET_MODEL_RELATIVE`, the model-status line, one signature
+change on `asset_candidates_from`); plus the committed fixture
+`ui_core/tests/data/sedan.roados` (81 561 bytes) with its
+`ui_core/tests/model_file.rs` (3 integration tests), and two documents (this
+file, `TASK_UI_PRIM_37.md`'s dated amendment). **The suite went 1970 → 1996**
+— lib 1531 → 1552 (+21), integration 0 → 3 (new binary), demo 226 → 228 (+2),
+doctests 226 → 227 (+1) — **none removed, none weakened**. The 1970 baseline
+is task 37's record (1519 lib there reads 1531 here; the tree wins and the two
+are recorded rather than reconciled).
+
+### The magic and the version
+
+`MESH_MAGIC = *b"ROADOSMF"`, `MESH_VERSION = 1`, `MESH_HEADER_BYTES = 40`,
+`VERTEX_STRIDE_BYTES = 32` — the last asserted against task 35's
+`MESH_VERTEX_STRIDE`, with `MESH_NORMAL_OFFSET == 12` and `MESH_UV_OFFSET ==
+24` beside it, so the file's byte layout and the `#[repr(C)]` struct cannot
+drift apart. The reader decodes field by field with `f32::from_le_bytes`,
+never by reinterpretation.
+
+### The loader validates in the task's order, and the order is the requirement
+
+Thirteen checks, shortness before content before arithmetic before allocation.
+`Vec::with_capacity` appears at three lines, all after the truncation check;
+the `checked_mul`/`checked_add` chain is `u64` throughout. `TooLarge` names
+one case only — a payload that fits the file and still cannot be addressed —
+and a count that does not fit its own file is `Truncated`, full stop.
+
+### The demo reaches the loader the way it reaches `load_picture`
+
+`load_model` beside `load_picture`, the same `asset_candidates_from` walker
+with `ASSET_MODEL_RELATIVE = "src/ui_demo/assets/sedan.roados"` (which forced
+the walker's one signature change: it now takes the relative path, and
+`load_picture` passes `ASSET_RELATIVE` with its existing tests' assertions
+kept). The colormap is `colormap.png` beside the found model. **No model file
+ships in `ui/src/ui_demo/assets/` in this task** — the asset is 39's — so the
+demo's search finds nothing, prints
+`ui_demo: sedan.roados not found; looked in …` (measured on a real run), and
+draws no car. **A mesh stand-in is refused on purpose**: there is no "no mesh"
+value for `MeshId`, `SubMeshRange`, `Mat4` and `TextureId` that is not a lie,
+so `Model` is stored, its ranges are available, and nothing draws them. The
+stored-but-undrawn fields carry `#[expect(dead_code)]`, which fires the day a
+later task reads them.
+
+### The status line lives in the frame-rate band, on every page
+
+`car model not loaded — see the log` at content (60, 652) → window (60, 716),
+above the fps readout's own column: inside `y ≥ 680`, where the pixel criterion
+allows differences, which is what makes a line the before-build does not have
+compatible with six otherwise pixel-identical pages. On every page because the
+model loads once in `main`: a line on one page's own would make the six pages'
+placed rects differ. It is a thirteenth `always_painted_handles` name and the
+twenty-ninth placed rect when the demo holds no model — both lists conditional
+on `model_status.is_some()`, so task 39's asset removes the line at runtime
+with zero Rust changed, which is exactly what 39's criterion expects. The
+em dash is U+2014, measured present in Lato-Medium's character map (beside
+task 30's absent ⚠ and ✓). The demo test pins the literal, not the constant.
+
+### The fixture is a test input, not an asset
+
+`ui/src/ui_core/tests/data/sedan.roados` (sha256
+`2b3c92433b8783562c48e4bd413a30186ec852a45a95c64caf0d36570b7785022`)
+is built by an offline generator kept outside the repository from the asset's
+verified figures — 2 032 triangles (704 body + 332 × 4 wheels), five names in
+file order, body T `[0, 0.15, -0.025]`, wheel-front-right T `[-0.3, 0.3, 0.66]`,
+the other three wheels mirrored by symmetry (a choice, documented as one, not
+a measurement) — with stand-in geometry (subdivided box + ring strips). The
+integration test asserts counts, names, tiling, index bounds, unit normals,
+four pairwise->0.1 m wheel centroids (measured: `[0.3, 0.3, 0.66]`,
+`[-0.3, 0.3, 0.66]`, `[0.3, 0.3, -0.66]`, `[-0.3, 0.3, -0.66]`) and each
+wheel's extent outside the body box. **Two honest deviations from the task
+file, both recorded rather than smoothed over**: (1) the "0x4000_0000" hostile
+index count cannot reach the truncation check under requirement 6's order —
+it is not a multiple of three, so check 5 refuses it first — and the test
+uses `0xC000_0000`, the smallest multiple of three with the wrap property,
+with `needed = 12_884_901_960`; (2) the "centroids outside the body box" half
+is asserted on each wheel's *extent*, because a wheel centre tucked under an
+arch sits inside the body volume by design — the pairwise separation is what
+catches four wheels baked at one origin.
+
+### Mutations: the prescribed three, plus the survivor that rewrote a test
+
+Snapshot before each break, `diff` after each restore. **Magic** to
+`ROADOSM\x00`: both the constant test and the refusal test fail, as
+prescribed. **`MESH_VERSION` to 2**: both the constant test and the version
+refusal fail, as prescribed. **The three payload lengths as `u32`
+`wrapping_mul`**: both hostile-count tests fail on the `needed` value while
+the other 19 stay green — a variant-only assertion would have survived that
+mutation. **The tiling check removed**: survived — the fixture overran the
+index end and was killed by the bounds check instead. The fixture was
+rewritten (a mid-array gap the end does not betray) and now kills exactly its
+own test with 20 green. **En dash for em dash in `MODEL_STATUS_TEXT`**: the
+demo's status test fails, which is what pins the literal.
+
+### Capture and rate (final tree, release)
+
+Before binary: pristine `HEAD` (`b056aac`) worktree build. After: this tree.
+Window id re-read per capture, `pgrep` in the same call as
+`magick import -window`, kill by PID:
+
+| page | full-window AE | AE over y 0–679 |
+|---|---|---|
+| pads | 2030 | **0** |
+| text | 2050 | **0** |
+| input | 2150 | **0** |
+| controls | 2121 | **0** |
+| data | 2051 | **0** |
+| overlays | 2008 | **0** |
+
+Overlays full-window AE was measured on the pre-literal-fix tree (the fix
+touched test code only, which no release binary contains — recorded, not
+re-measured). Every differing pixel is accounted for:
+on pads the status strip (`400x30+60+716`) reads AE 1707, the fps strip
+(`400x30+60+748`) reads 323, and 1707 + 323 = 2030 is the whole band — the
+bounding box of all differences is `308x46+60+722`, the two stacked lines. The
+fps strip's own 323 is two runs' fps values disagreeing, which is the
+documented band behavior.
+
+`.ai/tools/fps-check.sh 10 55` → **fps-check: 624 frames in 10.001s,
+average 62.4 fps, worst frame 17.9 ms, 0 frame(s) over 33 ms — PASS.** Per
+page: **pads 62.5, text 62.2, input 62.0, controls 62.1, data 61.9** (one
+46.7 ms frame), **overlays 61.9** (one 41.3 ms frame) — every page above 55
+and inside 61.1–63.9. Expected result, stated not left as coincidence: the
+loader runs once at start-up before the first frame, and no page draws its
+result. `cargo audit` clean (1293 advisories, 47 crates, exit 0).
+
+### What is NOT claimed
+
+- **Nothing about a car being drawn.** No page records a mesh command
+  (`painter.mesh`/`.mesh(` count in the demo is 0); `DrawCommand` and
+  `ShaderKind` keep 37's counts. First mesh pixels in the demo are 39's
+  capture, not this task's.
+- **Nothing about the converter.** The fixture's geometry is stand-in; a
+  converter mis-baking a transform is invisible here and is 39's to catch.
+- **Nothing about `cargo doc` being warning-free.** It carries two warnings,
+  both on lines this task did not touch (`render.rs`'s private
+  `IDENTITY_MAT3` intra-doc link, `mesh.rs`'s redundant link target) — new
+  lints on old lines under this host's toolchain, verified by `git diff`
+  rather than rebuilt, and left alone: fixing `mesh.rs` would be a fourth
+  code file outside the task's scope.
+- **Nothing about `#[must_use]` on the two loader functions.** The task file
+  asks for it; `Result` is already `#[must_use]` in std and an explicit
+  attribute is clippy's `double_must_use` — the code says so where the
+  attribute would go.
+- **Nothing about the doctest being `expect`-free.** The one `expect(` outside
+  `mod tests` is the doctest's, matching `texture.rs`'s established doctest
+  style; production code has none, and `grep -c unsafe` over the file is 0.
+- **Nothing about the model-status overlap being proved in general.** It is
+  held down by `no_two_placed_rects_overlap` over all six pages and by the
+  captures, for this footer strip at this window size.
 
 ## Task 37 — what it decided, and what it found
 
@@ -5754,7 +5914,7 @@ verified. A blank cell is unknown, not "none".
 | 35 | Mesh vertex format and GPU buffers | **done 2026-10-06** | `—` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | All 13 acceptance criteria met. `mesh.rs` module with `MeshVertex` (32 bytes, 3 f32 position + 3 f32 normal + 2 f32 UV), `SubMesh`, `Mesh`, `MeshId`; stride/offset constants in `render.rs` with `offset_of!` test; 4th VAO/VBO/IBO created in `Renderer::new` with attribute pointers (locations 0,1,2) inside `unsafe` block with element array binding; `MeshStore` on CPU, no GL, no eviction; `upload_mesh` validates before GL call (empty vertices/indices/sub_meshes, sub-mesh range, index < vertices.len()); `ensure_mesh_vertex/index_capacity` growth; `sub_mesh_byte_offset` conversion; `validate_mesh` pure function. +12 tests (1497 lib + 226 demo + 225 doctests = 1948 total). No scope creep: no `DrawCommand::Mesh`, no `ShaderKind::Mesh`, no `u_model`/`mat4`/`Transform`, no depth test, no model loader, no asset pipeline, no demo mesh. All 13 ACs met: 4 VAOs exist, stride/offsets asserted, wrong stride kills test, 5-mesh fixture pure-data, byte offset tested, normalise + zero-normal tested, validations tested, tooling clean, gallery pages pixel-identical (to verify), frame rate measured (to verify), no leak from 36/37/38, SAFETY comments on all new unsafe, module doc with rejected alternatives. Suite green: 1948 tests. See *Task 35 — what it decided* |
 | 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`'s "no matrix" half** | **implemented 2026-10-07, verified, record written, not yet reviewed** — `render/matrix.rs` (new, 17 tests) + `render.rs` (+112, 2 tests); `L2` amended dated 2026-10-07 | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | All 14 requirements met bar three AC greps that count doc comments (recorded in § *Task 36* with code-level numbers). Suite 1500 → 1519 lib (+19, none removed), demo 226, doctests 225. Six pages AE 0 outside y≥680; fps 62.0 script line, per-page 58.7–62.2 (overlays ~59 on both binaries, above floor 55). 2 of 2 mutations killed with restore proved by diff. See *Task 36 — what it decided* |
 | 37 | The mesh draw command, its shader and its batching | **implemented 2026-10-07, verified, record written, not yet reviewed** — 4 code files + 3 helper arms; ten variants, five kinds, four passes, two boundary slots | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | Suite 1519 → 1531 lib (+12), demo 226, doctests 225 → 226. Six pages AE 0 outside y≥680; fps 62.9 script line, per-page 61.8–62.7. Real-triangle probe error `0x0`, seed reverted byte-clean. 8 of 8 mutations killed (2 findings → 2 strengthened tests). No page draws a mesh; first pixels are 38's. See *Task 37 — what it decided* |
-| 38 | `ROADOSMF` model format and its loader | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_38.md` | — | — |
+| 38 | `ROADOSMF` model format and its loader | **implemented 2026-10-07, verified, record written, not yet reviewed** — `render/meshio.rs` (new, 21 unit + 1 doctest), `render.rs` (`MeshError→RenderError::Mesh`), demo `Model` + `load_model` + status line; fixture `tests/data/sedan.roados` (81 561 bytes) + 3 integration tests; `TASK_UI_PRIM_37.md` amended dated | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | Suite 1970 → 1996 (lib 1531 → 1552, integration 0 → 3, demo 226 → 228, doctests 226 → 227), none removed. Six pages AE 0 outside y≥680 (band diffs = status line + fps only, accounted pixel for pixel); fps 62.4 script line, per-page 61.9–62.5. Magic/version/u32-arithmetic mutations kill their tests; one tiling survivor rewrote its fixture. Two honest deviations recorded (0xC000_0000 hostile count; wheel-extent assertion). `cargo doc` carries 2 pre-existing warnings on untouched lines. See *Task 38 — what it decided* |
 | 39 | Offline asset pipeline | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_39.md` | — | — |
 | 40 | Drag-to-rotate — **partially closes gap `L4`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_40.md` | — | — |
 | 41 | `GL_RGBA8` colour capture and a public backdrop API — **gap `L1`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_41.md` | — | — |

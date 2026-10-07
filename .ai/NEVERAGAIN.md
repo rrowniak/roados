@@ -1615,3 +1615,20 @@ guard above it. Parse the `test result:` line's failure field specifically —
 no `test result:` line, or the field not a number) must abort the runner with a
 loud error, never default to "0 failures"**. An empty input to a summing parser
 is an error, not zero.
+
+## 2026-10-07 — `sed` with a Unicode escape edits every copy at once
+
+A deliberate break meant to touch one copy of a string — the `MODEL_STATUS_TEXT`
+constant, to prove the demo's status test pins the literal — was run through
+`sed -i` with a `\u{2014}` escape in the pattern. The pattern is not a portable
+spelling of an em dash, and whatever it matched, it matched in **both** the
+constant and the test's written-out literal: both lines changed identically and
+the test stayed green. A mutation that edits the expectation together with the
+code is not evidence; it is two documents agreeing because one tool rewrote
+them. (The break was then done correctly — one line changed with the file-edit
+tool — and the test failed as required.)
+
+**Rule:** never `sed` a string that exists in more than one place to prove one
+of them pins it. Edit the single line with the file-edit tool, run the test,
+restore the single line — and spell non-ASCII characters literally in the edit,
+never as a backslash escape a shell and a regex engine interpret differently.

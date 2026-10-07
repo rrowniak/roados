@@ -189,6 +189,7 @@ pub mod blur;
 pub mod context;
 pub mod matrix;
 pub mod mesh;
+pub mod meshio;
 pub mod target;
 
 use std::collections::HashMap;
@@ -889,11 +890,28 @@ pub enum RenderError {
     /// size with no addressable pixel count. Only the GL half of an image is the
     /// renderer's, and that is [`RenderError::Gl`].
     Texture(String),
+    /// A model file could not be loaded; carries the message from
+    /// [`meshio::MeshError`].
+    ///
+    /// The parse and the validation are `crate::render::meshio`'s decisions,
+    /// and its error carries the specifics — a magic that was not `ROADOSMF`,
+    /// a version this build does not read, a field name, a shortfall. The
+    /// upload half of a mesh is the renderer's, and that is
+    /// [`RenderError::Gl`]. Folding the mesh fault into [`RenderError::Texture`]
+    /// would put a mesh's message into a variant whose doc says it carries an
+    /// image's.
+    Mesh(String),
 }
 
 impl From<TextureError> for RenderError {
     fn from(error: TextureError) -> Self {
         RenderError::Texture(error.to_string())
+    }
+}
+
+impl From<meshio::MeshError> for RenderError {
+    fn from(error: meshio::MeshError) -> Self {
+        RenderError::Mesh(error.to_string())
     }
 }
 
@@ -904,6 +922,7 @@ impl std::fmt::Display for RenderError {
             RenderError::ProgramLink(log) => write!(f, "program link error: {log}"),
             RenderError::Gl(msg) => write!(f, "GL error: {msg}"),
             RenderError::Texture(msg) => write!(f, "texture error: {msg}"),
+            RenderError::Mesh(msg) => write!(f, "mesh error: {msg}"),
         }
     }
 }

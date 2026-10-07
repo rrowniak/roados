@@ -11,11 +11,11 @@ The platform and cross-compilation tasks are a separate sequence —
 `doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
 `doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-06 (**task 35 (Mesh vertex format and GPU buffers) implemented, verified, record written; task 34 (Depth buffer) implemented, verified, and committed as `c83ff11` on 2026-10-06; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3; task 31 committed as `8778c90`; task 30 committed as `75a896c`; tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33**)
+**Last updated:** 2026-10-07 (**task 36 (Matrix maths and the transform-to-GPU path) implemented, verified, record written; task 35 (Mesh vertex format and GPU buffers) implemented, verified, record written; task 34 (Depth buffer) implemented, verified, and committed as `c83ff11` on 2026-10-06; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3; task 31 committed as `8778c90`; task 30 committed as `75a896c`; tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33**)
 
 ## Current position
 
-**Status: task 35 (Mesh vertex format and GPU buffers) is done — implemented, verified, record written on 2026-10-06.** Task 34 (Depth buffer) is done — implemented, verified, and committed as `c83ff11` on 2026-10-06. Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows, 32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review for tasks 32, 34, 35 is `.ai/workflows/task-sequence.md` step 2, in a session separate from the implementer's**; the operator's commit is step 5. **The next task after 35 is 36** (Matrix maths and the transform-to-GPU path — closes gap `L2`): 33 is done, 34 is done, 35 is done, and 36–52 are specified but not started.
+**Status: task 36 (Matrix maths and the transform-to-GPU path) is done — implemented, verified, record written on 2026-10-07.** Task 35 (Mesh vertex format and GPU buffers) is done — implemented, verified, record written on 2026-10-06. Task 34 (Depth buffer) is done — implemented, verified, and committed as `c83ff11` on 2026-10-06. Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows, 32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review for tasks 32, 34, 35, 36 is `.ai/workflows/task-sequence.md` step 2, in a session separate from the implementer's**; the operator's commit is step 5. **The next task after 36 is 37** (The mesh draw command, its shader and its batching): 33 is done, 34 is done, 35 is done, 36 is done, and 37–52 are specified but not started.
 
 **Nothing is in flight, and the next task is 32 (Fade and clip truncation,
 drawn).** It is the lowest-numbered task of the sequence that is not done: 33 was
@@ -713,6 +713,162 @@ reader would otherwise walk.
   dependencies are `sdl3 0.20`, `glow 0.18`, `freetype-rs 0.38`.
 - **No mesh in the demo.** `ui_demo` gains nothing. Six pages must be
   pixel-identical.
+
+## Task 36 — what it decided, and what it found
+
+**Implemented 2026-10-07, verified, not yet reviewed** — review is
+`.ai/workflows/task-sequence.md` step 2, in a session separate from the
+implementer's. **2 code files**: `ui_core/src/render/matrix.rs` (new, 864
+lines, 17 tests) and `ui_core/src/render.rs` (+112 lines: the `pub mod
+matrix;` declaration beside `mesh`, the `MESH_MVP_UNIFORM` constant, the
+`## Transforms and the mesh matrix` module-doc section, 2 tests).
+`DEMO_APPLICATION.md` row `L2` carries the dated amendment (req 12).
+**The suite went 1500 → 1519 lib, demo 226 and doctests 225 unmoved —
+1970 total, +19, none removed, none weakened** (the +19 reconciles exactly:
+17 matrix + 2 render). The 1500 baseline is measured on pristine `HEAD`
+(`dce37a5`) in a worktree, not taken from the task-35 record, whose own
+figures disagree with each other (1491 + 226 + 225 = 1942 against a claimed
+1948); the tree wins.
+
+### Column-major, and why
+
+`Mat4 { cols: [f32; 16] }`, private field, `cols[c * 4 + r]` at column `c`,
+row `r`, 64 bytes. Column-major because GLSL's `mat4` is column-major and
+`glUniformMatrix4fv` with `transpose = GL_FALSE` takes its sixteen floats in
+that order — the array uploads verbatim and no transpose flag can silently
+swap it. `[[f32; 4]; 4]` rejected: `&[[f32; 4]; 4]` does not coerce to
+`&[f32]`, so the upload would need `from_raw_parts` and this task adds no
+`unsafe`. One accessor, `as_slice() -> &[f32; 16]`; no second accessor.
+
+### One pre-multiplied `u_mvp`, not three uniforms
+
+The mesh pass uploads `projection * view * model` as one `u_mvp`;
+`u_view` and `u_projection` deliberately not reserved. The count does not
+decide it (5 sub-meshes: 15 uploads/frame against 5 — noise). The error
+surface does: with three uniforms the shader must multiply in the right
+order, `M · V · P` and `V · P · M` both compile, both run, both draw a
+plausible wrong car, and no test in this crate compiles GLSL. One matrix has
+one order, `projection.multiply(&view).multiply(&model)`, unit-tested with
+no display. Cost recorded for task 37: `mat3(u_mvp)` is not a normal
+transform (projection scales x by `1/aspect`, z by near/far terms), so 37
+adds `u_model`/`u_normal` beside `u_mvp` when a caller scales non-uniformly;
+upload is `transpose: false`, and `true` silently transposes with no GL
+error. `P · V` caching (640 multiply-adds/frame) deferred to a measurement.
+
+### `Transform` unchanged, and the bridge lives in `matrix.rs`
+
+Five fields, `identity()`, `Default`, field-by-field `Interpolate` — all
+untouched (`git diff` shows no change to `property.rs` or `animation.rs`;
+growing a `pub struct` with public fields breaks every literal, and
+component-wise interpolation is wrong for three Euler angles). The bridge
+`Transform::to_matrix() -> Mat4` (`T · R_z · S`) is declared in
+`render/matrix.rs` so `property` gains no dependency on `render`. Rotation
+axis z (a 2D rotation has no other axis); window space y-down, so positive
+rotation is clockwise unflipped, counter-clockwise under the four shaders'
+`-clip.y` — neither is crate behaviour today (no 2D transform is drawn) and
+the flip is not baked in. Honest limit stated in the handoff: no widget's
+paint path calls `to_matrix`; a green test of the conversion proves the
+conversion and nothing else (`.ai/NEVERAGAIN.md` § *A test of a helper
+cannot see a call site that stopped using it*).
+
+### The projections, and the defaults task 40 must not move
+
+`perspective`: OpenGL `z ∈ [-1, 1]` (GLES 3.1 clip volume; D3D/Vulkan
+`[0, 1]` named as the mistake — the near/far test fails under it).
+`orthographic`: signed near/far along `-z`; the 2D box is `near = -1.0,
+far = 1.0`, and `Mat4::orthographic(0, w, 0, h, -1, 1)` reproduces the four
+2D shaders' `a_pos / u_resolution * 2.0 - 1.0` mapping exactly, `z = 0.0`
+included — pinned by test, the strongest argument for closing the matrix
+half without editing a shader. Decided defaults in the module docs:
+**`fov_y = π/4`, `near = 0.1` m, `far = 20.0` m, ratio 200** — in the range
+of hundreds task 34's `DEPTH_BITS` doc promises, half-extent `0.414 d` at
+45°. **Task 40 rotates the camera and must not move `near`/`far`.**
+Both constructors return `Option<Mat4>` (`None` on every violated
+precondition; `fov_y = 0` would otherwise be `inf`, not a panic — worse);
+`transform_point` is `None` only at `w == 0` or non-finite, `Some` for
+`w < 0` (behind-camera is clipping, and `None` there is a defect).
+
+### The capture: six pages, AE 0 outside the readout band
+
+Release builds from two trees — pristine `HEAD` in a worktree
+(`/tmp/task36_before`, built 2026-10-07) and the working tree — captured per
+page with the method of § *Verifying a change that draws*: `setsid` launch,
+window id re-read per capture (`roados ui_demo`, 1280x1020), `pgrep -a -x`
+in the same call as `magick import -window`, kill by PID. Before/after AE
+per page, full window then `1280x680+0+0` crop:
+
+| page | full-window AE | AE over y 0–679 |
+|---|---|---|
+| pads | 357 | **0** |
+| text | 111 | **0** |
+| input | 118 | **0** |
+| controls | 102 | **0** |
+| data | 523 | **0** |
+| overlays | 604 | **0** |
+
+**Every differing pixel is inside `y ≥ 680`, the fps readout's band** — the
+criterion the task states (AE 0 over y 80–680 in task 24.1's record). No
+shader edited (all four `*_SHADER_SRC` untouched by `git diff`; pinned by
+`the_four_2d_vertex_shaders_still_write_the_same_clip_position`);
+`DrawCommand` nine variants, `ShaderKind` four, `get_uniform_location` 16
+code sites.
+
+### The frame rate: no measurable change
+
+`.ai/tools/fps-check.sh 10 55` → **fps-check: 620 frames in 10.000s,
+average 62.0 fps, worst frame 21.1 ms, 0 frame(s) over 33 ms — PASS.**
+Per page (`ROADOS_RUN_SECONDS=10 … --tab=<page>`, `roados-fps` line):
+**pads 62.1, text 62.1, input 62.2, controls 62.1, data 62.2** (one 40.6 ms
+frame), **overlays 58.7** (one 36.8 ms frame). Overlays re-measured 3×:
+59.9 / 59.9 / 59.8 — and the pristine-`HEAD` binary reads **58.4 / 58.7**
+with pads at 62.1 on the same host. So overlays ~59 is the page on this
+machine, not a regression: this task adds no GL call, no uniform, no buffer
+and no per-frame work — a type in a module nothing calls — and before/after
+agree page for page. Overlays sits below the recorded 61.1–63.9 band on
+**both** binaries and above the floor of 55; that band staleness is
+recorded, not waived, and `cargo audit` ran clean (1290 advisories, 47
+crates, exit 0).
+
+### Mutation evidence (req 11), with restore proved by `diff`
+
+Snapshot to `/tmp/matrix_pristine.rs` before each break; `diff` after each
+restore; suite re-run green. (1) `projection.multiply(&view)
+.multiply(&model)` → `model.multiply(&view).multiply(&projection)`:
+`multiply_is_the_matrix_product_and_its_order_is_the_glu_one` **FAILED**
+(0 passed / 1 failed of 1519 filtered); restored, `diff` clean.
+(2) `orthographic(0, 640, 0, 480, -1, 1)` → `(…, 1, -1)`:
+`orthographic_reproduces_the_window_to_clip_mapping_the_four_shaders_write`
+**FAILED**; restored, `diff` clean, `--lib` 1519 passed afterwards.
+
+### Three acceptance greps that count doc comments, recorded honestly
+
+The task's AC greps are unsatisfiable literally alongside its own doc
+requirements, and the code-level numbers are what is reported: (a)
+`grep -c get_uniform_location render.rs` is **17, not 16** — the 17th hit
+is the new test's own doc comment ("sixteen … sites"); code call sites are
+still 16, proved by `git diff HEAD` showing no added call. (b)
+`uniform_matrix_4_f32_slice` appears **3×, all in doc comments**
+(`matrix.rs:5`, `render.rs:111,299`) — req 7/8 require the upload call
+shape in the docs; **no code call exists**. (c) `Transform` appears in
+**4 files, not 3** — `render.rs` mentions it only in the new module docs
+req 7 requires; code references are the three AC names. `property.rs`,
+`animation.rs`, `paint.rs`, `batch.rs`, `render/mesh.rs`, `ui_demo/`,
+`ui/Cargo.toml`, `ui/Cargo.lock` all unchanged by `git diff --stat`;
+`grep -c unsafe render/matrix.rs` is 0, `SAFETY` count in `render.rs`
+unchanged at 71.
+
+### What is NOT claimed
+
+- **Nothing about a matrix reaching a GPU.** No shader declares the
+  uniform, no draw command carries a matrix, no page shows a transformed
+  pixel. `cargo test` and the captures above are both green on a pipeline
+  whose matrix path has never run — the honest limit, and `L2` is not
+  closed, only its "no matrix" half is.
+- **Nothing about `cargo audit` on the operator's host** — it ran here,
+  clean, on 2026-10-07; that is this host's result.
+- **Nothing about overlays' 59 fps being explained** — measured on both
+  binaries, above the floor, below the old band; not chased, because both
+  trees agree it is not this task's.
 
 ## Task 31 — what it decided, and what it found
 
@@ -5456,7 +5612,7 @@ verified. A blank cell is unknown, not "none".
 | 32 | Fade and clip truncation, drawn | **implemented 2026-10-06, verified, record (32.3) written, not yet reviewed** — three sub-tasks: 32.1 the demo rows, 32.2 the mechanism, 32.3 the record | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5); the operator's `87da646` landed mid-task and owns none of these files | **none yet** — review is step 2, in a session separate from the implementer's | **AC1, AC2, AC4, AC6 met. AC5 met arithmetically, blend-state half argued (source-string assertion on `end_frame`, capture cannot measure). AC3 half: gate proved by font-free tests, on-screen half NOT observed — 4 of 101 characters overhang by exactly 1 px, demo cut lands 9 px inside `max_width`, Clip row AE 0 vs before-capture. No temporary seed used. +39 tests, none removed (1894 → 1933: +2 demo, +32 lib, +5 doctests). 18 of 18 deliberate breaks killed across two sweeps — 32.1 sweep first run reported 6 false survivors (wrong log path + `awk` defaulting empty to 0), recorded in `NEVERAGAIN.md`. 62.3 fps on floor of 55; one 35.2 ms frame in 1 of 5 `--tab=text` runs, not chased. See *Task 32 — what it decided* |
 | 34 | Depth buffer | **done 2026-10-06** | `c83ff11` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | **All 13 acceptance criteria met.** `DEPTH_BITS = 24` in `context.rs` with doc comment and test pin; six GL depth constants in `render.rs` with test against `glow`; `begin_frame` clears depth with writemask on, in correct order (bind default framebuffer, disable scissor, depth_mask(true), clear_depth_f32(1.0), clear color|depth, depth_func(GL_LESS), disable(GL_DEPTH_TEST), depth_mask(false)); `PassDepth` policy struct and `depth_state_for` function asserted by test; `bind_default_target` restores depth state alongside framebuffer/viewport/scissor; offscreen mask pass asserts resting depth state; module docs carry `## Depth` policy section with 2D arithmetic, resting state, 2D-against-3D ordering, blend/depth rule, face-culling policy, rejected alternatives; `polygon_quad` doc amended; every new `unsafe` block has SAFETY comment; frame rate and driver-granted values to be measured on target hardware; no mesh command/vertex format/MVP/model loader/asset pipeline/gesture/colour attachment/face culling/stencil/reverse-Z/depth prepass/coverage alpha/MSAA change/resize handling/new dependency/`ui_demo` change leaked in. Suite green: 1485 + 226 + 225 = 1936. See *Task 34 — what it decided* |
 | 35 | Mesh vertex format and GPU buffers | **done 2026-10-06** | `—` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | All 13 acceptance criteria met. `mesh.rs` module with `MeshVertex` (32 bytes, 3 f32 position + 3 f32 normal + 2 f32 UV), `SubMesh`, `Mesh`, `MeshId`; stride/offset constants in `render.rs` with `offset_of!` test; 4th VAO/VBO/IBO created in `Renderer::new` with attribute pointers (locations 0,1,2) inside `unsafe` block with element array binding; `MeshStore` on CPU, no GL, no eviction; `upload_mesh` validates before GL call (empty vertices/indices/sub_meshes, sub-mesh range, index < vertices.len()); `ensure_mesh_vertex/index_capacity` growth; `sub_mesh_byte_offset` conversion; `validate_mesh` pure function. +12 tests (1497 lib + 226 demo + 225 doctests = 1948 total). No scope creep: no `DrawCommand::Mesh`, no `ShaderKind::Mesh`, no `u_model`/`mat4`/`Transform`, no depth test, no model loader, no asset pipeline, no demo mesh. All 13 ACs met: 4 VAOs exist, stride/offsets asserted, wrong stride kills test, 5-mesh fixture pure-data, byte offset tested, normalise + zero-normal tested, validations tested, tooling clean, gallery pages pixel-identical (to verify), frame rate measured (to verify), no leak from 36/37/38, SAFETY comments on all new unsafe, module doc with rejected alternatives. Suite green: 1948 tests. See *Task 35 — what it decided* |
-| 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_36.md` | — | — |
+| 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`'s "no matrix" half** | **implemented 2026-10-07, verified, record written, not yet reviewed** — `render/matrix.rs` (new, 17 tests) + `render.rs` (+112, 2 tests); `L2` amended dated 2026-10-07 | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | All 14 requirements met bar three AC greps that count doc comments (recorded in § *Task 36* with code-level numbers). Suite 1500 → 1519 lib (+19, none removed), demo 226, doctests 225. Six pages AE 0 outside y≥680; fps 62.0 script line, per-page 58.7–62.2 (overlays ~59 on both binaries, above floor 55). 2 of 2 mutations killed with restore proved by diff. See *Task 36 — what it decided* |
 | 37 | The mesh draw command, its shader and its batching | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_37.md` | — | — |
 | 38 | `ROADOSMF` model format and its loader | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_38.md` | — | — |
 | 39 | Offline asset pipeline | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_39.md` | — | — |
@@ -5502,7 +5658,7 @@ to **required**, and it is task 36.
 batching) → 38 (model format and loader) → 39 (asset pipeline) → 40 (gesture).
 34 precedes everything because the depth policy is what lets 2D and 3D coexist;
 36 precedes 37 because the shader needs a matrix to consume; 38 precedes 39
-because the pipeline writes the format 38 reads. **Tasks 34 and 35 are complete; task 36
+because the pipeline writes the format 38 reads. **Tasks 34, 35 and 36 are complete; task 37
 is the next task in the sequence.**
 
 **The interaction half cannot be exercised on this host.** Task 40's gesture is

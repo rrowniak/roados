@@ -90,9 +90,55 @@
 //!   same `z`, at the cost of a depth test on every fragment of every UI pixel
 //!   and a rule that only holds because every 2D vertex shader happens to write
 //!   the same `z`. The `0.5 < 0.5` arithmetic makes this unnecessary.
+//!
+//! ## Transforms and the mesh matrix
+//!
+//! The mesh pass (task 37) uploads one pre-multiplied matrix per draw as
+//! `u_mvp`: `projection * view * model`, in that order. The whole chain goes
+//! as one uniform rather than three — `u_view` and `u_projection` are
+//! deliberately **not** reserved names — because the two plausible wrong orders
+//! (`M * V * P`, `V * P * M`) both compile, both run, and both draw a
+//! plausible-looking wrong car, and no test in this crate compiles GLSL. One
+//! matrix has exactly one order, written in one Rust expression, and that
+//! expression is unit-tested in `render/matrix.rs` with no display.
+//!
+//! What one matrix costs is recorded here so task 37 inherits the fact: the
+//! mesh fragment shader needs the model-to-world normal transform separately,
+//! and `mat3(u_mvp)` is not one — the projection scales x by `1 / aspect` and
+//! z by the near/far terms, so `P * R * n` normalised is not `R * n`. If a
+//! caller ever scales non-uniformly per axis, task 37 must add `u_model` or
+//! `u_normal` beside `u_mvp` rather than replacing it. The upload call shape
+//! is `gl.uniform_matrix_4_f32_slice(location, false, mvp.as_slice())` with
+//! **`transpose: false`**: `Mat4` is already column-major and so is GLSL's
+//! `mat4`, and setting the flag `true` out of row-major habit silently
+//! transposes the matrix with no GL error. Recomposing `P * V` per sub-mesh
+//! costs 640 multiply-adds a frame at five sub-meshes; caching it on
+//! `Renderer` is the change a future measurement may ask for, not this one.
+//!
+//! The projection this task's matrices reproduce exactly is the four 2D
+//! shaders' own mapping: `Mat4::orthographic(0, w, 0, h, -1, 1)` sends window
+//! pixels to the same clip coordinates the shaders compute from `a_pos /
+//! u_resolution`, with the `-clip.y` flip staying in the shaders. A future 2D
+//! transform therefore needs the matrix and that flip, not a different
+//! projection. `Transform` is unchanged by the matrix work — five fields, its
+//! `identity()`, its field-by-field `Interpolate` — and the conversion lives
+//! in `render/matrix.rs` rather than `property.rs` so the crate's lowest layer
+//! gains no dependency on `render`.
+//!
+//! Which transforms compose, and the expectation for task 37 rather than a
+//! decision: a wheel spins about its own axle, rides with the body, and the
+//! body is placed by one matrix, so the per-draw chain is
+//! `projection * view * car_placement * wheel_placement`. The expected carrier
+//! is a `transform: Mat4` field on `DrawCommand::Mesh`, because a wheel's
+//! matrix changes every frame and a `MeshStore` slot mutated mid-frame would
+//! make `end_frame`'s walk of the batcher read state that moved under it — the
+//! hazard row `L6a` in `DEMO_APPLICATION.md` records for a mode that must not
+//! change mid-frame — and a batch key built from a `Vec<Mat4>` in `MeshStore`
+//! would compare sixteen floats to decide whether two draws merge.
 
 pub mod blur;
 pub mod context;
+pub mod matrix;
 pub mod mesh;
 pub mod target;
 
@@ -246,6 +292,18 @@ const MESH_VERTEX_STRIDE: i32 = 32;
 const MESH_NORMAL_OFFSET: i32 = 12;
 /// Byte offset of `MeshVertex::uv` within the vertex.
 const MESH_UV_OFFSET: i32 = 24;
+
+/// The uniform name the mesh pass reads its pre-multiplied matrix from.
+///
+/// Task 37 queries the location from the mesh program and uploads through
+/// `gl.uniform_matrix_4_f32_slice(location, false, mvp.as_slice())`.
+/// **Nothing in this crate uploads it yet** — the mesh program does not exist,
+/// and a uniform added to a program whose shader ignores it is stripped by the
+/// GLSL compiler, so reserving the name here is the whole of this task's GL
+/// surface. `u_view` and `u_projection` are deliberately **not** reserved: a
+/// reserved name nothing sets is a name a later task sets by accident.
+#[allow(dead_code)]
+pub(crate) const MESH_MVP_UNIFORM: &str = "u_mvp";
 
 /// The number of indices one quad contributes to an index buffer: two triangles.
 const INDICES_PER_QUAD: usize = 6;
@@ -5093,6 +5151,60 @@ mod tests {
             test: false,
             writes: true,
         }; // type-checks
+    }
+
+    /// The four 2D vertex shaders still write the same clip position, and none
+    /// of them knows the mesh uniform.
+    ///
+    /// All four sources contain `gl_Position = vec4(clip.x, -clip.y, 0.0,
+    /// 1.0);` verbatim — the `z` task 34's depth arithmetic is written
+    /// against — and none contains `u_mvp`. This task edits no shader, so the
+    /// guarantee lives in code rather than in a reviewer's memory: editing any
+    /// of the four sources changes every pixel of every page.
+    #[test]
+    fn the_four_2d_vertex_shaders_still_write_the_same_clip_position() {
+        for (name, src) in [
+            ("solid", VERTEX_SHADER_SRC),
+            ("text", TEXT_VERTEX_SHADER_SRC),
+            ("image", IMAGE_VERTEX_SHADER_SRC),
+            ("blur", BLUR_VERTEX_SHADER_SRC),
+        ] {
+            assert!(
+                src.contains("gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);"),
+                "the {name} vertex shader no longer writes the shared clip position"
+            );
+            assert!(
+                !src.contains("u_mvp"),
+                "the {name} vertex shader references the mesh uniform"
+            );
+        }
+    }
+
+    /// The reserved mesh uniform name collides with none of the ten existing ones.
+    ///
+    /// The ten names are spread over sixteen `get_uniform_location` sites
+    /// because a location belongs to its own program; any name this task
+    /// reserved had to avoid all of them. The count is asserted where the
+    /// names are: renaming a uniform without updating this list fails here.
+    #[test]
+    fn the_mesh_mvp_uniform_is_not_one_the_existing_programs_already_use() {
+        for taken in [
+            "u_atlas",
+            "u_color",
+            "u_direction",
+            "u_image",
+            "u_resolution",
+            "u_size",
+            "u_source",
+            "u_taps",
+            "u_texel",
+            "u_weights",
+        ] {
+            assert_ne!(
+                MESH_MVP_UNIFORM, taken,
+                "the mesh uniform shadows an existing program's uniform"
+            );
+        }
     }
 
     #[test]

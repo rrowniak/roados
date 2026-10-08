@@ -126,8 +126,8 @@
 //! least along the top, where the curve is shallow. The needle's two long edges
 //! showed it too. **Measured on 2026-10-02, before and after**: the arc's outer
 //! edge on the horizontal through the dial's centre read `18 18 18 18 18 187 187`
-//! before — a step with nothing between it, the same shape as the text stem edge
-//! recorded in `NEVERAGAIN.md` — and `18 18 18 18 145 187 187` after, the 145
+//! before — a step with nothing between it, the same shape a text stem edge
+//! shows — and `18 18 18 18 145 187 187` after, the 145
 //! being a pixel three of four samples covered. Over the 106 rows of the arc
 //! that carry an outer edge, 103 were full coverage and **3** were intermediate
 //! before; after, **88 of 108** are intermediate, at 1/4, 1/2 and 3/4 coverage.
@@ -181,9 +181,8 @@
 //! module responds to a pointer over them**: a finger that lands on the needle
 //! goes to whatever is behind the gauge. A caller that wants a gauge to be
 //! grabbable has to build that gesture itself, and should not assume that the
-//! existence of a needle implies one — `.ai/NEVERAGAIN.md` § *a drawn control
-//! with nothing behind it* is the entry about what happens when that assumption
-//! is made in the other direction.
+//! existence of a needle implies one — a drawn control with nothing behind it is
+//! what happens when that assumption is made in the other direction.
 //!
 //! # Angles are degrees, clockwise, y down
 //!
@@ -1949,10 +1948,10 @@ mod tests {
     /// `step`-degree segments: `outer · (1 − cos(step/2))`.
     ///
     /// Derived from the definition rather than remembered, because the number a
-    /// test asserts against must not be the number the code produced — that is the
-    /// arrangement `.ai/NEVERAGAIN.md` § *expectations remembered instead of
-    /// derived* is about, and a sagitta is exactly the sort of thing an author
-    /// writes down from a calculator once and then stops believing.
+    /// test asserts against must not be the number the code produced —
+    /// expectations remembered instead of derived — and a sagitta is exactly the
+    /// sort of thing an author writes down from a calculator once and then stops
+    /// believing.
     fn sagitta_of(outer: f32, step: f32) -> f32 {
         outer * (1.0 - (step / 2.0).to_radians().cos())
     }

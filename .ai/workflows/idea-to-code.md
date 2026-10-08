@@ -17,8 +17,8 @@ stops.
 4  Implement    developer           the change
 5  Verify       developer           build, tests, lint — real output
    ── gate ──   reviewer            findings fixed or waived, then merged
-6  Feed back    developer            NEVERAGAIN.md, and doc/findings/ if a
-                                     factual question was settled
+ 6  Feed back    developer            doc/findings/ if a factual question was
+                                      settled
 ```
 
 Stages 2 and 3 are not always both present. A bug fix with a known cause
@@ -80,9 +80,8 @@ a waived finding is a decision, and decisions get written down.
 
 ## Stage 6 — Feed back
 
-Two things, both cheap, both skipped constantly:
+One thing, cheap, skipped constantly:
 
-- **`.ai/NEVERAGAIN.md`** — anything an agent got wrong and you had to fix.
 - **`doc/findings/`** — any factual question the build settled. Offer once,
   after the merge, not during the work.
 

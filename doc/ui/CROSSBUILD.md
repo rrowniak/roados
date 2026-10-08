@@ -1301,8 +1301,7 @@ all with **0 frames over 33 ms**:
 | 2 | on the clean-slate `cargo clean` rebuild | 62.0 | 19.7 ms |
 | 3 | at review, after the §5.5 command was fixed | 61.6 | 18.7 ms |
 
-Three rather than one because a single run's number cannot be re-derived — see
-`.ai/NEVERAGAIN.md` § *One log path for a loop of runs is one run of evidence*.
+Three rather than one because a single run's number cannot be re-derived.
 The recorded baseline is 61.6–61.9 fps, so all three sit inside or at the floor
 of it and **none is a regression**. Run 3 also re-established the aarch64
 artifact, which a full `cargo clean` had removed: rebuilt with

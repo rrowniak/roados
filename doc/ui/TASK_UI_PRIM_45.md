@@ -235,8 +235,8 @@ hypothesis to reason about; it is a question with an instrument.**
 
 `doc/ui/IMPLEMENTATION_STATE.md` § *A defect the operator found on screen, and
 what it was* records the shape: *"every assertion in them asked **what was
-recorded** and not **where it landed**"*, and `.ai/NEVERAGAIN.md` § *A survivor is
-a missing assertion, and only a sweep finds it* is the rule. So the question
+recorded** and not **where it landed**"*, and the rule is that **a survivor is
+a missing assertion, and only a sweep finds it**. So the question
 *"would anything the demo records be cut by its node's own clip?"* gets a test
 rather than a paragraph, and **that test is written and run against the
 unmodified tree before `Renderer::draw_node_clipped` is edited.**
@@ -656,9 +656,9 @@ it did not have.
      no longer supplied by the frame loop at all.
 
 10. **The capture method, the seed, and the number.** Recorded here in full because
-    requirement 12's tests cannot produce this evidence and `.ai/NEVERAGAIN.md` §
-    *An acceptance criterion that names an instrument which cannot produce the
-    evidence is not met by producing the evidence another way* applies.
+    requirement 12's tests cannot produce this evidence and **an acceptance
+    criterion that names an instrument which cannot produce the evidence is not
+    met by producing the evidence another way** applies.
 
     - **The seed.** A **temporary** block in `Demo::new`, keyed off the
       environment variable **`CLIP_PROBE`**, in the shape

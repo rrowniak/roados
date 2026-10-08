@@ -260,7 +260,7 @@ Five reasons, and the first is the whole design.
    `Label::layout`, `Button::paint`, `Toast::paint` and `TextInput::paint` all
    take it; `layout_text` takes it; `FontSet::advance` is *"the measuring half of
    the text path"*. **A `Painter` that measured would be a second, different
-   measurement seam**, and `.ai/NEVERAGAIN.md` § *Two documents each claiming
+   measurement seam**, and *two documents each claiming
    ownership of one definition* is the rule about two.
 3. **Weighing a parameter against a handle, since the brief asks.** A `&Font` or a
    `&FontSet` on `Painter::text` is a seventh argument too — and the **wrong** one,
@@ -307,7 +307,7 @@ glyph's advance fails.
 | **`scroll::clip_commands`** | **Its behaviour changes for a measured run and not for an unmeasured one** — a measured run wholly outside a viewport is now dropped. Requirement 9 pins both halves. **Its only production caller is `List::paint`, and the demo records no `List`**, so this is observable in the crate's tests and nowhere in the shipped frame. |
 | **`TextInput`'s selection and caret** | **Untouched.** `position_of`, `offset_at_position`, `caret_x`, `selection_rect` and `ensure_caret_visible` all read the same `advance` closure and none of them reads the recorded width. **Using the new field to shorten `visible_run` would be circular**: the run's width is a *consequence* of the walk, and `to` is the inner box's right edge, not a function of the width. Requirement 6 says so in those words. |
 | **`Truncation::Ellipsis`** | **Untouched.** `truncate_line` already cuts by measurement and `Label::paint` already produces the width of the cut line — this task adds the field, not the ellipsis. `LayoutOptions::truncation`, `LayoutOptions`' `Default` and the ellipsis budget arithmetic in `truncate_line` are byte-identical. |
-| **`render.rs`'s text pass** | **Does not read it, and must not.** `text_vertices` binds the field and does not use it: the pen advances from each glyph's own advance, and a second source of pen positions in one function is `.ai/NEVERAGAIN.md`'s *two owners of one definition* in the GPU path. Requirement 10 states it and the pixel-identical criterion is the check. |
+| **`render.rs`'s text pass** | **Does not read it, and must not.** `text_vertices` binds the field and does not use it: the pen advances from each glyph's own advance, and a second source of pen positions in one function is *two owners of one definition* in the GPU path. Requirement 10 states it and the pixel-identical criterion is the check. |
 | **`ui_demo`'s `inked_box`** | **Untouched, and its `Text` arm keeps its zero width.** It answers *"does this put ink above the tab bar"*, over every node on every page — a **y** question. Widening it would make a tab-bar guard assert something about the width of a text panel. Its doc's reason is corrected (falsity 3's sibling), nothing else. |
 | **`Label`'s `Line::width`**, `layout_text`, `truncate_line` | **Untouched.** The number is read, not recomputed. |
 
@@ -371,7 +371,7 @@ decisive.
    a choice.
 2. **The producers cannot land apart from the field.** A field no producer
    sets is `developer.md` § *Phase 2*'s *"No dead code"* — and it would also mean a
-   commit whose field is unreadable and unset, which is `.ai/NEVERAGAIN.md`'s *a
+   commit whose field is unreadable and unset, which is *a
    field carried by nobody* wearing a new type.
 3. **The split that would satisfy the threshold is the wrong one.** Separating 49.1
    into "the field and the renderer" and "the producers" puts `label.rs` and
@@ -609,8 +609,8 @@ found*.
    - **The doctest's text example is placed off the origin** —
      `Rect::new(41.0, 17.0, 90.0, 18.0)` from `x = 41.0`, `y = 17.0`,
      `font_size = 18.0`, `width = Some(90.0)` — because
-     `.ai/NEVERAGAIN.md` § *A rect's origin and a rect's extent are different
-     numbers* exists because a geometry fixture at the origin cannot see an origin
+     *a rect's origin and a rect's extent are different
+     numbers* — a geometry fixture at the origin cannot see an origin
      being read as an extent.
 
 9. **`clip_commands` keeps its three outcomes and its straddler rule, and one of
@@ -698,8 +698,9 @@ found*.
       which is the whole falsity this task closes.
     - **`a_text_run_is_bounded_by_its_line_box_and_not_by_its_baseline`** — the
       bound's top is `y`, **not** `y − ascent` and **not** `y + font_size`; and its
-      height is `font_size`, **not** `font_size × 1.2`. **Off the origin**, per
-      `.ai/NEVERAGAIN.md`. **The mutation:** a bound built from the baseline rather
+      height is `font_size`, **not** `font_size × 1.2`. **Off the origin** — a
+      fixture at the origin cannot see an origin read as an extent. **The mutation:**
+      a bound built from the baseline rather
       than the line box, which is a box shifted up by the ascent and drops a run
       that starts inside a clip.
     - **`a_non_finite_or_negative_width_leaves_a_text_run_unbounded`** — `NaN`,
@@ -879,7 +880,7 @@ and a font is a file.**
 `doc/ui/IMPLEMENTATION_STATE.md` § *Task 30* records that the demo's test fixture
 **called `define_family` for a family `main` never defined**, so every test saw two
 families and passed while the shipped binary resolved the unknown name to the
-default — *".ai/NEVERAGAIN.md § 2026-10-05 — A test fixture that builds what
+default — *"a test fixture that builds what
 production does not define"*. **Therefore, in this task:**
 
 - **No test defines a family, calls `FontSet::family("…")`, or asserts anything
@@ -937,8 +938,8 @@ production does not define"*. **Therefore, in this task:**
       handoff:** make the arm ignore `width` and return `None` unconditionally, and
       watch the suite fail; restore it and watch it pass.
       **The fixture is off the origin** — `x = 41.0`, not `0.0` — because
-      `.ai/NEVERAGAIN.md` § *A rect's origin and a rect's extent are different
-      numbers* exists because a geometry fixture at the origin cannot see an origin
+      *a rect's origin and a rect's extent are different
+      numbers* — a geometry fixture at the origin cannot see an origin
       read as an extent
 
 - [ ] **The bound is the line box, not the baseline, and its height is
@@ -1011,8 +1012,8 @@ production does not define"*. **Therefore, in this task:**
       returns **nothing new** in any `#[cfg(test)]` module this task touched, and
       **every width assertion is made in `FamilyId::default()`** and compares the
       recorded width against a number the same test computed from the same closure.
-      **The rule is `.ai/NEVERAGAIN.md` § 2026-10-05 — A test fixture that builds
-      what production does not define**, and the defect it records — a fixture
+      **The rule is *a test fixture that builds
+      what production does not define***, and the defect it records — a fixture
       defining a family `main` did not, so every test passed while the shipped
       binary did nothing — is the reason. **`keyboard.rs`'s stand-in is the positive
       form and is stated as such:** a key's recorded width is the advance it
@@ -1161,7 +1162,7 @@ production does not define"*. **Therefore, in this task:**
       `Option<f32>` per recorded text run and the `Rect` arithmetic `clip_commands`
       now performs for a run it previously skipped. **A regression is reported as a
       regression and not explained away**, because
-      `.ai/NEVERAGAIN.md` § *A still screenshot of a 4 fps application looks exactly
+      *a still screenshot of a 4 fps application looks exactly
       like a 60 fps one* is the reason this criterion exists at all
 
 - [ ] **Row `L8` is amended, dated, and its `Blocks` column is intact.**

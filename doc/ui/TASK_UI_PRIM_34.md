@@ -96,7 +96,7 @@ Window depth is the NDC `z` remapped from `[-1, 1]` to `[0, 1]`, so the 2D passe
 
 **Enabling the depth test over 2D geometry deletes every layer but the first**, and
 the result is a window showing the background and nothing else, with no GL error
-and a green `cargo test`. That is the failure shape `.ai/NEVERAGAIN.md` records
+and a green `cargo test`. That is a failure shape the repository has recorded
 more than once, and it is the reason this task is a *policy* task and not a
 one-line attribute change.
 
@@ -413,8 +413,7 @@ on this thread"*. Requirement 10 is that constraint, written down.
     the reason `MULTISAMPLE_SAMPLES`' doc gives: there is no GL context in the test
     harness, so a driver that quietly granted less than it was asked for is
     invisible to every check `cargo test` can make. `gl.get_error()` is read once
-    after each new GL call the first time it runs, per `.ai/NEVERAGAIN.md` § *A
-    buffer sized for one vertex per quad* — `bind_attach`'s doc records that a
+    after each new GL call the first time it runs: `bind_attach`'s doc records that a
     rejected call with nobody reading it dropped a whole pass.
 12. **The frame rate is measured on every page**, and the numbers go in the
     handoff whether they are good or bad, with the script's own line pasted rather

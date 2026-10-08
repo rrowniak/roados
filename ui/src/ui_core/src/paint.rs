@@ -527,9 +527,8 @@ pub enum DrawCommand {
         /// did not before. The consequence to state rather than fix is that a
         /// clipped run inside a scrolling viewport is clipped by the **scissor**
         /// and not by the command list, so it is drawn and cut by the GPU
-        /// instead of being dropped on the CPU — which is the whole of the
-        /// `A draw-command assertion cannot see where a command *lands*` entry in
-        /// `.ai/NEVERAGAIN.md`, unchanged by this field.
+        /// instead of being dropped on the CPU — a draw-command assertion cannot
+        /// see where a command *lands*, unchanged by this field.
         ///
         /// **In window coordinates, and so it moves with the run.**
         clip: Option<Rect>,
@@ -1380,10 +1379,10 @@ mod tests {
         // and image tests give: `command_quads` names every one of these fields,
         // so a rename here is a rename in the renderer.
         //
-        // The fixture is off the origin on purpose. `.ai/NEVERAGAIN.md` § *A
-        // rect's origin and a rect's extent are different numbers* — an origin
-        // of `(0, 0)` cannot see an origin read as an extent, and the offset is
-        // exactly the number that would be lost.
+        // The fixture is off the origin on purpose. A rect's origin and a rect's
+        // extent are different numbers — an origin of `(0, 0)` cannot see an
+        // origin read as an extent, and the offset is exactly the number that
+        // would be lost.
         let rect = Rect::new(240.0, 160.0, 420.0, 260.0);
         let mut painter = Painter::new();
         painter.shadow(rect, 12.0, Color::new(0, 0, 0, 128), 6.0, (3.0, 9.0));
@@ -1688,9 +1687,9 @@ mod tests {
         // The one word that separates the two painters, and the whole of what a
         // widget has to say to get a bold title.
         //
-        // Off the origin, as every geometry fixture here is: `.ai/NEVERAGAIN.md` §
-        // *A rect's origin and a rect's extent are different numbers*, and the
-        // positions below are part of what the two commands are compared on.
+        // Off the origin, as every geometry fixture here is: a rect's origin and
+        // a rect's extent are different numbers, and the positions below are
+        // part of what the two commands are compared on.
         let mut painter = Painter::new();
         painter.text(
             120.0,

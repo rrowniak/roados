@@ -559,8 +559,7 @@ condition rather than an expansion.
      `asset_candidates_from(exe: &Path, dir: Option<&OsStr>, relative: &str)`.
      `load_picture` passes `ASSET_RELATIVE` and **its existing tests keep their
      assertions** — a second search-path walker would be a second answer to one
-     question, and `.ai/NEVERAGAIN.md` § *Four documents agreeing is one belief,
-     counted four times* is the mechanism that lets two copies of a decision
+     question, and that is the mechanism that lets two copies of a decision
      disagree without anything failing.
    - **`ASSET_MODEL_RELATIVE` and the colormap's own name are two new `const`s**
      beside `ASSET_RELATIVE`, each doc-commented in that constant's
@@ -755,8 +754,8 @@ condition rather than an expansion.
         the tree is announced rather than discovered.
       - `the_fixtures_five_wheel_sub_meshes_are_not_one_sub_mesh` — the
         **anti-vacuity check**, and it exists because
-        `.ai/NEVERAGAIN.md` § *Four documents agreeing is one belief, counted four
-        times* is exactly this trap: the five names are asserted in this file, in
+        **four documents agreeing is one belief, counted four times** is exactly
+        this trap: the five names are asserted in this file, in
         task 37's, and in the fixture, so their agreement carries no information
         unless something checks the fixture is **not** a single sub-mesh. The test
         asserts `sub_meshes.len() == 5`, that the four wheel ranges are **pairwise
@@ -766,8 +765,8 @@ condition rather than an expansion.
         `meshio::load_from_bytes` with a `Vec<u8>`'s `as_slice()`. **This is the
         criterion's real content**: it is what stops a later refactor from folding
         `load_from_bytes` into `load_from_path` and quietly making every test in
-        this task illegal, since `.ai/NEVERAGAIN.md` § *A test of a helper cannot
-        see a call site that stopped using it* runs the other way here — a test
+        this task illegal, since **a test of a helper cannot see a call site
+        that stopped using it** runs the other way here — a test
         that needs a filesystem is a test that cannot run at all.
 
       **What these three tests do and do not prove, stated here rather than left
@@ -782,8 +781,7 @@ condition rather than an expansion.
       runtime looks would make this task's demo find it, which is a car on screen
       and therefore 39's capture.** **The handoff must say this in those words**,
       because a green fixture test reads like a green asset pipeline and is not
-      one — and per `.ai/NEVERAGAIN.md` § *A test fixture that builds what
-      production does not define*, a fixture that supplies the asset is **a second
+      one — and a fixture that supplies the asset is **a second
       copy of a decision 39 will make differently**, and the honest handling is to
       say so in the file rather than count the green as evidence about the
       pipeline. **The handoff also names the `include_bytes!` as the crate's

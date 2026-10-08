@@ -338,8 +338,8 @@ not its neighbour, and it moves between the two as the icon shifts by a pixel.
 This is the same failure `font.rs`'s module docs record for a signed distance
 field — *"a good way to draw text at a size other than the one it was rasterized
 for"* — arrived at from the other direction, and
-`.ai/NEVERAGAIN.md` § *A distance field has to binarize, and the bit it drops is
-the edge* is the same law in this repository's own memory.
+a distance field has to binarize, and the bit it drops is
+the edge.
 
 **And the atlas would not hold them.** `ATLAS_SIZE` is **2048**, so the atlas is
 **4 194 304** pixels. Thirty-three icons at 24×24 are **19 008** pixels —
@@ -519,8 +519,8 @@ which to break first:**
 `.ai/agents/developer.md` § Phase 3 (*"A test that has never failed is not a
 test"*) and *"Break it deliberately, watch it fail for the right reason, then fix
 it back."* A mutation the runner refused to apply is **not a kill**, and
-`.ai/NEVERAGAIN.md` § *A mutation the runner refused to apply was recorded as a
-kill* is that failure in this repository's own memory.
+a mutation the runner refused to apply being recorded as a kill is that failure
+in this repository's own memory.
 
 ### Scope, measured against `developer.md` § *Scope check*
 
@@ -637,7 +637,7 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
    field** — the existing one says the slice is a valid
    `IMAGE_VERTEX_STRIDE`-strided array because the struct is `repr(C)` with no
    padding, and a stride that no longer matches the struct is exactly the defect
-   `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad* is about.
+   *a buffer sized for one vertex per quad* is about.
 
 5. **`render.rs`: the two shader sources, exactly.**
 
@@ -780,7 +780,7 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
      **one `Painter::tinted_image` and nothing else**, at
      `self.destination(rect)`, `self.source.uv()`, `self.style().opacity`,
      `radius: 0.0` (the literal, not a property: an icon has no rounded corners,
-     and `.ai/NEVERAGAIN.md` § *A filled rounded rectangle is not an outline* is
+     and *a filled rounded rectangle is not an outline* is
      why a rounded icon would be a card), and `self.style().tint`. **A
      destination empty on either axis records nothing**, `Image::paint`'s rule
      and its reason. The doc-test asserts one command, the five-plus-one fields,
@@ -865,8 +865,8 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
    new field and the new attribute **and keep their names and every assertion
    they already make**; `the_image_shader_multiplies_the_sampled_texel_by_the_tint`
    and `a_tinted_image_quad_carries_the_tint_it_was_given` are new, and the
-   first asserts on the **whole assignment**, not a substring — `.ai/NEVERAGAIN.md`
-   § *An unknown-name rule and a mutation of it can be the same value* is why a
+   first asserts on the **whole assignment**, not a substring —
+   *an unknown-name rule and a mutation of it can be the same value* is why a
    bare `contains("v_tint")` will not do.
 
 10. **`DEMO_APPLICATION.md` § *Library gaps*, row `#4`, gains a dated note**,
@@ -932,8 +932,7 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
     six-page before/after capture of `IMPLEMENTATION_STATE.md`
     § *Verifying a change that draws — the capture method*, verbatim. Then
     **`gl.get_error()` read once after the first frame that draws the `data`
-    page's image**, with the instrument's code quoted, per
-    `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad* — because a
+    page's image**, with the instrument's code quoted — because a
     vertex layout that is wrong in a way GL accepts **draws the wrong picture or
     nothing**, and this is the task that changes one. Then the frame rate on all
     six pages.
@@ -1093,10 +1092,10 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
       handoff reports the **failing test names and counts** for each, plus the
       restored green. **A mutation the runner refused to apply is recorded as
       *not a result*, not as a kill** —
-      `.ai/NEVERAGAIN.md` § *A mutation the runner refused to apply was recorded
+      *a mutation the runner refused to apply was recorded
       as a kill*. **And every run is made against a tree that was rebuilt** —
-      `.ai/NEVERAGAIN.md` § *A build that reports `Finished in 0.0xs` did not
-      rebuild* and § *`tar -x` restores the archived mtime* are both the reason
+      *a build that reports `Finished in 0.0xs` did not
+      rebuild* and *`tar -x` restores the archived mtime* are both the reason
       the handoff pastes the build line beside each mutation result.
 
 - [ ] **The six gallery pages are pixel-identical outside the fps band, and the
@@ -1133,9 +1132,8 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
 
 - [ ] **No GL error on the first frame that draws the image, read once.**
       `gl.get_error()` is read after the first frame that draws the `data` page's
-      image and pasted into the handoff **with the instrument's code quoted**,
-      per `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad*. **A
-      capture is not a substitute in either direction**: a wrong vertex layout
+      image and pasted into the handoff **with the instrument's code quoted**.
+      **A capture is not a substitute in either direction**: a wrong vertex layout
       can draw the wrong picture, and the recorded command count is asserted by a
       test while the pixels are asserted only by the capture above.
 
@@ -1262,7 +1260,7 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
   ink, `ThemeToken::Text` is ink, and a token for "not selected" or a scoped
   token is `L9`'s and `L6b`'s — both separate tasks, and re-opening either here
   would be exactly the "two documents each claiming ownership of one definition"
-  `.ai/NEVERAGAIN.md` records.
+  failure.
 - **No font change and no icon font.** `ui/src/ui_core/src/font.rs` is untouched:
   no `FACE_COUNT` change, no third weight, no `GlyphKey` change, no glyph in the
   glyph atlas, no `Font` added to a `FontSet`. Option (C) is declined above with

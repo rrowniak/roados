@@ -1060,9 +1060,8 @@ impl List {
     ///
     /// The scrollbar is recorded **after** the rows, so a row's own background
     /// cannot cover it: a [`DrawCommand::RoundedRect`] fills its rect, and a
-    /// thumb drawn under an opaque row is a scrollbar nobody can see. That is
-    /// `.ai/NEVERAGAIN.md`'s *a filled rounded rectangle is not an outline*, one
-    /// level up.
+    /// thumb drawn under an opaque row is a scrollbar nobody can see. That is the
+    /// rule that a filled rounded rectangle is not an outline, one level up.
     ///
     /// A row whose node the arena no longer holds is skipped rather than
     /// reported: the only way to reach that state is for a caller to have removed
@@ -1658,9 +1657,8 @@ fn is_positive(value: f32) -> bool {
 /// The question this asks is "is this point inside the content", and its answer
 /// for the top edge is yes: `0.0` is the first pixel of the first row. It is
 /// [`is_positive`] with the strictness taken off, and it is a separate function
-/// because a *length* and a *position* are different questions — the mistake
-/// `.ai/NEVERAGAIN.md` records under "a rect's origin and a rect's extent are
-/// different numbers", one level down.
+/// because a *length* and a *position* are different questions — a rect's origin
+/// and a rect's extent are different numbers, one level down.
 fn at_or_above_zero(value: f32) -> bool {
     value >= 0.0
 }
@@ -1735,9 +1733,8 @@ mod tests {
     /// The height of one row, which is also a whole divisor of the viewport.
     const ROW: f32 = 100.0;
     /// The list's box at the origin of the window. Most of this module's
-    /// geometry fixtures are here, which is the blind spot
-    /// `.ai/NEVERAGAIN.md` records against the slider; `OFFSET_VIEWPORT` is the
-    /// one that is not.
+    /// geometry fixtures are here, which is the blind spot the slider fell into;
+    /// `OFFSET_VIEWPORT` is the one that is not.
     const VIEWPORT: Rect = Rect {
         x: 0.0,
         y: 0.0,
@@ -3398,8 +3395,8 @@ mod tests {
 
     #[test]
     fn the_scrollbar_is_drawn_after_the_rows() {
-        // A thumb drawn under an opaque row is a scrollbar nobody can see, which
-        // is `.ai/NEVERAGAIN.md`'s filled-rounded-rectangle rule one level up.
+        // A thumb drawn under an opaque row is a scrollbar nobody can see — a
+        // filled rounded rectangle is not an outline, one level up.
         let (mut nodes, mut list, _calls) = list(ROWS, ROW);
         assert!(list.sync(&mut nodes, VIEWPORT));
         let painted = list.paint(&nodes, VIEWPORT);

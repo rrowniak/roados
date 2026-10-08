@@ -1959,9 +1959,8 @@ mod tests {
         let shadow = filled[1].2;
         // Not `shadow.a <= PRESS_SHADOW_ALPHA * 255`: the alpha is *computed*
         // from that constant, so such an assertion is true by construction and
-        // survives setting the constant to 1.0 — the 2026-09-29 entry in
-        // `.ai/NEVERAGAIN.md` exactly. The number is written out instead, so
-        // that a change to either the constant or the path that produces the
+        // survives setting the constant to 1.0. The number is written out instead,
+        // so that a change to either the constant or the path that produces the
         // alpha has to move this.
         assert!(
             shadow.a < 128,
@@ -2444,8 +2443,7 @@ mod tests {
         );
         // Not `half == full / 2`: both numbers are *computed* from that product,
         // so such an assertion is true by construction and survives dropping the
-        // `* opacity` term entirely -- the 2026-09-29 entry in
-        // `.ai/NEVERAGAIN.md`. The numbers are written out instead, so that a
+        // `* opacity` term entirely. The numbers are written out instead, so that a
         // change to the constant or to the path producing the alpha has to move
         // one of them.
         assert_eq!(
@@ -2525,7 +2523,7 @@ mod tests {
     ///
     /// [`Button::paint`] computes the ring's colour from the same `opacity` local as
     /// every other colour, so it should follow for free — and "should follow for
-    /// free" is exactly the kind of claim `.ai/NEVERAGAIN.md` says nobody re-checks.
+    /// free" is exactly the kind of claim nobody re-checks.
     /// A ring left solid on a button that is fading is the same defect the dialog
     /// had, one primitive in and with no other test to catch it.
     #[test]

@@ -210,10 +210,8 @@ impl ShadowTarget {
         let (w, h) = (wanted.0, wanted.1);
         // The driver's own limit, read back rather than assumed. An extent past
         // it is refused here, where the caller can be told, rather than handed to
-        // `glTexImage2D` and left as an unchecked GL error — which is the shape
-        // of failure `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per
-        // quad* records, where a rejected call with nobody reading the rejection
-        // dropped a whole batch.
+        // `glTexImage2D` and left as an unchecked GL error — a rejected call with
+        // nobody reading the rejection drops a whole batch.
         let limit = max_texture_size(gl);
         if w > limit || h > limit {
             return Err(RenderError::Gl(format!(
@@ -344,9 +342,8 @@ impl ShadowTarget {
     /// check.** No unit test has a GL context; a still screenshot taken after the
     /// first frame shows the shadow, because the second frame's attach succeeds
     /// once the framebuffer has been bound; and the frame rate is unaffected. It
-    /// was found by reading `gl.get_error()` after each new call once, which is
-    /// the rule `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad*
-    /// records for a rejected GL call nobody read.
+    /// was found by reading `gl.get_error()` after each new call once: a rejected
+    /// GL call nobody reads is invisible.
     ///
     /// `self.size` is **not** changed here: which of the two textures is attached
     /// says nothing about how large either of them is.

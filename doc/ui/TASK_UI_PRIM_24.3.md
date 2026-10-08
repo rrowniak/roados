@@ -113,7 +113,7 @@ buttons put all five back, which is why this task is not only chrome.
    buttons arrive 150 ms apart.** The bar's own `Surface` is a bound property on
    the animating theme and so moves over 300 ms, while the buttons reach their
    final colours at 150. **Nobody has seen that on screen** — it needs `T`
-   injected and `NEVERAGAIN` records that XTEST does not deliver on this host.
+   injected, and XTEST does not deliver on this host.
    **It is the one argument for the number rather than the call**, and it is the
    operator's to weigh.
 

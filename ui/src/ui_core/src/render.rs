@@ -21,8 +21,8 @@
 //!
 //! **Enabling the depth test over 2D geometry deletes every layer but the first**,
 //! and the result is a window showing the background and nothing else, with no GL
-//! error and a green `cargo test`. That is the failure shape recorded in
-//! `.ai/NEVERAGAIN.md` more than once, and it is the reason this module is a
+//! error and a green `cargo test`. That is the failure shape this repository
+//! has recorded more than once, and it is the reason this module is a
 //! *policy* module and not a one-line attribute change.
 //!
 //! ### The resting state
@@ -600,8 +600,8 @@ void main() {
 /// The corners are cut with `discard`, not painted over. `DrawCommand::Image`'s
 /// radius is a **clip**: the corners must show whatever the widget drew behind
 /// the image. Filling them with a corner colour instead would make a rounded
-/// image a rectangle with the wrong corners — and `.ai/NEVERAGAIN.md` § *A
-/// filled rounded rectangle is not an outline* is that failure in a different
+/// image a rectangle with the wrong corners — and *a filled rounded rectangle
+/// is not an outline* is that failure in a different
 /// primitive. No unit test can see the difference between the two: they differ
 /// only in what reaches the framebuffer.
 ///
@@ -3816,9 +3816,9 @@ impl Renderer {
     /// unit test: the decision sits inside a function that needs a GL context,
     /// and the rasterizing half of it needs two real font files, which
     /// `AGENTS.md` forbids a test to open. The evidence is the pixels — two runs
-    /// of one string, measured in ink and in width — and `.ai/NEVERAGAIN.md`
-    /// records three defects in this repository that passed every unit test here
-    /// for exactly this reason.
+    /// of one string, measured in ink and in width — and this repository has
+    /// recorded three defects that passed every unit test here for exactly this
+    /// reason.
     fn draw_text_batch(&mut self, batch: &Batch) -> Result<(), RenderError> {
         if batch.key.shader != ShaderKind::Text {
             return Ok(());
@@ -3996,8 +3996,7 @@ impl Renderer {
     /// arithmetic that went wrong once already: a buffer sized for one vertex
     /// per quad is a quarter of the size it promises, the `glBufferSubData` that
     /// follows fails with `GL_INVALID_VALUE`, and the batch is silently
-    /// dropped — no error, no picture, and nothing in the suite to see it. See
-    /// `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad*.
+    /// dropped — no error, no picture, and nothing in the suite to see it.
     fn ensure_image_vertex_capacity(&mut self, quads: usize) -> Result<(), RenderError> {
         if quads <= self.image_vertex_capacity {
             return Ok(());
@@ -4093,8 +4092,8 @@ impl Renderer {
     /// Validates the mesh before any GL call, so a malformed mesh costs nothing
     /// and names itself: empty vertices, empty indices, or empty sub-meshes is
     /// an error saying which. An upload that returns a handle whose draws are
-    /// all no-ops is the failure `.ai/NEVERAGAIN.md` records for a buffer sized
-    /// wrong — a batch that disappears with every GL call reporting success.
+    /// all no-ops is the failure a buffer sized wrong produces — a batch that
+    /// disappears with every GL call reporting success.
     ///
     /// Validates every sub-mesh: `first_index + index_count <= indices.len()`,
     /// computed with `checked_add`, naming the sub-mesh in the error. A range
@@ -4250,8 +4249,8 @@ mod tests {
 
     #[test]
     fn the_text_batch_is_expanded_again_when_the_atlas_grows_under_it() {
-        // **The gate, and it is the one `.ai/NEVERAGAIN.md` has four rounds of
-        // history about — a rule with no test.** A placement's UVs are divided by
+        // **The gate, and it is one this repository has four rounds of history
+        // about — a rule with no test.** A placement's UVs are divided by
         // the atlas's size, a grow re-packs the atlas into a larger texture, and
         // the quads built before the grow therefore sample the re-packed texture
         // at the coordinates of the old one. It is invisible on every frame after
@@ -4788,7 +4787,7 @@ mod tests {
     #[test]
     fn a_convex_quadrilateral_fans_into_two_quads() {
         // Off the origin: a fixture at (0, 0) cannot see an origin read as an
-        // extent, per `.ai/NEVERAGAIN.md`.
+        // extent.
         let quads = command_quads(&DrawCommand::Polygon {
             points: vec![(20.0, 20.0), (60.0, 20.0), (60.0, 50.0), (20.0, 50.0)],
             color: Color::new(10, 20, 30, 255),
@@ -5198,8 +5197,8 @@ mod tests {
     ///
     /// What it cannot see is the pair of runs on screen with different ink and
     /// different advances, which is the defect the whole feature exists to avoid;
-    /// that is a capture, and `.ai/NEVERAGAIN.md` records three defects in this
-    /// repository that passed every unit test here.
+    /// that is a capture, and this repository has recorded three defects that
+    /// passed every unit test here.
     fn text_run(weight: FontWeight) -> DrawCommand {
         let mut painter = Painter::new();
         match weight {
@@ -5314,14 +5313,14 @@ mod tests {
     /// drawn from. What they cannot check is whether any of it reaches the
     /// screen — the atlas upload, the sampler binding, the discard and the
     /// premultiplied blend are all framebuffer-side, and this suite has no
-    /// context to observe them with. `.ai/NEVERAGAIN.md` records three defects
-    /// in this repository that passed every unit test here and were only found
-    /// by looking at the pixels.
+    /// context to observe them with. This repository has recorded three defects
+    /// that passed every unit test here and were only found by looking at the
+    /// pixels.
     ///
     /// The rect every image fixture is laid out in, away from the origin: a
     /// geometry fixture at `(0, 0)` cannot see an origin being read as an
-    /// extent, and this one is used to check both — see `.ai/NEVERAGAIN.md` §
-    /// *A rect's origin and a rect's extent are different numbers*.
+    /// extent, and this one is used to check both — a rect's origin and a rect's
+    /// extent are different numbers.
     fn fixture_rect() -> Rect {
         Rect::new(10.0, 20.0, 100.0, 50.0)
     }
@@ -5363,7 +5362,7 @@ mod tests {
     #[test]
     fn the_image_vertex_buffer_counts_four_vertices_per_quad() {
         // 256 quads is four vertices each, so 1024 vertices, at 40 bytes each:
-        // 40960. The number the NEVERAGAIN entry is about is 256 * 40 = 10240 —
+        // 40960. The wrong number is 256 * 40 = 10240 —
         // a quarter of it, which `glBufferSubData` rejects with
         // `GL_INVALID_VALUE` and the batch then vanishes with no error. So the
         // assertion is written against the full size and the wrong one is named
@@ -5435,7 +5434,7 @@ mod tests {
 
     #[test]
     fn the_image_fragment_shader_discards_the_corners_rather_than_filling_them() {
-        // `.ai/NEVERAGAIN.md` § *A filled rounded rectangle is not an outline*:
+        // A filled rounded rectangle is not an outline:
         // `DrawCommand::Image`'s radius is a clip, so the corners must show what
         // the widget drew behind. A colour write there is not a wrong colour,
         // it is a wrong shape, and no draw-command assertion can tell the two
@@ -5924,9 +5923,9 @@ mod tests {
     /// **What they cannot check is the ramp.** The whole point of this layer is
     /// that a shadow's edge is soft, and softness is pixels: the blur runs on the
     /// GPU, the target is single-sampled where the window's default framebuffer is
-    /// 4x, and the weights are eight bits per texel. `.ai/NEVERAGAIN.md` records
-    /// three defects in this repository that passed every unit test here and were
-    /// found by looking at the screen, so the acceptance for the blur is a capture
+    /// 4x, and the weights are eight bits per texel. This repository has recorded
+    /// three defects that passed every unit test here and were found by looking
+    /// at the screen, so the acceptance for the blur is a capture
     /// with the ramp measured in pixels, not this module.
     fn shadow_command() -> DrawCommand {
         DrawCommand::Shadow {
@@ -6261,8 +6260,8 @@ mod tests {
         // error, `gl.get_error()` read `0x0` at every step of the pass, the frame
         // rate was unchanged at 62 fps, and the picture was a window with no shadow
         // on it. Both halves of this pipeline's acceptance are blind to a uniform
-        // that reads as zero — `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex
-        // per quad* is the same shape one layer down.
+        // that reads as zero — a buffer sized for one vertex per quad is the
+        // same shape one layer down.
         let programs: [(&str, &str, &str, &[&str]); 4] = [
             (
                 "the shadow mask",

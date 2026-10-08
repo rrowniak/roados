@@ -1300,8 +1300,8 @@ impl Scroll {
     /// The order is the point of the middle one. A [`DrawCommand::RoundedRect`]
     /// *fills* its rect, so a ring drawn around the whole viewport and left
     /// uncovered is a card — 200 by 300 of it — with a scrollbar lying on top,
-    /// which is the defect `.ai/NEVERAGAIN.md` records against the slider's focus
-    /// ring. The ring here goes around the **thumb** and the thumb is recorded
+    /// which is the defect recorded against the slider's focus ring. The ring here
+    /// goes around the **thumb** and the thumb is recorded
     /// after it, so only its border shows. The ring is also what keeps a scroll
     /// identifiable at all: a scrollbar has no background of its own to draw over
     /// a ring with, exactly as a slider has none.
@@ -3093,8 +3093,7 @@ mod tests {
                 thumb.height + FOCUS_RING * 2.0,
             ),
             "the ring is the thumb's own rect grown, and NOT the viewport's — a filled \
-             rectangle that size with nothing over its middle is a card, which is what \
-             .ai/NEVERAGAIN.md records against the slider's focus ring"
+             rectangle that size with nothing over its middle is a card"
         );
         assert!(
             ring.x + ring.width <= OFFSET_VIEWPORT.x + OFFSET_VIEWPORT.width,
@@ -3484,10 +3483,10 @@ mod tests {
         // The shadow, in **numbers**, and every one of them derived rather than
         // copied: the panel rect, the offset it is drawn at, and the blur's reach.
         //
-        // The fixture is off the origin on purpose — `.ai/NEVERAGAIN.md` § *A
-        // rect's origin and a rect's extent are different numbers* — because this
-        // arm's arithmetic reads three same-typed numbers as if they were
-        // different ones, and a rect at `(0, 0)` cannot see that.
+        // The fixture is off the origin on purpose — a rect's origin and a rect's
+        // extent are different numbers — because this arm's arithmetic reads three
+        // same-typed numbers as if they were different ones, and a rect at `(0, 0)`
+        // cannot see that.
         //
         // `reach(2.0)` is four taps either side, and `taps_for(8.0)` is four too
         // (the kernel is nine taps in total), so the two sigmas below give the

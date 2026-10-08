@@ -193,15 +193,14 @@ and
 `premultiplied_multiplies_each_channel_by_the_alpha_in_u16` asserts it **by value**
 — `(200, 200, 200, 128) → (100, 100, 100, 128)` — because **a test that asserts
 only that the channels got *smaller* cannot catch a `u8` multiply**, and
-`.ai/NEVERAGAIN.md` § *An assertion that cannot fail* is the entry about exactly
-that.
+**an assertion that cannot fail** is exactly that trap.
 
 **Why this is in the task rather than left to the implementer:** a card drawn at
 `Surface` with `a = 200` and **not** premultiplied composites as if it were `(245 ·
 200, 245 · 200, 245 · 200, 200)` under `glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)`
 — **far too bright**, and it is the same class as
-`.ai/NEVERAGAIN.md` § *A strength clamped to 0..=1, used directly as an effect's
-size*: **a number that looks like the right kind of number and is not.**
+a strength clamped to `0..=1` and used directly as an effect's
+size: **a number that looks like the right kind of number and is not.**
 
 ### The two declared dependencies, and what happens without them
 
@@ -416,9 +415,8 @@ has landed and does not need writing if it has not — and `ui/src/ui_demo/src/m
    **`CHROME_ALPHA = 200` is not 255 and that is the whole point.** At 255 the
    backdrop is captured, blurred, composited and then **completely hidden behind an
    opaque card** — a real cost for no visible difference. The alpha's own doc says
-   so, because `.ai/NEVERAGAIN.md` § *A strength clamped to 0..=1, used directly as
-   an effect's size* is the entry about a number that looks like the right kind of
-   number and is not the right number.
+   so, because a number that looks like the right kind of number and is not the
+   right number is the failure this guards against.
 
 3. **`fn premultiplied(color: Color, alpha: u8) -> Color` — the crate's arithmetic,
    written once, with its reason cited.**
@@ -587,8 +585,8 @@ obtains or generates missing assets. **No placeholder geometric shapes**"* — *
      above.
 
    **The arm order is the z-order and it is stated, because the two paths differ.**
-   `.ai/NEVERAGAIN.md` § *A shadow lands on whatever was recorded before it, not on
-   whatever comes next* records that a `Shadow` is composited **after everything its
+   **A shadow lands on whatever was recorded before it, not on whatever comes
+   next**: a `Shadow` is composited **after everything its
    own segment recorded** (`render.rs`), and `TASK_UI_PRIM_41` § *Requirements*
    gives `Backdrop`'s `BatchKey::is_singleton` the same property — it **seals** the
    segment. **So the `Backdrop` must be recorded before the surface fill on the same
@@ -596,8 +594,8 @@ obtains or generates missing assets. **No placeholder geometric shapes**"* — *
    it in the `order` walk**, which is why the content of a translucent card lands on
    the card. `a_chrome_surface_records_its_backdrop_before_its_surface` is the test,
    and **it is the enforcement for a mechanism no draw-command assertion can see by
-   position alone** — `.ai/NEVERAGAIN.md`'s entry is that a comment claiming a state
-   transition happens *"once, up front"* is a testable claim, and this is it.
+   position alone** — the rule is that a comment claiming a state transition happens
+   *"once, up front"* is a testable claim, and this is it.
 
 8. **Five `page_members` rows, one per chrome surface, and no `focusable` flag.**
    `on(Page::Demo, status_bar.handle(), false)`, and the same for the pane and the
@@ -694,15 +692,15 @@ asserts a contract.** **Fourteen in `chrome.rs`, five in `main.rs`.**
 | 3 | `a_translucent_palette_is_strictly_darker_than_its_opaque_twin` | `surface.r < surface_opaque.r` on both channels, and `surface.a == CHROME_ALPHA` — **the assertion that a `u8` multiply survives**, since truncating the product darkens it |
 | 4 | `chrome_palette_reads_six_values_and_only_two_are_translucent` | six fields, and `surface`/`surface_opaque` are the only two with `a != 255` |
 | 5 | `chrome_palette_falls_back_when_a_token_holds_a_number` | the `as_color().unwrap_or(..)` path, as in task 01 |
-| 6 | **`a_chrome_surface_records_its_backdrop_before_its_surface`** | with `backdrop: true`, the recorded commands are **`[Backdrop, RoundedRect]`** and the `RoundedRect`'s rect equals the one the `Backdrop` carries. **This is the enforcement for a mechanism no other assertion can see** — `NEVERAGAIN`'s *"a shadow lands on whatever was recorded before it"* is about a picture this test would let be wrong |
+| 6 | **`a_chrome_surface_records_its_backdrop_before_its_surface`** | with `backdrop: true`, the recorded commands are **`[Backdrop, RoundedRect]`** and the `RoundedRect`'s rect equals the one the `Backdrop` carries. **This is the enforcement for a mechanism no other assertion can see** |
 | 7 | **`a_chrome_surface_without_a_backdrop_records_only_its_surface`** | with `backdrop: false`, **exactly one** `RoundedRect` at `surface_opaque`. **The control for 6**, and the fallback path is covered on any tree, which is the point of requirement 11 |
-| 8 | `the_backdrop_carries_the_palette_s_premultiplied_surface_and_blur_two_point_five` | the tint is `palette.surface`, not `surface_opaque`, and the mode is `Blur(BACKDROP_SIGMA)` — **a card whose blur is then hidden under an opaque fill is the `.ai/NEVERAGAIN.md` "right kind of number" defect** |
+| 8 | `the_backdrop_carries_the_palette_s_premultiplied_surface_and_blur_two_point_five` | the tint is `palette.surface`, not `surface_opaque`, and the mode is `Blur(BACKDROP_SIGMA)` — **a card whose blur is then hidden under an opaque fill is the "right kind of number" defect** |
 | 9 | `the_dock_is_a_row_of_five_slots_and_the_glyph_table_has_five_entries` | `DOCK_GLYPHS.len() == DOCK_SLOTS` and both are 5 |
-| 10 | `every_dock_glyph_is_one_non_empty_character` | each entry is exactly one char and not whitespace — **an empty label draws nothing and cannot be seen**, which is the `NEVERAGAIN` § *A drawn control with nothing behind it* shape |
+| 10 | `every_dock_glyph_is_one_non_empty_character` | each entry is exactly one char and not whitespace — **an empty label draws nothing and cannot be seen**, which is the **drawn control with nothing behind it** shape |
 | 11 | `a_pager_paint_arm_records_three_circles_and_nothing_else` | **exactly three** `Circle`s, and no other variant in the vector |
 | 12 | `the_pager_places_three_dots_pager_dot_gap_apart_and_centred` | the three `(x, y)` by value, and the middle one is the row's own midpoint |
 | 13 | `the_indicator_column_is_five_rows_in_red_amber_green_blue_grey_order` | five, and the order is the section's |
-| 14 | `the_chrome_nodes_do_not_overlap_each_other` | **the four-sided separation test** — the three rectangles' interiors do not intersect. **The row is not at the origin**, on `NEVERAGAIN.md`'s *"a geometry fixture at the origin cannot see an origin being read as an extent"* |
+| 14 | `the_chrome_nodes_do_not_overlap_each_other` | **the four-sided separation test** — the three rectangles' interiors do not intersect. **The row is not at the origin** — a geometry fixture at the origin cannot see an origin being read as an extent |
 
 **In `main.rs`'s `mod tests` — five:**
 
@@ -728,8 +726,8 @@ asserts a contract.** **Fourteen in `chrome.rs`, five in `main.rs`.**
   `Page::Demo`, empty on each of the six.** This is the criterion that the chrome
   does not leak onto the gallery, and **covering the children is the point** —
   a chrome surface that records commands while its own labels record none is a
-  bar with nothing on it, and `.ai/NEVERAGAIN.md` § *A drawn control with nothing
-  behind it* is the entry about a picture no test could see the difference in.
+  bar with nothing on it, and a drawn control with nothing behind it is a picture
+  no test could see the difference in.
   **Its control is the demo page's own map node**, which records a large non-empty
   vector on the same page.
 - **`a_theme_switch_reaches_every_chrome_surface`** — `toggle_theme()` and then all
@@ -745,8 +743,7 @@ Phase 3 says *"A test that has never failed is not a test"*:
 1. **Swap the `backdrop` and `rounded_rect` calls** in
    `chrome_surface_commands` and re-run test 6 — it fails on the order, **and the
    capture shows the surface painted over its own blur.** This break has a visible
-   consequence, and `NEVERAGAIN`'s *A shadow lands on whatever was recorded before
-   it* is the entry that predicts it.
+   consequence, and *a shadow lands on whatever was recorded before it* predicts it.
 2. **Premultiply with a `u8` multiply** instead of a `u16` one and re-run test 1 —
    it fails by value, on the number `Pixels::premultiply`'s doc predicted.
 3. **Give the dock's third `Button` an empty label** and re-run test 10 — it fails.
@@ -773,9 +770,8 @@ Phase 3 says *"A test that has never failed is not a test"*:
       `DISPLAY=:0 xwininfo -root -tree | rg '"roados ui_demo"'`, then
       `DISPLAY=:0 magick import -window <id>` — **with `pgrep -a -x ui_demo` in the
       same call as each capture and no seed, no environment variable and no rebuilt
-      binary**, which is stated because `.ai/NEVERAGAIN.md` § *A capture whose only
-      route was instrumented* is the entry about a picture whose method was not
-      given. **The capture is read for seven things, each stated in the handoff:**
+      binary**, which is stated because a picture whose method was not given is the
+      failure this guards against. **The capture is read for seven things, each stated in the handoff:**
       the map is visible across the whole area below the gallery's tab bar; **a
       status bar across the top with the padlock, the profile name and the airbag
       badge and nothing else**; **a dock across the bottom with five slots and no
@@ -814,9 +810,8 @@ Phase 3 says *"A test that has never failed is not a test"*:
 
 - [ ] **The geometry is asserted, not eyeballed.**
       `the_chrome_nodes_do_not_overlap_each_other` runs the four-sided separation
-      test over the three rectangles and **none is at the origin**, on
-      `.ai/NEVERAGAIN.md`'s *"a geometry fixture at the origin cannot see an origin
-      being read as an extent"*;
+      test over the three rectangles and **none is at the origin** — a geometry
+      fixture at the origin cannot see an origin being read as an extent;
       `the_pager_places_three_dots_pager_dot_gap_apart_and_centred` asserts the
       three centres by value;
       `the_indicator_column_is_five_rows_in_red_amber_green_blue_grey_order`
@@ -893,9 +888,8 @@ Phase 3 says *"A test that has never failed is not a test"*:
       multiply in `u8` instead of `u16` and watch the first fail on the number
       `Pixels::premultiply`'s own doc predicted; make `premultiplied` return its
       input and watch tests 1 and 3 fail together. **The reason the test is written
-      on a value at all** is `.ai/NEVERAGAIN.md` § *An assertion that cannot fail*
-      and § *A strength clamped to 0..=1, used directly as an effect's size* — **a
-      "it got smaller" assertion passes on a number that is wrong.**
+      on a value at all** is that **a "it got smaller" assertion passes on a
+      number that is wrong.**
 
 - [ ] **`cargo test --all-features` is green with every named test present, and the
       three counts are pasted.** From `ui/`: `cargo fmt --check`;
@@ -927,8 +921,8 @@ Phase 3 says *"A test that has never failed is not a test"*:
       application is pixel-identical to a still of a 60 fps one** — which is how a
       four-fps regression survived three reviews in this repository. **And the
       numbers name their build**: `ls -la ui/target/release/ui_demo` settles in one
-      command which binary was measured, on `NEVERAGAIN.md` § *A debug build reads
-      as a performance regression*.
+      command which binary was measured — **a debug build reads as a performance
+      regression**.
 
 - [ ] **Nothing leaked in, and the manifest rule holds.** `git diff --stat` names
       **no file under `ui/src/ui_core/src/`**, **no file under
@@ -1066,11 +1060,11 @@ Phase 3 says *"A test that has never failed is not a test"*:
   bound to a `Property<String>`, and `a_theme_switch_reaches_every_chrome_surface`
   is the test that reaches them. **A `SystemTime` read in a paint path would be a
   wall-clock read in the demo**, and `AGENTS.md` § *Rust* forbids a wall-clock
-  *test* while `.ai/NEVERAGAIN.md` § *A still screenshot of a 4 fps application*
-  is the entry about what a per-frame cost does to a build nobody measured. **A
+  *test* while **a still screenshot of a 4 fps application** hides what a
+  per-frame cost does to a build nobody measured. **A
   moving clock also has no capture evidence**: `magick compare -metric AE` of two
-  captures of a number that ticks is `NEVERAGAIN.md` § *Two captures of a moving
-  number can be identical*, and the cure there is to read the number rather than the
+  captures of a number that ticks is that **two captures of a moving number can be
+  identical**, and the cure there is to read the number rather than the
   pixels — **which a wall clock would make impossible to photograph.**
 
 - **No change to the gallery, to the tab bar, to `Page`, or to any other page.**

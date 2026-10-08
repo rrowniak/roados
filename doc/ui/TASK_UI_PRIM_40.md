@@ -284,9 +284,9 @@ rather than claiming a capture proves it:**
    window and a finger turns the car* — is **not claimed, and an acceptance
    criterion here does not require it.** The gates in `.ai/workflows/task-sequence.md`
    § Gates forbid evidence by assertion, so a criterion that cannot be met is not
-   written; `.ai/NEVERAGAIN.md` § *An acceptance criterion that names an instrument
-   which cannot produce the evidence is not met by producing the evidence another
-   way* is the rule this file obeys by leaving the criterion out and recording the
+   written; **an acceptance criterion that names an instrument which cannot
+   produce the evidence is not met by producing the evidence another way** is the
+   rule this file obeys by leaving the criterion out and recording the
    gap instead.
 
 ### What this task does to gap `L4`, and the honest limit
@@ -787,8 +787,7 @@ stop condition rather than an expansion** (`developer.md` § *Stop conditions*).
     six-page before/after capture of § *The demo must draw something*, and then
     **the frame rate on all six pages**. **`gl.get_error()` is read once after the
     first frame that draws the mesh** and the result pasted with the instrument's
-    code quoted, per `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad* —
-    `bind_attach`'s doc records that a rejected call with nobody reading it dropped
+    code quoted: `bind_attach`'s doc records that a rejected call with nobody reading it dropped
     a whole pass, **and a mesh pass that silently draws nothing is the largest
     version of that failure this sequence has produced.**
 
@@ -979,8 +978,7 @@ stop condition rather than an expansion** (`developer.md` § *Stop conditions*).
 
 - [ ] **No GL error on the first frame that draws the mesh**, read once with
       `gl.get_error()` and pasted into the handoff **with the instrument's code
-      quoted** — per `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad*.
-      **A capture is not a substitute:** a mesh that silently draws nothing looks
+      quoted**. **A capture is not a substitute:** a mesh that silently draws nothing looks
       exactly like a mesh that drew a car, and the count of mesh commands in the
       recorded stream is asserted by a test while the pixels are not asserted by
       anything

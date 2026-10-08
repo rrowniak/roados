@@ -7,8 +7,7 @@
 //! draws — each one is its own node in the arena, which is what lets a caller
 //! register it with [`Focus`](crate::input::Focus) and a key activate it. A
 //! dialog whose "OK" is a rounded rectangle in a `Vec<DrawCommand>` is a dialog
-//! whose "OK" cannot be pressed, and `.ai/NEVERAGAIN.md` § *A drawn control with
-//! nothing behind it* is the entry for that.
+//! whose "OK" cannot be pressed — a drawn control with nothing behind it.
 //!
 //! # The paint order, and the shadow that makes it work
 //!
@@ -1148,10 +1147,10 @@ impl Dialog {
         // and then they were gone in one frame — which is what an operator reported
         // as *"the buttons blink for a moment"* on the way in and on the way out.
         //
-        // `.ai/NEVERAGAIN.md` § *a strength clamped to 0..=1, used directly as an
-        // effect's size* is the class: every test in this module asserted **which**
-        // commands were recorded, and these were recorded correctly on every frame.
-        // The defect was in the alpha **on** a command that was present.
+        // A strength clamped to 0..=1, used directly as an effect's size, is the
+        // class: every test in this module asserted **which** commands were
+        // recorded, and these were recorded correctly on every frame. The defect
+        // was in the alpha **on** a command that was present.
         for (index, action) in self.actions.iter().enumerate() {
             if let Some(rect) = geometry
                 .actions
@@ -1334,8 +1333,8 @@ impl Transition {
 ///
 /// It exists because there are three consumers and they must not be three
 /// computations: a panel drawn at one size and hit-tested at another is a panel
-/// whose scrim tap lands in the wrong place, and `.ai/NEVERAGAIN.md` § *A drawn
-/// control with nothing behind it* asks for exactly that consistency.
+/// whose scrim tap lands in the wrong place — a drawn control must answer at the
+/// geometry it was drawn with.
 struct Geometry {
     /// The panel at rest: centred in the box, sized from its own content.
     rest: Rect,
@@ -1706,9 +1705,9 @@ mod tests {
 
     /// The box the dialogs below are laid out in.
     ///
-    /// **Not at the origin**, deliberately, for the reason `.ai/NEVERAGAIN.md` §
-    /// *A rect's origin and a rect's extent are different numbers* gives: a
-    /// fixture at `(0, 0)` cannot see a coordinate being read as a size.
+    /// **Not at the origin**, deliberately: a rect's origin and a rect's extent are
+    /// different numbers, and a fixture at `(0, 0)` cannot see a coordinate being
+    /// read as a size.
     const SCREEN: Rect = Rect {
         x: 40.0,
         y: 30.0,
@@ -3038,11 +3037,10 @@ mod tests {
     /// alphas is 255: without it this would pass on a dialog that faded everything
     /// to nothing at all times.
     ///
-    /// `.ai/NEVERAGAIN.md` § *a strength clamped to 0..=1, used directly as an
-    /// effect's size* is why this asserts alpha and not the presence of a command:
-    /// the buttons' commands were recorded correctly on every frame of the broken
-    /// build, and every other test in this module passed while they sat at 255 over
-    /// an invisible panel.
+    /// A strength clamped to 0..=1, used directly as an effect's size, is why this
+    /// asserts alpha and not the presence of a command: the buttons' commands were
+    /// recorded correctly on every frame of the broken build, and every other test
+    /// in this module passed while they sat at 255 over an invisible panel.
     #[test]
     fn every_colour_the_dialog_draws_fades_together() {
         let mut nodes = Arena::new();

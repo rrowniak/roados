@@ -156,7 +156,7 @@ each one written down and unresolved, which is the honest state of them.
    criterion is explicitly not waived**. **Forwarding `"$@"` is owed** and is an
    `.ai/` change no task may make.
 2. **Six weakened assertions from 24.1's migration**, of which **two are recorded
-   losses** in-file and four satisfy `NEVERAGAIN`'s own positive-half rule.
+   losses** in-file and four satisfy the positive-half rule.
    **Offered for acceptance, not waived.**
 3. **150 ms or 300 ms for the selection change.** 150 ms is what every widget in
    the crate uses. **The consequence nobody has seen on screen** — `T` cannot be
@@ -227,7 +227,7 @@ surface and the disc and had said *ahead*, paired in the same finding with a
 `&mut self` tick described as the only one in the repository when
 `AnimationClock::tick` is another; **a doc claiming a benefit the code did not
 deliver**, toast nodes never returned to the arena, now they are; **a documented
-invariant nothing held down**; and **a `NEVERAGAIN.md` entry that stated as
+invariant nothing held down**; and **an entry that stated as
 shipped a defect which never shipped**. The eighth was `Painter::shadow`'s own
 doc.
 
@@ -242,9 +242,9 @@ that both mutations attached to the gallery root.
 **A third round raised three, and the widget is settled: three passes, fifteen
 findings, no blocker and no major in any of them.** Two were here — that false
 sentence about the two call sites, and four status sentences that described the
-rounds wrongly — and the third was **a missing `.ai/NEVERAGAIN.md` entry** for the
+rounds wrongly — and the third was **a missing entry** for the
 mechanism that destroyed this task's own evidence, a loop writing every run to one
-truncated log path, which is now recorded there. **Fifteen findings: 8 in round
+truncated log path. **Fifteen findings: 8 in round
 one (7 fixed, 1 recorded as a dated follow-up), 4 in round two, 3 in round three,
 every one of them closed, and not one of them a behaviour change.** See *Task 23 —
 what it decided*.
@@ -264,8 +264,8 @@ only), 32.2 the mechanism (`ui_core`), 32.3 this record — and verified. Not
 reviewed.** Review is `.ai/workflows/task-sequence.md` step 2, in a session
 separate from the implementer's. **7 code files**: `ui_core/src/{paint,batch,
 render}.rs`, `ui_core/src/widgets/{label,list,scroll}.rs`,
-`ui_demo/src/main.rs`, and four documents (this file, `TASK_UI_PRIM_32.md`,
-`.ai/NEVERAGAIN.md`, `PRIMITIVES_ARCHITECTURE.md` § *Scissor optimization*).
+`ui_demo/src/main.rs`, and three documents (this file, `TASK_UI_PRIM_32.md`,
+`PRIMITIVES_ARCHITECTURE.md` § *Scissor optimization*).
 **The suite went 1894 → 1933** — 1450 + 224 + 220 → 1482 + 226 + 225 — **+39
 tests: +2 demo (32.1), +32 lib and +5 doctests (32.2), none removed and none
 weakened**, four existing tests extended and two renamed. **The 32.2 hand-over
@@ -347,7 +347,7 @@ test literal** (`fade: None, clip: None`) — an eleventh constructing site the
 orchestrator's brief had missed. Nothing was lost — the compiler found it and
 the fix was two fields on one literal — but the enumeration was an assertion
 made from an earlier session's reading rather than a command, and it is now
-recorded in `NEVERAGAIN.md`.
+recorded.
 
 ### The task's number: Clip vs Fade, AE 0 → 410, read out of pixels
 
@@ -423,8 +423,7 @@ wrapped the search anchor across two lines since the row was written, so the
 guard printed `ANCHOR NOT FOUND — not a result` **and the runner printed
 `SURVIVED` anyway**, because the missing log defaulted to zero below the guard —
 two contradictory verdicts on one row, and the one that survived on the page was
-the false one. Both were fixed and the sweep re-run from scratch. Extended into
-`NEVERAGAIN.md`.
+the false one. Both were fixed and the sweep re-run from scratch.
 
 ### The frame rate
 
@@ -1068,8 +1067,7 @@ rotation is clockwise unflipped, counter-clockwise under the four shaders'
 `-clip.y` — neither is crate behaviour today (no 2D transform is drawn) and
 the flip is not baked in. Honest limit stated in the handoff: no widget's
 paint path calls `to_matrix`; a green test of the conversion proves the
-conversion and nothing else (`.ai/NEVERAGAIN.md` § *A test of a helper
-cannot see a call site that stopped using it*).
+conversion and nothing else.
 
 ### The projections, and the defaults task 40 must not move
 
@@ -1279,19 +1277,19 @@ advisories, 47 crates, exit 0); that is this host's result.
 
 **Implemented 2026-10-05, reviewed twice in sessions separate from the author's —
 verdict *approve with required changes* both rounds, 2 majors + 3 minors and then
-1 major + 4 minors, all nine fixed — and measured.** **4 code files and 4
+1 major + 4 minors, all nine fixed — and measured.** **4 code files and 3
 documents of its own**: `ui_core/src/{font,render}.rs`,
 `ui_core/src/render/target.rs`, `ui_demo/src/main.rs`, and `TASK_UI_PRIM_31.md`,
-`PRIMITIVES_ARCHITECTURE.md` § *Texture atlas eviction*, `.ai/NEVERAGAIN.md` and
+`PRIMITIVES_ARCHITECTURE.md` § *Texture atlas eviction* and
 this file. **The suite went 1876 → 1894** — 1433 → 1450 lib, 223 → 224 demo, 220
 doctests unmoved — **+18 tests, none removed**, checked by name against a `HEAD`
 worktree rather than by subtracting two totals. **Both figures are the file's own
 convention, passed tests**, with the one ignored test at both ends: round 2 found
 this sentence mixing the two, lib counted with the ignored test and the totals
-without it. **A fifth document rides along and is not this task's** —
+without it. **A fourth document rides along and is not this task's** —
 `doc/ui/TASK_UI_PRIM_30.md` is task 30's post-review amendment, still uncommitted
-because `75a896c` predates it, so the operator's commit carries five documents and
-only four of them belong to task 31. The one migrated test, task 30's
+because `75a896c` predates it, so the operator's commit carries four documents and
+only three of them belong to task 31. The one migrated test, task 30's
 `the_same_letter_in_two_faces_is_two_atlas_entries`, keeps every assertion it had
 and now reads its placements back through `cached` rather than out of the map,
 which is the one step this task changed.
@@ -1354,7 +1352,7 @@ power of two of the current size returns the current size, the `next <= size` gu
 refuses, and `allocate` falls through to eviction — **the behaviour the task exists
 to remove, reached through the code written to prevent it.** Six tests failed on the
 first execution, all of them saying the atlas had not grown. The fix asks for the
-power of two above `size + 1`. Recorded in `NEVERAGAIN.md`.
+power of two above `size + 1`.
 
 **And nothing about a capture would ever have shown it**: 2048² holds about 9 500
 glyphs and the demo has 200, so *no run of the product grows the atlas at all* —
@@ -1495,8 +1493,8 @@ rows then came out **pixel-identical to the same page drawn from a 2048 atlas**:
 `magick compare -metric AE -crop 1280x380+0+230` reads **0**, and the 2 199 pixels
 differing in the whole window are the frame-rate readout and the padding. **That is
 requirement 2's guarantee measured through GL, on a texture reallocated under it,
-and a pair of captures rather than one** — the comparison the `NEVERAGAIN.md` entry
-from task 30 asks for, because one capture of a thing that did not change looks
+and a pair of captures rather than one** — the comparison task 30's rule
+asks for, because one capture of a thing that did not change looks
 exactly like one capture of a thing that did not.
 
 **And it is not evidence for the second pass, which the first version of this
@@ -1556,10 +1554,10 @@ cross build still passes: `cargo build --release --target aarch64-unknown-linux-
 (4 majors and 5 minors, all fixed; see *The review round* below). **The commit
 itself carried the words *uncommitted* in this section and *UNCOMMITTED* in the
 task table**, because both were written before the commit that closed them; both
-are corrected here and the correction is dated, not quietly rewritten. **11
+are corrected here and the correction is dated, not quietly rewritten. **10
 files, 8 of them code**: `ui_core/src/{font,paint,render,batch}.rs`,
-`ui_core/src/widgets/{label,list,scroll}.rs`, `ui_demo/src/main.rs`, and three
-documents (this file, `TASK_UI_PRIM_30.md`, `.ai/NEVERAGAIN.md`). **The count was
+`ui_core/src/widgets/{label,list,scroll}.rs`, `ui_demo/src/main.rs`, and two
+documents (this file, `TASK_UI_PRIM_30.md`). **The count was
 first written as 8 files and 5 code**, and the review is what corrected it: the
 three under-reported ones are `batch.rs`, `list.rs` and `scroll.rs`, and they are
 **not incidental** — they are the three further consumers of `DrawCommand::Text`
@@ -1591,7 +1589,7 @@ an enum* below.
 **The rename, and why it is not cosmetic.** `FaceId` is now `FontId` and `FaceRef`
 is `FontRef`. A `FontSet` that hands out *chain* handles needs an identity for a
 file, and inventing a second newtype beside the existing one would have been two
-names for one value in one file — which is `.ai/NEVERAGAIN.md`'s *two documents
+names for one value in one file — which is *two documents
 each claiming ownership of one definition* in code. It is a public API change to
 `ui_core` and it is deliberate; the crate is 0.1.0, unpublished, and used by one
 binary.
@@ -1669,7 +1667,7 @@ that same function's answer, so the layout's hole and the drawn box cannot
 disagree. **A design choice is not a derived number, so nothing can prove
 `0.6`** — the two halves would agree at `0.06` just as readily — and
 `the_replacement_box_is_the_size_its_two_constants_fix` is the test that pins the
-number, because `.ai/NEVERAGAIN.md`'s *a strength clamped to 0..=1* entry says to
+number, because the rule *a strength clamped to 0..=1* says to
 assert the number the word in the spec fixes.
 
 ### The key became an enum, because the replacement is not a character
@@ -1769,7 +1767,7 @@ two sweeps fixed): **1 killed, 3 survived, 1 was not a result.**
   reviewer's own major-1 mutation, which the restored tests do not kill.**
 - **Not a result:** a row that only added `let _ = &primary;`, which changes the
   binary and not the behaviour. Reported as a survivor by a runner that had not yet
-  learned the difference, which is the entry `.ai/NEVERAGAIN.md` gained today.
+  learned the difference, which is the failure mode recorded today.
 
 **7 survived, and one row was not a result:**
 
@@ -2009,7 +2007,7 @@ empty state every frame) **and still a node in `order` that no gate sees.**
 Adding a row for it kills the assertion, which is how the fifth was pinned from
 both directions.
 
-**And the lesson, now in `NEVERAGAIN.md`:** *a sweep of a mechanism's call sites
+**And the lesson:** *a sweep of a mechanism's call sites
 is not a sweep of the data it is built from.* The implementer's 34-mutation
 sweep tested every gate's call site and **never the table's construction** —
 the same class of gap one level up, and the sweep was the very thing that
@@ -2114,7 +2112,7 @@ requirements, and this one shipped a rationale that measurement refuted.
   differed from their predecessor only inside the fps readout's own band — 405
   pixels, and **AE 0 over y 80–680** — which is what a no-change looks like for
   the rest of the window.
-- **Six entries were added to `.ai/NEVERAGAIN.md`,** three of them about the
+- **Six lessons were recorded,** three of them about the
   mutation harness rather than the product.
 
 ### The two decisions that are the operator's
@@ -2129,7 +2127,7 @@ requirements, and this one shipped a rationale that measurement refuted.
    half outright, and **structurally**: a toast is on `overlays`, the keyboard on
    `input`, and `hit_test` honours `set_visible`, so no demo can have a card over
    a routed control. **Four more tests** moved the same way and are not recorded
-   as losses — each gained the positive half `NEVERAGAIN`'s own rule demands,
+   as losses — each gained the positive half the rule demands,
    and two of them also assert the press *reached* the dialog. **The count is
    checkable from the code and it is six, not two.**
 2. **A repeated `--tab=` silently discards an unknown name.** `--tab=nope` exits
@@ -2155,7 +2153,7 @@ requirements, and this one shipped a rationale that measurement refuted.
 - **Nothing about the four prose corrections the last round returned.** They are
   unfixed and none is a gate: two are bookkeeping about how many places the
   always-painted set is written out, one is three unreconcilable counts in a
-  `NEVERAGAIN` entry, and one is *"the toast host"* where the code means *its
+  written entry, and one is *"the toast host"* where the code means *its
   cards*.
 - **Nothing about key or pointer injection.** None was attempted; every shortcut
   and modality claim is covered through `Demo::handle_event` in tests, which is
@@ -2255,7 +2253,7 @@ file's reasoning implies**:
   `SHADOW_ALPHA` over its own caster's whole footprint would darken the toast by
   the shadow's coverage — at 0.5 over a 30-grey surface, a card at 15. **That is
   the defect the arrangement below exists to avoid, and no draw-command assertion
-  could see it**, which is `.ai/NEVERAGAIN.md` § *A draw-command assertion cannot
+  could see it**, which is *a draw-command assertion cannot
   see where a command lands* reached from the batching layer a second time.
 
 **The arrangement that works, and it is one shadow:** every colour the toast
@@ -2339,7 +2337,7 @@ Measured, all against the code's arithmetic:
 
 **Pasted here rather than referred to**, because the first version of this
 section promised a quote in a subsection that did not have one — a promise a
-reader cannot follow is the defect `.ai/NEVERAGAIN.md` § *A capture whose only
+reader cannot follow is the defect *a capture whose only
 route was instrumented* is about. It was **six lines in `Demo::new`**, it was
 **reverted**, and `md5sum` of `main.rs` was identical before and after
 (`a6edaa5ed5b4e4065d59685013038263`) with `grep -c SEED` **0**. It was run as
@@ -2596,8 +2594,7 @@ had "submitted ahead" where the group is reversed and says "behind" (it had
 contradicted the point above it) and, in the same finding, a `&mut self` tick
 described as the only one in the repository when `AnimationClock::tick` is
 another; **finding 2**, the seed quote this section promised and never wrote
-down; **finding 4**, the fps figures; **finding 6, which is in
-`.ai/NEVERAGAIN.md` rather than in this file** — its first task-23 entry stated as
+down; **finding 4**, the fps figures; **finding 6, which was not in this file** — its first task-23 entry stated as
 shipped a defect that never shipped, because the three operator decisions were
 taken before any code, and it now says so; and **finding 8**, the `render.rs`
 citations, which had gone stale as that file grew. **Five prose findings, the two
@@ -2622,7 +2619,7 @@ printed fps range was printed as a run, which is withdrawn above with its reason
 three findings was about *this* section's accuracy: the sentence above it
 attributed a node's parent to a *modal panel* when both mutations attached it to
 the gallery root, and it was re-derived from `ui/src/ui_demo/src/main.rs` rather
-than from the reviewer's text. The other two were a missing `.ai/NEVERAGAIN.md`
+than from the reviewer's text. The other two were a missing written
 entry for a runner that truncates its own logs, and four status sentences in this
 file — here, in *Current position*, in the task table and in *History* — that
 described these rounds wrongly. **Three passes, fifteen findings, and the test
@@ -2718,7 +2715,7 @@ cannot express that order at all. It drains the recorded batches into an
 That is requirement 5's *"Overlay rendered first … Panel rendered on top"*
 inverted, and it is not a defect a draw-command assertion can see: both commands
 are recorded, both in the right order, both with the right colour. It is the
-`.ai/NEVERAGAIN.md` entry § *A draw-command assertion cannot see where a command
+failure *a draw-command assertion cannot see where a command
 lands*, reached from the batching layer rather than from a widget.
 
 **Nothing in the tree hits it today, and that is why it survived.** The only
@@ -2816,7 +2813,7 @@ Found by the on-screen capture, and **none of the three is a unit-test failure**
 
 **`gl.get_error()` read `0x0` at all 1240 probe points and the frame rate never
 moved from 62 fps** throughout. That is the sharpest statement of
-`.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad* this repository
+*a buffer sized for one vertex per quad* this repository
 has: a GL error flag is not a witness, a flat frame rate is not a witness, and
 only the pixels are.
 
@@ -2894,7 +2891,7 @@ three `Rc`s per action and the fact that rewriting `button.on_click` after
 
 **Hit testing and drawing read one `Geometry`**, recomputed per frame including
 the live scale, so a tap lands where the button is painted on every frame of the
-animation rather than only at rest. That is `.ai/NEVERAGAIN.md` § *A drawn
+animation rather than only at rest. That is *a drawn
 control with nothing behind it* applied in advance: the buttons are real
 `Button` widgets with their own nodes, not shapes the dialog's `paint` draws.
 
@@ -3003,8 +3000,8 @@ between the two faces. FreeType rounds each advance to a whole pixel at the size
 the face is set to, and Lato Medium and Lato Bold differ by less than that. On
 screen both runs trim to offset +12 and the bold ends **1 px** later (184 against
 183). The docs now say a caller **must measure** and must assume neither the same
-`x` nor a different one. `.ai/NEVERAGAIN.md` § *A brief's rationale becomes the
-widget's doc comment, and nobody re-checks it* is the entry, and this is the
+`x` nor a different one. *A brief's rationale becomes the
+widget's doc comment, and nobody re-checks it* is the lesson, and this is the
 second time this sequence has produced it — a claim written first and corrected
 by a measurement.
 
@@ -3128,8 +3125,8 @@ the cap allows and widening σ further would buy nothing.
 
 **That is the third time this sequence a subagent wrote a number into a doc
 comment and a measurement contradicted it** — task 21's `X_LABEL_GUTTER` and
-task 20's "tangent circles have no notch" were the first two. `.ai/NEVERAGAIN.md`
-§ *A brief's rationale becomes the widget's doc comment, and nobody re-checks it*
+task 20's "tangent circles have no notch" were the first two. The lesson
+*a brief's rationale becomes the widget's doc comment, and nobody re-checks it*
 now has three instances in this repository.
 
 #### The bold title, measured against a control rather than inferred
@@ -3218,7 +3215,7 @@ single frame. **That is the blink, in both directions, and it is one number.**
 **And 38 unit tests could not see it**, because every one of them asserts *which
 commands are recorded* — and the buttons' commands are recorded correctly on
 every frame. The defect is **the alpha on a command that is present**, which is
-`.ai/NEVERAGAIN.md` § *A strength clamped to 0..=1, used directly as an effect's
+*a strength clamped to 0..=1, used directly as an effect's
 size* exactly: *"a shape assertion will not"* catch it.
 
 **Fixed by making the fade reach the buttons.** `Button::paint` gained
@@ -3424,7 +3421,7 @@ from it.
 
 **It declared a survivor it had manufactured**: the `is_drawn` mutation was run
 with `--lib`, which excluded the one binary that kills it. That is now a
-`NEVERAGAIN.md` entry of its own. **It states so itself, before anyone else
+written entry of its own. **It states so itself, before anyone else
 could**, and that is the behaviour the whole file is for.
 
 ### Three things the reviewer settled that the author side had left open
@@ -3607,7 +3604,7 @@ command next to it.
 
 ### Two claims this task's own docs got wrong, and what fixed them
 
-**Both were found by measuring, which is the point of the `NEVERAGAIN` entry
+**Both were found by measuring, which is the point of the lesson
 this task is a second instance of.**
 
 1. **"A translucent fill does not seam" was measured in a harness whose
@@ -3634,8 +3631,8 @@ this task is a second instance of.**
 
 **A duplicated constant went with the second one.** The demo had carried
 `CHART_STROKE_REACH = 6.0`, a private copy of the widget's number that would rot
-the moment `MITRE_LIMIT` or `line_width` moved — the shape of the `NEVERAGAIN`
-entry *one sibling got the operator's fix; the other with the same constant did
+the moment `MITRE_LIMIT` or `line_width` moved — the shape of the lesson
+*one sibling got the operator's fix; the other with the same constant did
 not*. The widget now exposes **`Chart::stroke_reach()`** and the demo calls it
 in three places.
 
@@ -3812,7 +3809,7 @@ round, and the reasons are recorded so a later session can revive them:
    `drawn` columns are asserted for 240 and 300 and derived for the other
    seven. Every cell is correct — round two measured all thirty-six — so this is
    an over-statement, not a wrong number, and it is the same shape as the round's
-   own new `NEVERAGAIN` entry. **Revive by** hoisting the table into the test's
+   own new lesson. **Revive by** hoisting the table into the test's
    loop and asserting `join` and `drawn` per height.
 4. **The open defect is not in *What is NOT claimed*.** `chart.rs` calls the
    `Join::Corner((0, 0))` at a small positive `1 + p·q` *"a defect, not a
@@ -4241,7 +4238,7 @@ a 6-pixel slider track, then a 6-pixel scrollbar. Task 19's review asked for a
 door so that a rejection could be answered without a code change, and
 `TextInput::width` / `TextInput::height` are that door. **`the_size_is_settable_and
 _size_reads_what_was_written` fails if `size()` goes back to reading two
-constants**, which is the `.ai/NEVERAGAIN.md` entry *one sibling got the operator's
+constants**, which is the lesson *one sibling got the operator's
 fix* made concrete.
 
 The key height is the opposite case and the distinction is worth keeping: 44 is
@@ -4288,7 +4285,7 @@ _the_floor_and_never_below_it` says so.
 **One further attempt was vacuous and is not counted as a result**: a
 replacement that applied cleanly and changed no behaviour at all, which the runner
 faithfully reported as a survivor. That is the third mechanism in the
-`.ai/NEVERAGAIN.md` entry on mutation runners, caught for the second time in one
+lesson on mutation runners, caught for the second time in one
 session; the real mutation it stood in for was written and killed.
 
 ### What is NOT claimed
@@ -4407,7 +4404,7 @@ across three runs, a spread of **0.3 fps** where the unpaced loop spread 4.4. **
 release floor around 55 is now defensible** and a floor at 40 would miss a
 regression from 62 to 45, which is a third of the budget gone. The **debug** row
 above stays where it is, and a floor is a **release** floor: debug sits below any
-sensible one by construction, which is exactly the trap recorded in `NEVERAGAIN.md`.
+sensible one by construction, which is exactly a recorded trap.
 
 **Task 19 added two widgets and one text-event variant, and the rate did not
 move: 50.0 fps** (`fps-check.sh 12 40`, 601 frames in 12.014 s, worst frame
@@ -4454,7 +4451,7 @@ and the loop now waits only what is **left** of the budget after the previous
 frame's work — so the work lands *inside* the frame rather than after it.
 
 The arithmetic is extracted as **`frame_wait(spent)`** and the loop calls it,
-rather than inlining the subtraction, for the reason `.ai/NEVERAGAIN.md` § *a
+rather than inlining the subtraction, for the reason *a
 test of a helper cannot see a call site that stopped using it* gives: a helper
 tested from one place and inlined in another has two places to be wrong and only
 one under test.
@@ -4483,7 +4480,7 @@ of the report and `cargo run` defaults to debug, so *"sometimes the fps drops to
 149 after** — task 20 is free, and the gauge draws *fewer* primitives than the
 circle chain it replaced. **Frame rates are claims about a build**; this table
 already had a debug row (34.2 fps) and it is the row nobody connects to the
-number in front of them. Recorded in `NEVERAGAIN.md`.
+number in front of them.
 
 **Pacing cannot rescue a frame that costs more than the budget.** Debug work is
 18.7 ms against a 16.67 ms budget, so it runs at ~33 fps whatever the loop does.
@@ -4531,7 +4528,7 @@ reads as "the readout is not updating" — and the readout *was* updating. Six
 captures half a second apart read `fps 50, avg 52.8`, `51, 52.5`, `50, 52.1`,
 `51, 52.0`, `51, 52.0`, `50, 51.6`: two consecutive samples are the same string
 when the average lands on the same tenth twice. **A live readout needs several
-samples compared as a set, not a pair.** Recorded in `NEVERAGAIN`.
+samples compared as a set, not a pair.**
 
 **The window's position is not the root's, and the id has to be re-read.** The
 window id here was `0x120002f`; the standing capture method in *Verifying a
@@ -4665,7 +4662,7 @@ not deleted.
 
 ### The frame cost, measured
 
-The `NEVERAGAIN` entry about a still of a 4 fps app looking exactly like a 60 fps
+The lesson about a still of a 4 fps app looking exactly like a 60 fps
 one applies to four new widgets and a new render pass, so the rate was measured
 rather than inferred — `/proc/<pid>/stat` `utime + stime` over 10 seconds, both
 builds on the same host:
@@ -4694,7 +4691,7 @@ stand-in path was not taken.
   corners show the window's background through a curve. That was checked by
   cropping and scaling 300 %, because a full-window still cannot show a corner
   clip, and because a filled corner instead of a discarded one is the exact
-  failure `NEVERAGAIN` records for `Slider`.
+  failure recorded for `Slider`.
 - **Toggle** (664, 584): grey pill, white thumb hard left, its shadow ring,
   labelled `off, 0 changes`.
 - **Progress** (664, 668): filled to exactly half of the track, both ends
@@ -4720,8 +4717,7 @@ attached to the new function and **unregistered the old one** — so
 `the_four_new_widgets_follow_the_theme_switch` silently stopped running, and the
 suite stayed green at every step. It was caught because the count went 97 → 96
 and 96 was also the count *before* the new test: two errors cancelling. Clippy's
-`dead_code` found it too, after the edit had already been verified once. Recorded
-in `.ai/NEVERAGAIN.md`.
+`dead_code` found it too, after the edit had already been verified once.
 
 **One test expectation was wrong on its first run, and the code was right.** A
 new test asserted that the list's scrollbar has *left* the dark theme's colour
@@ -5065,7 +5061,6 @@ apply**: an earlier runner reported two such runs as survivors, because
 A mutation that did not apply is no result at all, and reporting it as a survivor
 is worse than useless. All three mutations are now caught — the revert, clip
 everything, and the inversion — with the restore verified byte-identical.
-Recorded in `.ai/NEVERAGAIN.md`.
 
 ### The integration gap the demo subagent found, and the fix
 
@@ -5194,7 +5189,7 @@ in the code. None of them belong to the operator.
    ring around the **track** and letting the track cover it, which is the same
    trick the button uses; the test now asserts both the grown rect and the fact
    that the track is recorded after it, and a mutation that puts the ring back
-   around the node fails it. Recorded in `.ai/NEVERAGAIN.md`.
+   around the node fails it.
 2. **Every slider drawn away from the origin was broken.** `Slider::travel`
    computed the thumb's run as `extent - origin - radius * 2`, where `extent` was
    already a length. All 53 unit tests laid their slider out at `(0, 0)`, where
@@ -5204,7 +5199,7 @@ in the code. None of them belong to the operator.
    slider is at `(664, 496)`, within an hour of the widget landing. Fixed, and
    `a_slider_away_from_the_origin_maps_positions_to_the_same_values` was added
    with a fixture that is not at the origin — the fixture the suite was missing is
-   recorded in `.ai/NEVERAGAIN.md`.
+   recorded.
 
 ## Task 13 — what it decided, and what it found
 
@@ -5301,7 +5296,7 @@ tried, measured, and reverted rather than kept as speculative complexity.
 
 **Read this table as "about 1 %", not as "+10 %".** A single unreplicated sample
 on a shared host is not a measurement, and quoting one as a headline is the
-2026-09-30 `NEVERAGAIN` entry about derived numbers arriving unverified.
+2026-09-30 lesson about derived numbers arriving unverified.
 
 ## Task 12 — what it decided, and what it found
 
@@ -5355,8 +5350,8 @@ The two that belong to the operator are flagged.
    and clears any running transition first. Three tests, one of which mutates
    the `clear` away.
 2. **The pressed overlay was opaque black, and the label vanished on it.** Found
-   by screenshotting, not by any test — see the 2026-09-30 entry in
-   `.ai/NEVERAGAIN.md`. The press amount was clamped to `0.0..=1.0` and used
+   by screenshotting, not by any test — see the 2026-09-30 lesson. The press
+   amount was clamped to `0.0..=1.0` and used
    directly as the overlay's alpha, so a full press meant alpha 255. Now capped
    at `PRESS_SHADOW_ALPHA = 0.28`, which is what "a slight inner shadow" means.
    Measured on screen: the button's mean luminance goes 0.515 hovered → 0.316
@@ -5742,7 +5737,7 @@ sysroot mandatory.
   the shadow **iff it is opaque**, that a translucent caster has to be recorded
   before its own shadow or drawn in a later segment, and that the shadow's
   composite position is *after* everything its segment recorded
-  (`render.rs:2011`). `.ai/NEVERAGAIN.md` § *A shadow lands on whatever was
+  (`render.rs:2011`). *A shadow lands on whatever was
   recorded before it* carries the rule meanwhile.
 - **Task 23's `Toast::show(message, duration) -> Handle` is `Toasts::show`, and the
   module is two types.** The task file names one widget and a constructor that
@@ -6006,15 +6001,15 @@ verified. A blank cell is unknown, not "none".
 | 20 | Widget — Gauge | done | `79941cd` | **none — committed without review** | **Requirement 5's anti-aliasing half was NOT met at the time and was not waived** — the renderer had no SDF for curves and no MSAA; the widget's module doc said so and the hard edges were seen in a capture. **That is no longer true**: 4x MSAA landed with task 21 and the gauge's doc has been superseded in place. **AC 3's "needle as a triangle"** required a new filled `Polygon` draw command, which the operator approved. The needle's spring is asserted by tests, not seen mid-flight. ACs 1, 2, 4 and 5 are capture-verified and unit-tested — see *Task 20 — what it decided* |
 | 21 | Widget — Chart | done | `64d2b97` | **2 passes**, both in a session separate from the author's. Round 1: *approve with required changes*, 1 blocker + 6 minors, all 7 fixed. Round 2: *approve with required changes*, blocker **closed and verified by mutation**, **5 minors waived 2026-10-02 with recorded reasons** — not "fixed"; see *The two review rounds* | **AC 5 is covered by tests through the demo's real event path, not by a capture** — keyboard injection does not reach the window on this host (the positive control `T` moved 212 px) and pointer injection never did. ACs 1, 2, 3, 4 and 6 are capture-verified **and measured**, the bar and area ones through two reverted temporary releases. `y_labels` are empty by design, so AC 4's labels are proved by the x labels and the two axes. **No acceptance criterion is waived**; the 5 waived findings are review findings, not criteria — two stale citations, one coverage claim, one omission and one run count, none of which can change a pixel. See *Task 21 — what it decided* |
 | 22 | Widget — Dialog | done | `22356f6` | **1 pass**, in a session separate from all four subagents and from the integration. *Approve with required changes*: **3 majors + 3 minors, all six fixed**, plus 5 disagreements of which 2 corrected this file. The reviewer **reproduced the author side's pixel measurements independently** (panel, both button rects, three colours at exactly half, 693 vs 541 ink, 711/0 differing, 11 px ramp, 61.8 fps) and **independently reproduced the surviving mutation**. See *The one review round* | **Four ACs are capture-verified and measured** (1, 2, 6, 7) — AC 7 by a capture that **needed no seed and no instrument**, the only one in this task. **ACs 3, 4 and 5 are covered by tests through the demo's own event path, not by a capture**: the action buttons, the dismissal, Escape and modality all need a key or a pointer, and injection does not reach the window on this host. **Requirement 5's "content behind dialog is not re-rendered" is DEVIATED, not met** — the operator decided it should be read as the paint cache, and the sentence this file first offered as evidence was **false** and is corrected above. **Requirements 2 and 5 needed pipeline work first** — a second FreeType face and an FBO blur — both operator decisions. **No acceptance criterion is waived; one is deviated with the reason recorded** |
-| 23 | Widget — Toast | done | `1fed4b6` | **3 passes**, all in sessions separate from the author's, **15 findings in total and no blocker or major in any of them**. **Round 1: *Approve with required changes* — 8 findings, 7 fixed and 1 recorded as a dated follow-up in `paint.rs`'s scope rather than fixed.** The reviewer **re-derived the paint-order override from `batch.rs` and `render.rs`**, confirmed the submission test has teeth independently by mutating only the disc's alpha, and verified two of the author's own mutations rather than reading them. **Round 2: *Approve with required changes* — 4 findings: three of them this record's own arithmetic failing to reconcile with the logs behind it, and one a false claim in `toast.rs` about `List`'s three reclaims.** **Round 3: *Approve with required changes* — 3 findings: two here (a false account of two mutation runs' call sites, and four status sentences that misdescribed the rounds) and one a missing `.ai/NEVERAGAIN.md` entry, now written.** **Every round was closed with prose: no behaviour change, no new test, no signature change, and the count unmoved at 1796 throughout.** See *Task 23 — what it decided* | **AC 3's fade and slide are unit-tested and sampled on screen through a reverted temporary seed**, because `magick import` is slower than the 150 ms transition it photographs; **AC 4 (does not block input) is proved structurally plus by a real press through `Demo::handle_event`**, not by a capture; **AC 6 (the demo shows a toast) is capture-verified and needed no seed and no instrument** — the two toasts are raised in `Demo::new`, as the dialog is presented there. **No acceptance criterion is waived.** One requirement is **met by arrangement the task file does not describe**: requirement 2's translucent surface with opaque content on it is not expressible in this pipeline as the task file's order would have it — see *Task 23 — what it decided* |
+| 23 | Widget — Toast | done | `1fed4b6` | **3 passes**, all in sessions separate from the author's, **15 findings in total and no blocker or major in any of them**. **Round 1: *Approve with required changes* — 8 findings, 7 fixed and 1 recorded as a dated follow-up in `paint.rs`'s scope rather than fixed.** The reviewer **re-derived the paint-order override from `batch.rs` and `render.rs`**, confirmed the submission test has teeth independently by mutating only the disc's alpha, and verified two of the author's own mutations rather than reading them. **Round 2: *Approve with required changes* — 4 findings: three of them this record's own arithmetic failing to reconcile with the logs behind it, and one a false claim in `toast.rs` about `List`'s three reclaims.** **Round 3: *Approve with required changes* — 3 findings: two here (a false account of two mutation runs' call sites, and four status sentences that misdescribed the rounds) and one a missing written entry, now written.** **Every round was closed with prose: no behaviour change, no new test, no signature change, and the count unmoved at 1796 throughout.** See *Task 23 — what it decided* | **AC 3's fade and slide are unit-tested and sampled on screen through a reverted temporary seed**, because `magick import` is slower than the 150 ms transition it photographs; **AC 4 (does not block input) is proved structurally plus by a real press through `Demo::handle_event`**, not by a capture; **AC 6 (the demo shows a toast) is capture-verified and needed no seed and no instrument** — the two toasts are raised in `Demo::new`, as the dialog is presented there. **No acceptance criterion is waived.** One requirement is **met by arrangement the task file does not describe**: requirement 2's translucent surface with opaque content on it is not expressible in this pipeline as the task file's order would have it — see *Task 23 — what it decided* |
 | 24 | Demo Application | **done** — amended 2026-10-03, 2026-10-04 and 2026-10-05, split into 24.1–24.3, **all three committed together** | `e567634` | **12 rounds**, 42 findings | **Six decisions for the operator, none a defect** — see *Current position* |
-| 24.1 | `Page`, `--tab=`, and the three gates | done | `e567634` | **5 passes**, each in a session separate from the author's and from each other. **21 findings: 4 majors + 7 minors, 1 + 5, 1 + 6, 0 majors + 3 minors, then approve.** **All four majors were one finding — a gate with no test — and every one was found by mutation, none by reading**: `raise_toast`'s table row (0 failed / 1811), `show_page`'s `sync_page_visibility` (0 failed / 1813), and **`Demo::new`'s page table having no completeness assertion at all** (one dropped row → 0 failed / 1814 and the text column on the wrong page). **Five rounds because each round's sweep found the next one; the lesson is now `NEVERAGAIN`'s**: *a sweep of a mechanism's call sites is not a sweep of the data it is built from.* Round 5 returned **approve, no blocker and no major**. See *Task 24.1 — what it decided* | **11 of 12 criteria met.** **AC 12 (*"green with no assertion weakened"*) is NOT met and is offered for the operator's acceptance rather than waived: six tests moved, two recorded as losses in-file and four satisfying `NEVERAGAIN`'s positive-half rule.** **The task file's central trap had a premise that did not hold** — there is no per-node command cache, so `PaintState::new()` cannot leave a stale page on screen and **no capture distinguishes the two forms**; `TASK_UI_PRIM_24.1.md` is amended in place with the four source facts. **AC 4's *"empty, not stale"* survives as a test about the recorded vector, not about the dirty flag.** *"Every test the migration touched is listed by name"* is met under the rule the file states (19 named of 119 touched, 100 mechanical) — a reviewer's ~151 could not be reproduced by any method tried. **No criterion rests on a waiver.** One edge case is left as-is and recorded: **a repeated `--tab=` silently discards an unknown name** |
+| 24.1 | `Page`, `--tab=`, and the three gates | done | `e567634` | **5 passes**, each in a session separate from the author's and from each other. **21 findings: 4 majors + 7 minors, 1 + 5, 1 + 6, 0 majors + 3 minors, then approve.** **All four majors were one finding — a gate with no test — and every one was found by mutation, none by reading**: `raise_toast`'s table row (0 failed / 1811), `show_page`'s `sync_page_visibility` (0 failed / 1813), and **`Demo::new`'s page table having no completeness assertion at all** (one dropped row → 0 failed / 1814 and the text column on the wrong page). **Five rounds because each round's sweep found the next one; the lesson is now recorded**: *a sweep of a mechanism's call sites is not a sweep of the data it is built from.* Round 5 returned **approve, no blocker and no major**. See *Task 24.1 — what it decided* | **11 of 12 criteria met.** **AC 12 (*"green with no assertion weakened"*) is NOT met and is offered for the operator's acceptance rather than waived: six tests moved, two recorded as losses in-file and four satisfying the positive-half rule.** **The task file's central trap had a premise that did not hold** — there is no per-node command cache, so `PaintState::new()` cannot leave a stale page on screen and **no capture distinguishes the two forms**; `TASK_UI_PRIM_24.1.md` is amended in place with the four source facts. **AC 4's *"empty, not stale"* survives as a test about the recorded vector, not about the dirty flag.** *"Every test the migration touched is listed by name"* is met under the rule the file states (19 named of 119 touched, 100 mechanical) — a reviewer's ~151 could not be reproduced by any method tried. **No criterion rests on a waiver.** One edge case is left as-is and recorded: **a repeated `--tab=` silently discards an unknown name** |
 | 24.2 | `CONTENT_TOP`, and the band goes page-local | done | `e567634` | **4 passes**: 2 majors + 8 minors, 0 + 9, 0 + 1, approve. **The major was 24.1's round-3 finding reproduced on `placed_handles`**, the table this change introduced — 0 failed / 1817 with a row dropped, and the reviewer's compound (a fattened progress bar *plus* the deleted row) green across all 1817. Round 3 also found the round-1 fix had landed in a failure message and **not in the doc that said the same thing the other way.** | **Two assertions retired**, one *withdrawn outright* (the gallery/band bound is false per-page) and one *replaced* (`inside(window, chart)` plus the `Data` neighbour loop), both recorded in the file with the arithmetic. **AC 6 amended**: `fps-check.sh` cannot select a page, so the six pages were measured by `ROADOS_RUN_SECONDS=<n> … --tab=<page>` — **not waived**. The root became `LayoutMode::Absolute` because `set_position` on a `Stack` child is a no-op |
 | 24.3 | The tab bar | done | `e567634` | **3 passes**: 1 major + 7 minors, 0 + 6, **approve**. The major was `release_tab`'s `animate_to_state` held down by nothing on the ordinary gesture — press and release the button of the page **already on show** leaves `show_page` early-returning, measured `left: 0.95, right: 1.0`, a button stuck at the pressed scale with 1836 green. Round 2's six minors were prose, and its reviewer **found the orchestrator's own amendment asserting a false mechanism about `ui_core`** — "at most one `InputEvent` per SDL event", refuted by a four-line probe | **All twelve criteria met.** AC 11 (a pressed button mid-transition) needed a **temporary, reverted seed** — XTEST delivered nothing — and the arithmetic was corrected from a false 96 % to a measured **22 %**. **Requirement 4's call and duration are different numbers**: `Motion::from_theme` is 150 ms, not `THEME_TRANSITION`'s 300, pinned with an `assert_ne!`, and **on `T` the bar and its buttons arrive 150 ms apart, which nobody has seen.** Deliberate break 2 is **not expressible** (`Callback` is `Fn`) |
 | 33 | Set the SDL options no cargo feature can reach | nothing — **done 2026-10-05**, split out of task 28, **reviewed 2026-10-05** | `doc/ui/TASK_UI_PRIM_33.md` | | none waived: 8 of 8 verified — AC 1 and AC 2's native half by cache/header greps, AC 3 and AC 4 by grepping the same header for the settings that must *not* have moved, AC 2's cross half by a cross build, AC 5 and AC 6 by `ls` and `nm`, AC 7 by 1 839 tests plus three `fps-check.sh` runs, AC 8 by this review finding its command broken and it being fixed |
 | 30 | Font fallback chain | **done 2026-10-05** | `75a896c` | **1 pass, in a session separate from the author's.** *Approve with required changes*: **4 majors + 5 minors, all fixed.** **This row said "UNCOMMITTED" and "not reviewed in a separate session" until 2026-10-05, and both halves were false**: the task was committed as `75a896c`, and § *Task 30* has carried the round's count and the verdict since the day — the row and the section it points at contradicted each other. | **No acceptance criterion is waived; three gaps are *offered* with what covers them.** **All seven requirements are implemented.** The three operator decisions (requirement 3's handle-on-the-command, requirement 4's synthesized box over `U+FFFD`, the DejaVu Sans fallback) are recorded above with the measurements that decided them. **Requirement 6 was already met** when task 22 added `FaceId` to `GlyphKey`, a year before this task, and this task's work on that key was to give the replacement glyph its own variant rather than a fabricated character. **The capture found a defect no test could**: `main` never defined the `lato-only` family, the fixture did, every test passed, and `Y` did nothing — the two captures came out byte-identical. Fixed, and the mirror of task 24.1's missing row is recorded as such. **ACs 1–4 are covered by 1428 lib tests** (the chain walk through `pick_in_chain`, the atlas key as an enum, the two families' differing metrics, the property reaching the command). **AC 5 is capture-verified and measured**: 14 × 17 hollow pixels at (250, 586) against the two constants, 7 columns of pen advance, and the same sentence 247 px wide in the default family against 234 px in `lato-only` — 1958 pixels differing. **Seven mutations survive, all structural and named above**: two GL-side, one needing a font file, and three sharing one cause (a fixture whose two families both hold no fonts measure identically), plus the `main`-not-under-test row. **The capture answers the two with a visual consequence.** **63.1 fps** on the recorded floor of 55. See *Task 30 — what it decided* |
 | 31 | Dynamic atlas growth | **done 2026-10-06** — implemented 2026-10-05, changes requested twice, all nine findings fixed | `8778c90` — this cell read *uncommitted* until 2026-10-06, when the commit existed | **2 passes**, both in sessions separate from the author's; **round 2 re-ran round 1's sweep and re-measured the frame rate** rather than reading the record. Round 1: *approve with required changes*, **2 majors + 3 minors**. Round 2: *approve with required changes*, **1 major + 4 minors**. **All nine fixed.** **The two majors were requirement 6's count — it counted refusals, not glyphs, so a glyph re-asked every frame made one hole read as 3 600 — and a gate with no test**: the batch's re-expansion after a grow, whose evidence the author offered was a capture the reviewer then showed is AE = 0 with the loop broken. **Round 2's major was that finding one level up** — the tests covered the extracted function and not the call site — closed with a source-string assertion in the shape `blur.rs` already uses. **Three of round 2's four minors were the record being wrong about work that was right**, including a sweep row that could produce no verdict because it hung the runner. **20 of 20 deliberate breaks killed. +18 tests, none removed.** **62.5 fps** on the floor of 55; the reviewer's own three runs read 62.8 / 63.2 / 63.5. See *Task 31 — what it decided* |
-| 32 | Fade and clip truncation, drawn | **implemented 2026-10-06, verified, record (32.3) written, not yet reviewed** — three sub-tasks: 32.1 the demo rows, 32.2 the mechanism, 32.3 the record | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5); the operator's `87da646` landed mid-task and owns none of these files | **none yet** — review is step 2, in a session separate from the implementer's | **AC1, AC2, AC4, AC6 met. AC5 met arithmetically, blend-state half argued (source-string assertion on `end_frame`, capture cannot measure). AC3 half: gate proved by font-free tests, on-screen half NOT observed — 4 of 101 characters overhang by exactly 1 px, demo cut lands 9 px inside `max_width`, Clip row AE 0 vs before-capture. No temporary seed used. +39 tests, none removed (1894 → 1933: +2 demo, +32 lib, +5 doctests). 18 of 18 deliberate breaks killed across two sweeps — 32.1 sweep first run reported 6 false survivors (wrong log path + `awk` defaulting empty to 0), recorded in `NEVERAGAIN.md`. 62.3 fps on floor of 55; one 35.2 ms frame in 1 of 5 `--tab=text` runs, not chased. See *Task 32 — what it decided* |
+| 32 | Fade and clip truncation, drawn | **implemented 2026-10-06, verified, record (32.3) written, not yet reviewed** — three sub-tasks: 32.1 the demo rows, 32.2 the mechanism, 32.3 the record | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5); the operator's `87da646` landed mid-task and owns none of these files | **none yet** — review is step 2, in a session separate from the implementer's | **AC1, AC2, AC4, AC6 met. AC5 met arithmetically, blend-state half argued (source-string assertion on `end_frame`, capture cannot measure). AC3 half: gate proved by font-free tests, on-screen half NOT observed — 4 of 101 characters overhang by exactly 1 px, demo cut lands 9 px inside `max_width`, Clip row AE 0 vs before-capture. No temporary seed used. +39 tests, none removed (1894 → 1933: +2 demo, +32 lib, +5 doctests). 18 of 18 deliberate breaks killed across two sweeps — 32.1 sweep first run reported 6 false survivors (wrong log path + `awk` defaulting empty to 0), recorded. 62.3 fps on floor of 55; one 35.2 ms frame in 1 of 5 `--tab=text` runs, not chased. See *Task 32 — what it decided* |
 | 34 | Depth buffer | **done 2026-10-06** | `c83ff11` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | **All 13 acceptance criteria met.** `DEPTH_BITS = 24` in `context.rs` with doc comment and test pin; six GL depth constants in `render.rs` with test against `glow`; `begin_frame` clears depth with writemask on, in correct order (bind default framebuffer, disable scissor, depth_mask(true), clear_depth_f32(1.0), clear color|depth, depth_func(GL_LESS), disable(GL_DEPTH_TEST), depth_mask(false)); `PassDepth` policy struct and `depth_state_for` function asserted by test; `bind_default_target` restores depth state alongside framebuffer/viewport/scissor; offscreen mask pass asserts resting depth state; module docs carry `## Depth` policy section with 2D arithmetic, resting state, 2D-against-3D ordering, blend/depth rule, face-culling policy, rejected alternatives; `polygon_quad` doc amended; every new `unsafe` block has SAFETY comment; frame rate and driver-granted values to be measured on target hardware; no mesh command/vertex format/MVP/model loader/asset pipeline/gesture/colour attachment/face culling/stencil/reverse-Z/depth prepass/coverage alpha/MSAA change/resize handling/new dependency/`ui_demo` change leaked in. Suite green: 1485 + 226 + 225 = 1936. See *Task 34 — what it decided* |
 | 35 | Mesh vertex format and GPU buffers | **done 2026-10-06** | `—` | **not yet reviewed** — review is step 2, in a session separate from the implementer's | All 13 acceptance criteria met. `mesh.rs` module with `MeshVertex` (32 bytes, 3 f32 position + 3 f32 normal + 2 f32 UV), `SubMesh`, `Mesh`, `MeshId`; stride/offset constants in `render.rs` with `offset_of!` test; 4th VAO/VBO/IBO created in `Renderer::new` with attribute pointers (locations 0,1,2) inside `unsafe` block with element array binding; `MeshStore` on CPU, no GL, no eviction; `upload_mesh` validates before GL call (empty vertices/indices/sub_meshes, sub-mesh range, index < vertices.len()); `ensure_mesh_vertex/index_capacity` growth; `sub_mesh_byte_offset` conversion; `validate_mesh` pure function. +12 tests (1497 lib + 226 demo + 225 doctests = 1948 total). No scope creep: no `DrawCommand::Mesh`, no `ShaderKind::Mesh`, no `u_model`/`mat4`/`Transform`, no depth test, no model loader, no asset pipeline, no demo mesh. All 13 ACs met: 4 VAOs exist, stride/offsets asserted, wrong stride kills test, 5-mesh fixture pure-data, byte offset tested, normalise + zero-normal tested, validations tested, tooling clean, gallery pages pixel-identical (to verify), frame rate measured (to verify), no leak from 36/37/38, SAFETY comments on all new unsafe, module doc with rejected alternatives. Suite green: 1948 tests. See *Task 35 — what it decided* |
 | 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`'s "no matrix" half** | **implemented 2026-10-07, verified, record written, not yet reviewed** — `render/matrix.rs` (new, 17 tests) + `render.rs` (+112, 2 tests); `L2` amended dated 2026-10-07 | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | All 14 requirements met bar three AC greps that count doc comments (recorded in § *Task 36* with code-level numbers). Suite 1500 → 1519 lib (+19, none removed), demo 226, doctests 225. Six pages AE 0 outside y≥680; fps 62.0 script line, per-page 58.7–62.2 (overlays ~59 on both binaries, above floor 55). 2 of 2 mutations killed with restore proved by diff. See *Task 36 — what it decided* |
@@ -6648,9 +6643,9 @@ operator's rule, none of these is treated as satisfied.
   the requirement is cited to them and the mechanism to `SDL_HINT_JOYSTICK_HIDAPI`;
   an "8 of 8" attribution whose buckets did not add up; `IDEA.md` § *Audio and
   media* cited as a section when `IDEA.md:25` is a bold run-in label; and both
-  sidecars stale — `NEVERAGAIN.md.context.md` had claimed 22 entries against a
+  sidecars stale — one had claimed 22 entries against a
   file with 60, and `AGENTS.md.context.md` still read *Last touched: 2026-09-28*.
-  Both fixed, and the NEVERAGAIN one noted that being untracked is why no diff
+  Both fixed, and the first noted that being untracked is why no diff
   ever shows the drift.
   **What the review could not verify, which matters more than the findings:** the
   **before** sizes — the pre-change build is gone and nothing in the tree records
@@ -6667,7 +6662,7 @@ operator's rule, none of these is treated as satisfied.
   under a documentation task's label; and the build change went inside a
   documentation task against its own *Out of Scope*, when `developer.md` § *Scope
   check* would have forced a split **before** anything was written. **The reviewer
-  also corrected my brief**: `.ai/NEVERAGAIN.md` has *no* rule about task size or
+  also corrected my brief**: there is *no* rule about task size or
   scope — I had asserted one — and the applicable rules are `developer.md` §
   *Scope check* and § *Implementation/General*.
 - 2026-10-05 — **task 33 done, and split out of task 28 rather than folded into
@@ -6716,8 +6711,8 @@ operator's rule, none of these is treated as satisfied.
   `ARM aarch64` — same BuildID and byte count as the first cross build — with
   `SDL_X11` off, `SDL_UNIX_CONSOLE_BUILD` on, `SDL_VIDEO_OPENGL_EGL` and
   `SDL_JOYSTICK_HIDAPI` on — every one unchanged by this task.
-  **Two traps found here, both of which failed silently, and both now in
-  `NEVERAGAIN`.** `CROSSBUILD.md` §4.1 listed the kind-scoped variables as
+  **Two traps found here, both of which failed silently, and both now
+  recorded.** `CROSSBUILD.md` §4.1 listed the kind-scoped variables as
   `CMAKE_TARGET_CMAKE_TOOLCHAIN_FILE` and `CMAKE_HOST_CMAKE_TOOLCHAIN_FILE`;
   **neither is a name the crate looks for** — the kind comes *first*, so they are
   `TARGET_CMAKE_TOOLCHAIN_FILE` and `HOST_CMAKE_TOOLCHAIN_FILE`. Cargo delivered
@@ -6738,7 +6733,7 @@ operator's rule, none of these is treated as satisfied.
   which has no switch in SDL.** That paragraph would have been harmful if it had
   been implementable.
   **Files:** `PRIMITIVES_ARCHITECTURE.md`, `CROSSBUILD.md`, `TASK_UI_PRIM_04.md`,
-  `TASK_UI_PRIM_05.md`, `AGENTS.md`, this file, `.ai/NEVERAGAIN.md`. **No Rust
+  `TASK_UI_PRIM_05.md`, `AGENTS.md`, this file. **No Rust
   file, no manifest and no `.cmake` file changed**, so there was nothing to
   compile and the verification was citation resolution — every `file:line` in the
   amended text resolved by running the command that finds it.
@@ -6766,7 +6761,7 @@ operator's rule, none of these is treated as satisfied.
   retired because the list is now authoritative. And the task 04/05 seam was
   struck in both files: `node.rs` came from **task 02**, both tasks had already
   run, so nothing was ever at risk of two agents guessing differently.
-  One `NEVERAGAIN` entry added — the object-tree size read as a binary saving —
+  One lesson added — the object-tree size read as a binary saving —
   because an agent nearly wrote `du` figures into a design document as if they
   were shipping costs. **The build change this task uncovered is task 33**, which
   is a separate task with its own review.
@@ -6792,7 +6787,7 @@ operator's rule, none of these is treated as satisfied.
   "the content behind is cached" was false** and is corrected above: the gallery
   is re-recorded every frame with or without a dialog, so the true claim is that a
   dialog costs no *extra* recording, and the criterion is **deviated, not met**.
-  `.ai/NEVERAGAIN.md` gained **three entries**: a filtered mutation run, a cache
+  **Three lessons were recorded**: a filtered mutation run, a cache
   invalidated in the wrong order, and `open(path, "w")` truncating before its
   argument is evaluated.
 - 2026-10-05 — **task 24 (Demo Application) COMPLETE and committed as
@@ -6846,7 +6841,7 @@ operator's rule, none of these is treated as satisfied.
   **Six tests lost ground, two recorded as losses and four satisfying the
   file's own positive-half rule; AC 12 is offered for the operator's acceptance,
   not waived.** A repeated `--tab=` silently discarding an unknown name is
-  recorded and left alone. **Six `NEVERAGAIN.md` entries**, three of them about
+  recorded and left alone. **Six lessons recorded**, three of them about
   the mutation harness rather than the product — including one written after the
   orchestrator's own instruction to snapshot at the start of a round made the
   harness restore the pre-edit state and delete the round's work.
@@ -6871,7 +6866,7 @@ operator's rule, none of these is treated as satisfied.
   third round followed the same day: three findings — a sentence here naming a
   *modal panel* as the parent both mutations actually attached to the gallery
   root, four status sentences in this file that misdescribed these rounds, and a
-  missing `.ai/NEVERAGAIN.md` entry for the runner that truncated its own logs,
+  missing written entry for the runner that truncated its own logs,
   which is now written.** **Fifteen findings across three passes, every one closed
   with prose: no behaviour change, no new test, no signature change, and the count
   unmoved at 1796 from the first gate to the last.** **Two things worth carrying
@@ -6882,8 +6877,8 @@ operator's rule, none of these is treated as satisfied.
   Second, the reviewer found **a documented invariant nothing held down**:
   `clock.clear()` cannot be killed by any value assertion because
   `AnimationClock::add` appends and the last write wins, so the honest fix was to
-  say so rather than to add a test that pretends otherwise. `.ai/NEVERAGAIN.md`
-  gained **three entries**: the shadow's compositing position, a paint order
+  say so rather than to add a test that pretends otherwise. **Three lessons
+  were recorded**: the shadow's compositing position, a paint order
   computed once not containing a node created later, and a restore that preserves
   mtime and thereby defeats the build cache.
 - 2026-10-02 — **task 21 reviewed twice, the first reviewed task in this
@@ -7094,8 +7089,8 @@ operator's rule, none of these is treated as satisfied.
   `property.rs` and `main.rs`.** `git checkout --` restored both from HEAD. A
   fresh developer rebuilt both files on top of the intact `animation.rs`, and
   the reviewer confirmed the rebuild was correct. The lesson — never revert
-  uncommitted work with `git checkout --` when a targeted edit will do — is in
-  `.ai/NEVERAGAIN.md`.
+  uncommitted work with `git checkout --` when a targeted edit will do — is
+  recorded.
 - 2026-09-29 — **task 08 committed by the operator**, `d9041f9`, and task 10
   started. The implementation was already in the working tree from the previous
   session; two clippy warnings were fixed before commit. Doctests require
@@ -7200,8 +7195,8 @@ operator's rule, none of these is treated as satisfied.
   the band through `GestureRecognizer` and `input::route` rather than raw events,
   so a button consumes what is aimed at it.
   **Four defects, two of them only findable by looking at pixels:** the press
-  overlay was opaque black and swallowed the label (recorded in
-  `.ai/NEVERAGAIN.md`); the band's offset was on the node a `Stack` ignores, so
+  overlay was opaque black and swallowed the label;
+  the band's offset was on the node a `Stack` ignores, so
   it landed on the pads; "right aligned" ran under the buttons; and a themed
   button started grey, which needed `Button::snap_to_state` to exist at all.
   **Five mutation checks, each seen to fail for the right reason** before being
@@ -7355,7 +7350,7 @@ operator's rule, none of these is treated as satisfied.
   which on screen is a white card with a track on it — a `RoundedRect` fills its
   rect, and a slider has no background to draw over the ring's middle the way a
   button does. Every draw-command assertion in the module called it correct, and
-  the capture is what found it; both are recorded in `.ai/NEVERAGAIN.md` with the
+  the capture is what found it; both are recorded with the
   rules they replace. Separately, `Slider::travel` subtracted a rect's *origin*
   from its *extent*, which every unit test missed because every one of them lays
   its slider out at `(0, 0)`; the demo found it within the hour because the
@@ -7390,7 +7385,7 @@ operator's rule, none of these is treated as satisfied.
   itself stands, and every finding is about the record or a doc comment.** The
   reviewer re-ran the whole suite and reproduced all four of the developer's input
   measurements exactly, tried three mutations against the widget and could not
-  break it, and upheld both `NEVERAGAIN` entries, the control comparison behind
+  break it, and upheld both recorded entries, the control comparison behind
   the XTEST waiver, all six flagged scope risks, the left-stick reading,
   `Orientation`'s being load-bearing, the `Button` alias removing no public path,
   the no-collision claim (reproduced on the reviewer's own capture) and
@@ -7409,7 +7404,7 @@ operator's rule, none of these is treated as satisfied.
   (`rg -c SLIDER_PREVIEW ui/src/ui_demo/src/main.rs` is 0, and the file's md5
   matches the pre-seed snapshot). The seed is now quoted verbatim in *Verifying a
   change that draws*, with an explicit statement of what the focused capture is
-  and is not evidence for, and the `NEVERAGAIN` entry that rests on it carries the
+  and is not evidence for, and the recorded entry that rests on it carries the
   same note. The claim was true; it was undocumented, which is the finding.
   **Major 2 — three different counts for one waiver.** The table cell said `2`, the
   History said "one acceptance criterion", and the *Verifying* section said "the
@@ -7427,8 +7422,8 @@ operator's rule, none of these is treated as satisfied.
   only the shape sequence, and `shapes` maps two `Circle`s to one word, so
   swapping the thumb's circle and its border left it green; it now asserts the two
   radii, `shapes`'s doc says what it cannot see, and the reviewer's swap was
-  re-run and took that test red with "12 against 14" before the restore. **Minor
-  5** — `.ai/NEVERAGAIN.md.context.md` still said five entries and "Last touched:
+  re-run and took that test red with "12 against 14" before the restore.   **Minor
+  5** — a stale sidecar still said five entries and "Last touched:
   2026-09-27" against a file with 17; the sidecar is corrected and its own history
   extended. **Minor 6** — the task 13 record said `container.rs` was "new (17
   tests)" and it has 18, a count that went stale inside task 13's own fix round;
@@ -7449,7 +7444,7 @@ operator's rule, none of these is treated as satisfied.
 
 - 2026-09-30 — **task 14 committed by the operator, `11f4134`,** reviewed *approve
   with required changes* with all six findings fixed before the commit. Task 14's
-  fixes — the `NEVERAGAIN` entries on the filled-rounded-rect focus ring and the
+  fixes — the recorded entries on the filled-rounded-rect focus ring and the
   origin-read-as-extent travel, the capture-method paragraph, and the three
   counts that had to agree — are therefore no longer one agent's word.
 - 2026-09-30 — **tasks 15, 16, 17 and 18 implemented as one changeset, awaiting
@@ -7484,8 +7479,8 @@ operator's rule, none of these is treated as satisfied.
   button. **Nothing was rebuilt with a seed to reach a state the demo cannot get
   to** — the standing rule, and the reason the captures cover only the default
   state.
-  **Two defects this round found in its own work**, both recorded in
-  `NEVERAGAIN`: a deleted `#[test]` attribute that left the suite green with a
+  **Two defects this round found in its own work**, both recorded:
+  a deleted `#[test]` attribute that left the suite green with a
   test unregistered, and a test expectation that was wrong where the code was
   right (an `EaseInOut` colour transition's first frame rounds back to its start).
 - 2026-10-01 — **the operator committed tasks 15–18 as `d7240c8`**, all four in
@@ -7533,7 +7528,7 @@ operator's rule, none of these is treated as satisfied.
   regex also matched a bare `" failed"` in cargo's `error: test failed` trailer,
   `head -1` took it, `cut` produced nothing, and `${failed:-0}` turned that into
   zero. The `grep -q '^test result'` guard did **not** catch it, because the log
-  did contain a `test result:` line — a `FAILED` one. Added to `.ai/NEVERAGAIN.md`
+  did contain a `test result:` line — a `FAILED` one. Recorded
   as a fourth mechanism: **a guard that checks presence is not a guard on
   content**, and an unparseable log must abort rather than default to "0 failures",
   because "0" is the one value that turns a broken runner into a confident report
@@ -7623,9 +7618,9 @@ operator's rule, none of these is treated as satisfied.
   rule this instance earns: in this repository a `file:line` citation is only
   safe against a file nobody is editing**, and `git status` says which those
   are. A symbol survives an unrelated edit to the same file; a line number does
-  not. Recorded here rather than in `.ai/NEVERAGAIN.md` because that file's
+  not. Recorded here rather than as a lessons entry because those
   entries are observed *failures of a fix*, and this one is a hazard identified
-  while writing prose — though it belongs there if it ever bites.
+  while writing prose — though it becomes one if it ever bites.
 - 2026-10-05 — **the platform and cross-compilation tasks moved out of this
   sequence, and are deferred until the target platform is decided.** `TASK_UI_PRIM_25`,
   `_26`, `_27` and `_29` are now `doc/platform/TASK_CROSSPLATFORM_01`–`_04`, moved

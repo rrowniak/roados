@@ -149,8 +149,8 @@ can ask for needs a spelling, and the spelling is one string per screen.
 
 **The history is the library's, not the caller's.** A caller that kept its own
 `Vec<Page>` would hold the same fact twice — the hazard `GALLERY_SHORTCUTS` is
-held to and that `NEVERAGAIN.md`'s *Two documents each claiming ownership of one
-definition* is the rule for. `Screens` is the only thing that knows what "the
+held to, and the rule is *two documents each claiming ownership of one
+definition*. `Screens` is the only thing that knows what "the
 screen before this one" is, because it knows the set. The demo's
 `pending_page: Property<Option<Page>>` is a **pending request, not a history**,
 and the two must never be confused: `pending_page` is written six times and read
@@ -246,7 +246,7 @@ names are written out.**
   `Demo::page: Page` stays, is written **only** by `show_page`, and
   `the_demo_page_field_and_the_librarys_current_screen_never_disagree` walks all
   six pages and both switch paths. **Two representations of one fact is a
-  `NEVERAGAIN.md` hazard and the mitigation is a test**, which is what this
+  hazard and the mitigation is a test**, which is what this
   repository already does for `Demo::frame_clips` (*"One function, used by the
   loop and by the tests, closes that"*). The alternative — rewriting ~30 test
   sites from `Page::X` to `ScreenId(3)` — would make the demo's own tests
@@ -269,11 +269,11 @@ each. § *Testing* says which mutation each test kills.
 
 **The fourth row is the one that makes the third safe, and it was found by
 reading the demo's tree rather than by designing it.** A screen host is a
-**full-window box**, and `.ai/NEVERAGAIN.md`'s 2026-10-05 entry — *"A container
-that covers the window swallows every tap aimed at anything behind it"* — is this
-repository's measured record of the failure mode. That entry's fix was *"a second
+**full-window box**, and *"A container
+that covers the window swallows every tap aimed at anything behind it"* is this
+repository's measured record of the failure mode. The fix was *"a second
 hit test, after `input::route` had declined — a fallback rather than a bypass"*,
-and its closing rule is *"where two mechanisms read one ordering in opposite
+and the closing rule is *"where two mechanisms read one ordering in opposite
 directions, **check that they can both be satisfied before moving anything**: here
 the answer was that they could not, which is a fact the operator's brief did not
 contain and only the measurement produced."*
@@ -542,7 +542,7 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
    `L2`, and why a cross-fade is a pipeline change rather than a widget one;
    **`LayoutMode::Absolute` is what a screen root must be**, with
    `arrange_stack`'s origin placement named; **a screen root is a hit-test region**,
-   with `NEVERAGAIN.md`'s 2026-10-05 entry cited by section; **the renderer has no
+   with the full-window-container tap-swallowing failure stated; **the renderer has no
    visibility test and that is gap #5's**; and **`LayoutMode` appears nowhere in
    the file**, with the acceptance criterion named so a later edit that imports it
    fails.
@@ -724,8 +724,8 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
     - **Each host sets `hits(false)`, and this is what makes the child order
       irrelevant to hit testing.** With it, `hit_test_from` descends into a host,
       offers its children, and returns `None` for the host itself — so the tab bar
-      is reached on **every** page whatever the order, and `NEVERAGAIN.md`'s
-      2026-10-05 failure cannot recur. **The flag is still required rather than
+      is reached on **every** page whatever the order, and the full-window-container
+      failure cannot recur. **The flag is still required rather than
       left at its default, and the doc comment says why in one sentence:** a
       grouping node that draws nothing is not something a reader can press.
     - **`Screens::add` does not attach.** `Demo::new` attaches each host to
@@ -772,7 +772,7 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
     the paint gate is asked.** It is `self.order` filtered by
     `self.screens.shows(&self.nodes.borrow(), handle)` — **and it is what both
     `Demo::frame`'s paint walk and `Demo::draw` iterate**, so the two sets cannot
-    disagree. `NEVERAGAIN.md`'s *A test of a helper cannot see a call site that
+    disagree. *A test of a helper cannot see a call site that
     stopped using it* is the rule: **one function, used by the loop and by the
     tests.**
 
@@ -855,7 +855,7 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
 22. **`doc/ui/IMPLEMENTATION_STATE.md` gains one entry** carrying: the
     regrouping and the six hosts; **`Demo::page` kept as a vocabulary mirror and
     the named test that pins it**; **the seven deleted items by name**; the
-    child-order constraint and the `NEVERAGAIN.md` entry it answers; the
+    child-order constraint and the failure mode it answers; the
     `PageMember` → `Screens` completeness tests; **the six pages' frame rates**;
     and **the honest limits** — the demo still has **no transition**, the
     renderer still has **no per-node visibility test**, and the demo's `Page` is
@@ -882,7 +882,7 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
       — `input::route(&nodes, root, &tap)` printed for a press on each of the six,
       **on each of the six pages** rather than on one, asserting the button is on
       the chain. **This is the test a reviewer should break first**, and it is the
-      two-line diagnosis `NEVERAGAIN.md`'s 2026-10-05 entry prescribes. **Running
+      two-line diagnosis that failure prescribes. **Running
       it on all six pages is the point**: the failure it guards against appears on
       **one** page, the one whose host is the only visible one.
     - `every_pages_clickable_controls_are_still_in_the_route_chain` — the three
@@ -948,7 +948,7 @@ predicate beside it.
 | `sync_hides_every_screen_but_the_one_on_show` | `sync` writing nothing; `sync` writing `true` for every root; `sync` writing only the outgoing screen and leaving the incoming one hidden. **Each fails on a different screen, which is why the fixture has three.** |
 | `sync_touches_nothing_but_the_screen_roots_and_is_idempotent` | `sync` toggling, or writing a node it was not given. Kills a `sync` whose second call differs from its first — the cheapest defect to ship and the hardest to see. |
 | `sync_with_nothing_on_show_hides_every_registered_screen` | `sync` treating "no current" as "show everything". |
-| **`an_invisible_screen_root_and_its_whole_subtree_are_not_hit`** | **Removing the `sync` call.** This is the test that makes the gate *matter*: `sync`'s own unit test passes with `sync` never called, and only this one fails. **This is the pair `NEVERAGAIN.md` says a gate needs.** |
+| **`an_invisible_screen_root_and_its_whole_subtree_are_not_hit`** | **Removing the `sync` call.** This is the test that makes the gate *matter*: `sync`'s own unit test passes with `sync` never called, and only this one fails. **This is the pair a gate needs.** |
 | `the_screen_on_show_is_hit_all_the_way_down_to_its_deepest_leaf` | `sync` over-hiding. **Without this positive control the test above passes for a `sync` that hides everything, which is a blank window.** |
 | `shows_is_true_only_on_the_screen_on_show_and_on_no_screen_at_all` | `shows` losing the "in no screen" branch — **which would hide the tab bar, the background, the readout and the toast host**, and no rect assertion would see it. |
 | `shows_follows_a_node_up_to_its_screen_root_and_agrees_with_hit_test` | `shows` checking only the node itself and not its ancestors, which is right for a member and wrong for a root's child. **It asserts agreement with `hit_test` on the same point, so the two gates cannot diverge.** |
@@ -966,7 +966,7 @@ predicate beside it.
 | `a_pop_with_nothing_on_the_stack_changes_nothing_and_leaves_the_flags_alone` | `pop` at the root wrapping the index and hiding a screen that was not on show. |
 | `a_name_registered_twice_is_refused_and_the_table_does_not_grow` | `add` appending a duplicate — **the same mutation class as `Demo::new`'s dropped row, one level down.** |
 | `a_name_that_was_never_registered_changes_nothing_current_history_or_flag` | `show` returning `true` for a name it did not resolve, which is 24.1's recorded *"a repeated `--tab=` silently discards an unknown name"* defect reappearing one layer down. |
-| **`the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its_six_buttons`** | **Dropping one host's `set_hits(false)`**, or moving a host after `tab_bar` without the flag — reproduces `NEVERAGAIN.md`'s 2026-10-05 entry: the bar becomes unclickable **on the one page whose host is the only visible one**, six handlers are wired, and nothing else in the suite sees it. **The mutation appears on `overlays` alone**, which is why the test loops the six pages |
+| **`the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its_six_buttons`** | **Dropping one host's `set_hits(false)`**, or moving a host after `tab_bar` without the flag — reproduces the 2026-10-05 failure: the bar becomes unclickable **on the one page whose host is the only visible one**, six handlers are wired, and nothing else in the suite sees it. **The mutation appears on `overlays` alone**, which is why the test loops the six pages |
 | `every_pages_clickable_controls_are_still_in_the_route_chain` | The same move's other half: a control inside a host that a full-window sibling shadows. |
 | `no_screen_host_is_a_hit_test_target` | One host left at `hits(true)`. **Checked on the demo's six hosts and not on a fixture**, because the defect is about *these* boxes covering *this* window. |
 | `every_dialog_button_is_in_the_route_chain_without_the_manual_fallback` | The dialog left outside the tree, **or** the manual `chain.push(self.dialog.handle())` deleted while the dialog is still outside it — which would make the dialog's buttons unreachable and is the failure mode this test exists to gate the deletion with |
@@ -1146,7 +1146,7 @@ predicate beside it.
 - [ ] **`Demo::drawn_handles` is the one place the paint gate is asked, and both
       walks use it.** `grep -n 'drawn_handles' ui/src/ui_demo/src/main.rs` shows
       **one definition and two call sites** — `Demo::frame`'s paint walk and
-      `Demo::draw` — plus the tests. **The mechanism is `NEVERAGAIN.md`'s: a test
+      `Demo::draw` — plus the tests. **The mechanism is that a test
       of a helper cannot see a call site that stopped using it, so the helper and
       the call sites are the same object.**
       `the_nodes_drawn_on_a_page_are_its_own_nodes_and_the_always_painted_set`
@@ -1158,7 +1158,7 @@ predicate beside it.
       every page.** **`the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its
       _six_buttons`** calls `input::route(&nodes, root, &tap)` for a press on each
       of the six **on each of the six pages** and asserts the button is on the
-      chain — the two-line diagnosis `.ai/NEVERAGAIN.md`'s 2026-10-05 entry
+      chain — the two-line diagnosis that failure
       prescribes, **and the test a reviewer should break first.**
       **The six-page loop is not thoroughness, it is the whole test**: dropping one
       host's `set_hits(false)` shadows the bar on **`overlays` alone**, because that
@@ -1465,5 +1465,5 @@ predicate beside it.
   cannot see — a rect that moved on all six pages, and a frame-cost regression —
   are covered by `every_page_places_every_rect_where_the_gallery_placed_it` and by
   `fps-check.sh` respectively, which is the pairing
-  `.ai/NEVERAGAIN.md`'s *A still screenshot of a 4 fps application looks exactly
-  like a 60 fps one* exists to demand
+  *a still screenshot of a 4 fps application looks exactly like a 60 fps one*
+  exists to demand

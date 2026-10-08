@@ -826,8 +826,8 @@ being overtaken by a later commit, and the distinction is what makes it a
   history. So the table was written on top of a tree that already had both
   files, and the grep it offered as evidence could not have produced its answer:
   `git grep -ic framebuffer 1ea7e79` hits **eight files**, `target.rs` alone
-  29 times. **The lesson is the one in `.ai/NEVERAGAIN.md`'s spirit — a sweep of
-  a mechanism's call sites is not a sweep of what exists.** Here it is worse:
+  29 times. **The lesson — a sweep of a mechanism's call sites is not a sweep
+  of what exists.** Here it is worse:
   the absence claim was made by a grep that was never run against the right tree.
 - **L6 was false when written**, and in the crate's own words. The row denied
   any mode or enumeration concept; `GaugeType` is a `pub enum` documented as

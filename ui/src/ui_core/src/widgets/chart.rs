@@ -265,9 +265,9 @@
 //! series, a grid and a cursor's worth of hairlines all look grabbable, and
 //! nothing in this module reads a pointer over any of them.** A caller that wants
 //! a chart to be pannable or selectable has to build that gesture itself, and
-//! should not assume the existence of a series implies one — `.ai/NEVERAGAIN.md`
-//! § *a drawn control with nothing behind it* is the entry about what happens
-//! when that assumption is made in the other direction.
+//! should not assume the existence of a series implies one — a drawn control
+//! with nothing behind it is what happens when that assumption is made in the
+//! other direction.
 //!
 //! # Colours, and what is not a theme token
 //!

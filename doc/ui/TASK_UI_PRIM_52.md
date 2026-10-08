@@ -42,7 +42,7 @@ auditable"* and that the `L1..L11` rows are the ones the Layout work exposed.
 marked closed** — § *Library gaps* records that the first eight rows *"keep their
 numbering, because four files outside this one cite it by number"*, which is
 exactly the constraint `TASK_UI_PRIM_24.1`'s lesson
-(`.ai/NEVERAGAIN.md` § *A position API that only one parent mode reads*, in
+(*a position API that only one parent mode reads*, in
 general: a sweep of one table leaves the other stale) turned on an amendment.
 
 Two differences between the rows are recorded rather than smoothed over, because
@@ -444,8 +444,8 @@ a caller will look.** Three reasons.
    works in main/cross terms over `FlexItem`, which a grid does not build.**
    Routing grid cells through it would mean constructing `FlexItem`s for a
    flexbox the grid is not, and the uniformity of the tiling would be gone.
-3. **This is the exact failure `.ai/NEVERAGAIN.md` § *A position API that only
-   one parent mode reads* records, and that entry supplies the remedy**: *"a
+3. **This is the exact failure *a position API that only
+   one parent mode reads* records, and the remedy is**: *"a
    setter that a **parent** consumes is not honoured by every parent, and the
    compiler will not say so. Before writing a placement, read **the parent's
    `LayoutMode` arm** rather than the setter's name."* `position` is honoured by
@@ -656,8 +656,8 @@ conditions*).
    axis, and each gains: **`LayoutMode::Flex` honours it and no other mode does;
    a grid cell's factor is ignored, because a grid has no main axis and its
    column width is decided by `columns` and the box.** **This is
-   `.ai/NEVERAGAIN.md` § *A position API that only one parent mode reads*'s
-   remedy applied to the other setter** — the entry's rule is *"read the parent's
+   *a position API that only one parent mode reads*'s
+   remedy applied to the other setter** — the rule is *"read the parent's
    `LayoutMode` arm rather than the setter's name"*, and the two things that make
    the answer findable are the doc and the test. **Nothing else in
    `LayoutState` changes**, and `position` is not touched by this task.
@@ -865,7 +865,7 @@ conditions*).
     `columns == 0` as one column, a left-aligned short last row, no alignments, no
     row squeezing, and `columns` staying `usize`); **the `wrap` decision and the
     deleted promise, by name**; **that `flex` is unread inside a grid cell and
-    that this is `NEVERAGAIN`'s "one parent mode" entry with the remedy applied
+    that this is the "one parent mode" rule with the remedy applied
     to the other setter**; **that `spacing` is the grid's gap on both axes and
     that `L7` is amended rather than closed**; **the test count before and
     after**; the frame rate for all six pages; and **the honest limit in the
@@ -976,7 +976,7 @@ conditions*).
       `set_flex`'s doc each name the modes that honour the factor** and say that a
       grid cell's is ignored, because a grid has no main axis and its column width
       is decided by `columns` and the box. **This is
-      `.ai/NEVERAGAIN.md` § *A position API that only one parent mode reads*'s
+      *a position API that only one parent mode reads*'s
       remedy applied to the other setter**, and the mechanism is what makes it
       checkable: a caller who reads the setter's name is told which parent's arm
       consumes it.

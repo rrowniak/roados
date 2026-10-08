@@ -280,8 +280,8 @@ fn vertex_bytes(vertices: &[BlurVertex]) -> &[u8] {
 /// **not** through `crate::render::vertex_buffer_size`: that helper multiplies
 /// by four because a *quad* is four vertices, and this buffer's unit is already
 /// vertices — a quad of six would be sized at 24 vertices' worth and the upload
-/// would fail with `GL_INVALID_VALUE`. See `.ai/NEVERAGAIN.md` § *A buffer sized
-/// for one vertex per quad*, which is that mistake in the other direction.
+/// would fail with `GL_INVALID_VALUE`. A buffer sized for one vertex per quad is
+/// that mistake in the other direction.
 pub struct BlurQuad {
     /// The vertex array carrying the attribute pointer.
     vao: glow::VertexArray,

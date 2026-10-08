@@ -208,8 +208,8 @@ down.
    - Validate **before any GL call**, so a malformed mesh costs nothing and
      names itself: `vertices` empty, `indices` empty, or `sub_meshes` empty is
      an error saying which. An upload that returns a handle whose draws are all
-     no-ops is the failure `.ai/NEVERAGAIN.md` records for a buffer sized wrong
-     — a batch that disappears with every GL call reporting success.
+     no-ops is the failure shape of a buffer sized wrong — a batch that
+     disappears with every GL call reporting success.
    - Validate every sub-mesh: `first_index + index_count <= indices.len()`,
      computed with `checked_add`, naming the sub-mesh in the error. A range past
      the end of the index buffer is what `draw_elements` reads, and without
@@ -256,8 +256,7 @@ down.
     a mesh buffer is uploaded once and never edited, so there is no per-frame
     path to preserve. `INITIAL_CAPACITY` is not reused: a mesh counts
     **vertices and indices**, not quads, and the `VERTS_PER_QUAD` factor in
-    `vertex_buffer_size` is the arithmetic that went wrong once already — see
-    `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad*.
+    `vertex_buffer_size` is the arithmetic that went wrong once already.
 
 ## Acceptance Criteria
 

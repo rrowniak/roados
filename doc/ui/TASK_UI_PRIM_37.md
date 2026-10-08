@@ -611,8 +611,7 @@ one developer's change.
     script's own line rather than the number it expected:
 
     - **`gl.get_error()` is read once after the first mesh draw** and the result
-      pasted, per `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad* —
-      `bind_attach`'s doc records that a rejected call with nobody reading it
+      pasted: `bind_attach`'s doc records that a rejected call with nobody reading it
       dropped a whole pass, and a mesh draw that silently does nothing is the
       largest version of that failure this sequence has produced.
     - **The frame rate is measured on every page and reported against task 34's
@@ -750,8 +749,7 @@ one developer's change.
       calls, five uniform sets, five `use_program`s — as the number task 38's first
       capture is measured against
 - [ ] **No GL error, read once after the first mesh draw**, pasted into the
-      handoff with the instrument's code quoted — per
-      `.ai/NEVERAGAIN.md` § *A buffer sized for one vertex per quad*. The three new
+      handoff with the instrument's code quoted. The three new
       constants are pinned against `glow::CULL_FACE`, `glow::CULL_FACE_MODE` and
       `glow::BACK`, and the six depth pins still hold
 - [ ] **Nothing from tasks 38, 39 or 40 leaked in.** `git diff --stat` shows **no

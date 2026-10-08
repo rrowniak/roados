@@ -91,9 +91,8 @@
 //! right — a [`DrawCommand::RoundedRect`] *fills* its rect, so a "corner"
 //! drawn as a filled rounded rectangle is a card with an image on it, and a
 //! "border" drawn as a filled rounded rectangle is the same card. The discard is
-//! the whole of the mechanism; see `.ai/NEVERAGAIN.md`'s entry *A filled rounded
-//! rectangle is not an outline*, which is a defect of that shape found in this
-//! repository's own slider.
+//! the whole of the mechanism; a filled rounded rectangle is not an outline, a
+//! defect of that shape found in this repository's own slider.
 //!
 //! # Opacity is a fraction, not a tint
 //!
@@ -967,8 +966,8 @@ impl Image {
     /// opacity, with the corner radius. There is no background and no border, and
     /// there is deliberately nothing else: a rounded corner is a shader clip, so
     /// a widget that drew a shape to make the corner would be drawing a card
-    /// under the image. See the module documentation and `.ai/NEVERAGAIN.md`'s
-    /// entry *A filled rounded rectangle is not an outline*.
+    /// under the image. See the module documentation: a filled rounded rectangle
+    /// is not an outline.
     ///
     /// The opacity is clamped to `0.0..=1.0` here and **not** multiplied into a
     /// colour: the command has no colour for an image, the shader scales the
@@ -1919,9 +1918,8 @@ mod tests {
 
     #[test]
     fn an_image_laid_out_somewhere_else_is_placed_relative_to_its_own_rect() {
-        // The fixture the NEVERAGAIN entry asks for, stated in the numbers: the
-        // demo puts its widgets at (664, 496) and nothing else in this repository
-        // is at the origin.
+        // The fixture is stated in the numbers: the demo puts its widgets at
+        // (664, 496) and nothing else in this repository is at the origin.
         let (_nodes, wide) = image(200, 100);
         let box_at = Rect::new(664.0, 496.0, 240.0, 240.0);
         assert_eq!(box_at.x, 664.0, "the fixture really is off the origin");
@@ -2574,9 +2572,9 @@ mod tests {
 
     #[test]
     fn the_corners_are_a_clip_and_nothing_is_drawn_for_them() {
-        // `.ai/NEVERAGAIN.md`, *A filled rounded rectangle is not an outline*: a
-        // `RoundedRect` fills its rect, so a "corner" drawn as a filled shape is
-        // a card with the image on it. The image records one command and it is
+        // A filled rounded rectangle is not an outline: a `RoundedRect` fills its
+        // rect, so a "corner" drawn as a filled shape is a card with the image on
+        // it. The image records one command and it is
         // the image — no rect, no rounded rect, nothing behind it and nothing on
         // top.
         let (_nodes, image) = image(200, 100);

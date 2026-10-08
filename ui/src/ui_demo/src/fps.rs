@@ -4,9 +4,9 @@
 //! demo rendered at about 4 fps — a `load_char` per character, per label, per
 //! frame — and survived three reviews and four captures, because every capture
 //! method in this repository is a single still, and a still of a 4 fps
-//! application is pixel-identical to a still of a 60 fps one. The entry in
-//! `.ai/NEVERAGAIN.md` is the reason this module exists, so the next regression
-//! of that kind is a **number** rather than a suspicion.
+//! application is pixel-identical to a still of a 60 fps one. That is the reason
+//! this module exists, so the next regression of that kind is a **number**
+//! rather than a suspicion.
 //!
 //! Two numbers come out of a run and they answer different questions:
 //!

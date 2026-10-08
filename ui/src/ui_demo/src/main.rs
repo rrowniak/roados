@@ -167,8 +167,8 @@
 //! the scrim is not painted, the panel is not painted, and `dialog_is_modal` does not
 //! read whether the page is on show. With `pads` as the default page that would have
 //! been the launch state of `ui_demo` with no argument at all, which is the shape
-//! `.ai/NEVERAGAIN.md` records three reviews mistaking for a tooling problem — a
-//! window that looks right and answers nothing.
+//! three reviews mistook for a tooling problem — a window that looks right and
+//! answers nothing.
 //!
 //! On `overlays` it **opens showing rather than waiting to be opened**, and that is
 //! still a decision about evidence rather than about the demo. Input injection does
@@ -1211,9 +1211,9 @@ const CHART_X_LABEL_GUTTER: f32 = 18.0;
 /// `no_node_is_clipped_and_the_chart_keeps_its_geometry_inside_its_own_rect` is
 /// what holds that claim in the suite: it asserts, over all three shapes and both
 /// ends of a transition, that **the lowest pixel the chart draws is above the
-/// readout's own line**. `.ai/NEVERAGAIN.md`'s 2026-10-01 entry *a brief's
-/// rationale becomes the widget's doc comment, and nobody re-checks it* is the
-/// reason this constant carries a measurement rather than a derivation.
+/// readout's own line**. A brief's rationale becomes the widget's doc comment,
+/// and nobody re-checks it — which is the reason this constant carries a
+/// measurement rather than a derivation.
 const CHART_READOUT_GAP: f32 = 4.0;
 
 /// Where the label naming what the chart is showing sits, under it.
@@ -2486,10 +2486,10 @@ fn glyph_report(atlas_size: u32, dropped: u32) -> String {
 /// Returns how long the loop should block after a frame that took `spent`.
 ///
 /// This is the whole of the frame budget as arithmetic, kept out of the loop so
-/// it can be tested: `.ai/NEVERAGAIN.md` § *a test of a helper cannot see a call
-/// site that stopped using it* is the reason the loop calls **this** function
-/// rather than inlining the subtraction, because a helper tested from one place
-/// and inlined in another has two places to be wrong and only one under test.
+/// it can be tested: a test of a helper cannot see a call site that stopped
+/// using it, which is the reason the loop calls **this** function rather than
+/// inlining the subtraction, because a helper tested from one place and inlined
+/// in another has two places to be wrong and only one under test.
 ///
 /// A frame that overran the budget has nothing left. **`Duration::saturating_sub`
 /// is the whole of that rule**: it stops at zero rather than handing SDL a
@@ -2499,10 +2499,10 @@ fn glyph_report(atlas_size: u32, dropped: u32) -> String {
 /// that clamp **survived the whole suite** — `saturating_sub` already stops at
 /// zero, so the clamp restated a rule the subtraction had already enforced and no
 /// test could ever tell the two apart. It is gone rather than kept as a second
-/// place to be wrong. `.ai/NEVERAGAIN.md` § *a test of a helper cannot see a call
-/// site that stopped using it* is also why the loop calls **this** function
-/// rather than inlining the subtraction: a helper tested from one place and
-/// inlined in another has two places to be wrong and only one under test.
+/// place to be wrong. A test of a helper cannot see a call site that stopped
+/// using it, which is also why the loop calls **this** function rather than
+/// inlining the subtraction: a helper tested from one place and inlined in
+/// another has two places to be wrong and only one under test.
 ///
 /// Returning zero for an overrun is not mercy, it is accuracy: the loop is
 /// already late and is reporting a frame that cost too much rather than waiting a
@@ -2556,9 +2556,8 @@ fn run_seconds_from(raw: Option<String>) -> Option<Duration> {
 /// **A missing asset must not take the window down.** The demo draws everything
 /// else, the image's own label says it is standing in, and this function says
 /// once on stderr where it looked — a silent stand-in is a picture of nothing
-/// with no explanation, and an unexplained blank rectangle is what
-/// `.ai/NEVERAGAIN.md` records two of this repository's defects as having been
-/// mistaken for.
+/// with no explanation, and an unexplained blank rectangle is what two of this
+/// repository's defects were mistaken for.
 fn load_picture(renderer: &mut Renderer) -> Option<Picture> {
     let candidates = asset_candidates();
     let path = candidates.iter().find(|path| path.is_file());
@@ -2898,9 +2897,9 @@ fn over_rect(rect: Rect, x: f32, y: f32) -> bool {
 /// **The `by` is always the widget's own answer and never a number written here.**
 /// This function was written when the demo carried a private `6.0` for that
 /// reach, derived by hand from a `MITRE_LIMIT` the widget keeps private, and the
-/// widget now answers the question itself. `.ai/NEVERAGAIN.md`'s 2026-10-01 entry
-/// *one sibling got the operator's fix; the other with the same constant did not*
-/// is about that shape, and a copy of a number is wrong for exactly one reason:
+/// widget now answers the question itself. One sibling got the operator's fix
+/// and the other with the same constant did not — that is the shape, and a copy
+/// of a number is wrong for exactly one reason:
 /// it is right until one of its two inputs moves, and nothing in the demo says so
 /// when they do. There is no constant of that kind in this file any more.
 fn grown(rect: Rect, by: f32) -> Rect {
@@ -3401,8 +3400,8 @@ struct Demo {
     ///    gesture left that could bring them back**: every other key is either
     ///    guarded by the modal or does not touch the pads.
     ///
-    /// That is `.ai/NEVERAGAIN.md` § *A drawn control with nothing behind it*
-    /// reached through the keyboard rather than through a missing event handler,
+    /// That is *a drawn control with nothing behind it* reached through the
+    /// keyboard rather than through a missing event handler,
     /// and `a_release_is_never_gated_so_nothing_can_be_stranded_mid_press` is the
     /// test that found it. Written by [`Demo::press_all`] and cleared by
     /// [`Demo::release_all`], so the flag and the animation are one fact.
@@ -4841,9 +4840,9 @@ impl Demo {
         //   where **every tap and every key is swallowed by a scrim nobody can
         //   see**. That is not a hypothetical degradation: it is the launch state
         //   of `ui_demo` with no argument at all, once the default page is
-        //   `pads`, and it is the state `.ai/NEVERAGAIN.md` § *A still screenshot
-        //   of a 4 fps application* spent three reviews mistaking for something
-        //   else. `D` is the way to bring it up from any page, and it activates
+        //   `pads`, and it is the state *a still screenshot of a 4 fps
+        //   application* spent three reviews mistaking for something else. `D`
+        //   is the way to bring it up from any page, and it activates
         //   `overlays` as it does.
         //
         // What would reverse it: nothing in this task, and the operator's decision
@@ -4971,8 +4970,8 @@ impl Demo {
                 // `LABEL_FONT_SIZE / 2` and `LABEL_FONT_SIZE` is private with no
                 // accessor, so the demo cannot compute it — and a reach check that
                 // silently stopped covering the top and the left is the failure
-                // `.ai/NEVERAGAIN.md` § *a brief's rationale becomes the widget's
-                // doc comment* is about, one level down.
+                // *a brief's rationale becomes the widget's doc comment* is
+                // about, one level down.
                 return Err("the chart writes y labels, and this check does not bound them");
             }
             let reach = grown(
@@ -5723,9 +5722,9 @@ impl Demo {
     /// **The one place the bar enters the `Tab` order**, and it is a function
     /// rather than a written-out list for the reason
     /// [`Demo::focusables`] is a filter: a list of six handles beside
-    /// [`Demo::tabs`] is a second list of the six buttons, and
-    /// `.ai/NEVERAGAIN.md`'s *a sweep of a mechanism's call sites is not a sweep of
-    /// the data it is built from* is what a second list costs.
+    /// [`Demo::tabs`] is a second list of the six buttons, and a sweep of a
+    /// mechanism's call sites is not a sweep of the data it is built from —
+    /// which is what a second list costs.
     ///
     /// **The order inside this list is not the order `Tab` walks.** That is the
     /// tree's paint order — [`input::Focus`] recomputes it by walking from
@@ -6020,9 +6019,8 @@ impl Demo {
     /// than the implementer's**: requirement 4 names it, so it is written as
     /// specified and its cost is recorded here rather than quietly removed. What
     /// this doc must not do is credit the flag with a rendering consequence it does
-    /// not have — an earlier version of it said exactly that and was wrong, which is
-    /// `.ai/NEVERAGAIN.md` § *A brief's rationale becomes the widget's doc comment*
-    /// one layer up.
+    /// not have — an earlier version of it said exactly that and was wrong, which
+    /// is *a brief's rationale becomes the widget's doc comment* one layer up.
     fn empty_off_page_paint(&self, nodes: &mut Arena<WidgetNode>) {
         let page = self.page;
         for &handle in self.order.iter() {
@@ -6149,10 +6147,10 @@ impl Demo {
     ///
     /// **The gauge's keys are not an afterthought and they are not arbitrary.**
     /// They exist because of a fact about this host rather than about the widget:
-    /// **no pointer event can be injected here**, so
-    /// `.ai/NEVERAGAIN.md` § *a still screenshot of a 4 fps application* and
-    /// `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws* both
-    /// record that a capture taken by clicking the demo cannot be reproduced. A
+    /// **no pointer event can be injected here**, so *a still screenshot of a 4
+    /// fps application* and `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a
+    /// change that draws* both record that a capture taken by clicking the demo
+    /// cannot be reproduced. A
     /// gauge is a **display** — its needle and its tick marks are decoration and
     /// nothing in the widget answers a finger — so with no pointer there would be
     /// **no route to its value at all** and the acceptance criterion *"Demo shows
@@ -6841,9 +6839,8 @@ impl Demo {
     /// action a tap would report — and it has no `focused` property either. A
     /// `Tab` stop on it would move focus to a control that can do nothing with it
     /// and would draw no ring, so focus would arrive somewhere with no sign of
-    /// having arrived. `.ai/NEVERAGAIN.md` § *a drawn control with nothing behind
-    /// it* is the entry about the other direction of that mistake, and this is
-    /// the same one avoided.
+    /// having arrived. *A drawn control with nothing behind it* is about the
+    /// other direction of that mistake, and this is the same one avoided.
     ///
     /// **The chart is in neither half of that**, and for the chart's own stated
     /// reason rather than the gauge's: `chart.rs` says in its module document
@@ -7855,8 +7852,8 @@ impl Demo {
     /// takes the focus away without going through `set_focus`: `OK` and `Cancel`
     /// fire their clicks and close, `Escape` closes, a tap on the scrim closes,
     /// and each of those is the widget's own code rather than the demo's. The
-    /// `.ai/NEVERAGAIN.md` § *a drawn control with nothing behind it* concern is
-    /// still real and is now answered by `activatable` rather than by the ring: a
+    /// *a drawn control with nothing behind it* concern is still real and is now
+    /// answered by `activatable` rather than by the ring: a
     /// ring on a control that cannot be reached is a ring whose *meaning* is wrong,
     /// and the fix for that is to stop implying it can be reached.
     ///
@@ -8976,9 +8973,9 @@ impl Demo {
     /// **One list is not the same as a checked list, and this function alone is
     /// not checked.** Both consumers filter it, and the assertion that the filter
     /// partitions the list used to compare it with itself — so deleting a row here
-    /// left every test green. `.ai/NEVERAGAIN.md` § *a sweep of a mechanism's call
-    /// sites is not a sweep of the data it is built from* is about exactly that,
-    /// **and this doc cited it while making the mistake it names**; the row
+    /// left every test green. *A sweep of a mechanism's call sites is not a sweep
+    /// of the data it is built from* is about exactly that, **and this doc cited
+    /// it while making the mistake it names**; the row
     /// deletion was found by the review of task 24.2. The fix is
     /// [`assert_placed_handles_is_complete`], which compares this list against
     /// [`expected_placed_rect_names`] — a written-out answer, because a derived one
@@ -10164,8 +10161,8 @@ mod tests {
     /// and every character in it is uncovered — which is a real state and the right
     /// one to assert the *replacement*'s arithmetic against, and is no evidence at
     /// all about which font draws the warning sign. That is what the capture is
-    /// for, and `.ai/NEVERAGAIN.md` has three entries about defects that passed
-    /// every unit test here for exactly this reason.
+    /// for, and three defects in this repository passed every unit test here for
+    /// exactly this reason.
     #[test]
     fn the_fallback_label_carries_characters_no_font_in_its_chain_covers() {
         let demo = laid_out_on(Page::Text);
@@ -10870,9 +10867,9 @@ mod tests {
         // thickness, so 270 needs 33 and 135 needs 17.
         //
         // **Asserted exactly rather than "at least"**, because "at least" would pass
-        // on a band twice as long, and a longer band is the failure mode
-        // `.ai/NEVERAGAIN.md` § *a still screenshot of a 4 fps application* warns
-        // about — invisible in a still and expensive every frame.
+        // on a band twice as long, and a longer band is the failure mode *a
+        // still screenshot of a 4 fps application* warns about — invisible in a
+        // still and expensive every frame.
         let band: Vec<&DrawCommand> = commands
             .iter()
             .filter(|command| {
@@ -11092,10 +11089,10 @@ mod tests {
         // a tap would report, so a finger that lands on the needle goes to
         // whatever is behind the gauge. **The demo has nothing behind it there**,
         // so the correct outcome of a press over the dial is that nothing at all
-        // happens — and this asserts that, because `.ai/NEVERAGAIN.md` § *a drawn
-        // control with nothing behind it* is the entry about a widget that looks
-        // grabbable and is not, and the mistake it records was made by a test
-        // suite that only asked whether the control could be operated.
+        // happens — and this asserts that, because *a drawn control with nothing
+        // behind it* is about a widget that looks grabbable and is not, and the
+        // mistake it records was made by a test suite that only asked whether
+        // the control could be operated.
         //
         // What it also rules out is the opposite defect: a tap that fell through
         // to the pads, which are the one thing in the window that does answer a
@@ -11337,8 +11334,8 @@ mod tests {
         //
         // **Measured from the card's own origin, and task 24.2 is why.** These
         // two lines compared a **size** against an **absolute origin**, which is
-        // the trap `.ai/NEVERAGAIN.md`'s *a rect's origin and a rect's extent are
-        // different numbers* records and it was correct only while the card sat
+        // the trap of a rect's origin and a rect's extent being different
+        // numbers, and it was correct only while the card sat
         // at the window's own top left: the first run of this task read `-52`
         // instead of `12`, because the card had moved down `CONTENT_TOP` and taken
         // its pads with it. Nothing here is weakened — the same twelve pixels are
@@ -13164,8 +13161,8 @@ mod tests {
     ///
     /// A chart is a display: no value a drag would set, no action a tap would
     /// report, and no `on_event` on the type for one to be routed to. What is
-    /// asserted is both directions of the mistake `.ai/NEVERAGAIN.md` § *a drawn
-    /// control with nothing behind it* is about: nothing the chart owns changed,
+    /// asserted is both directions of the mistake *a drawn control with nothing
+    /// behind it* is about: nothing the chart owns changed,
     /// **and nothing behind it was pressed either** — the pads are the one thing in
     /// this window that answers a press, and the chart sits nowhere near them.
     #[test]
@@ -13846,10 +13843,10 @@ mod tests {
     /// derived from `placed_handles` for the reason
     /// [`always_painted_handles`]'s doc gives: **an expected answer read back out
     /// of the thing it is checking agrees with whatever that thing says**, which is
-    /// the whole thing it exists to catch. `.ai/NEVERAGAIN.md` § *a sweep of a
-    /// mechanism's call sites is not a sweep of the data it is built from* — which
-    /// this helper's own doc cited while making exactly that mistake — is task
-    /// 24.1's round-3 major, and this is the same one a table further down.
+    /// the whole thing it exists to catch. *A sweep of a mechanism's call sites is
+    /// not a sweep of the data it is built from* — which this helper's own doc
+    /// cited while making exactly that mistake — is task 24.1's round-3 major,
+    /// and this is the same one a table further down.
     ///
     /// **Nine `text panel label` rows, and the repetition is load-bearing**: the
     /// comparison is over sorted lists with duplicates intact, so losing *one* of
@@ -14017,9 +14014,9 @@ mod tests {
     ///
     /// **This is the assertion that closes the direction
     /// [`assert_placed_handles_is_complete`] cannot see**, and it is phrased over
-    /// the *complement* for the reason `.ai/NEVERAGAIN.md` § *a sweep of a
-    /// mechanism's call sites is not a sweep of the data it is built from* gives:
-    /// an assertion over membership passes for a node in no list, by definition.
+    /// the *complement* for the reason *a sweep of a mechanism's call sites is
+    /// not a sweep of the data it is built from* gives: an assertion over
+    /// membership passes for a node in no list, by definition.
     /// Walking [`Demo::order`] instead is what makes a missing one a failure.
     ///
     /// **Two filters, and each is load-bearing.** A node with **no extent** is not
@@ -14051,8 +14048,8 @@ mod tests {
     /// corrected to say the opposite and the doc had not, so the two disagreed and
     /// the doc was the one a reader reaches first. **The cause was a patch script
     /// that raised on its second edit and therefore wrote nothing**, discarding its
-    /// first — see `.ai/NEVERAGAIN.md`'s entry on a multi-edit script that writes
-    /// once at the end. A reduction of the script re-applied two of the three
+    /// first — a multi-edit script that writes once at the end. A reduction of
+    /// the script re-applied two of the three
     /// edits and the missing one was reported as done.
     fn assert_every_drawn_leaf_is_named_or_excused(demo: &Demo) {
         let named: Vec<Handle> = demo
@@ -14097,9 +14094,9 @@ mod tests {
             demo.page
         );
         // **The pads' exemption is a live one, and that is asserted rather than
-        // assumed** — the same positive half `.ai/NEVERAGAIN.md` § *hiding a widget
-        // makes every test that crosses the boundary vacuous* demands of any
-        // assertion phrased over what is *not* there.
+        // assumed** — the same positive half *hiding a widget makes every test
+        // that crosses the boundary vacuous* demands of any assertion phrased
+        // over what is *not* there.
         //
         // **`any`, and not `all`, and the wording says so**: this asserts that **at
         // least one** of the three pads records a command on `pads`, not that all
@@ -14960,10 +14957,10 @@ mod tests {
     /// of the recording-order contract task 37 recorded.
     ///
     /// **The second half is the load-bearing one**, and it is this file's answer
-    /// to `.ai/NEVERAGAIN.md` § *a draw-command assertion cannot see where a
-    /// command lands*: the list's rows were drawn over the window background above
-    /// the panel while eighty-eight unit tests passed, because every assertion in
-    /// them asked *what was recorded* and not *where it landed*. So this asks the
+    /// to *a draw-command assertion cannot see where a command lands*: the list's
+    /// rows were drawn over the window background above the panel while
+    /// eighty-eight unit tests passed, because every assertion in them asked *what
+    /// was recorded* and not *where it landed*. So this asks the
     /// second question — over **all three** of the chart's shapes, and **twice
     /// each**: once mid-transition, where the drawn series is the glide's and a
     /// command could land anywhere between where it was and where it is going,
@@ -15004,10 +15001,10 @@ mod tests {
     /// a node top edge of 240, in a capture of the running demo. Both are inside
     /// the 6 px the widget reports, and both are well inside the ten pixels of
     /// clearance to the image-fit label's line at 224, which is the number that
-    /// says nothing is overdrawn. `.ai/NEVERAGAIN.md` § *a brief's rationale
-    /// becomes the widget's doc comment, and nobody re-checks it* is why they are
-    /// written here, where a reader can check them, and not only in a constant's
-    /// doc — the constant this test's allowance used to be is gone.
+    /// says nothing is overdrawn. *A brief's rationale becomes the widget's doc
+    /// comment, and nobody re-checks it* is why they are written here, where a
+    /// reader can check them, and not only in a constant's doc — the constant
+    /// this test's allowance used to be is gone.
     #[test]
     fn no_node_is_clipped_and_the_chart_keeps_its_geometry_inside_its_own_rect() {
         let mut demo = laid_out_on(Page::Data);
@@ -15885,9 +15882,10 @@ mod tests {
 
     #[test]
     fn a_stall_reaches_both_the_readout_and_the_report() {
-        // The defect `.ai/NEVERAGAIN.md` records — a demo that renders correctly
-        // at four frames a second — is invisible in a capture and obvious in these
-        // two numbers. Forty uniform frames and one slow one: the average still
+        // The defect this repository has recorded — a demo that renders correctly
+        // at four frames a second — is invisible in a capture and obvious in
+        // these two numbers. Forty uniform frames and one slow one: the average
+        // still
         // reads like a working application, and the rate and the worst frame say
         // what happened.
         let mut demo = demo();
@@ -16322,10 +16320,10 @@ mod tests {
     /// of the six call sites: five tests pressed `Tab` a written number of times to
     /// reach a page's own control, and task 24.3 moved every one of those numbers by
     /// six without changing what the tests were about. A derived count is the fix
-    /// `.ai/NEVERAGAIN.md`'s *a deleted `#[test]` attribute is a green suite with a
-    /// hole in it* argues for at the other end — **a number that can go stale is a
-    /// hole whether it is in an attribute or in a loop bound**, and this one was
-    /// found by five red tests rather than by reading a diff.
+    /// *a deleted `#[test]` attribute is a green suite with a hole in it* argues
+    /// for at the other end — **a number that can go stale is a hole whether it
+    /// is in an attribute or in a loop bound**, and this one was found by five
+    /// red tests rather than by reading a diff.
     ///
     /// `index` is zero-based over [`page_focusables`], so `0` is the page's first
     /// own control. **The extra one** is `Focus::step`'s rule: with nothing focused
@@ -16620,9 +16618,8 @@ mod tests {
     /// cursor's worth of hairlines **all look grabbable and nothing in the module
     /// reads a pointer over any of them**: there is no `on_event` on the type for
     /// one to be routed to. A `Tab` stop would therefore be a stop where focus
-    /// arrives, nothing answers, and no ring is drawn —
-    /// `.ai/NEVERAGAIN.md` § *a drawn control with nothing behind it* is the entry
-    /// about the mistake in the other direction.
+    /// arrives, nothing answers, and no ring is drawn — the mistake in the other
+    /// direction is what *a drawn control with nothing behind it* is about.
     ///
     /// **Both halves of the gauge's test, for the same reason**: the expected
     /// order does not name the chart either — so this is not the walk agreeing
@@ -16848,10 +16845,10 @@ mod tests {
         // own `set_position` — one of the six sites the shift is written at — left
         // **every one of the 1817 tests green**, because the column's labels only
         // ever claimed to be *below the frame-rate readout* and 501 is below 748
-        // as surely as 565 is. `.ai/NEVERAGAIN.md`'s *a sweep of a mechanism's
-        // call sites is not a sweep of the data it is built from* is the same
-        // shape one level down: the sweep ran all six sites and the column was in
-        // it, and **nothing was asserting what the column is for**.
+        // as surely as 565 is. *A sweep of a mechanism's call sites is not a
+        // sweep of the data it is built from* is the same shape one level down:
+        // the sweep ran all six sites and the column was in it, and **nothing was
+        // asserting what the column is for**.
         let at = |handle: Handle| demo.node_rect(handle).expect("a laid-out node");
         let card = at(demo.card().handle());
         assert_eq!(
@@ -17986,9 +17983,9 @@ mod tests {
         // thing that tells the two apart is the same key moving something once the
         // dialog is gone.
         //
-        // `.ai/NEVERAGAIN.md` § *A drawn control with nothing behind it*, applied to
-        // a keyboard shortcut: name the gesture that operates the thing, and assert
-        // the gesture moves it.
+        // *A drawn control with nothing behind it*, applied to a keyboard
+        // shortcut: name the gesture that operates the thing, and assert the
+        // gesture moves it.
         for (what, keycode, _, _) in GALLERY_SHORTCUTS {
             let mut demo = shortcut_fixture(false);
             let before = gallery_state(&demo);
@@ -18447,8 +18444,8 @@ mod tests {
     #[test]
     fn a_tap_on_the_button_that_was_drawn_there_fires_that_button() {
         // **The gesture that operates the control, aimed where it is painted** —
-        // `.ai/NEVERAGAIN.md` § *a drawn control with nothing behind it*. The point
-        // comes out of the recorded paint and not out of `Dialog::action_rect`,
+        // *a drawn control with nothing behind it*. The point comes out of the
+        // recorded paint and not out of `Dialog::action_rect`,
         // because asking the widget where it draws a button and then pressing
         // there is asking it twice.
         let mut demo = shown_dialog_on(Page::Overlays);
@@ -20269,10 +20266,10 @@ mod tests {
     /// `gallery_with_toasts_on`, `shortcut_fixture_on` — reaches the gate through
     /// `Demo::new`'s own `sync_page_visibility()`, which is a **different call site**
     /// from `Demo::show_page`'s. A test built out of fixtures would hold down the
-    /// constructor and leave the switch untested, which is exactly the hole
-    /// `.ai/NEVERAGAIN.md` § *A paint order computed once does not contain a node
-    /// created later* found in `raise_toast`: one gate, two call sites, and only one
-    /// of them under test. Each case below therefore builds a fixture **on one page**
+    /// constructor and leave the switch untested, which is exactly the hole *a
+    /// paint order computed once does not contain a node created later* found in
+    /// `raise_toast`: one gate, two call sites, and only one of them under test.
+    /// Each case below therefore builds a fixture **on one page**
     /// and switches to **another** with a real key.
     ///
     /// **Two observables, and they are two different questions.** `set_visible` is
@@ -20394,9 +20391,9 @@ mod tests {
     /// what the paint gate empties.** `Demo::raise_toast` therefore appends a row
     /// beside the node it appends to `order`, and without it a card raised by `K`
     /// would be painted on **every** page — the notification would follow you off
-    /// `overlays` and onto `pads`. This is `.ai/NEVERAGAIN.md` § *A paint order
-    /// computed once does not contain a node created later*, which shipped once here
-    /// in task 23 and which the widget's own tests cannot catch: they ask the widget
+    /// `overlays` and onto `pads`. This is *a paint order computed once does not
+    /// contain a node created later*, which shipped once here in task 23 and which
+    /// the widget's own tests cannot catch: they ask the widget
     /// what it records, and the defect is that the frame loop never asks the widget.
     #[test]
     fn a_toast_raised_after_construction_is_page_content_like_any_other() {
@@ -20987,7 +20984,7 @@ mod tests {
     /// `Button::size` is `content_size` floored at `MIN_TOUCH_TARGET` in both
     /// dimensions. Asserting `rect.height >= 44.0` against a literal would be the
     /// second copy of a number the widget keeps private, and this file has three
-    /// such copies already and a `NEVERAGAIN` entry about the fourth.
+    /// such copies already and a fourth is on record.
     #[test]
     fn every_tab_button_is_at_least_the_touch_target_floor_tall() {
         for page in Page::ALL {
@@ -21463,9 +21460,9 @@ mod tests {
     /// **AC 8** — the bar is unreachable while the dialog is showing, and reachable
     /// the moment it closes.
     ///
-    /// **Two halves and both are positive**, which is the shape
-    /// `.ai/NEVERAGAIN.md`'s *hiding a widget makes every test that crosses the
-    /// boundary vacuous* demands: "nothing happened" is satisfied by a broken bar,
+    /// **Two halves and both are positive**, which is the shape *hiding a widget
+    /// makes every test that crosses the boundary vacuous* demands: "nothing
+    /// happened" is satisfied by a broken bar,
     /// so the second half is the same click on the same button with the dialog
     /// closed.
     ///
@@ -21744,8 +21741,8 @@ mod tests {
     /// **A press paints a colour strictly between the two ends, mid-transition.**
     ///
     /// This is the acceptance criterion's *"a **pressed** button mid-transition"*
-    /// written the way `.ai/NEVERAGAIN.md` asks after `PRESS_SHADOW_ALPHA`:
-    /// **assert the number the word fixes**, because a capture cannot. The capture
+    /// written the way the `PRESS_SHADOW_ALPHA` lesson asks: **assert the number
+    /// the word fixes**, because a capture cannot. The capture
     /// of this task caught a mid-transition frame on 2 of 130 samples — the interval
     /// between samples is 161 ms against a 150 ms window, so it cannot be repeated
     /// to get more — and at that interval the intermediate sat 22 % of the way from
@@ -21854,10 +21851,9 @@ mod tests {
     /// dropping `tab.button.animate_to_state(motion)` from `release_tab` left the
     /// whole suite green, and a probe reading `scale` on this state read **0.95** —
     /// a tab button stuck at the pressed scale for ever, with `pressed` already
-    /// `false` and no gesture left that could bring it back. That is
-    /// `.ai/NEVERAGAIN.md`'s *a drawn control with nothing behind it* in its
-    /// sharpest form: a control whose state is unreachable, rather than merely
-    /// unwritten.
+    /// `false` and no gesture left that could bring it back. That is *a drawn
+    /// control with nothing behind it* in its sharpest form: a control whose
+    /// state is unreachable, rather than merely unwritten.
     ///
     /// **`Page::Data` and not `Page::Pads`** so that the test reads the same way as
     /// its neighbour and the two are one story: the neighbour presses a button
@@ -22121,8 +22117,8 @@ mod tests {
     ///
     /// This is the test that says the seven are *in the strip on purpose* rather
     /// than excused to make two tests stop failing, which is the positive half
-    /// `.ai/NEVERAGAIN.md` demands of an assertion phrased over what is **not**
-    /// there: `strip_excused` names the bar and its buttons, and a list that excused
+    /// demanded of an assertion phrased over what is **not** there:
+    /// `strip_excused` names the bar and its buttons, and a list that excused
     /// seven nodes which drew nothing would be a list covering nothing.
     #[test]
     fn the_bar_and_the_background_are_the_only_thing_in_the_strip() {

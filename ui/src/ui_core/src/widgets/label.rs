@@ -1058,8 +1058,8 @@ mod tests {
         // than vanishing" claimed the opposite of what the code did, since a family
         // with nothing in it **did** vanish until the same review made `FontSet`
         // resolve an empty family to the default one. A test named for a case its
-        // fixture cannot produce is the failure this repository's `.ai/NEVERAGAIN.md`
-        // records twice, and this file cites that entry two hundred lines above.
+        // fixture cannot produce is the failure this repository records twice, and
+        // this file makes the same point two hundred lines above.
         let mut fonts = FontSet::new();
         fonts.define_family("one");
         fonts.define_family("two");

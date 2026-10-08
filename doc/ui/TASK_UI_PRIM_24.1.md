@@ -51,8 +51,8 @@ commands must be replaced with `PaintState::from_commands(Vec::new())` and
 (`PaintState::new`, `ui/src/ui_core/src/paint.rs`), so the renderer keeps the batch it
 already has and **the old page stays on screen** with every test that reads a
 recorded command still green, because the commands are only *stale*, not
-*absent*. `.ai/NEVERAGAIN.md` § *A cache invalidated in the wrong order is a
-cache that lies* is the same failure one layer down.
+*absent*. **A cache invalidated in the wrong order is a cache that lies** — the
+same failure one layer down.
 
 **The test migration is the largest part of this task, and it should be counted
 before anything else is written.** The three test helpers — `tests::demo()`,

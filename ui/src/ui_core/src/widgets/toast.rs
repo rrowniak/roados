@@ -32,8 +32,7 @@
 //! disc** — which is not the order they are drawn in, and getting it wrong puts
 //! a toast's own text under its own background. Three facts about this pipeline
 //! decide it, and all three are the reason a draw-command assertion cannot be
-//! trusted here (`.ai/NEVERAGAIN.md` § *A draw-command assertion cannot see
-//! where a command lands*):
+//! trusted here — a draw-command assertion cannot see where a command lands:
 //!
 //! 1. **A translucent command cannot share a segment with an opaque one.**
 //!    [`Batcher::submit_order`](crate::batch::Batcher::submit_order) groups
@@ -1643,11 +1642,10 @@ mod tests {
 
     /// The box the stacks below are laid out in.
     ///
-    /// **Not at the origin**, deliberately, for the reason `.ai/NEVERAGAIN.md` §
-    /// *A rect's origin and a rect's extent are different numbers* gives: a
-    /// fixture at `(0, 0)` cannot see a coordinate being read as a size, and
-    /// this module computes a card's `x` from the box's **width** and its `y`
-    /// from the box's **bottom edge**.
+    /// **Not at the origin**, deliberately: a rect's origin and a rect's extent are
+    /// different numbers, and a fixture at `(0, 0)` cannot see a coordinate being
+    /// read as a size. This module computes a card's `x` from the box's **width**
+    /// and its `y` from the box's **bottom edge**.
     const SCREEN: Rect = Rect {
         x: 40.0,
         y: 30.0,
@@ -1830,9 +1828,9 @@ mod tests {
     /// its translucent ones, then the shadow the segment ends with —
     /// `render.rs:1994` to `:2016`. Running the recorded commands through the
     /// **real** [`Batcher`] is what makes this a measurement of where a command
-    /// lands rather than a restatement of the order it was written in, and
-    /// `.ai/NEVERAGAIN.md` § *A draw-command assertion cannot see where a command
-    /// lands* is the entry for what it replaces.
+    /// lands rather than a restatement of the order it was written in — a
+    /// draw-command assertion cannot see where a command lands, which is what it
+    /// replaces.
     fn submitted(commands: &[DrawCommand]) -> Vec<&'static str> {
         let mut batcher = Batcher::new();
         for command in commands {
@@ -2675,9 +2673,9 @@ mod tests {
     ///
     /// **The assertion is on the alpha and not on the presence of a command**,
     /// because a card at 94% and a card at 100% record the same four commands in
-    /// the same places. `.ai/NEVERAGAIN.md` § *A strength clamped to 0..=1, used
-    /// directly as an effect's size* is the class: forty-six tests once passed
-    /// over a button whose press overlay was a fully opaque black box.
+    /// the same places. A strength clamped to 0..=1, used directly as an effect's
+    /// size, is the class: forty-six tests once passed over a button whose press
+    /// overlay was a fully opaque black box.
     #[test]
     fn the_message_the_disc_and_the_surface_fade_with_the_toast() {
         let mut nodes = Arena::new();

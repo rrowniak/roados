@@ -160,8 +160,8 @@ checkable by `git diff`.
 
 **The honest limit, and the rule that names it.** `to_matrix` is the first edge
 out of `Transform` in the crate's history, and **no widget's paint path calls
-it**. `.ai/NEVERAGAIN.md` § *A test of a helper cannot see a call site that
-stopped using it* is the exact rule: a test of `to_matrix` proves `to_matrix`
+it**. **A test of a helper cannot see a call site that stopped using it** is
+the exact rule: a test of `to_matrix` proves `to_matrix`
 and nothing else, and a caller that never calls it is invisible to the suite.
 So the acceptance criterion greps for the edge and **states what it does not
 prove**. What would close it for the 2D layers is named in § *Out of Scope*.
@@ -361,9 +361,9 @@ arguments**. Per-page measurement is therefore
 `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` with the
 `roados-fps` line parsed by hand — the same amendment
 `IMPLEMENTATION_STATE.md` § *Current position* records for task 24.2's criterion
-6, and `.ai/NEVERAGAIN.md` § *An acceptance criterion that names an instrument
-which cannot produce the evidence is not met by producing the evidence another
-way* is why it is written that way here rather than as an instruction to use the
+6, and **an acceptance criterion that names an instrument which cannot produce
+the evidence is not met by producing the evidence another way** is why it is
+written that way here rather than as an instruction to use the
 script for six pages.
 
 ### Per-mesh transforms compose, and where the composition happens
@@ -762,8 +762,7 @@ reserved uniform name and the docs — the third is four lines and a doc comment
       tests; and `rg -l Transform ui/src` returns **three** files —
       `property.rs`, `animation.rs`, `render/matrix.rs` (was two).
       **The handoff states what this does not prove**: no widget's paint path
-      calls `to_matrix`, and per `.ai/NEVERAGAIN.md` § *A test of a helper cannot
-      see a call site that stopped using it*, a green test of the conversion is
+      calls `to_matrix`, and a green test of the conversion is
       not evidence that anything uses it
 - [ ] **`Mat4` is 64 bytes, column-major, and reachable without `unsafe`.**
       `the_sixteen_floats_are_column_major` asserts `size_of::<Mat4>() == 64`,

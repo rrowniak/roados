@@ -103,8 +103,7 @@ source and not inferred:
 - **`fn command_quads` in `ui/src/ui_core/src/render.rs`** is the whole of the
   expansion, and its `DrawCommand::Path` arm is **one `line_quad` per segment with
   no join of any kind**. A polyline therefore *notches on the outside of every
-  corner* — the same mechanism `.ai/NEVERAGAIN.md` § *A brief's rationale becomes
-  the widget's doc comment* records the gauge's author measuring, at 5.6 px of
+  corner* — the same mechanism the gauge's author measured, at 5.6 px of
   scallop on a 14 px band. **The map's answer is one `Circle` per vertex**
   (requirement 6), because `DrawCommand::Circle`'s arm is a rounded rect of radius
   `r` around a `2r` box, so a disc of radius `w / 2` at a vertex covers precisely
@@ -430,8 +429,7 @@ file count alone**, and that is stated rather than dressed up as a design.
    filled shape it records is convex and why**; and **§ *What this approach
    cannot do* in full, in the module's own voice rather than as a pointer to a
    task file** — because the module is the file a future agent opens first, and
-   `.ai/NEVERAGAIN.md` § *A brief's rationale becomes the widget's doc comment*
-   is the entry about a confident claim in exactly that position.
+   a confident claim in exactly that position is what this guards against.
 
 2. **The world's types, named and complete, in `map.rs`.** Every one is `pub`,
    every field is `pub`, and `World`, `Road`, `Poi` and `Car` derive
@@ -593,8 +591,7 @@ file count alone**, and that is stated rather than dressed up as a design.
 
    `MapSurface::paint` therefore records, per stroke, **one `Path` and one `Circle`
    per point including both ends** — never one fewer. The alternative (relying on
-   the segments alone) is the notch `.ai/NEVERAGAIN.md` § *A brief's rationale
-   becomes the widget's doc comment* measured on a gauge, and it is a visible
+   the segments alone) is the notch measured on a gauge, and it is a visible
    defect on a road grid.
 
    **The limit, in the same doc: a mitre join covers more.** At a turn of `θ` a
@@ -696,9 +693,8 @@ file count alone**, and that is stated rather than dressed up as a design.
    `ui/src/ui_core/src/batch.rs` groups commands into batches and
    `ui/src/ui_core/src/render.rs` submits them in the order they were recorded, so
    the last recorded opaque command is the top one. **The doc cites that rather
-   than restating it as a rule**, on `.ai/NEVERAGAIN.md` § *A shadow lands on
-   whatever was recorded before it, not on whatever comes next*: that entry records
-   the same mechanism, and the reason the ordering here is checkable is that
+   than restating it as a rule**: that is the same mechanism, and the reason the
+   ordering here is checkable is that
    `roads_are_recorded_minor_class_first` and `the_car_is_recorded_last` assert the
    *positions* of commands rather than their presence.
 
@@ -822,7 +818,7 @@ private function is `fn intersects`, and its behaviour is asserted through
 
 | # | test | what it holds |
 |---|---|---|
-| 1 | `project_puts_the_camera_centre_at_the_middle_of_the_viewport` | the closed form, at a non-origin viewport — `NEVERAGAIN.md`'s *"a geometry fixture at the origin cannot see an origin being read as an extent"* |
+| 1 | `project_puts_the_camera_centre_at_the_middle_of_the_viewport` | the closed form, at a non-origin viewport — **a geometry fixture at the origin cannot see an origin being read as an extent** |
 | 2 | `project_scales_metres_into_pixels_and_does_not_flip_y` | `(0, 0)` and `(0, +100)` land with the second **below** the first |
 | 3 | `a_nan_point_projects_to_a_nan_rather_than_to_a_panic` | propagation, not a panic |
 | 4 | `world_is_deterministic_in_its_seed` | `world(7) == world(7)`, by `PartialEq` |
@@ -837,7 +833,7 @@ private function is `fn intersects`, and its behaviour is asserted through
 | 13 | `no_two_pois_share_a_position_and_one_is_of_each_kind` | three POIs, three kinds |
 | 14 | `map_palette_reads_every_value_from_a_theme_and_every_colour_is_opaque` | ten values, ten alphas of 255 — the opacity that makes the record order the z-order |
 | 15 | `map_palette_falls_back_when_a_token_holds_a_number` | the `as_color().unwrap_or(..)` path |
-| 16 | `paint_records_one_ground_rect_and_nothing_else_when_the_world_is_empty` | **the vacuity guard.** `NEVERAGAIN.md`'s *"check that the case is where the property is non-vacuous"*: an empty world must record **exactly one** command, not zero, or every other test's "at least one command" would pass on an empty picture |
+| 16 | `paint_records_one_ground_rect_and_nothing_else_when_the_world_is_empty` | **the vacuity guard.** Check that the case is where the property is non-vacuous: an empty world must record **exactly one** command, not zero, or every other test's "at least one command" would pass on an empty picture |
 | 17 | `paint_records_a_path_and_one_circle_per_vertex_for_every_road` | **the count through the public API** — for each road, one `Path` whose point count equals the road's, and one `Circle` per point **including both ends**. **The control beside it is test 18**: the same call with an empty `World`, where there is no road to count |
 | 18 | `a_world_with_no_roads_records_no_path_and_no_circle` | the control for 17 |
 | 19 | `roads_are_recorded_minor_class_first` | **the positions**, not the presence: every `Service` road's `Path` precedes every `Secondary` one's, which precedes every `Arterial` one's |
@@ -887,9 +883,8 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
 
 1. **Delete the per-vertex `Circle`s** from `MapSurface::paint` and re-run test 17
    — it fails on the count, and the capture shows the notches. **This is the break
-   that has a visual consequence**, and `.ai/NEVERAGAIN.md`'s
-   *A fill rule cannot be repaired downstream* family says the consequence is the
-   evidence.
+   that has a visual consequence**, and the rule that *a fill rule cannot be
+   repaired downstream* says the consequence is the evidence.
 2. **Move `road_arterial` before `road_service`** in the record order and re-run
    test 19 — it fails, and the capture shows the thin roads on top of the heavy
    ones where they cross.
@@ -935,8 +930,7 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
       movement; a curve is a polyline; a road's width is pixels; no mitre join; no
       raster and therefore no mipmaps; the marker is rotated by hand because no
       2-D pass carries a transform.** **A module doc that says "see the task file"
-      fails this criterion**, on `.ai/NEVERAGAIN.md` § *A brief's rationale becomes
-      the widget's doc comment* — *"a confident false claim in the one file every
+      fails this criterion**: *"a confident false claim in the one file every
       future reader opens is worse than no claim"*, and a pointer is the same
       failure with better manners.
 
@@ -958,7 +952,7 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
       `a_world_with_no_roads_records_no_path_and_no_circle` is the control that
       says zero roads records zero of each. **Mutation evidence:** drop the
       endpoint `Circle`s and watch the count fall by two per road; drop them all
-      and watch the capture show the notches, which is the `.ai/NEVERAGAIN.md`
+      and watch the capture show the notches, which is the
       mechanism with a visible consequence. **The arithmetic is in the requirement
       and in the module doc**: `Circle`'s arm is a rounded rect of radius `r`
       around a `2r` box, and `fn line_quad` is the segment expanded by half its
@@ -983,9 +977,9 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
       id from `DISPLAY=:0 xwininfo -root -tree | rg '"roados ui_demo"'`, and
       `DISPLAY=:0 magick import -window <id>` — with `pgrep -a -x ui_demo` in the
       same call as each capture, **and no seed, no environment variable and no
-      rebuilt binary**, which is stated because `.ai/NEVERAGAIN.md` § *A capture
-      whose only route was instrumented* is the entry about a capture that is
-      described as evidence without saying what produced it. **The capture is read
+      rebuilt binary**, which is stated because a capture that is described as
+      evidence without saying what produced it is the failure this guards against.
+      **The capture is read
       for six things and each is stated in the handoff:** a full-bleed ground with
       blocks, three weights of road, a blue route that turns a corner and lies on
       the road grid, three POI pips, the car marker with a nose pointing along the
@@ -1181,10 +1175,9 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
   task that fills it in.
 
 - **No demo page shortcut, no hidden key, no second way in.** `--tab=demo` is the
-  **only** route to the map, and that is deliberate: `.ai/NEVERAGAIN.md` § *A
-  capture whose only route was instrumented* is the entry about a picture whose
-  method was not stated, and **an acceptance criterion that needs a key is an
-  acceptance criterion that cannot be met on this host.**
+  **only** route to the map, and that is deliberate: a picture whose method was
+  not stated is the failure this guards against, and **an acceptance criterion
+  that needs a key is an acceptance criterion that cannot be met on this host.**
 
 - **No `ui_core` change of any kind — no `DrawCommand` variant, no `Painter`
       method, no `ThemeToken`, no `LayoutMode`.** Four of these are tempting and
@@ -1202,9 +1195,9 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
 - **No test needing a display, a network, a filesystem or the wall clock.**
   `AGENTS.md` § *Rust* forbids all four, and every one of the thirty-two tests is
   arithmetic over values the module produced itself. **No `Instant::now()` in
-  `map.rs`**, so the map is not the second instance of the trap
-  `.ai/NEVERAGAIN.md` § *A still screenshot of a 4 fps application looks exactly
-  like a 60 fps one* records — that one's evidence was a `load_char` per character
+  `map.rs`**, so the map is not the second instance of the trap that **a still
+  screenshot of a 4 fps application looks exactly like a 60 fps one** — that
+  one's evidence was a `load_char` per character
   per frame, and **a generator called per frame with no clock is the shape of that
   bug with a different name.**
 

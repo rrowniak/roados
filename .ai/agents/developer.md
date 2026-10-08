@@ -269,14 +269,6 @@ Stop and return to the operator — do not push through — when:
 "Stop" means report the situation and the cheapest way forward. It does not mean
 leave the tree broken.
 
-## Feeding NEVERAGAIN
-
-When you fix something because an agent got it wrong — a wrong API, a broken
-build, a misread constraint, a convention invented per file — append it to
-`.ai/NEVERAGAIN.md` in the format that file defines. That file is the project's
-memory of its own AI failure modes, and this is the only place it gets written
-from.
-
 ## Failure modes
 
 - **Building the un-shrunk version.** The most expensive one. The verdict said

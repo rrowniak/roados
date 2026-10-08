@@ -292,9 +292,9 @@ because three separate facts already make it the only one available:
 /// this one is inside the backdrop and one recorded after it is over it. That
 /// is the recording contract, it is the caller's, and it is the same contract
 /// task 37 recorded for a mesh: *record the scene first and the chrome second.*
-/// `.ai/NEVERAGAIN.md` § *A shadow lands on whatever was recorded before it, not
-/// on whatever comes next* is the same rule for the same reason — the layer
-/// lands on everything before it.
+/// **A shadow lands on whatever was recorded before it, not on whatever comes
+/// next** is the same rule for the same reason — the layer lands on everything
+/// before it.
 ///
 /// **It replaces its rect, by default, and that is arithmetic rather than
 /// taste.** The capture carries the default framebuffer's own alpha, which is
@@ -504,10 +504,9 @@ chrome blurs the chrome.
 the relative order of all three is not observable** — a seal consumes exactly one
 singleton command, so a backdrop, a shadow and a mesh each end their own segment
 and are never adjacent. Task 37 already states this for the shadow and the mesh; this
-task states it for three. **And the one case where it *is* observable is the
-`NEVERAGAIN` case**: a shadow recorded immediately after a backdrop lands **on**
-the backdrop, which is what that entry is about, and it is the caller's ordering
-again. `draw_backdrop_batch`'s doc names it.
+task states it for three. **And the one case where it *is* observable is a shadow
+recorded immediately after a backdrop**: it lands **on** the backdrop, and it is
+the caller's ordering again. `draw_backdrop_batch`'s doc names it.
 
 **Depth: no depth attachment, and it is state rather than storage, which is task
 34's own reason.** `ShadowTarget` gets none because a shadow's mask is one quad
@@ -804,10 +803,9 @@ full seven**, and records the overshoot rather than disguising it.
    and before task 37's `Mesh`, with `#[derive(Clone, Debug, PartialEq)]`
    unchanged and every field doc-commented exactly as § *The public API* gives
    them — **the capture semantics (`tint.a == 255` replaces the rect), the
-   recording contract (*scene, then backdrop, then chrome*) with
-   `.ai/NEVERAGAIN.md` § *A shadow lands on whatever was recorded before it, not
-   on whatever comes next* cited by name, and the fact that `rect` sizes the
-   composite and not the capture, with the ES 3.1 rule beside it.** No
+   recording contract (*scene, then backdrop, then chrome*), and the fact that
+   `rect` sizes the composite and not the capture, with the ES 3.1 rule beside
+   it.** No
    `radius`: the composite shader is the shadow composite's shape with a sampler
    argument changed, and a rounded backdrop is § *Out of Scope*.
 
@@ -1118,8 +1116,8 @@ full seven**, and records the overshoot rather than disguising it.
       `demo.order` asserted to record **no** `DrawCommand::Backdrop`. **With
       `a_page_records_no_command_on_a_node_that_is_not_its_own`'s vacuity control
       copied in**, because a sweep over an empty `order` proves nothing —
-      `.ai/NEVERAGAIN.md` § *A sweep of a mechanism's call sites is not a sweep of
-      the data it is built from*. **This test is what makes the pixel-identical
+      *a sweep of a mechanism's call sites is not a sweep of the data it is built
+      from*. **This test is what makes the pixel-identical
       criterion demanding rather than merely met.**
 
 20. **The GL error, the capture and the frame rate are produced, and the handoff
@@ -1127,9 +1125,8 @@ full seven**, and records the overshoot rather than disguising it.
 
     - **`gl.get_error()` is read once after the first backdrop** — once *per
       process*, because requirement 15's probe is the only reader — and the result
-      pasted **with the instrument's code quoted**, per `.ai/NEVERAGAIN.md`
-      § *A buffer sized for one vertex per quad*: `bind_attach`'s doc records that
-      a rejected call with nobody reading it dropped a whole pass, and a **backdrop
+      pasted **with the instrument's code quoted**: `bind_attach`'s doc records
+      that a rejected call with nobody reading it dropped a whole pass, and a **backdrop
       that silently does not draw is the largest version of that failure this
       sequence has produced.** **A capture is not a substitute** — a missing
       backdrop and a backdrop over a solid background look different, and only one
@@ -1298,9 +1295,7 @@ full seven**, and records the overshoot rather than disguising it.
       name and its assertion and gains
       `!COMPOSITED_PASSES.contains(&Pass::Backdrop)`. **`DrawCommand::Shadow`'s doc
       and `DrawCommand::Backdrop`'s doc both state the recording contract** —
-      *record the scene, then the backdrop, then the chrome* — with
-      `.ai/NEVERAGAIN.md` § *A shadow lands on whatever was recorded before it,
-      not on whatever comes next* cited by name in `Backdrop`'s
+      *record the scene, then the backdrop, then the chrome*.
 
 - [ ] **Depth: no attachment, no test, no write, and the policy is data.**
       `grep -rn 'depth\|DEPTH' ui/src/ui_core/src/render/target.rs` shows
@@ -1470,8 +1465,8 @@ full seven**, and records the overshoot rather than disguising it.
       **`Renderer::colour_capture_legal()`'s answer recorded in
       `doc/ui/IMPLEMENTATION_STATE.md`**. **A capture is not a substitute** — the
       absence of a backdrop and a backdrop that drew nothing are the same picture,
-      which is the whole of `.ai/NEVERAGAIN.md`
-      § *A buffer sized for one vertex per quad* in one sentence
+      which is the whole of
+      *a buffer sized for one vertex per quad* in one sentence
 
 - [ ] **`L1` is amended, dated, and still open.** Row **`L1`** in
       `DEMO_APPLICATION.md` § *Gaps this layout exposes in `ui_core`* carries a

@@ -77,7 +77,7 @@ Five reasons for the shape, and the second is the one that makes the rest follow
    writing its own `selected`, and `TabBar` would have no node of its own — the
    buttons have theirs, and *who attaches them* is then unanswered. That shape is
    a `Vec` and a convention, and § *Testing* is built on the finding that a
-   convention is not a mechanism: `NEVERAGAIN`'s *"a sweep of a mechanism's call
+   convention is not a mechanism: *"a sweep of a mechanism's call
    sites is not a sweep of the data it is built from"* is a finding about exactly
    that.
 2. **The second palette is what makes "the six pages are pixel-identical" a
@@ -212,7 +212,7 @@ and the composition is by *name*.**
   composition is two representations of one fact** — `Screens::current` and
   `TabBar`'s `Cell<Option<TabId>>` — **whose mitigation is a named test and not a
   design change**, on task 42's precedent: *"Two representations of one fact is a
-  `NEVERAGAIN.md` hazard and the mitigation is a test."* That test is
+  hazard and the mitigation is a test."* That test is
   `the_tab_bar_selection_and_the_screens_current_name_never_disagree`, in
   requirement 26.
 
@@ -296,7 +296,7 @@ shape `Demo::new` already builds, moved into the widget.
   a saturating subtraction would make it look fine.
 - **The geometry has one owner and no `Rect` parameter anywhere on the widget.**
   `bar_rect`, `tab_rect` and `tab_at` read the nodes' **own cached rects** from the
-  arena, and `paint` reads the same two. **`NEVERAGAIN`'s 2026-10-01 rule is that
+  arena, and `paint` reads the same two. **The 2026-10-01 rule is that
   when a control's geometry is drawn from one number, *"assert that hit testing
   and drawing read the same number, because they are two consumers of one
   constant"*** — so there is no second computation and no number to keep in step.
@@ -439,7 +439,7 @@ now.**
      `TAB_BUTTON_TALL` named a third — `keyboard::KEY_HEIGHT` — and that was
      wrong, because `KEY_HEIGHT` is `52.0`:** the constant's doc claimed *"the same
      44 three other places already name"* and listed a number that is not 44.
-     **This is a `NEVERAGAIN` shape rather than a new one — a doc comment asserting
+     **This is a familiar shape rather than a new one — a doc comment asserting
      the opposite of the code beside it, which `DEMO_APPLICATION.md`
      § *Corrections to the second gap table* records three times — and requirement 18
      deletes the constant, so the false claim goes with it.** The handoff says so
@@ -532,7 +532,7 @@ now.**
       — **the container, the N buttons, N attachments, N click handlers, and
       `motion` at `Motion { duration: Duration::from_millis(150), easing: Easing::EaseInOut }`**, which are the *same two fallbacks* `Motion::from_theme` uses when a theme holds something else, so an unthemed bar's aim has a length and a curve rather than none. **Selection starts at `None`** — `Screens::new`'s rule, *"an empty table with nothing on show"*, and `Option` is the honest answer for a bar whose caller has not chosen yet. **It does not aim and it does not snap**; `snap_to_state` exists for the reason `Button::snap_to_state` does.
     - `#[must_use] pub fn handle(&self) -> Handle` — the bar's own node, which is what `node::attach` takes and what a caller registers with `Focus` and `input::route`.
-    - `#[must_use] pub fn tab_ids(&self) -> Vec<TabId>` — **and no `len`.** `tab_ids().len()` is the count, and a second accessor for it is the pair of lists `NEVERAGAIN` warns about.
+    - `#[must_use] pub fn tab_ids(&self) -> Vec<TabId>` — **and no `len`.** `tab_ids().len()` is the count, and a second accessor for it is a second copy of one list.
     - `#[must_use] pub fn tab_id_of(&self, handle: Handle) -> Option<TabId>` — **a search over `tabs`, not an arithmetic position**, for `Demo::tab_button`'s reason: *"a search … rather than a position, because a handle is what routing and the paint walk arrive with"*.
     - `#[must_use] pub fn tab(&self, id: TabId) -> Option<&Button>` — **`Option`**, because `TabId` is constructible by a caller and a bar does not owe it a button.
     - `#[must_use] pub fn label(&self, id: TabId) -> Option<&str>`
@@ -591,19 +591,19 @@ now.**
 14. **The tests in `tab_bar.rs`, twenty-six**, on a
     `fn fixture() -> (Arena<WidgetNode>, TabBar, Vec<Handle>)` that builds a
     **four-tab** bar in an arena, lays it out **at a rect that is not the origin**
-    (`Rect::new(664.0, 120.0, 520.0, 64.0)`, `NEVERAGAIN`'s 2026-09-30 rule that a
+    (`Rect::new(664.0, 120.0, 520.0, 64.0)`, the rule that a
     geometry fixture at `(0, 0)` cannot see an origin read as an extent), and
     returns the tab handles.
 
     - `every_tab_button_is_a_child_of_the_bar_in_the_order_the_labels_came_in` — the node's child list, in order, against the labels.
     - `every_label_the_bar_was_given_names_exactly_one_tab` — **and a fifth label resolves to `None`**, which is the complement half.
-    - **`a_button_that_is_not_a_tab_of_this_bar_is_never_aimed_and_never_painted_by_it`** — **the `NEVERAGAIN` complement assertion, and the one that kills 24.1's dropped-row finding one level down.** A foreign `Button` on a node in the same arena: `tab_id_of` is `None` for it, `tab_rect` is `None` for the id it would have had, `tab_at` over its rect is `None`, and the bar's recorded stream contains none of its commands. **A membership assertion passes for a tab that was never added; this one cannot.**
+    - **`a_button_that_is_not_a_tab_of_this_bar_is_never_aimed_and_never_painted_by_it`** — **the complement assertion, and the one that kills 24.1's dropped-row finding one level down.** A foreign `Button` on a node in the same arena: `tab_id_of` is `None` for it, `tab_rect` is `None` for the id it would have had, `tab_at` over its rect is `None`, and the bar's recorded stream contains none of its commands. **A membership assertion passes for a tab that was never added; this one cannot.**
     - `the_bar_places_its_tabs_left_to_right_with_the_gap_and_the_padding_it_declared` — the four rects, by their positions, against `TAB_SPACING` and `TAB_BAR_PADDING`.
     - `the_bar_is_exactly_as_tall_as_its_padding_and_its_tabs` — **the demo's `the_bar_is_exactly_as_tall_as_its_padding_and_its_buttons`, moved**, and 43.2 keeps the demo's by that name.
     - `every_tab_button_is_at_least_the_touch_target_floor_tall` — **over the laid-out rects, not over `TAB_HEIGHT` compared with itself.**
     - `the_measured_size_is_the_sum_of_the_labels_the_gaps_and_the_padding` — `size` against the four laid-out rects' extent.
     - `a_bar_with_no_tabs_is_a_box_of_its_padding_and_says_so` — **the `n - 1` edge**, and `size` is asserted rather than assumed to have clamped.
-    - **`tab_at_tab_rect_and_hit_test_read_the_same_box`** — `input::hit_test(&nodes, bar.handle(), point)` for a point inside tab *k* returns tab *k*'s node, and `tab_at` returns `TabId(k)`, **for every tab, at four points per tab** (centre, and each edge's last pixel). **The `NEVERAGAIN` 2026-10-01 rule as a test: a control that is drawn and cannot be operated is indistinguishable from one that works, to a suite that only looks at what was recorded.**
+    - **`tab_at_tab_rect_and_hit_test_read_the_same_box`** — `input::hit_test(&nodes, bar.handle(), point)` for a point inside tab *k* returns tab *k*'s node, and `tab_at` returns `TabId(k)`, **for every tab, at four points per tab** (centre, and each edge's last pixel). **The 2026-10-01 rule as a test: a control that is drawn and cannot be operated is indistinguishable from one that works, to a suite that only looks at what was recorded.**
     - `the_bar_paints_its_background_and_then_its_tabs_in_the_bar_order` — **the command-position assertion**, which is what makes 43.2's pixel criterion a test rather than a capture.
     - `a_tab_with_no_cached_rect_is_painted_as_nothing_and_not_as_a_default_box` — the `None` path of `paint`.
     - `selecting_a_tab_moves_the_selection_and_reports_it_once` — `on_select`'s counter.
@@ -700,14 +700,14 @@ now.**
     `the_container_with_a_background_are_the_card_and_the_bar` keeps its name and
     its assertions.
 
-21. **Six functions are deleted by name, and `NEVERAGAIN`'s *a test of a helper
-    cannot see a call site that stopped using it* is the rule that makes the
+21. **Six functions are deleted by name, and the rule *a test of a helper
+    cannot see a call site that stopped using it* is what makes the
     replacements one-line each:** `Demo::tab_focusables` → **`TabBar::tab_ids`**,
     `Demo::tab_button` → **`TabBar::tab_id_of`** + **`TabBar::tab`**,
     `Demo::tab_at` → **`TabBar::tab_at`**, `Demo::aim_tab_buttons` → **gone, into
     `TabBar::sync`**, `Demo::press_tab` → **`TabBar::press`**, `Demo::release_tab`
     → **`TabBar::release`**, and `Demo::sync_tab_hover` → **`TabBar::hover`**.
-    **That is seven functions out and six in, and `NEVERAGAIN`'s rule is why each
+    **That is seven functions out and six in, and that rule is why each
     replacement is a delegation rather than a re-implementation**: a demo-local
     `tab_at` that computed its own rects would be a second geometry, and a
     demo-local `aim_tab_buttons` would be the aim 24.3's major came from.
@@ -912,7 +912,7 @@ this file's own history rather than a general principle.**
    is the same test on the demo's own bar. **And the structural answer is
    requirement 12's: the aim is inside the widget, in one function, with nothing
    left for a caller to forget.**
-2. **`NEVERAGAIN`'s *"a sweep of a mechanism's call sites is not a sweep of the data
+2. **The rule *"a sweep of a mechanism's call sites is not a sweep of the data
    it is built from"*, and its complement: a membership assertion passes for a row
    that was never added.** 24.1's round-3 reviewer deleted one line of
    `Demo::new` — the loop that adds seven text labels to the page table — and the
@@ -922,7 +922,7 @@ this file's own history rather than a general principle.**
    from both sides, the triples by convergence, and the index mapping by its
    complement `0 .. Page::ALL.len()`.**
 
-**And the third lesson is `NEVERAGAIN`'s *"for every control drawn, name the gesture
+**And the third lesson is *"for every control drawn, name the gesture
 that operates it"* — a tab is drawn and, on this host, cannot be pressed, so the
 hit test is asserted against the crate's own `input::hit_test` and the painted rect
 rather than against a pointer event that has never arrived.**
@@ -947,7 +947,7 @@ rather than against a pointer event that has never arrived.**
 | `the_focus_record_is_not_part_of_the_aimed_triple` | **`focused` in the triple.** It would cost six aims a frame for no visible change, because `Style::ring_width` is the one appearance `animate_to_state` never animates — and the frame-rate criterion would catch it only as a slow drift |
 | `the_bar_follows_a_new_palette_and_a_new_selected_palette_on_the_next_sync` | **The two setters being wired to the same slot**, and `set_palette` moving a *selected* tab. The bar would render and no rect assertion would see it |
 | `a_bar_with_no_tabs_is_a_box_of_its_padding_and_says_so` | **`n - 1` underflow in `size`** for an empty bar — which is the edge a saturating subtraction would make look fine |
-| **`tab_at_tab_rect_and_hit_test_read_the_same_box`** | **`NEVERAGAIN`'s 2026-10-01 rule.** A bar that draws four tabs and hit-tests three, or tests a box `arrange_flex` never produced. **Four points per tab — centre and each edge's last pixel — against `input::hit_test`, the crate's own mechanism, rather than against a pointer event this host has never delivered** |
+| **`tab_at_tab_rect_and_hit_test_read_the_same_box`** | **The 2026-10-01 rule.** A bar that draws four tabs and hit-tests three, or tests a box `arrange_flex` never produced. **Four points per tab — centre and each edge's last pixel — against `input::hit_test`, the crate's own mechanism, rather than against a pointer event this host has never delivered** |
 | `the_bar_paints_its_background_and_then_its_tabs_in_the_bar_order` | The command-position mutation, by recorded position rather than by count. **A capture sees the result; this sees the cause** |
 | `left_and_right_and_home_and_end_walk_the_selection_and_wrap_at_both_ends` | The wrap arithmetic, on a **four**-tab bar so a two-tab bar cannot make it pass |
 | **`an_arithmetic_key_with_no_tab_focused_is_left_for_the_focused_control`** | Arrows consumed unconditionally, which would take left/right away from every control behind the bar |
@@ -1135,7 +1135,7 @@ rather than against a pointer event that has never arrived.**
       - `the_focus_record_is_not_part_of_the_aimed_triple` — **the remembered
         `aimed` state**, killed by putting `focused` in the triple
 
-      **The lesson being obeyed is `NEVERAGAIN`'s *"a sweep of a mechanism's call
+      **The lesson being obeyed is *"a sweep of a mechanism's call
       sites is not a sweep of the data it is built from"*, plus its complement: a
       membership assertion passes for a row that was never added.** 24.1's round-3
       reviewer deleted one line of `Demo::new` and the whole suite stayed green
@@ -1289,7 +1289,7 @@ rather than against a pointer event that has never arrived.**
       cannot see — a command that was never recorded, and a frame-cost regression —
       are covered by `the_bar_still_records_the_command_sequence_it_recorded_before`
       and by `fps-check.sh` respectively**, which is the pairing
-      `.ai/NEVERAGAIN.md`'s *A still screenshot of a 4 fps application looks exactly
+      *a still screenshot of a 4 fps application looks exactly
       like a 60 fps one* exists to demand. **And 43.1 launches `ui_demo` zero
       times**, so the one instrument this file does not use has nothing to report on
       that sub-task
@@ -1311,7 +1311,7 @@ rather than against a pointer event that has never arrived.**
   wrapping**, and the module doc says so in one paragraph. **No `Scroll` is
   composed in**, because a horizontally scrolling bar is a second interaction
   (fling, momentum, snap, a visible scrollbar) and every one of those is
-  `.ai/NEVERAGAIN.md`'s *A drawn control with nothing behind it* waiting to happen.
+  *a drawn control with nothing behind it* waiting to happen.
   **The six-page gallery fits**, which is a fact about six labels and 1280 px and
   not a property the widget has. **A bar that does not fit is the caller's to
   solve**, and this file names the limit rather than half-building the answer
@@ -1407,7 +1407,7 @@ rather than against a pointer event that has never arrived.**
 
 - **No acceptance criterion is waived, and none requires a pointer event, a GL
   readback, a display, a network, a filesystem or the wall clock.**
-  `.ai/NEVERAGAIN.md`'s *An acceptance criterion that names an instrument which
+  *An acceptance criterion that names an instrument which
   cannot produce the evidence is not met by producing the evidence another way* is
   the rule this file obeys by leaving such a criterion out and recording the gap:
   **the tab bar's operability by finger is not one of them, and the handoff says in

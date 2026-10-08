@@ -63,13 +63,6 @@ exception it names the rule it excepts.
   `dev-dependencies`. No test that needs a display, a network, a filesystem or
   the wall clock. `developer.md`'s suite is run from `ui/`.
 
-## Never again
-
-Common AI pitfalls for this project are recorded in `.ai/NEVERAGAIN.md` —
-observed failures, dated, with the rule that replaces each one. Read it before
-non-trivial work; add to it whenever a fix is made because an agent got
-something wrong.
-
 ## Working context
 
 A working document may have a sidecar: `<file>.context.md`, beside the file it

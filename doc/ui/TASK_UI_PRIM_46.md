@@ -111,8 +111,8 @@ is the one that settles it.
    read, because the two copies would drift.
 3. **A scalar whose meaning is decided by a runtime field is a reader's trap, and
    this repository has already been caught by exactly that shape.**
-   `.ai/NEVERAGAIN.md` § *A constant named for an axis is not a deduction about a
-   dimension* records a review that read `X_LABEL_GUTTER` as a width subtraction
+   **A constant named for an axis is not a deduction about a dimension**: a
+   review read `X_LABEL_GUTTER` as a width subtraction
    when it came off a height, and the rule it leaves: **publish the derivation, and
    do not make a reader infer which dimension a number is about.** A `f32` whose
    axis is `self.axis` is that failure with a runtime trigger.
@@ -623,9 +623,9 @@ document corrections to `scroll.rs`'s **own module doc** are part of 46.1 becaus
 they live in `scroll.rs`, and the corrections to `list.rs`'s module doc are part
 of 46.2 for the same reason. **No two subagents write one file.**
 
-**And because this tree is being modified in parallel, `.ai/NEVERAGAIN.md`
-§ *On a shared tree, the suite you ran is not your suite* applies to both
-handoffs:** the shape that worked there is to copy the workspace to `/tmp`,
+**And because this tree is being modified in parallel, the rule *on a shared
+tree, the suite you ran is not your suite* applies to both handoffs:** the shape
+that worked there is to copy the workspace to `/tmp`,
 delete the other agent's file **and its `mod` line** in the copy, `diff` this
 task's files against the copy to prove they are identical, run the gate there
 with its own `CARGO_TARGET_DIR`, and report both trees. **A green suite on a
@@ -963,9 +963,8 @@ same way the vertical one does, and task 45 owns it.
 18. **`Scroll::paint` draws up to two bars,** in this order: **the vertical bar,
     then the horizontal bar**, then the two focus rings and their thumbs. The
     order is stated because a thumb drawn under a bar is a scrollbar nobody can
-    see — the same argument `List::paint` makes about rows, and
-    `.ai/NEVERAGAIN.md`'s *a filled rounded rectangle is not an outline* one level
-    up. **`Scroll::paint` returns `Vec::new()` only when neither axis has anywhere
+    see — the same argument `List::paint` makes about rows, one level up.
+    **`Scroll::paint` returns `Vec::new()` only when neither axis has anywhere
     to go**, so `scrollbar_rect`'s `None`-means-no-scrollbar contract holds for
     the pair and its doctest gains both axes. **No `DrawCommand` variant is added
     and no pipeline file is touched**, because every primitive is an axis-aligned
@@ -1469,9 +1468,8 @@ same way the vertical one does, and task 45 owns it.
       implemented and verified **before** 46.2 was briefed, that 46.2's brief
       named `Axis`, `Scroll::set_snap_points` and `Scroll::tick`'s signature as
       existing, and that **because this tree is shared, both suites were reported
-      against a `/tmp` copy with the other agent's file and its `mod` line removed**
-      per `.ai/NEVERAGAIN.md` § *On a shared tree, the suite you ran is not your
-      suite*. **A single green number with no tree named does not meet this
+      against a `/tmp` copy with the other agent's file and its `mod` line removed**.
+      **A single green number with no tree named does not meet this
       criterion.**
 
 ## Out of Scope

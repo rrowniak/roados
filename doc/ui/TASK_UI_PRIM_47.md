@@ -100,8 +100,8 @@ Verbatim from row `L6b`, clause by clause:
   `ui/src/ui_core/src/layout.rs`. `input::Focus::collect_focusable` is a private
   recursive walk in `ui/src/ui_core/src/input.rs`; `Focus::current` is public.
 - **`arrange_stack` never reads `position` and `arrange_absolute` does** — the
-  recorded defect in `.ai/NEVERAGAIN.md` § *A position API that only one parent
-  mode reads*.
+  recorded defect of a position API that only one parent
+  mode reads.
 - **`Slider::set_range` and `Slider::set_step` exist and re-project the value**, and
   `set_step`'s doc carries the sharp edge this task is built beside, verbatim:
   *"A slider from 0 to 1 with a step of 0.3 snaps to 0, 0.3, 0.6 and 0.9 and cannot
@@ -151,8 +151,8 @@ object deleted. Four reasons, and the first settles it.
    loop*** — new machinery in the one stage of the frame whose ordering is a
    recorded contract (task 37's *"record the map before the mesh and the chrome
    after it"*), and a flat list cannot nest without the owner computing push/pop
-   boundaries itself, which is the bug `NEVERAGAIN.md` § *A container that covers
-   the window swallows every tap aimed at anything behind it* is about.
+   boundaries itself, which is the bug of a container that covers
+   the window and swallows every tap aimed at anything behind it.
 2. **Inheritance is a walk up `parent()`, and the crate already walks it.**
    `node.rs`'s private `descends_from` is exactly the loop `resolve` needs:
    `nodes.get(handle).and_then(WidgetNode::parent)` until the arena answers `None`.
@@ -292,7 +292,7 @@ label and a choice set is **not** something to animate.
 
 **And no `mark_dirty` is required anywhere, which is a decision and not an
 oversight.** Every widget this task places has a fixed rect and a mode that changes
-only what is *inside* that rect, so no layout input moves. `NEVERAGAIN.md` § *A
+only what is *inside* that rect, so no layout input moves. *A
 cache invalidated in the wrong order is a cache that lies* is the trap this walks
 around rather than into: there is no cache to invalidate because no cached rect
 depends on the mode. `a_mode_change_moves_no_rect_in_the_tree` is the test that
@@ -391,7 +391,7 @@ other two, which is its second:
      precedent does not transfer to a map that is consulted, not traversed.
    - **`retain` exists, and it is this task's lesson from task 24.1.** It drops
      every entry whose handle the arena no longer holds and returns how many it
-     dropped. `NEVERAGAIN.md` § *A sweep of a mechanism's call sites is not a sweep
+     dropped. *A sweep of a mechanism's call sites is not a sweep
      of the data it is built from* is the `page_members` leak, where *"the table
      was pruned nowhere"* and six rows named dead handles; a scope whose owner
      removes a node needs the same one call, and **`retain` is deliberately not
@@ -431,7 +431,7 @@ other two, which is its second:
    - **`Callback<()>` is `crate::widgets::Callback<()>`, not `Rc<dyn Fn()>`.** It is
      the crate's own erased action type, it is already the return type of a button's
      handler, and a second erased-closure type beside it would be
-     `NEVERAGAIN.md` § *Two documents each claiming ownership of one definition*
+     *two documents each claiming ownership of one definition*
      with an extra struct.
    - **`capture` appends and says so**; it does **not** replace and it does **not**
      return a value (there is nothing to fail). `restore` takes `&self`, runs every
@@ -688,7 +688,7 @@ other two, which is its second:
     - **The container is `LayoutMode::Absolute`, `Constraints::tight(CLIMATE_SIZE)`,
       `set_position(Some(Offset::new(CLIMATE_ORIGIN.0, CLIMATE_ORIGIN.1)))`,
       attached to the root after the controls layer.** **`Absolute` and not
-      `Stack`, by `NEVERAGAIN.md` § *A position API that only one parent mode
+      `Stack`, by the rule *a position API that only one parent mode
       reads*: `arrange_stack` never reads `position` and `arrange_absolute` is the
       one arm that does.** Every child declares its own `set_position`, in
       coordinates relative to the container's origin, and the container gives it a
@@ -834,7 +834,7 @@ other two, which is its second:
 14. **The tests, named, with no display, no network, no filesystem and no wall
     clock** — the only kind `AGENTS.md` permits. Each names the mutation it kills,
     because `developer.md` § Phase 3 (*"A test that has never failed is not a
-    test"*) and `NEVERAGAIN.md` § *A survivor is a missing assertion* both require
+    test"*) and *a survivor is a missing assertion* both require
     it.
 
     **In `mode.rs`:**
@@ -1179,7 +1179,7 @@ other two, which is its second:
       in the demo), so **1935 or more**, and **no test was deleted, renamed away or
       weakened**: the handoff lists the before and after counts per binary. **The handoff names the tree it measured on** — this
       sequence has three task files open at once, and
-      `.ai/NEVERAGAIN.md` § *On a shared tree, the suite you ran is not your suite*
+      *on a shared tree, the suite you ran is not your suite*
       is the rule that a number without a tree is not a result.
       `cargo fmt --check`, `cargo build --all-targets --all-features`,
       `cargo clippy --all-targets --all-features -- -D warnings` and
@@ -1233,7 +1233,7 @@ other two, which is its second:
         `assert_the_pages_partition_the_placed_rects` **passes unamended and holds
         no list to extend** — it is a bidirectional containment check between the
         union and `placed_rects()`, so it reads like a table and is not one, and
-        `.ai/NEVERAGAIN.md` § *A sweep of a mechanism's call sites is not a sweep of
+        *a sweep of a mechanism's call sites is not a sweep of
         the data it is built from* is the rule that says so. The completeness lives
         where the lists are: `assert_placed_handles_is_complete` and
         `expected_placed_rect_names`.

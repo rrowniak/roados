@@ -153,7 +153,7 @@ seven tokens.
   **220** doctests — measured on `75a896c` plus the uncommitted diff with
   `cargo test --all-features` from `ui/`; `ui_core` runs 1451 and reports one
   ignored. **The handoff names the tree it measured on**, because four task
-  files are open at once and `.ai/NEVERAGAIN.md` § *On a shared tree, the suite
+  files are open at once and *on a shared tree, the suite
   you ran is not your suite* is the rule that a number without a tree is not a
   result.
 - **`.ai/tools/fps-check.sh` takes `seconds` then `floor` and runs the binary
@@ -163,8 +163,8 @@ seven tokens.
 - **No pointer event has ever been observed reaching this window on this host**
   (`IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
   method*, measured across several sessions). **Nothing in this task is verified
-  by a pointer, and no acceptance criterion here asks for one** — `.ai/
-  NEVERAGAIN.md` § *An acceptance criterion that names an instrument which cannot
+  by a pointer, and no acceptance criterion here asks for one** —
+  *an acceptance criterion that names an instrument which cannot
   produce the evidence is not met by producing the evidence another way* is the
   rule that decides that.
 
@@ -310,8 +310,8 @@ because it cannot express the subtree row `L9`'s Blocks column names.
    push/pop"*; it would be ***build a paint traversal in `ui_core` and reconcile
    it with the demo's flat loop***, in the one stage of the frame whose ordering is
    a recorded contract, **and a flat list cannot nest without the owner computing
-   the boundaries itself** — the bug `.ai/NEVERAGAIN.md` § *A container that
-   covers the window swallows every tap aimed at anything behind it* is about.
+   the boundaries itself** — the bug of a container that
+   covers the window and swallows every tap aimed at anything behind it.
 4. **A `Theme` field is refused, and this is the decisive one.** `Theme` has **no
    node** and must stay the *global* source: `switch_to` iterates
    `ThemeToken::all()` and animates **every** member, so a scope stored on `Theme`
@@ -480,7 +480,7 @@ still unfixed**, because `mode.rs` does not exist in the tree this file was
 written against.
 
 - **This task does not touch `property.rs`.** One module doc, one sentence, and it
-  is 47's. Repeating it would be `NEVERAGAIN.md` § *Two documents each claiming
+  is 47's. Repeating it would be *two documents each claiming
   ownership of one definition*, with a second patch on a shared file.
 - **This task's own edit to § *Inheritance* is to add `scope::ThemeScope` to the
   list 47 writes** — which means **§ *Inheritance` still reading *"Some properties
@@ -832,7 +832,7 @@ table* was written about.
 10. **The tests, named, with no display, no network, no filesystem and no wall
     clock** — the only kind `AGENTS.md` permits. Each names the mutation it kills,
     because `developer.md` § Phase 3 (*"A test that has never failed is not a
-    test"*) and `NEVERAGAIN.md` § *A survivor is a missing assertion* both require
+    test"*) and *a survivor is a missing assertion* both require
     it.
 
     **In `scope.rs` — seventeen:**
@@ -1057,8 +1057,8 @@ table* was written about.
       doctests** — and **no test was deleted, renamed away or weakened**: the
       handoff lists the before and after counts per binary.
       **The handoff names the tree it measured on**, because four task files are
-      open at once and `.ai/NEVERAGAIN.md`
-      § *On a shared tree, the suite you ran is not your suite* is the rule that a
+      open at once and
+      *on a shared tree, the suite you ran is not your suite* is the rule that a
       number without a tree is not a result.
       `cargo fmt --check`, `cargo build --all-targets --all-features`,
       `cargo clippy --all-targets --all-features -- -D warnings` and
@@ -1130,8 +1130,8 @@ table* was written about.
       `widgets/gauge.rs`, `widgets/image.rs`, `widgets/progress.rs` or
       `ui/src/ui_demo/src/main.rs`. **`property.rs` in particular is untouched**,
       because its false inheritance sentence is `TASK_UI_PRIM_47`'s requirement 3
-      and duplicating a fix another task owns is `NEVERAGAIN.md`
-      § *Two documents each claiming ownership of one definition* with a patch.
+      and duplicating a fix another task owns is
+      *two documents each claiming ownership of one definition* with a patch.
       `grep -c unsafe` over `scope.rs` and over the three changed widgets is **0**,
       and `grep -n 'unwrap()\|expect(\|panic!\|unimplemented!\|todo!'` over
       `scope.rs` returns **nothing**. **`unwrap_or` is not `unwrap` and is used

@@ -47,9 +47,9 @@ smoke test rather than a development task: nothing new is built here.
    it as closed with evidence, or as still open with the reason. Nothing may be
    reported closed on the strength of a build that succeeded.
 
-6. **Feed back.** Anything an agent got wrong during this sequence belongs in
-   `.ai/NEVERAGAIN.md`, and any factual question the work settled belongs in
-   `doc/findings/`. This is stage 6 of `.ai/workflows/idea-to-code.md` and it is
+6. **Feed back.** Anything an agent got wrong during this sequence, and any
+   factual question the work settled, belongs in `doc/findings/`. This is stage
+   6 of `.ai/workflows/idea-to-code.md` and it is
    the step most often skipped.
 
 ## Acceptance Criteria
@@ -60,7 +60,7 @@ smoke test rather than a development task: nothing new is built here.
 - [ ] Frame rate is measured and reported, with method and scene.
 - [ ] Every interaction in task 24 was exercised on the device.
 - [ ] Each carried waiver is closed with evidence or still open with a reason.
-- [ ] `NEVERAGAIN.md` and `doc/findings/` are updated, where warranted.
+- [ ] `doc/findings/` is updated, where warranted.
 
 ## Out of Scope
 

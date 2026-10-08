@@ -885,8 +885,9 @@ impl Toggle {
         // test in the slider's module missed because every rect there started at
         // the origin: a control laid out anywhere else in the window reported a
         // negative run and pinned its two ends to its own centre. The rule that
-        // came out of it is in `.ai/NEVERAGAIN.md`, and the fixture that follows
-        // it is `a_toggle_away_from_the_origin_puts_its_whole_geometry_elsewhere`.
+        // came out of it is that a rect's origin and a rect's extent are
+        // different numbers, and the fixture that follows it is
+        // `a_toggle_away_from_the_origin_puts_its_whole_geometry_elsewhere`.
         let run = track.width - THUMB_RADIUS * 2.0;
         if run <= 0.0 {
             let middle = track.x + track.width / 2.0;

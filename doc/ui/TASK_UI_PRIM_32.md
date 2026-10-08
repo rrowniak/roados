@@ -151,8 +151,7 @@ rather than a fade.
       ink ending **9 px inside `max_width`** — so the Clip row is AE 0 against
       its own before-capture, and the clip cut nothing. A criterion whose
       instrument cannot produce the evidence is not met by producing the evidence
-      another way (`.ai/NEVERAGAIN.md`, *An acceptance criterion that names an
-      instrument which cannot produce the evidence*). **No temporary seed was
+      another way. **No temporary seed was
       used to manufacture an overhanging cut.**
 - [x] **AC4** Two labels with different clip rects in one frame do not clip each
       other

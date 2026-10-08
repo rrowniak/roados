@@ -166,8 +166,8 @@ whose origin is currently implicit.
    wrap. **The defect this records is the general one, not the tool's**: an
    acceptance criterion that names an instrument which cannot produce the
    evidence is not satisfied by producing the evidence another way, and this file
-   carried the wording from 24.1 without anyone checking it. `.ai/NEVERAGAIN.md`
-   has the entry. **The tool change is still owed and is not this task's.**
+   carried the wording from 24.1 without anyone checking it. **The tool change
+   is still owed and is not this task's.**
 
 ## Acceptance Criteria
 

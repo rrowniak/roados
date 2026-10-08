@@ -34,7 +34,7 @@ gesture has a unit test over literal numbers.
 
 | task | what this task needs from it |
 |---|---|
-| **`TASK_UI_DEMO_03`** | **`PaneRects`, in three separate ways.** `card_row` and `dots` are the two bands 05-1 fills; **`pane_rects(width) -> PaneRects` is 05-3's seam** — the reshape is one argument to a function task 03 already wrote and tested, which is why this task's file list contains no layout work; and **the car matrix, which must be one composition and not two.** Task 03's requirement 9 puts the composition *"in `Demo`'s own private helper"*. **This task requires that helper to be named `car_mvp(&self) -> Option<Mat4>`, and if task 03 named it otherwise 05 renames it in a one-line edit rather than writing a second composition** — two compositions of one camera is `.ai/NEVERAGAIN.md`'s second-copy rule with a different spelling, and the two would differ the first time someone changed one |
+| **`TASK_UI_DEMO_03`** | **`PaneRects`, in three separate ways.** `card_row` and `dots` are the two bands 05-1 fills; **`pane_rects(width) -> PaneRects` is 05-3's seam** — the reshape is one argument to a function task 03 already wrote and tested, which is why this task's file list contains no layout work; and **the car matrix, which must be one composition and not two.** Task 03's requirement 9 puts the composition *"in `Demo`'s own private helper"*. **This task requires that helper to be named `car_mvp(&self) -> Option<Mat4>`, and if task 03 named it otherwise 05 renames it in a one-line edit rather than writing a second composition** — two compositions of one camera is the second-copy rule with a different spelling, and the two would differ the first time someone changed one |
 | **`TASK_UI_PRIM_44`** | **`Icon`** — `Icon::new(nodes, texture, source)`, `Icon::set_tint`, `Icon::paint(rect)`, `ICON_SIZE` — and the tint in `DrawCommand::Image`. 05-2's lock and charge-port glyphs, **which are two of the 33 baked Lucide PNGs task 39 committed**: `lock` and `plug-zap`. **This is the first consumer of those 66 files in the demo** |
 | **`TASK_UI_PRIM_46`** | **`Scroll` with `Axis::Horizontal`, `set_content_width`, `set_snap_points`, `snap_to_points(rect, motion)`, `scroll_by`, `max_scroll_for`, `tick`.** 05-1's pager **is** a `Scroll` with three snap points; § *Requirements* 5 shows why it cannot be anything else and why the pages are full-width |
 | **`TASK_UI_PRIM_45`** | **the per-node clip**, which 05-1 needs twice: the card at a page boundary is **half outside the pager's viewport**, and `L8`'s *Blocks* column names *"the carousel's page edges"* and `L5`'s names *"The card carousel"* |
@@ -304,8 +304,8 @@ and a greyed `Start FSD` — **three, and a different three.**
    labels, one per corner, at the four quadrant positions of the card — **plus one
    for the recommended block, and two per non-tyre card.** Every label carries a
    `PageMember` row and a `placed_handles` row, **`assert_placed_handles_is_complete`
-   being the instrument**, on `.ai/NEVERAGAIN.md`'s 2026-10-04 lesson: the demo's
-   page table has been caught green with a row dropped, twice.
+   being the instrument**: the demo's page table has been caught green with a row
+   dropped, twice.
 
 10. **05-1's tests, in `carousel.rs`'s `mod tests` and `main.rs`'s, with no display,
     no network, no filesystem and no wall clock:**
@@ -402,7 +402,7 @@ and a greyed `Start FSD` — **three, and a different three.**
     **`at` is `Demo::slider_at`'s shape with the page gate first** — `if !self
     .on_show(node) { return None; }` then `if !self.indicators… revealed { return
     None; }` then the rect test — **because a hidden hotspot that is still
-    hit-testable is the defect `.ai/NEVERAGAIN.md` records for a control with no
+    hit-testable is the defect of a control with no
     route to it, in the other direction.** **One row in `GALLERY_SHORTCUTS`, `R`,
     toggling the reveal**, on row 3's *"revealed by a gesture on the picture"* —
     **the key and a future tap share one write path, and the key is what makes the

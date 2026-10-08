@@ -165,8 +165,8 @@ second of which is the one that settles it.
   this column documents.**
 - **`flash_lit(elapsed) = (elapsed / BLINK_HALF_MS) % 2 == 0`** is a pure function
   of an elapsed time. **No counter, no flip-flop, and therefore no state that can
-  disagree with the clock** — the failure `NEVERAGAIN`'s *a counter incremented
-  per event, beside a doc saying it was not* is about, one level down.
+  disagree with the clock** — the failure *a counter incremented
+  per event, beside a doc saying it was not* describes, one level down.
 - **`FLASH_ONCE_MS = 2 × BLINK_HALF_MS`** is *"flashes once"* as a duration: one
   on, one off, then solid. **It is derived from `BLINK_HALF_MS` and not typed
   beside it**, so the two cannot drift.
@@ -420,9 +420,8 @@ sentence supports both and a reader who prefers the other has it written down.
    first"* applied to a helper that exists for exactly this: a fixed string in a
    fixed box with an ellipsis. **All twenty-three nodes live under
    `DemoPane::indicators`**, and each carries a `PageMember` row and a
-   `placed_handles` row — **twenty-three rows and not one**, on
-   `.ai/NEVERAGAIN.md`'s 2026-10-04 entry: the demo's page table and
-   `placed_handles` have each been caught green with a row dropped, and
+   `placed_handles` row — **twenty-three rows and not one**: the demo's page table
+   and `placed_handles` have each been caught green with a row dropped, and
    **twenty-three labels under one box is the largest instance of that shape the
    demo has.**
 
@@ -518,9 +517,8 @@ sentence supports both and a reader who prefers the other has it written down.
       label handles is in `page_members` for the seventh variant and in
       `placed_handles`, **and `page_members.len()` grew by exactly twenty-three
       over the count `TASK_UI_DEMO_03` left**. **A count beside the membership**,
-      because a membership assertion alone passes when a row is missing —
-      `NEVERAGAIN`'s 2026-10-04 rule, and the demo has now been bitten by it
-      twice.
+      because a membership assertion alone passes when a row is missing,
+      and the demo has now been bitten by that twice.
     - **`the_i_j_and_l_keys_reach_the_column_through_handle_event`** —
       `demo_on(Page::Demo)`, one `Demo::handle_event` per key with a
       constructed `Event::KeyDown`, asserting the named row's `active` moved and
@@ -584,7 +582,7 @@ sentence supports both and a reader who prefers the other has it written down.
       control at a second half-length**, so the assertion cannot pass for any
       threshold. **There is no `Cell<bool>`, no `RefCell<bool>` and no flip-flop in
       the module** — `rg -n 'Cell|RefCell' ui/src/ui_demo/src/indicators.rs`
-      returns nothing — which is `NEVERAGAIN`'s *a counter incremented per event,
+      returns nothing — which is *a counter incremented per event,
       beside a doc saying it was not* one level down.
 
 - [ ] **All three timing rules are pinned, including their second clauses.**

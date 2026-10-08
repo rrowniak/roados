@@ -140,7 +140,7 @@ named as proposals where they are proposals.**
 | constant | value | where it comes from |
 |---|---|---|
 | `PANE_WIDTH` | `WINDOW.width * 0.40` = **512.0** | § *The car-status pane*'s *"Left ~40 %"*, and `WINDOW` is 1280 wide. **Written as the product, not the product's value**, so the ratio is visible where the number is |
-| `PANE_TOP` | `CONTENT_TOP` = **64.0** | task 24.2's `CONTENT_TOP`. **The pane starts under the tab bar and never over it** — `.ai/NEVERAGAIN.md` § *A container that covers the window swallows every tap aimed at anything behind it* is why the bar's band is not the pane's |
+| `PANE_TOP` | `CONTENT_TOP` = **64.0** | task 24.2's `CONTENT_TOP`. **The pane starts under the tab bar and never over it** — a container that covers the window swallows every tap aimed at anything behind it, which is why the bar's band is not the pane's |
 | `PANE_BOTTOM` | `FPS_READOUT_ORIGIN.1` = **684.0** | the frame-rate readout sits at `(60, 684)`, and **this page does not cover the instrument every other page shows.** A pane that ran to the window's foot would put 460 px of opaque fill over the readout |
 | `PAGE_INDICATOR_HEIGHT` | **24.0** | the dots are *"· · ·"* — three marks, and a dot row a dot's diameter tall. **A proposal**, and the smallest height at which a 6 px disc with 9 px of air above and below fits |
 | `CARD_ROW_HEIGHT` | **120.0** | the ASCII's card row is about a fifth of the pane's height. **A proposal**, from the photograph's proportions and nothing else |
@@ -169,8 +169,8 @@ than a picture.**
 2. **Every readout belongs to exactly one state, and the state's own table lists
    it.** A readout is a `DemoLabel` with a row in exactly one state's list, and
    `every_readout_belongs_to_exactly_one_state_and_every_state_has_some` asserts
-   it. **This is `.ai/NEVERAGAIN.md` § *A sweep of a mechanism's call sites is not
-   a sweep of the data it is built from*, aimed at the table rather than the code** —
+   it. **This is the *a sweep of a mechanism's call sites is not a sweep of the
+   data it is built from* rule, aimed at the table rather than the code** —
    the demo's page-membership table has already been caught twice by a missing row,
    and a state's readout list is the same shape of data.
 3. **Range is in all three states and nothing else is.** § *Screen states* names
@@ -300,7 +300,7 @@ that settles it:
    is right.
 2. **Two ambient terms would double the frame's rotation work for one visible
    change**, and `AMBIENT_YAW_RATE` is already a per-frame write.
-3. **`NEVERAGAIN`'s "a second copy of a decision" rule applies to the constants
+3. **The *a second copy of a decision* rule applies to the constants
    too**, which is why requirement 1 renames task 40's *placement* constants to
    `DATA_CAR_ORIGIN` / `DATA_CAR_SIZE` rather than adding a second pair beside
    them. **The camera constants are shared and are not renamed** — one distance,
@@ -318,8 +318,7 @@ that settles it:
    and carry every hit into the edit; a hit this list misses is a site the rename
    breaks and `cargo build` will not catch if the name resolved through a `use`.
    The reason is § *The ambient rotation*: one car, one pair of names, and two
-   pairs of names is `.ai/NEVERAGAIN.md`'s second-copy rule with a different
-   spelling.
+   pairs of names is the second-copy rule with a different spelling.
 
 2. **The pane's constants, in `ui/src/ui_demo/src/main.rs`, each `const`, each
    doc-commented with its derivation from the § *The pane's geometry* table and
@@ -366,7 +365,7 @@ that settles it:
    /// **Which is also why this function cannot be a method on `Demo`.** It takes
    /// no handle and reads no property, so it is `#[must_use]`, it is free of GL
    /// and of `Arena`, and every assertion about the pane's layout is a call to it
-   /// rather than a frame. `.ai/NEVERAGAIN.md`'s *A test fixture that builds what
+   /// rather than a frame. The rule *a test fixture that builds what
    /// production does not define* runs the other way here: the production
    /// construction **is** the tested one.
    #[must_use]
@@ -439,9 +438,9 @@ that settles it:
    then `self.car_state = state`, then the readouts' visibility sync (requirement
    7), then `self.sync_page_visibility()`. It returns whether it moved.
    **`sync_page_visibility` is called here and nowhere else new** — the page gate
-   is what makes a state change visible at all, and `.ai/NEVERAGAIN.md`'s
-   2026-10-04 entry records `show_page`'s own `sync_page_visibility` call as
-   *"a mechanism with no test"* found by mutation, so this call site gets a test
+   is what makes a state change visible at all, and `show_page`'s own
+   `sync_page_visibility` call was *"a mechanism with no test"* found by mutation,
+   so this call site gets a test
    in requirement 11 by name.
    **`TASK_UI_DEMO_04` adds exactly one line to this function** — the self-test
    arm — and this task must leave the function so that a one-line addition needs
@@ -471,8 +470,8 @@ that settles it:
    ///
    /// **One table, read by the visibility sync and by the completeness
    /// assertion**, because two readers of one list is the arrangement
-   /// `Page::ALL` already uses for the six pages and the arrangement
-   /// `NEVERAGAIN`'s missing-row entry is about when there are two.
+   /// `Page::ALL` already uses for the six pages, and the arrangement that
+   /// catches a missing row.
    const STATE_READOUTS: [[bool; 5]; 3] = [
        // Parked:   drive mode, range.
        [true,  true,  false, false, false],
@@ -523,10 +522,10 @@ that settles it:
    **Every one of the six handles gets a `PageMember { page: <the seventh
    variant>, focusable: false, always: false }` row in `Demo::new` and a
    `("pane …", handle)` row in `Demo::placed_handles`**, and
-   `expected_placed_rect_names` gains all six names. **This is the obligation
-   `.ai/NEVERAGAIN.md`'s 2026-10-04 entry makes twice** — the page table's
-   completeness assertion and `placed_handles` are the two instruments that catch
-   a dropped row, and both were caught green before.
+   `expected_placed_rect_names` gains all six names. **This is an obligation two
+   instruments carry** — the page table's completeness assertion and
+   `placed_handles` are the two that catch a dropped row, and both were caught
+   green before.
    **`car_node` is a second placement of the same car**, so its rect is
    `Rect::new(CAR_ORIGIN.0, CAR_ORIGIN.1, CAR_SIZE.width, CAR_SIZE.height)` and
    **`Demo::car_at` is not changed** — the `data` page's car keeps its own hit
@@ -642,7 +641,7 @@ that settles it:
       in a row is `true` for at least one state, **no index is `true` in two
       states' rows except the range**, and every `Option` in `CarReadouts` is
       `Some` **iff** its index is `true` in some row. **The complement is
-      asserted, not the membership** — `NEVERAGAIN`'s rule, and the reason: a row
+      asserted, not the membership** — the reason: a row
       that is missing is trivially "not a member" and every membership-phrased
       assertion passes.
     - **`switching_state_moves_the_gates_and_nothing_else`** — a `Demo` on the
@@ -679,7 +678,7 @@ that settles it:
       `Primary`.
     - **`the_tint_granularity_caption_names_body_and_wheels`** — a source-string
       assertion over the caption's format string, in the shape `blur.rs` uses, on
-      `NEVERAGAIN`'s rule that *"if the text being edited is a claim rather than
+      the rule that *"if the text being edited is a claim rather than
       code, the check that finds out is a reader, not a tool"* — except here the
       reader is a capture and the tool is a grep for the sentence the pane prints.
 

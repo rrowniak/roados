@@ -395,7 +395,7 @@ of which is a test:
   gap: **`LayoutMode::Stack` places every child at `Offset::ZERO`, so today there
   is no way to inset one stacked child from its container's origin except a
   wrapper node with a position.** That is the same condition
-  `.ai/NEVERAGAIN.md` § *A position API that only one parent mode reads* records
+  *a position API that only one parent mode reads* records
   for `set_position`, and this task closes it for margins.
 - **`LayoutMode::Grid`: not read**, if `arrange_grid` exists when this task
   lands — and requirement 9 makes the condition explicit rather than assuming an
@@ -1053,8 +1053,7 @@ expansion** (`developer.md` § *Stop conditions*).
     `CrossAxisAlignment` are untouched.**
 
 12. **Four doc comments gain the sentences that name who reads what**, in the
-    shape `.ai/NEVERAGAIN.md` § *A position API that only one parent mode reads*
-    prescribes — *"a setter that a **parent** consumes is not honoured by every
+    shape *"a setter that a **parent** consumes is not honoured by every
     parent, and the compiler will not say so"*:
 
     - **`LayoutState::with_flex`, `LayoutState::with_shrink`,
@@ -1290,8 +1289,8 @@ expansion** (`developer.md` § *Stop conditions*).
       the same `with_spacing(12.0)` on a `row`, a `column`, a `stack` and an
       `absolute`: **the first two separate the children, the last two do not.**
       **The second half exists because `with_spacing` on a `Stack` is silently
-      ignored today and no test says so**, which is `.ai/NEVERAGAIN.md`
-      § *A position API that only one parent mode reads* with nothing standing
+      ignored today and no test says so**, which is
+      *a position API that only one parent mode reads* with nothing standing
       between it and the next caller.
     - **`the_declared_constraints_are_the_flex_basis`** — **the base-size
       decision, by value, and the test that makes § *`flex-basis`*'s argument
@@ -1551,8 +1550,8 @@ expansion** (`developer.md` § *Stop conditions*).
       _children_and_a_stack_ignores_it` asserts the same `with_spacing(12.0)`
       separates children in a `row` and a `column` and does nothing in a `stack`
       or an `absolute`** — **the second half is a fact no test covered before this
-      task**, which is `.ai/NEVERAGAIN.md`
-      § *A position API that only one parent mode reads* with nothing standing
+      task**, which is
+      *a position API that only one parent mode reads* with nothing standing
       between it and the next caller. **No `FlexConfig` field is added, no getter,
       and `MainAxisAlignment` and `CrossAxisAlignment` are untouched** —
       `git diff --stat` shows `FlexConfig` changed in comments only.
@@ -1766,8 +1765,8 @@ expansion** (`developer.md` § *Stop conditions*).
   `arrange_grid` exists when this task lands its one push gains
   `trailing: Size::ZERO` — **one argument, no arithmetic, no decision.** **A
   margin is not read inside a grid cell**, and the field's doc says so and a test
-  holds it, which is the remedy `.ai/NEVERAGAIN.md`
-  § *A position API that only one parent mode reads* prescribes.
+  holds it, which is the remedy
+  *a position API that only one parent mode reads* prescribes.
 - **No absolute margins and no `auto` margins.** **Negative** margins are refused
   and clamped to zero at store, for `Padding::clamped`'s own reason: *"a negative
   side would otherwise pull a child out of its parent's box, and there is no

@@ -981,8 +981,8 @@ impl FontSet {
     ///
     /// **No allocation and no `Option`**, because this is called once per character
     /// per run and a chain lookup that cloned a family would be the first
-    /// per-frame allocation in the text path — the shape of cost `.ai/NEVERAGAIN.md`
-    /// records as invisible until a frame rate is measured.
+    /// per-frame allocation in the text path — a shape of cost invisible until a
+    /// frame rate is measured.
     fn drawable(&self, id: FamilyId) -> &Family {
         let entry = self.entry(id);
         let default = self.default_family();
@@ -1303,8 +1303,8 @@ const REPLACEMENT_MIN: u32 = 3;
 /// width for an uncovered character comes from here and the drawn box's own
 /// `advance` comes from [`replacement_bitmap`], so a caller that measured with
 /// one and drew with the other would leave a gap or an overlap. Two callers, one
-/// function — the rule `.ai/NEVERAGAIN.md`'s *two documents each claiming
-/// ownership of one definition* is about, in code.
+/// function — the rule that two documents each claiming ownership of one
+/// definition is about, in code.
 #[must_use]
 pub fn replacement_advance(size: f32) -> f32 {
     REPLACEMENT_ADVANCE_EM * size.max(0.0)
@@ -1803,8 +1803,8 @@ impl GlyphAtlas {
     /// next, so the sizes the atlas has held divide the size it is growing into
     /// and nothing has to be rounded on the way; the ceiling because a texture
     /// that grows without one grows until the driver refuses the upload, and a GL
-    /// error nothing reads is the failure mode `.ai/NEVERAGAIN.md` has already
-    /// recorded twice.
+    /// error nothing reads is a failure mode already recorded twice in this
+    /// repository.
     ///
     /// **It rounds the current size up to the next power of two, and not up its own
     /// double.** `next_power_of_two` is idempotent on a power of two — it answers
@@ -2914,8 +2914,7 @@ mod weight_tests {
 
     /// A glyph's entry, off the origin and with a size the assertions can tell
     /// apart: an entry at `x = 0` with the default metrics cannot be told from
-    /// any other, which is the same reason `.ai/NEVERAGAIN.md` § *A rect's
-    /// origin and a rect's extent are different numbers* exists.
+    /// any other — a rect's origin and a rect's extent are different numbers.
     ///
     /// **An `Entry` and not a `GlyphPlacement`, because that is what the atlas
     /// stores** — the placement is derived from it, and a test that builds one
@@ -3690,9 +3689,8 @@ mod chain_tests {
     /// show that the two halves of the replacement agree, which they would agree
     /// about at 0.06 as readily as at 0.6; a mistyped fraction would leave the
     /// suite green and put a box half the width of the character it stands in for
-    /// on the screen. `.ai/NEVERAGAIN.md`'s *a strength clamped to 0..=1* entry is
-    /// the same shape: assert the number the word in the spec fixes, because a
-    /// shape assertion will not.
+    /// on the screen. A strength clamped to 0..=1 is the same shape: assert the
+    /// number the word in the spec fixes, because a shape assertion will not.
     #[test]
     fn the_replacement_box_is_the_size_its_two_constants_fix() {
         let bitmap = replacement_bitmap(24.0);

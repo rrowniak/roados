@@ -105,10 +105,9 @@ use sdl3::keyboard::Keycode;
 /// reason the slider's own `DEFAULT_LENGTH` is.
 ///
 /// It is a **default**, not a fixed number: [`TextInput::width`] starts here and
-/// a caller writes its own. That is the defect `.ai/NEVERAGAIN.md` records as
-/// *one sibling got the operator's fix* — the operator widened a 6-pixel slider
-/// track and a 6-pixel scrollbar on two consecutive days, and a sizing constant
-/// with no door cannot be answered the same way twice.
+/// a caller writes its own. That is the defect: the operator widened a 6-pixel
+/// slider track and a 6-pixel scrollbar on two consecutive days, and a sizing
+/// constant with no door cannot be answered the same way twice.
 const DEFAULT_WIDTH: f32 = 240.0;
 
 /// The height a text input asks for when its caller gives it no size of its own.
@@ -130,8 +129,8 @@ const MIN_TOUCH_TARGET: f32 = 44.0;
 /// The border is a filled rounded rectangle at the field's own rect, with the
 /// surface drawn over it inset by this much, so only the border is left:
 /// [`DrawCommand::RoundedRect`] fills its rect, and a border drawn any other way
-/// is a second background rather than an outline — the defect `.ai/NEVERAGAIN.md`
-/// records as *a filled rounded rectangle is not an outline*.
+/// is a second background rather than an outline — a filled rounded rectangle is
+/// not an outline.
 ///
 /// The theme's own `BorderWidth` is a 1-pixel hairline. A field is read at a
 /// glance from across a cabin, so its border is twice that, and a caller that
@@ -1324,8 +1323,8 @@ impl TextInput {
     /// the border, so the border reads as an outline: a
     /// [`DrawCommand::RoundedRect`] fills its rect, so a border drawn on its own
     /// is a second background, and a border that the surface does not cover is
-    /// the defect `.ai/NEVERAGAIN.md` records as *a filled rounded rectangle is
-    /// not an outline*. The text is recorded after the selection, so the
+    /// the defect: a filled rounded rectangle is not an outline. The text is
+    /// recorded after the selection, so the
     /// selection is a highlight behind the text rather than a box over it. The
     /// caret is last, because a caret is over everything.
     ///
@@ -2174,9 +2173,9 @@ mod tests {
         // The point of this test is that a *caller* can answer a request to change
         // the field's size. The operator widened a 6-pixel slider track on one day
         // and a 6-pixel scrollbar the next, and both fixes went through a setter;
-        // a sizing constant with no door is the defect that cost the second round,
-        // and `.ai/NEVERAGAIN.md` records it under *one sibling got the operator's
-        // fix*. Reverting `size` to the two constants fails here.
+        // a sizing constant with no door is the defect that cost the second round
+        // — one sibling got the operator's fix. Reverting `size` to the two
+        // constants fails here.
         input.width.set(420.0);
         input.height.set(64.0);
         assert_eq!(input.size(), Size::new(420.0, 64.0));
@@ -3226,10 +3225,10 @@ mod tests {
 
     #[test]
     fn the_surface_is_drawn_over_the_border_so_the_border_reads_as_an_outline() {
-        // The defect `.ai/NEVERAGAIN.md` records as *a filled rounded rectangle is
-        // not an outline*: a `RoundedRect` fills its rect, so a border recorded on
-        // its own is a second background and the field is a card with a line round
-        // it. Asserting the pair — the grown shape *and* the covering shape
+        // The defect is that a filled rounded rectangle is not an outline: a
+        // `RoundedRect` fills its rect, so a border recorded on its own is a
+        // second background and the field is a card with a line round it.
+        // Asserting the pair — the grown shape *and* the covering shape
         // recorded after it — is the only way a recorded-command assertion can see
         // that, because the border alone is satisfied by a filled rectangle of
         // exactly the right colour and place.

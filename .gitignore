@@ -8,3 +8,8 @@
 # Temp data
 
 /tmp/
+
+# Asset-pipeline download cache. The committed assets under
+# ui/src/ui_demo/assets/ are NOT covered by this: they are in the tree.
+# Only .asset-cache/ (the 12 MB of pinned upstream archives) stays out.
+/.asset-cache/

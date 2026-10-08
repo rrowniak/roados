@@ -564,6 +564,58 @@ impl TextureCache {
         self.load(path, &mut |path: &Path| decode(path))
     }
 
+    /// Loads the image at `path` from disk and always gives it a texture of
+    /// its own, even when it would fit in the shared atlas.
+    ///
+    /// A mesh's UVs address a whole 0-1 texture, and an atlas window is not
+    /// one: the 512x512 colormap packs into the atlas under the ordinary rule
+    /// and the mesh then samples it with its own UVs, which is a black car at
+    /// any ambient. So the colormap comes through here, and everything else
+    /// keeps going through [`TextureCache::load_from_file`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TextureError::Unreadable`] when the file cannot be opened or
+    /// decoded, and [`TextureError::TooLarge`] when it decodes to a size with
+    /// no addressable pixel count.
+    pub fn load_from_file_standalone(
+        &mut self,
+        path: &Path,
+    ) -> Result<TextureHandle, TextureError> {
+        self.load_standalone(path, &mut |path: &Path| decode(path))
+    }
+
+    /// Loads the image at `path` through `loader` and always stores it
+    /// standalone, decoding once and never again for the same path.
+    ///
+    /// This is the seam [`TextureCache::load_from_file_standalone`] is a
+    /// wrapper over, and the reason it takes a loader rather than decoding
+    /// itself is the same as [`TextureCache::load`]'s: a test cannot open a
+    /// file, so the routing — standalone rather than atlas — is asserted
+    /// through an in-memory loader instead of not at all.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever `loader` returns, unchanged, and nothing else: like
+    /// [`TextureCache::load`], a failure is not remembered.
+    fn load_standalone<F>(
+        &mut self,
+        path: &Path,
+        loader: &mut F,
+    ) -> Result<TextureHandle, TextureError>
+    where
+        F: FnMut(&Path) -> Result<Pixels, TextureError>,
+    {
+        if let Some(&handle) = self.loaded.get(path) {
+            self.touch(handle);
+            return Ok(handle);
+        }
+        let pixels = loader(path)?;
+        let handle = self.insert_standalone(pixels)?;
+        self.loaded.insert(path.to_path_buf(), handle);
+        Ok(handle)
+    }
+
     /// Returns the handle for the image at `path`, decoding it with `loader` the
     /// first time it is asked for and not at all afterwards.
     ///
@@ -719,12 +771,12 @@ impl TextureCache {
         if width == 0 || height == 0 || addressable.is_none() {
             return Err(TextureError::TooLarge { width, height });
         }
-        let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1).max(FIRST_ATLAS_ID);
-        self.sizes.insert(id, (width, height));
 
         if width <= ATLAS_MAX_IMAGE && height <= ATLAS_MAX_IMAGE {
             if let Some((x, y)) = self.atlas_at(width, height) {
+                let id = self.next_id;
+                self.next_id = self.next_id.wrapping_add(1).max(FIRST_ATLAS_ID);
+                self.sizes.insert(id, (width, height));
                 self.atlas.blit(x, y, &pixels);
                 let size = self.atlas.size;
                 let placement = Placement {
@@ -745,6 +797,32 @@ impl TextureCache {
                 return Ok(TextureHandle::new(TextureId::new(id)));
             }
         }
+        self.insert_standalone(pixels)
+    }
+
+    /// Stores `pixels` as an image with a texture of its own and returns the
+    /// handle, whatever its size.
+    ///
+    /// This is the half of [`TextureCache::insert`] the atlas cannot serve: a
+    /// mesh's UVs address a whole 0-1 texture rather than an atlas window, so
+    /// the colormap bypasses the packing rule through here instead of going
+    /// around it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TextureError::TooLarge`] when the image has no addressable
+    /// size, like [`TextureCache::insert`] does.
+    fn insert_standalone(&mut self, pixels: Pixels) -> Result<TextureHandle, TextureError> {
+        let (width, height) = pixels.size();
+        let addressable = usize::try_from(width)
+            .ok()
+            .and_then(|width| width.checked_mul(usize::try_from(height).ok()?));
+        if width == 0 || height == 0 || addressable.is_none() {
+            return Err(TextureError::TooLarge { width, height });
+        }
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(FIRST_ATLAS_ID);
+        self.sizes.insert(id, (width, height));
         self.standalone.insert(
             id,
             Standalone {
@@ -1084,6 +1162,82 @@ mod tests {
             cache.standalone_pixels(handle).is_none(),
             "an atlas image has no texture of its own"
         );
+    }
+
+    #[test]
+    fn forced_standalone_bypasses_the_atlas() {
+        // The mesh colormap is 512x512, exactly at the packing limit, and an
+        // 8x8 image is far inside it: both must come back standalone, because
+        // a mesh samples its texture with whole 0-1 UVs rather than an atlas
+        // window.
+        let mut cache = TextureCache::new();
+        let colormap = cache
+            .insert_standalone(solid(512, 512, [200, 100, 50, 255]))
+            .expect("addressable");
+        let icon = cache
+            .insert_standalone(solid(8, 8, [200, 100, 50, 255]))
+            .expect("addressable");
+
+        for handle in [colormap, icon] {
+            assert!(
+                is_standalone(handle.id()),
+                "forced standalone carries the bit"
+            );
+            assert!(
+                cache.standalone_pixels(handle).is_some(),
+                "and has a texture of its own"
+            );
+            assert!(
+                cache.placement(handle).is_none(),
+                "and no window into the atlas"
+            );
+        }
+    }
+
+    #[test]
+    fn the_standalone_load_path_bypasses_the_atlas() {
+        // Pins the production routing `load_from_file_standalone` takes: the
+        // same seam with an in-memory 512x512 loader, so rerouting the seam
+        // through ordinary `insert` fails here — as a black car would only on
+        // screen.
+        let mut cache = TextureCache::new();
+        let mut counter = Counting::new(512, 512);
+        let mut loader = counter.loader();
+        let handle = cache
+            .load_standalone(&path("colormap.png"), &mut loader)
+            .expect("addressable");
+
+        assert!(
+            is_standalone(handle.id()),
+            "the seam carries the standalone bit"
+        );
+        assert!(
+            cache.standalone_pixels(handle).is_some(),
+            "and the pixels live outside the atlas"
+        );
+        assert!(
+            cache.placement(handle).is_none(),
+            "and there is no atlas window for mesh UVs to miss"
+        );
+    }
+
+    #[test]
+    fn normal_insert_still_packs_small_images() {
+        // The control beside the test above: the ordinary path packs an 8x8
+        // image into the atlas, so the forced path is the exception rather
+        // than the rule.
+        let mut cache = TextureCache::new();
+        let mut counter = Counting::new(8, 8);
+        let handle = load_once(&mut cache, &mut counter, "icon.png")
+            .expect("loaded")
+            .0;
+
+        assert!(
+            !is_standalone(handle.id()),
+            "packed into the atlas, so the bit is clear"
+        );
+        assert!(cache.placement(handle).is_some());
+        assert!(cache.standalone_pixels(handle).is_none());
     }
 
     #[test]

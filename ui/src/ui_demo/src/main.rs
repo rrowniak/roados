@@ -236,11 +236,12 @@ use ui_core::layout::{
     MainAxisAlignment, Offset, Padding, Size,
 };
 use ui_core::node::{self, WidgetNode};
-use ui_core::paint::{Color, PaintState, Painter, Rect, TextureId};
 #[cfg(test)]
-use ui_core::paint::{DrawCommand, UvRect};
+use ui_core::paint::UvRect;
+use ui_core::paint::{Color, DrawCommand, PaintState, Painter, Rect, TextureId};
 use ui_core::property::Property;
 use ui_core::render::context::Context;
+use ui_core::render::matrix::Mat4;
 use ui_core::render::mesh::{MeshId, SubMeshRange};
 use ui_core::render::meshio;
 use ui_core::render::Renderer;
@@ -255,6 +256,7 @@ use ui_core::widgets::image::{Image, ImageFit, ImageSource};
 use ui_core::widgets::keyboard::{KeyAction, Keyboard, Palette as KeyboardPalette};
 use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapMode};
 use ui_core::widgets::progress::{Palette as ProgressPalette, Progress};
+use ui_core::widgets::rotator::Rotator;
 use ui_core::widgets::slider::{Orientation, Palette as SliderPalette, Slider};
 use ui_core::widgets::text_input::{Palette as TextInputPalette, TextInput};
 use ui_core::widgets::toast::{Palette as ToastPalette, Severity, Toasts};
@@ -1419,6 +1421,130 @@ const MODEL_STATUS_ORIGIN: (f32, f32) = (60.0, 652.0);
 /// left edge — and the same 400 keeps the two boxes' right edges on one line.
 const MODEL_STATUS_WIDTH: f32 = 400.0;
 
+/// Where the demo's car sits, on the `data` page's free band.
+///
+/// **This file's proposal, not a measurement of free space**: the gauge begins
+/// at [`GAUGE_ORIGIN`]'s 664, the chart at [`CHART_ORIGIN`]'s 1000, the image
+/// at [`IMAGE_ORIGIN`]'s 800, and the fps readout is at y 684, so a rect from
+/// (60, 240) to (620, 640) overlaps nothing the gallery placed and ends clear
+/// of the fps band the capture criterion names. [`CONTENT_TOP`] is added at the
+/// placement like every other `*_ORIGIN` in this file, so the window rect is
+/// [`CAR_RECT`]. `no_two_placed_rects_overlap` over `page_rects` is what pins
+/// the choice, and `the_car_rect_overlaps_nothing_the_gallery_placed` pins the
+/// premise the press chain's position rests on.
+const CAR_ORIGIN: (f32, f32) = (60.0, 240.0);
+
+/// The box the demo's car is given.
+///
+/// 560 by 400: the aspect [`Demo::car_mvp`] divides by, so the rect and the
+/// frustum agree about the frame's shape. A content size, so the window rect
+/// adds [`CONTENT_TOP`] to the y.
+const CAR_SIZE: Size = Size {
+    width: 560.0,
+    height: 400.0,
+};
+
+/// The car's rect in window coordinates: [`CAR_SIZE`] at [`CAR_ORIGIN`] plus
+/// [`CONTENT_TOP`].
+///
+/// The one rect the capture criterion names beside the fps band, the clip
+/// [`Demo::frame_clips`] confines the mesh to, and the box the strip tests
+/// read the mesh's ink as — the scissor is what makes a mesh command's ink
+/// box this rect rather than the window. A `Rect` rather than a second
+/// spelling of the origin and the size, so the three readers cannot disagree
+/// about the box.
+const CAR_RECT: Rect = Rect {
+    x: CAR_ORIGIN.0,
+    y: CAR_ORIGIN.1 + CONTENT_TOP,
+    width: 560.0,
+    height: 400.0,
+};
+
+/// The model's centre in y, in metres.
+///
+/// From task 39's `bounds_min.y = 0.0` and `bounds_max.y = 1.3`: the orbit
+/// aims the camera at the middle of the car's height rather than at the
+/// ground plane it sits on.
+const CAR_TARGET_Y: f32 = 0.65;
+
+/// How far the orbit holds the camera from its target, in metres.
+///
+/// **7.0, and not the 2.6 the task file derives.** The file's derivation —
+/// 2.15 m of visible height at 2.6 m holding the 1.30 m car at 60 % — assumes
+/// the car rect is the viewport, and it is not: task 37's `draw_mesh_batch`
+/// sets the scissor and never the viewport, so the viewport is the window
+/// and the file's composition centres the orbit on the *window* (640, 510),
+/// outside the rect. Captured at 2.6 the rect shows a cropped fender. The
+/// number here is fitted instead, vertex by vertex: all 3 184 of the model's
+/// positions projected through the production composition below (replicated
+/// exactly and checked to seven decimals against it), over every ambient yaw
+/// at the resting pitch, asking that each land inside the rect with margin.
+/// Worst fraction of the rect's half-size: 1.654 at 4.0, 1.249 at 5.0, 1.028
+/// at 6.0, **0.874 at 7.0**, 0.761 at 8.0 — the worst vertex is always a
+/// front-bumper corner at (±0.55, 0.7, −1.25) swinging across the rect's
+/// edge. At 7.0 the whole car stays in frame with about 13 % of margin at
+/// every yaw the ambient turn reaches.
+///
+/// Task 36's `near = 0.1` and `far = 20.0` are used unchanged, which is the
+/// promise 36's module docs made to this task by name. What would reverse the
+/// distance is a smaller model, a wider rect, or a target the orbit no
+/// longer centres on — any of which moves the worst vertex back inside at a
+/// shorter throw.
+const CAR_DISTANCE: f32 = 7.0;
+
+/// The NDC shift that recentres the orbit target into the car rect.
+///
+/// The viewport is the window, so the perspective below centres the orbit on
+/// the window — and the window's centre is outside the car rect. Shifting
+/// clip-space x/y by these constants after the projection moves NDC (0, 0)
+/// to the rect's own centre: `sx = 2·cx/W − 1`, `sy = 1 − 2·cy/H`, which is
+/// the off-centre projection an asymmetric frustum would build, written as
+/// the translation matrix it is. A translation after the projection shifts
+/// NDC without touching `w`, so the divide still divides by the true depth.
+/// `the_car_records_five_mesh_commands_each_with_a_range_and_one_mvp` pins
+/// the arrival: the recorded matrix maps the orbit target to the rect's
+/// centre within a pixel.
+const CAR_SHIFT_X: f32 = 2.0 * (CAR_RECT.x + CAR_RECT.width * 0.5) / 1280.0 - 1.0;
+/// See [`CAR_SHIFT_X`]: the y half of the recentre.
+const CAR_SHIFT_Y: f32 = 1.0 - 2.0 * (CAR_RECT.y + CAR_RECT.height * 0.5) / 1020.0;
+
+/// The yaw the car rests at, in radians — ≈ 34.4°.
+///
+/// A three-quarter-from-above resting view with [`CAR_REST_PITCH`]. The
+/// model's facing is recorded nowhere in this repository — tasks 38 and 39
+/// record extents and node translations, not which way the nose points — so
+/// which yaw sign produces a front three-quarter is settled from the first
+/// capture, and the handoff records the value it used. This file does not
+/// assert a direction it cannot verify.
+const CAR_REST_YAW: f32 = 0.6;
+
+/// The pitch the car rests at, in radians — ≈ 12°.
+///
+/// With [`CAR_REST_YAW`], a three-quarter-from-above resting view: high enough
+/// that the roof reads, low enough that the flanks do. Inside
+/// [`ROTOR_PITCH_LIMIT`](ui_core::widgets::rotator::ROTOR_PITCH_LIMIT), so the
+/// rest pose is one the clamp never touches.
+const CAR_REST_PITCH: f32 = 0.21;
+
+/// How fast the car turns with no finger on it, in rad/s.
+///
+/// 0.35 is 20°/s, a turn in about eighteen seconds: slow enough that the car
+/// is clearly turning in a capture rather than strobing, fast enough that two
+/// captures a second apart differ visibly in the car rect. An accumulation —
+/// `yaw += rate · dt` — rather than an absolute assignment, so a gesture's
+/// contribution survives the handover instead of being reset by it.
+const AMBIENT_YAW_RATE: f32 = 0.35;
+
+/// The mesh pass's ambient term while the `data` page shows a model.
+///
+/// 0.65 rather than the default 0.35: the car's flanks spend half the orbit
+/// facing away from `MESH_LIGHT_DIR`, and at 0.35 the lee side reads
+/// near-black on screen. Scoped to `data`-page-with-model frames in
+/// [`Demo::draw`] — every other frame draws on the default, which
+/// [`Renderer::begin_frame`] restores — so no other page pays for it. If the
+/// capture shows washout, lower it.
+const CAR_AMBIENT: f32 = 0.65;
+
 // ------------------------------------------------------------------ task 19
 
 /// The y at which the text-entry band begins: the bottom of the window less
@@ -2120,13 +2246,10 @@ struct Picture {
 /// struct must not pre-empt it.
 struct Model {
     /// The uploaded mesh's handle.
-    #[expect(dead_code, reason = "drawn by a later task; stored, not shown")]
     mesh: MeshId,
     /// Every sub-mesh range in the file, in file order.
-    #[expect(dead_code, reason = "drawn by a later task; stored, not shown")]
     ranges: Vec<SubMeshRange>,
     /// The colormap's texture.
-    #[expect(dead_code, reason = "drawn by a later task; stored, not shown")]
     texture: TextureId,
 }
 
@@ -2515,8 +2638,12 @@ fn load_model(renderer: &mut Renderer) -> Option<Model> {
     };
     // The colormap sits beside the model, and the model file does not name
     // it: the format carries no texture reference, so the demo names it.
+    // Standalone rather than atlas-resident, because the mesh pass samples it
+    // by the model's own UVs: an atlas would pack it beside other images and
+    // the same UVs would land on somebody else's pixels, which is the black
+    // car the atlas path draws.
     let colormap = path.parent().unwrap_or(Path::new("")).join(COLORMAP_FILE);
-    let texture = match renderer.load_texture(&colormap) {
+    let texture = match renderer.load_standalone_texture(&colormap) {
         Ok(texture) => texture.id(),
         Err(error) => {
             eprintln!(
@@ -3183,6 +3310,31 @@ impl DemoSlider {
     }
 }
 
+/// The car in the demo: the widget, and the dragging state the demo last wrote
+/// to it.
+///
+/// In [`DemoSlider`]'s exact shape — a wrapper whose `node()` delegates to
+/// `widget.handle()`, so `self.car.node()` and `self.slider.node()` are the
+/// same kind of thing — minus the aim: a rotator has no `animate_to_state`
+/// and nothing to aim, so the only record is what the demo last wrote. The
+/// flag the press arms write is [`Demo::car_dragging`], beside the widget like
+/// `slider_dragging` is beside the slider; this record is what the frame
+/// synced to the property, so a write marks the node dirty only when the state
+/// has actually moved.
+struct DemoCar {
+    /// The rotator widget, with its node in the arena.
+    widget: Rotator,
+    /// The dragging state the demo last wrote to the widget.
+    written: bool,
+}
+
+impl DemoCar {
+    /// Returns the car's node in the arena.
+    fn node(&self) -> Handle {
+        self.widget.handle()
+    }
+}
+
 /// The demo's widget tree, the pads that press, the labels that show what text
 /// rendering does, the theme every colour comes from, and the clock that drives
 /// the pads.
@@ -3309,6 +3461,21 @@ struct Demo {
     slider_readout: DemoLabel,
     /// Whether a pointer is holding the slider down.
     slider_dragging: bool,
+    /// The car, on the `data` page: the rotator and the dragging state the
+    /// demo last synced to it.
+    ///
+    /// A plain field and not an `Option`, for the reason the slider is: the
+    /// widget exists whether or not a model loaded, and a missing model means
+    /// the frame records no mesh commands rather than the demo losing the
+    /// control that would have aimed them.
+    car: DemoCar,
+    /// Whether a pointer is holding the car down.
+    ///
+    /// The slider's counterpart, and needed for the same reason: `Rotator`'s
+    /// `dragging` is written by the caller from a press and a release, because
+    /// the gesture recogniser reports a tap on the *release* and a drag only
+    /// once the pointer has moved.
+    car_dragging: bool,
     /// The toggle, under the slider's readout.
     toggle: Toggle,
     /// The state the toggle was last aimed at.
@@ -3403,7 +3570,6 @@ struct Demo {
     fps_readout: DemoLabel,
     /// The uploaded model, or `None` — which means the page shows the line
     /// saying so, and never a shape pretending to be the car.
-    #[expect(dead_code, reason = "drawn by a later task; stored, not shown")]
     model: Option<Model>,
     /// The line saying the car model did not load, above the frame-rate
     /// readout on every page — or `None` when a model did load, which removes
@@ -4123,6 +4289,28 @@ impl Demo {
             widget,
             written: false,
             aimed: false,
+        };
+
+        // The car the `data` page orbits: a rotator aimed once at its resting
+        // pose, in a node of the page's own size. The rest pose is written
+        // through `rotate_by` rather than into the properties, because that
+        // is the single write path and a construction that bypassed it would
+        // be a second one. Which yaw flatters the model is settled from the
+        // first capture — the facing is recorded nowhere — so the values are
+        // [`CAR_REST_YAW`] and [`CAR_REST_PITCH`] and not zeroes the widget
+        // chose.
+        let rotator = Rotator::new(&mut nodes);
+        let _ = rotator.rotate_by(CAR_REST_YAW, CAR_REST_PITCH);
+        {
+            nodes
+                .get_mut(rotator.handle())
+                .ok_or("ui_demo: the car node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(CAR_SIZE));
+        }
+        let car = DemoCar {
+            widget: rotator,
+            written: false,
         };
 
         // The toggle, under the slider's readout, and the label that says which
@@ -4856,6 +5044,14 @@ impl Demo {
                 SLIDER_ORIGIN.0,
                 SLIDER_ORIGIN.1 + CONTENT_TOP,
             )));
+        // The car, at [`CAR_ORIGIN`] like every other `*_ORIGIN` here: a
+        // content coordinate with [`CONTENT_TOP`] added at the position, so
+        // the laid-out node is [`CAR_RECT`].
+        nodes
+            .get_mut(car.widget.handle())
+            .ok_or("ui_demo: the car is missing")?
+            .layout_mut()
+            .set_position(Some(Offset::new(CAR_ORIGIN.0, CAR_ORIGIN.1 + CONTENT_TOP)));
         nodes
             .get_mut(slider_readout.label.handle())
             .ok_or("ui_demo: the slider readout is missing")?
@@ -4933,7 +5129,14 @@ impl Demo {
         // above everything else here. The chart comes after the progress bar
         // because that is where it sits: the progress bar is the last of the
         // control column and the chart is the whole of the one to its right.
-        if !controls.add_child(&mut nodes, gauge.handle())
+        // The car is first, before the gauge: the paint walk records in this
+        // order, so the mesh is recorded before the page's chrome and the
+        // chrome draws over it. That is the recording-order contract task 37
+        // recorded — the car before the gauge, the chart, the image and the
+        // readouts — and the paint gate empties it on the five pages that do
+        // not show it.
+        if !controls.add_child(&mut nodes, car.widget.handle())
+            || !controls.add_child(&mut nodes, gauge.handle())
             || !controls.add_child(&mut nodes, gauge_readout.label.handle())
             || !controls.add_child(&mut nodes, slider.widget.handle())
             || !controls.add_child(&mut nodes, slider_readout.label.handle())
@@ -5315,6 +5518,13 @@ impl Demo {
         on(Page::Data, image_fit_readout.label.handle(), false);
         on(Page::Data, chart.handle(), false);
         on(Page::Data, chart_readout.label.handle(), false);
+        // The car, on `data` and on no other page: the mesh is the page's
+        // visualisation, and the paint gate empties it everywhere else. Not
+        // focusable, so the `Tab` order is unchanged — the rotator answers
+        // arrows only while something holds focus, and nothing here hands it
+        // one; the key path is verified by unit test through the crate's own
+        // event path instead.
+        on(Page::Data, car.node(), false);
         // `overlays`: the dialog, its two actions, and the toast host's cards.
         // **The host itself is not a row**, and the reason is that it records no
         // commands of its own — every command belongs to the toast that recorded
@@ -5378,6 +5588,8 @@ impl Demo {
             slider,
             slider_readout,
             slider_dragging: false,
+            car,
+            car_dragging: false,
             toggle,
             toggle_aimed: ToggleState {
                 checked: toggle_state,
@@ -6142,6 +6354,16 @@ impl Demo {
                     // [`Demo::route_input_event`] cannot see it, and a button
                     // lighting up under the scrim is the same defect a lit pad was.
                     self.press_tab(index);
+                } else if self.car_at(x, y).is_some() {
+                    // **After the four existing press arms, and the position is
+                    // not load-bearing**: `the_car_rect_overlaps_nothing_the_
+                    // gallery_placed` pins that `CAR_RECT` intersects none of
+                    // `pad_at`, `slider_at`, `keyboard_at` or `tab_at`, so no
+                    // earlier arm can have claimed the press. That is the same
+                    // move as `nothing_the_demo_places_reaches_into_the_strip`,
+                    // which pins the premise the tab bar's fallback guard rests
+                    // on rather than the guard.
+                    self.press_car();
                 }
                 // **Nothing is offered to the chart**, and that is the same
                 // decision `the_chart_is_not_in_the_focus_order` records: a chart
@@ -6157,6 +6379,7 @@ impl Demo {
                     self.release_pad(index);
                 }
                 self.slider_dragging = false;
+                self.release_car();
                 self.release_key();
                 // **Unguarded, like every release here**, on the argument the pads'
                 // release gives: a release has no effect on anything a guarded press
@@ -6183,10 +6406,15 @@ impl Demo {
                     // The bar on a finger, on the mouse arm's argument: the press is
                     // guarded by the modal chain above and the release below is not.
                     self.press_tab(index);
+                } else if self.car_at(x, y).is_some() {
+                    // The car on a finger, on the mouse arm's argument: a car
+                    // has no mouse, so this is the route a hand actually takes.
+                    self.press_car();
                 }
             }
             Event::FingerUp { .. } | Event::FingerCanceled { .. } => {
                 self.slider_dragging = false;
+                self.release_car();
                 // A canceled touch releases the key too, for the same reason: a
                 // finger that is gone must not leave a key lit — and it releases
                 // the tab button for the same reason.
@@ -6335,6 +6563,20 @@ impl Demo {
         if self.slider_dragging && matches!(event.kind(), InputEventKind::Drag { .. }) {
             if let Some(rect) = self.slider_rect() {
                 self.slider.widget.on_event(event, rect);
+                if event.consumed() {
+                    return;
+                }
+            }
+        }
+        // A drag goes to the rotator being dragged first, whether or not the
+        // pointer is still over it. The routed chain below finds the node
+        // under the pointer, and a finger that has travelled past the end of
+        // the car rect is outside it — which is exactly when the car most
+        // needs to hear about the drag, because the answer is further round
+        // the orbit.
+        if self.car_dragging && matches!(event.kind(), InputEventKind::Drag { .. }) {
+            if let Some(rect) = self.car_rect() {
+                self.car.widget.on_event(event, rect);
                 if event.consumed() {
                     return;
                 }
@@ -6640,6 +6882,15 @@ impl Demo {
         if handle == self.slider.node() {
             return match self.slider_rect() {
                 Some(rect) => self.slider.widget.on_event(event, rect),
+                None => false,
+            };
+        }
+        // The car beside the slider: a drag offered to the car's own node
+        // reaches the rotator, and anything else travels on. `car_rect` is
+        // `None` before the first layout, so there is nothing to offer to.
+        if handle == self.car.node() {
+            return match self.car_rect() {
+                Some(rect) => self.car.widget.on_event(event, rect),
                 None => false,
             };
         }
@@ -7140,6 +7391,34 @@ impl Demo {
             self.page_members
                 .retain(|member| arena.get(member.handle).is_some());
         }
+        // The car's ambient turn, after the ticks and before the paint: the
+        // gesture owns the yaw while a drag is in progress and this owns it
+        // the rest of the time, and the handover is neither a blend nor a
+        // snap — the term accumulates, so it resumes from wherever the gesture
+        // left the value.
+        //
+        // **A write and not an `animate_to`**, for two reasons. The crate's
+        // idiom is "aim once, tick per frame" and a per-frame aim would creep
+        // toward its target and never arrive — [`Demo::sync_toggle_state`]'s
+        // argument, cited by name. And an *accumulation* rather than an
+        // absolute assignment is what lets a gesture's contribution survive
+        // the handover: drag the car 90°, release, and it resumes turning from
+        // 90°, not from zero.
+        //
+        // **Pitch is never ambient-driven**: an ambient pitch would integrate
+        // one way until it hit the clamp and then stick there — a car that
+        // tilts forward forever and stops. So of the two values, one has two
+        // producers and one has exactly one.
+        //
+        // There is no `tick` for the rotator to call: a rotator has no
+        // transition, so a `tick` over it would return `false` forever.
+        self.sync_car_state();
+        if !self.car.widget.dragging.get() {
+            let _ = self
+                .car
+                .widget
+                .rotate_by(AMBIENT_YAW_RATE * delta.as_secs_f32(), 0.0);
+        }
         // The one number the readout below the chart names that the demo has to
         // write rather than bind, for the reason `Demo::chart_moving` gives:
         // `Chart::is_animating` is a method over the widget's own clock. Guarded
@@ -7231,6 +7510,16 @@ impl Demo {
                     Some(rect) => self.slider.widget.paint(rect.into()),
                     None => Vec::new(),
                 };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The car, on the `data` page and emptied everywhere else by the
+            // paint gate below. The node's position in `order` — first child
+            // of the controls layer — is what records it before the page's
+            // chrome; this arm only decides *what* is recorded. With no model
+            // it records nothing: there is no stand-in mesh.
+            if handle == self.car.node() {
+                let commands = self.car_commands();
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
@@ -7794,6 +8083,141 @@ impl Demo {
         }
     }
 
+    /// Writes the press arms' dragging record to the rotator, when it moved.
+    ///
+    /// The write half of [`Demo::sync_slider_state`] and for the same reason:
+    /// a property write notifies the node's `on_change` callback and marks
+    /// the node dirty, so it is done only when the state has actually moved.
+    /// There is no aim half — a rotator has no `animate_to_state` and nothing
+    /// to aim — and the handoff says so rather than leaving a reader looking
+    /// for one.
+    fn sync_car_state(&mut self) {
+        let wanted = self.car_dragging;
+        if self.car.widget.dragging.get() != wanted {
+            self.car.widget.dragging.set(wanted);
+            self.car.written = wanted;
+        }
+    }
+
+    /// Returns the camera's world-space eye for an orbit of `yaw` about y and
+    /// `pitch` about x at `distance` from the target.
+    ///
+    /// Two facts a reader will get wrong, because both are invisible in the
+    /// arithmetic. With `pitch > 0` the **eye rises above the target** and
+    /// looks down — so *drag down shows more roof* — and the `-` the view puts
+    /// on the eye is `target − distance · direction`, not `+`: it puts yaw 0
+    /// with the camera on `+z` looking toward `−z`, which is what makes the
+    /// yaw sign the convention it is rather than an accident. [`CAR_TARGET_Y`]
+    /// is the target's own y and is *added* to `distance · sin(pitch)`, so a
+    /// helper that returned a world-space eye by forgetting the target would
+    /// sit 0.65 m low and show the car from below the beltline.
+    ///
+    /// Free of GL and of `Mat4`, so the geometry is unit-testable — and
+    /// `the_view_puts_the_orbit_target_on_the_camera_axis` is what holds it.
+    fn orbit(yaw: f32, pitch: f32, distance: f32) -> [f32; 3] {
+        let (sy, cy) = yaw.sin_cos();
+        let (sp, cp) = pitch.sin_cos();
+        [
+            -distance * sy * cp,
+            CAR_TARGET_Y + distance * sp,
+            distance * cp * cy,
+        ]
+    }
+
+    /// Returns the view matrix for an orbit of `yaw` about y and `pitch`
+    /// about x: the matrix composition as a pure function.
+    ///
+    /// `Mat4`'s post-multiplying convention is what makes this order right:
+    /// `rotated_x` then `rotated_y` then `translated` is `R_x · R_y · T`,
+    /// which is the one order that aims the camera **at the target** — and
+    /// `Mat4` has **no `look_at`**, so this composition is the camera's only
+    /// construction. `the_view_puts_the_orbit_target_on_the_camera_axis` pins
+    /// both the order and the sign, because an orbit with either wrong
+    /// produces a plausible wrong picture and no error anywhere.
+    fn orbit_view(yaw: f32, pitch: f32) -> Mat4 {
+        let [eye_x, eye_y, eye_z] = Self::orbit(yaw, pitch, CAR_DISTANCE);
+        Mat4::identity()
+            .rotated_x(pitch)
+            .rotated_y(yaw)
+            .translated([-eye_x, -eye_y, -eye_z])
+    }
+
+    /// Returns the matrix the car is drawn through, or `None` after saying
+    /// why.
+    ///
+    /// `projection` is `Mat4::perspective` at `fov_y = π/4` with task 36's
+    /// `near = 0.1` and `far = 20.0` unchanged, which is the promise 36's
+    /// module docs made to this task by name. The aspect is the **window's**,
+    /// not the rect's: the viewport is the window — task 37's
+    /// `draw_mesh_batch` sets the scissor and never the viewport — so a rect
+    /// aspect would draw every wheel as an ellipse 12 % too tall. The model
+    /// matrix is the identity: the camera orbits and the car never moves, so
+    /// no per-sub-mesh transform is applied and there is no wheel spin.
+    ///
+    /// The `shift` recentres the orbit into the rect — see [`CAR_SHIFT_X`] —
+    /// because the perspective centres it on the window instead. The order is
+    /// `shift · projection · view · model`, the recentre outermost, so it
+    /// moves NDC without touching the depth the divide reads.
+    ///
+    /// The `Option` is handled, not unwrapped: 36 returns `None` on every
+    /// violated precondition, so this returns `None` with a printed reason
+    /// rather than drawing with a stale matrix. The constants above satisfy
+    /// every precondition, so the reason names them rather than the call.
+    fn car_mvp(&self) -> Option<Mat4> {
+        let aspect = WINDOW.width / WINDOW.height;
+        let Some(projection) = Mat4::perspective(std::f32::consts::FRAC_PI_4, aspect, 0.1, 20.0)
+        else {
+            eprintln!(
+                "ui_demo: the car projection is degenerate for fov π/4, aspect \
+                 {aspect}, near 0.1, far 20.0; drawing no car"
+            );
+            return None;
+        };
+        let shift = Mat4::identity().translated([CAR_SHIFT_X, CAR_SHIFT_Y, 0.0]);
+        let view = Self::orbit_view(self.car.widget.yaw.get(), self.car.widget.pitch.get());
+        let model = Mat4::identity();
+        Some(shift.multiply(&projection).multiply(&view).multiply(&model))
+    }
+
+    /// Returns the five mesh commands that draw the car, or nothing.
+    ///
+    /// One command per sub-mesh in [`Model::ranges`]' file order, because
+    /// task 35's ranges are what selects a part and `DrawCommand::Mesh`
+    /// carries one range per command. All five carry the same `mvp` — the
+    /// model's own placement is task 39's baked node transforms, so no
+    /// per-sub-mesh transform is applied. `tint` is the premultiplied white
+    /// the colormap needs and `opacity` is `1.0`, so the mesh batches
+    /// `Opaque` and writes depth per task 37's table. With no model there is
+    /// no stand-in — `load_model`'s doc gives the four values a stand-in
+    /// would have to lie about — so this records nothing.
+    ///
+    /// `u_normal_matrix` is the identity 3×3, uploaded by the renderer itself:
+    /// the model matrix **is** the identity and the view is a rigid rotation
+    /// plus a translation, so the model→world 3×3 is the identity. The honest
+    /// limit rides along: if a later task rotates the *car* rather than
+    /// orbiting the camera, the normal matrix stops being the identity and
+    /// needs a real inverse transpose, which `Mat4` does not have.
+    fn car_commands(&self) -> Vec<DrawCommand> {
+        let Some(model) = &self.model else {
+            return Vec::new();
+        };
+        let Some(mvp) = self.car_mvp() else {
+            return Vec::new();
+        };
+        let mut painter = Painter::new();
+        for range in &model.ranges {
+            painter.mesh(
+                model.mesh,
+                *range,
+                mvp,
+                Color::new(255, 255, 255, 255),
+                1.0,
+                model.texture,
+            );
+        }
+        painter.finish()
+    }
+
     /// Re-aims the toggle when the state its appearance is derived from has
     /// moved.
     ///
@@ -7876,7 +8300,17 @@ impl Demo {
     }
 
     /// Hands the recorded commands to the renderer, in paint order.
+    ///
+    /// The mesh pass reads [`CAR_AMBIENT`] while the `data` page shows a
+    /// model, and the default everywhere else: the car's lee side needs the
+    /// lift and no other page draws a mesh to spend it on. Scoped here rather
+    /// than in the frame because it is a renderer state, not a widget one —
+    /// and [`Renderer::begin_frame`] resets it every frame, so a value set
+    /// here never leaks into the next.
     fn draw(&mut self, renderer: &mut Renderer) {
+        if self.page == Page::Data && self.model.is_some() {
+            renderer.set_mesh_ambient(CAR_AMBIENT);
+        }
         let mut nodes = self.nodes.borrow_mut();
         let clips = self.frame_clips();
         for (handle, clip) in self.order.iter().copied().zip(clips) {
@@ -7886,6 +8320,13 @@ impl Demo {
 
     /// Returns the clip for every node in paint order, positionally matching
     /// [`Demo::order`].
+    ///
+    /// **The car is clipped to [`CAR_RECT`] and nothing else is clipped.**
+    /// Task 37's `draw_mesh_batch` calls `apply_clip(batch.clip)` — a clip
+    /// that does not exist is no clip — and an unclipped car would draw across
+    /// the tab bar and the chrome, which is both a visible defect and a
+    /// violation of the recording-order contract task 37 recorded. This is the
+    /// first thing in the pipeline that a scissor actually matters to.
     ///
     /// **This is the whole of the frame's clipping, in one place, and the frame
     /// loop uses it rather than deciding inline.** That is not tidiness: an
@@ -7905,7 +8346,16 @@ impl Demo {
     /// a parameter kept only so a caller could pass it would be a second thing to
     /// keep in step.
     fn frame_clips(&self) -> Vec<Option<Rect>> {
-        self.order.iter().map(|_| None).collect()
+        self.order
+            .iter()
+            .map(|handle| {
+                if *handle == self.car.node() {
+                    Some(CAR_RECT)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Switches between the dark and light themes, animated over
@@ -8256,6 +8706,26 @@ impl Demo {
             .add(pad.press.animate_to(0.0, RELEASE_DURATION, RELEASE_SPRING));
     }
 
+    /// Starts a drag on the car.
+    ///
+    /// Records the flag; the frame's [`Demo::sync_car_state`] writes it to the
+    /// widget, which is the two-step [`Demo::sync_slider_state`] takes for the
+    /// slider's own flag. Called from the guarded press arms, so a press under
+    /// a modal scrim never starts one.
+    fn press_car(&mut self) {
+        self.car_dragging = true;
+    }
+
+    /// Ends a drag on the car.
+    ///
+    /// Unguarded, like every other release in the file, on the `release_all`
+    /// argument the file already states: a release has no effect on anything
+    /// a guarded press did not start, and a pointer that goes down on the
+    /// scrim and up over the car must still tidy up.
+    fn release_car(&mut self) {
+        self.car_dragging = false;
+    }
+
     /// Returns the index of the pad whose laid-out rect contains `(x, y)`.
     ///
     /// **The page guard is the first line of the body, and it is here because this
@@ -8321,6 +8791,35 @@ impl Demo {
     /// `on_event` takes a rect: a node cannot reach the arena that holds it.
     fn slider_rect(&self) -> Option<Rect> {
         self.node_rect(self.slider.node())
+    }
+
+    /// Returns `Some(())` when the point is over the car, and `None` when it
+    /// is not.
+    ///
+    /// In [`Demo::slider_at`]'s exact shape — `on_show` first, then the rect —
+    /// because this is the fourth helper that bypasses
+    /// [`Demo::route_input_event`]: the press arms call it straight from
+    /// `MouseButtonDown` and `FingerDown`, and a rectangle on a page that is
+    /// not showing is still a rectangle. Without the page gate a drag on the
+    /// `data` page's car would still be reachable from a page that does not
+    /// draw it.
+    fn car_at(&self, x: f32, y: f32) -> Option<()> {
+        if !self.on_show(self.car.node()) {
+            return None;
+        }
+        self.car_rect()
+            .is_some_and(|rect| over_rect(rect, x, y))
+            .then_some(())
+    }
+
+    /// Returns the car's rect in window coordinates, or `None` if it has not
+    /// been laid out. See [`Demo::slider_rect`].
+    ///
+    /// The laid-out node, which is [`CAR_RECT`] once the layout pass has run —
+    /// and `the_car_rect_overlaps_nothing_the_gallery_placed` is what holds
+    /// the constant and the node together.
+    fn car_rect(&self) -> Option<Rect> {
+        self.node_rect(self.car.node())
     }
 
     /// Returns the toggle's rect in window coordinates, or `None` if it has not
@@ -8431,7 +8930,9 @@ impl Demo {
     /// task 21 for the same one: the widgets' own hundreds of unit tests know
     /// nothing about where the demo put them, and a hand-placed 270 by 450 box in
     /// the one column the list just vacated is exactly the kind of claim only a
-    /// reader looking at the arithmetic can check.
+    /// reader looking at the arithmetic can check. **The car is in it for the
+    /// same reason**, and `the_car_rect_overlaps_nothing_the_gallery_placed`
+    /// is what says the 560 by 400 box at [`CAR_ORIGIN`] touches nothing.
     ///
     /// **The dialog is deliberately not in it**, and that is the whole of the
     /// omission: an overlay is *meant* to be drawn on top of the gallery, so
@@ -8510,6 +9011,7 @@ impl Demo {
             ("progress readout", self.progress_readout.label.handle()),
             ("chart", self.chart.handle()),
             ("chart readout", self.chart_readout.label.handle()),
+            ("car", self.car.node()),
             ("fps readout", self.fps_readout.label.handle()),
             ("text input", self.text_input.handle()),
             ("text readout", self.text_readout.label.handle()),
@@ -8518,8 +9020,8 @@ impl Demo {
         ]);
         // The model-status line, named apart like the fallback label: it is
         // the one leaf whose presence depends on what `main` found on disk, so
-        // a demo holding a model lists twenty-eight and one without lists
-        // twenty-nine, and `expected_placed_rect_names` is what says which.
+        // a demo holding a model lists twenty-nine and one without lists
+        // thirty, and `expected_placed_rect_names` is what says which.
         if let Some(status) = &self.model_status {
             handles.push(("model status", status.label.handle()));
         }
@@ -8546,7 +9048,7 @@ impl Demo {
     /// dissolved. What it strengthens is each page's own layout, which is the
     /// thing a reader switching tabs actually sees.
     ///
-    /// **Twenty-eight with a model and twenty-nine without one — and the number is checked** —
+    /// **Twenty-nine with a model and thirty without one — and the number is checked** —
     /// [`expected_placed_rect_names`] holds the whole set and
     /// [`assert_placed_handles_is_complete`] asserts its length. The three pads are
     /// three more widgets on screen and are **not** in it: they are the card's
@@ -8969,6 +9471,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use ui_core::font::replacement_advance;
+    use ui_core::widgets::rotator::ROTOR_SENSITIVITY;
 
     /// Monospace stand-in measurements: every character half its size wide, and
     /// every line 1.2 times its size tall, so both grow with the font size the
@@ -13356,7 +13859,7 @@ mod tests {
     ///
     /// The `with_model_status` half is the one leaf whose presence depends on
     /// what `main` found on disk: a demo holding a model has no status line and
-    /// lists twenty-eight, one without lists twenty-nine. The flag is read from
+    /// lists twenty-nine, one without lists thirty. The flag is read from
     /// the demo beside it, never written out twice.
     fn expected_placed_rect_names(with_model_status: bool) -> Vec<&'static str> {
         let mut names = vec![
@@ -13383,6 +13886,7 @@ mod tests {
             "progress readout",
             "chart",
             "chart readout",
+            "car",
             "fps readout",
             "text input",
             "text readout",
@@ -13413,7 +13917,7 @@ mod tests {
         let mut want = expected_placed_rect_names(with_model_status);
         want.sort_unstable();
         // **The count, checked rather than asserted in a doc comment.** One card,
-        // nine text-panel labels, one fallback label and seventeen controls and
+        // nine text-panel labels, one fallback label and eighteen controls and
         // readouts — and the second review of this task caught the prose above
         // claiming twenty-six while the list held twenty-five, which is the shape of
         // the same failure a number nobody computed is a number nobody checked.
@@ -13421,13 +13925,13 @@ mod tests {
         // two edits and is the point. Task 30 and task 32.1 are the second and
         // third times this line has had to change, which is the evidence that it is
         // the right place for the number rather than a doc comment. The model
-        // status is the twenty-ninth, present exactly when the demo holds no
+        // status is the thirtieth, present exactly when the demo holds no
         // model — which is every test fixture, and every run until task 39.
         assert_eq!(
             want.len(),
-            if with_model_status { 29 } else { 28 },
+            if with_model_status { 30 } else { 29 },
             "the written-out list holds one card, nine text-panel labels, one \
-             fallback label and seventeen controls and readouts, and the model \
+             fallback label and eighteen controls and readouts, and the model \
              status when the demo holds no model"
         );
         assert_eq!(
@@ -13441,7 +13945,7 @@ mod tests {
     }
 
     /// The nodes that draw something, have a box, and are **not** one of
-    /// [`Demo::placed_handles`]'s twenty-eight-or-twenty-nine — written out, and named individually
+    /// [`Demo::placed_handles`]'s twenty-nine-or-thirty — written out, and named individually
     /// rather than derived from anything the demo already believes.
     ///
     /// **Twelve, and nine of them are laid out by a container rather than placed by
@@ -13795,6 +14299,15 @@ mod tests {
     /// [`DrawCommand::Path`] keeps a `panic!`, and for `command_box`'s reason — a
     /// variant nobody taught this about would be counted as harmless rather than as
     /// an absence. The demo records no `Path`.
+    ///
+    /// [`DrawCommand::Mesh`] is [`CAR_RECT`], and that is a measurement rather
+    /// than a guess: [`Demo::frame_clips`] gives the car's node `Some(CAR_RECT)`
+    /// and task 37's `draw_mesh_batch` calls `apply_clip` on it, so the scissor
+    /// confines every mesh command's ink to that rect whatever the matrix says.
+    /// `the_car_rect_overlaps_nothing_the_gallery_placed` pins the rect against
+    /// the gallery and `the_view_puts_the_orbit_target_on_the_camera_axis`
+    /// pins the matrix, so this arm rests on two assertions rather than on a
+    /// reading of the shader.
     fn inked_box(command: &DrawCommand) -> Rect {
         let box_of = |points: &[(f32, f32)]| {
             let low_x = points.iter().map(|p| p.0).fold(f32::MAX, f32::min);
@@ -13847,12 +14360,13 @@ mod tests {
                 ),
                 ui_core::render::blur::reach(*blur),
             ),
-            DrawCommand::Path { .. } | DrawCommand::Mesh { .. } => {
+            DrawCommand::Path { .. } => {
                 panic!(
                     "the demo records no {command:?}, and this test does not know \
                      how to place one"
                 );
             }
+            DrawCommand::Mesh { .. } => CAR_RECT,
         }
     }
 
@@ -14420,21 +14934,30 @@ mod tests {
         );
     }
 
-    /// Nothing is clipped any more, and the chart's own geometry is what says why
-    /// that is allowed to be true.
+    /// Nothing is clipped but the car, and the chart's own geometry is what says
+    /// why that is allowed to be true.
+    ///
+    /// **The name is historical, and it is kept on purpose**: the task file
+    /// names this test, so renaming it would make the requirement's own
+    /// checklist un-greppable. What "no node is clipped" means now is in the
+    /// assertion — one `Some` for the car and `None` for everything else.
     ///
     /// **The first half is the frame's own list of clips**, which is the one
     /// `Demo::draw` walks — not a helper called directly, because a test of a
     /// helper cannot see a call site that stopped using it. That was a real
     /// survivor: a mutation inlining the clip decision into the loop passed every
-    /// test written against the helper. The function survives with no decision
-    /// left in it, and this is what says so — one `None` per node in paint order,
-    /// positionally matching, and no node offered a clip of its own.
+    /// test written against the helper. The function survives with one decision
+    /// left in it — the car's node is offered `Some(CAR_RECT)` — and this is
+    /// what says so: one clip for the car, `None` for every other node in
+    /// paint order, positionally matching, and no node offered a clip of its
+    /// own.
     ///
-    /// The list was the only clipped node this demo ever had and it is gone as of
-    /// 2026-10-02: a scrolling viewport's rows are drawn half outside it *by
-    /// design*, which is the whole reason a scissor was needed and the whole
-    /// reason nothing needs one now.
+    /// The list was the only clipped node this demo ever had and the chart took
+    /// its place for one task: a scrolling viewport's rows are drawn half outside
+    /// it *by design*, which is the whole reason a scissor was needed and the
+    /// whole reason nothing needed one until the car. An unclipped car would
+    /// draw across the tab bar and the chrome — a visible defect and a violation
+    /// of the recording-order contract task 37 recorded.
     ///
     /// **The second half is the load-bearing one**, and it is this file's answer
     /// to `.ai/NEVERAGAIN.md` § *a draw-command assertion cannot see where a
@@ -14494,16 +15017,20 @@ mod tests {
             demo.order.len(),
             "one clip per node in paint order, positionally matching"
         );
-        let clipped: Vec<Handle> = demo
+        let clipped: Vec<(Handle, Rect)> = demo
             .order
             .iter()
             .zip(clips.iter())
-            .filter(|(_, clip)| clip.is_some())
-            .map(|(handle, _)| *handle)
+            .filter_map(|(handle, clip)| clip.map(|rect| (*handle, rect)))
             .collect();
-        assert!(
-            clipped.is_empty(),
-            "and no node is offered a clip — but these are: {clipped:?}"
+        // **The car's row, added rather than the old set loosened**: the car
+        // is the one node the frame clips, to its own rect, and everything
+        // else keeps the `None` the old assertion named.
+        assert_eq!(
+            clipped,
+            vec![(demo.car.node(), CAR_RECT)],
+            "the car is clipped to its own rect and no other node is offered \
+             a clip — but these are: {clipped:?}"
         );
 
         for (shape, name) in CHART_TYPE_NAMES.iter().enumerate() {
@@ -14628,6 +15155,398 @@ mod tests {
                     "and {stroked:?} is inside the {WINDOW:?}"
                 );
             }
+        }
+    }
+
+    /// A demo holding a hand-built model, laid out on `page`: the mesh tests'
+    /// fixture.
+    ///
+    /// `demo_on` passes no model — a test may not need a filesystem — so a
+    /// test that reads mesh commands builds the `Model` by hand instead. The
+    /// handles are names a recording needs rather than promises, which is
+    /// what `MeshId::new`'s own doc says: an unknown id draws nothing, and a
+    /// recording is what these tests read. Five ranges in file order, the way
+    /// `load_model` collects them out of the file.
+    fn demo_with_model_on(page: Page) -> Demo {
+        let model = Model {
+            mesh: MeshId::new(3),
+            ranges: vec![
+                SubMeshRange {
+                    first_index: 0,
+                    index_count: 3,
+                },
+                SubMeshRange {
+                    first_index: 3,
+                    index_count: 6,
+                },
+                SubMeshRange {
+                    first_index: 9,
+                    index_count: 9,
+                },
+                SubMeshRange {
+                    first_index: 18,
+                    index_count: 12,
+                },
+                SubMeshRange {
+                    first_index: 30,
+                    index_count: 15,
+                },
+            ],
+            texture: TextureId::new(7),
+        };
+        let mut demo = Demo::new(mono_metrics(), demo_fonts(), None, Some(model), page)
+            .expect("a demo holding a model");
+        demo.frame(WINDOW, Duration::from_millis(16));
+        demo
+    }
+
+    #[test]
+    fn a_drag_over_the_car_turns_it_and_touches_nothing_else() {
+        // Through `Demo::offer_to`, the demo's own dispatcher, so the event
+        // travels the crate's route rather than a test's: the car arm answers
+        // the car's own node and the rotator writes the yaw.
+        let demo = laid_out_on(Page::Data);
+        let before = demo.placed_rects();
+        let yaw_before = demo.car.widget.yaw.get();
+        let rect = demo.car_rect().expect("the car is placed");
+        let mut drag = InputEvent::new(
+            InputEventKind::Drag {
+                delta: Offset::new(60.0, 0.0),
+            },
+            Some(Offset::new(
+                rect.x + rect.width / 2.0,
+                rect.y + rect.height / 2.0,
+            )),
+        );
+        assert!(
+            demo.offer_to(demo.car.node(), &mut drag),
+            "the car's own node takes the drag"
+        );
+        assert!(drag.consumed());
+        assert_eq!(
+            demo.car.widget.yaw.get(),
+            yaw_before + (-60.0 * ROTOR_SENSITIVITY),
+            "and the yaw moved by exactly the drag times the sensitivity"
+        );
+        assert_eq!(
+            demo.placed_rects(),
+            before,
+            "and nothing the gallery placed moved"
+        );
+    }
+
+    #[test]
+    fn the_ambient_turn_holds_the_car_when_nothing_is_dragging() {
+        // A frame with a delta and no drag: the gesture produced nothing, so
+        // the ambient producer owns the yaw and the mesh pass is exercised
+        // with no input at all.
+        let mut demo = demo_on(Page::Data);
+        let yaw_before = demo.car.widget.yaw.get();
+        let pitch_before = demo.car.widget.pitch.get();
+        assert_eq!(
+            yaw_before, CAR_REST_YAW,
+            "the demo aims at its resting yaw once, at construction"
+        );
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let step = AMBIENT_YAW_RATE * Duration::from_millis(16).as_secs_f32();
+        assert_eq!(
+            demo.car.widget.yaw.get(),
+            yaw_before + step,
+            "one frame advances the yaw by rate × seconds"
+        );
+        assert_eq!(
+            demo.car.widget.pitch.get(),
+            pitch_before,
+            "and the pitch is bit-identical: the ambient term never touches it"
+        );
+    }
+
+    #[test]
+    fn the_gesture_stops_the_ambient_turn_and_the_ambient_resumes_from_where_it_left_off() {
+        // The precedence test, end to end: a press starts the drag, a drag
+        // turns the car, frames while it is held add nothing, and one frame
+        // after the release the yaw is where the drag left it plus one
+        // ambient step — not reset, not blended.
+        let mut demo = laid_out_on(Page::Data);
+        let rect = demo.car_rect().expect("the car is placed");
+        let (x, y) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+        demo.handle_event(mouse_down_at(x, y, 0));
+        assert!(demo.car_dragging, "the press starts the drag");
+        let yaw_at_press = demo.car.widget.yaw.get();
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.car.widget.yaw.get(),
+            yaw_at_press,
+            "and a frame while it is held adds no ambient turn"
+        );
+        let mut drag = InputEvent::new(
+            InputEventKind::Drag {
+                delta: Offset::new(60.0, 0.0),
+            },
+            Some(Offset::new(x, y)),
+        );
+        assert!(demo.offer_to(demo.car.node(), &mut drag));
+        let yaw_at_release = yaw_at_press + (-60.0 * ROTOR_SENSITIVITY);
+        assert_eq!(
+            demo.car.widget.yaw.get(),
+            yaw_at_release,
+            "the drag turns the car by exactly its delta"
+        );
+        demo.handle_event(Event::MouseButtonUp {
+            timestamp: 1_000_000,
+            window_id: 0,
+            which: 0,
+            mouse_btn: MouseButton::Left,
+            clicks: 1,
+            x,
+            y,
+        });
+        assert!(!demo.car_dragging, "the release ends the drag");
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let step = AMBIENT_YAW_RATE * Duration::from_millis(16).as_secs_f32();
+        assert_eq!(
+            demo.car.widget.yaw.get(),
+            yaw_at_release + step,
+            "and one frame later the yaw is where the drag left it plus one \
+             ambient step"
+        );
+    }
+
+    #[test]
+    fn the_ambient_turn_never_moves_the_pitch() {
+        // The one-producer fact: of the two values, the pitch has exactly
+        // one producer — the gesture — so ten frames of ambient turn leave
+        // it bit-identical.
+        let mut demo = demo_on(Page::Data);
+        let pitch_before = demo.car.widget.pitch.get();
+        assert_eq!(
+            pitch_before, CAR_REST_PITCH,
+            "the demo aims at its resting pitch once, at construction"
+        );
+        frames(&mut demo, 10, Duration::from_millis(16));
+        assert_eq!(
+            demo.car.widget.pitch.get(),
+            pitch_before,
+            "ten frames of ambient turn never move the pitch"
+        );
+    }
+
+    #[test]
+    fn the_car_node_is_a_member_of_the_data_page_and_of_no_other() {
+        // The page table holds the car once, on `data`: the paint gate and
+        // the hit-test gate both read this table, so a second row would draw
+        // the car twice and a missing one would draw it nowhere.
+        for page in Page::ALL {
+            let demo = demo_on(page);
+            let rows: Vec<Page> = demo
+                .page_members
+                .iter()
+                .filter(|member| member.handle == demo.car.node())
+                .map(|member| member.page)
+                .collect();
+            assert_eq!(
+                rows,
+                vec![Page::Data],
+                "{page:?}: the car has exactly one row, on `data`"
+            );
+            assert_eq!(
+                demo.on_show(demo.car.node()),
+                page == Page::Data,
+                "{page:?}: and the gate shows it there and only there"
+            );
+        }
+    }
+
+    #[test]
+    fn the_car_rect_overlaps_nothing_the_gallery_placed() {
+        // The premise the press chain's position rests on, by name: the new
+        // arm goes after the four existing press arms, which is safe only
+        // because `CAR_RECT` intersects none of what they answer. Pinned to
+        // the laid-out numbers rather than to a reading of the layout.
+        let demo = laid_out_on(Page::Data);
+        let car = demo.car_rect().expect("the car is placed");
+        assert_eq!(
+            (car.x, car.y, car.width, car.height),
+            (
+                CAR_ORIGIN.0,
+                CAR_ORIGIN.1 + CONTENT_TOP,
+                CAR_SIZE.width,
+                CAR_SIZE.height
+            ),
+            "the node is where `CAR_ORIGIN` and `CAR_SIZE` say it is"
+        );
+        // Every other leaf on the car's own page, by name rather than by
+        // count: a new neighbour would fail here rather than hide behind one.
+        for (what, rect) in demo.page_rects() {
+            if what == "car" {
+                continue;
+            }
+            assert!(
+                !touches(car, rect),
+                "the car at {car:?} shares a pixel with the {what} at {rect:?}"
+            );
+        }
+        // And the three the press chain answers before the car — the pads are
+        // laid out by their row rather than placed, so they are not in that
+        // list — plus the slider, the keyboard and the six tab buttons.
+        for pad in &demo.pads {
+            let rect = demo.node_rect(pad.node).expect("a laid-out pad");
+            assert!(
+                !touches(car, rect),
+                "the car at {car:?} shares a pixel with a pad at {rect:?}"
+            );
+        }
+        for (what, handle) in [
+            ("slider", demo.slider.node()),
+            ("keyboard", demo.keyboard.handle()),
+        ] {
+            let rect = demo.node_rect(handle).expect("a laid-out node");
+            assert!(
+                !touches(car, rect),
+                "the car at {car:?} shares a pixel with the {what} at {rect:?}"
+            );
+        }
+        for button in demo.tab_focusables() {
+            let rect = demo.node_rect(button).expect("a laid-out button");
+            assert!(
+                !touches(car, rect),
+                "the car at {car:?} shares a pixel with a tab button at {rect:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_view_puts_the_orbit_target_on_the_camera_axis() {
+        // The sign test, and the one a reviewer should break first: the
+        // orbit's target must map to the camera axis, at rest and away from
+        // it. An orbit with the wrong sign or the wrong rotation order
+        // produces a plausible wrong picture and no error anywhere, so this
+        // reads the production composition — `Demo::orbit_view` — rather
+        // than a copy of it.
+        for (yaw, pitch) in [(0.0, 0.0), (CAR_REST_YAW, CAR_REST_PITCH)] {
+            let view = Demo::orbit_view(yaw, pitch);
+            let got = view
+                .transform_point([0.0, CAR_TARGET_Y, 0.0])
+                .expect("the target is never on the camera plane");
+            for (axis, want) in [(got[0], 0.0), (got[1], 0.0), (got[2], -CAR_DISTANCE)] {
+                assert!(
+                    (axis - want).abs() < 1e-4,
+                    "at yaw {yaw} pitch {pitch} the target maps to {got:?}, \
+                     not to [0, 0, {CAR_DISTANCE}] negated"
+                );
+            }
+        }
+        // And the pitch limit is inside the assertions above: the rest pitch
+        // the second case orbits at is one the clamp never touches. Read off
+        // the constructed widget rather than the constant, which pins the
+        // constructor's wiring as well as the number.
+        let demo = demo_on(Page::Data);
+        assert!(
+            CAR_REST_PITCH <= demo.car.widget.pitch_limit(),
+            "the resting pitch is inside the clamp, or the second case above \
+             orbits where the widget refuses to go"
+        );
+    }
+
+    #[test]
+    fn the_car_records_five_mesh_commands_each_with_a_range_and_one_mvp() {
+        // The command-level half, matching task 34's rect-level half for the
+        // 2D pages: five commands, one per range of `Model::ranges` in file
+        // order, all through one matrix — which is the honest statement that
+        // no wheel spin exists.
+        let demo = demo_with_model_on(Page::Data);
+        let commands = demo.commands_at(demo.car.node());
+        assert_eq!(
+            commands.len(),
+            5,
+            "one command per sub-mesh, and the model holds five ranges"
+        );
+        let mut mvp = None;
+        for (command, range) in commands.iter().zip(
+            demo.model
+                .as_ref()
+                .expect("a model the fixture built")
+                .ranges
+                .iter(),
+        ) {
+            let DrawCommand::Mesh {
+                mesh,
+                range: recorded,
+                mvp: command_mvp,
+                tint,
+                opacity,
+                texture,
+            } = command
+            else {
+                panic!("the car records nothing but mesh commands, not {command:?}");
+            };
+            let model = demo.model.as_ref().expect("a model the fixture built");
+            assert_eq!(*mesh, model.mesh, "the command draws the model's mesh");
+            assert_eq!(*recorded, *range, "through the range's own file order");
+            assert_eq!(
+                *tint,
+                Color::new(255, 255, 255, 255),
+                "in the premultiplied white the colormap needs"
+            );
+            assert_eq!(*opacity, 1.0, "opaque, so the mesh batches `Opaque`");
+            assert_eq!(*texture, model.texture, "with the model's colormap");
+            match mvp {
+                None => mvp = Some(*command_mvp),
+                Some(first) => assert_eq!(
+                    *command_mvp, first,
+                    "and every sub-mesh shares the one matrix"
+                ),
+            }
+        }
+        // The recorded matrix centres the orbit in the rect: the viewport is
+        // the window, so without the recentre the target would land on the
+        // window's own centre, outside the rect. Read off the first recorded
+        // command rather than a helper, so this pins what is drawn.
+        let first = mvp.expect("five commands recorded one matrix");
+        let centred = first
+            .transform_point([0.0, CAR_TARGET_Y, 0.0])
+            .expect("the target is never on the camera plane");
+        let (px, py) = (
+            (centred[0] + 1.0) / 2.0 * WINDOW.width,
+            (1.0 - centred[1]) / 2.0 * WINDOW.height,
+        );
+        assert!(
+            (px - (CAR_RECT.x + CAR_RECT.width / 2.0)).abs() < 1.0
+                && (py - (CAR_RECT.y + CAR_RECT.height / 2.0)).abs() < 1.0,
+            "the recorded matrix puts the orbit target at ({px}, {py}), not \
+             at the car rect's centre"
+        );
+        // Before the chrome in paint order: the car node walks before the
+        // gauge, the chart and the image, so the mesh is under them.
+        let position = |handle: Handle| {
+            demo.order
+                .iter()
+                .position(|candidate| *candidate == handle)
+                .expect("a node the paint order walks")
+        };
+        let car = position(demo.car.node());
+        for (what, handle) in [
+            ("gauge", demo.gauge.handle()),
+            ("chart", demo.chart.handle()),
+            ("image", demo.image.handle()),
+        ] {
+            assert!(
+                car < position(handle),
+                "the car walks before the {what}, so the chrome is over it"
+            );
+        }
+        // And on the five pages that do not show it, the gate empties the
+        // node: no other page records one, so the capture criterion below is
+        // demanding rather than merely met.
+        for page in Page::ALL {
+            if page == Page::Data {
+                continue;
+            }
+            let other = demo_with_model_on(page);
+            assert!(
+                other.commands_at(other.car.node()).is_empty(),
+                "{page:?} records no mesh command"
+            );
         }
     }
 

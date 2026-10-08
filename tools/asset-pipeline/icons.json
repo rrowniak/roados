@@ -1,0 +1,48 @@
+{
+  "upstream": "lucide-1.52.0.zip",
+  "icons_dir": "lucide-1.52.0/icons",
+  "sizes": [24],
+  "themes": {"dark": "#1a1a1a", "light": "#eceff4"},
+  "icons": {
+    "car": "car.svg",
+    "car-front": "car-front.svg",
+    "battery-charging": "battery-charging.svg",
+    "gauge": "gauge.svg",
+    "plug-zap": "plug-zap.svg",
+    "zap": "zap.svg",
+    "thermometer": "thermometer.svg",
+    "snowflake": "snowflake.svg",
+    "lock": "lock.svg",
+    "lock-open": "lock-open.svg",
+    "sun": "sun.svg",
+    "clock": "clock.svg",
+    "calendar": "calendar.svg",
+    "bell": "bell.svg",
+    "download": "download.svg",
+    "navigation": "navigation.svg",
+    "play": "play.svg",
+    "pause": "pause.svg",
+    "skip-back": "skip-back.svg",
+    "skip-forward": "skip-forward.svg",
+    "volume-2": "volume-2.svg",
+    "speaker": "speaker.svg",
+    "fan": "fan.svg",
+    "settings": "settings.svg",
+    "wrench": "wrench.svg",
+    "circle-alert": "circle-alert.svg",
+    "triangle-alert": "triangle-alert.svg",
+    "power": "power.svg",
+    "map-pin": "map-pin.svg",
+    "radio": "radio.svg",
+    "wifi": "wifi.svg",
+    "smartphone": "smartphone.svg",
+    "armchair": "armchair.svg"
+  },
+  "unmapped": [
+    {
+      "name": "gauge-metric",
+      "substitute": "gauge",
+      "reason": "gauge-metric does not exist in Lucide 1.52.0, so gauge.svg answers the gauge semantic. No other set is acceptable: an absent glyph is the moment an agent reaches for a set that has it, and the set that has it is simple-icons, which is CC0 and therefore looks safe while shipping tesla.svg. The closed 33-entry list above and fetch_upstream.sh's two-URL allow-list are what make reaching impossible rather than discouraged."
+    }
+  ]
+}

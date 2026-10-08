@@ -1167,8 +1167,113 @@ unchanged at 71.
 - **Nothing about `cargo audit` on the operator's host** — it ran here,
   clean, on 2026-10-07; that is this host's result.
 - **Nothing about overlays' 59 fps being explained** — measured on both
-  binaries, above the floor, below the old band; not chased, because both
-  trees agree it is not this task's.
+binaries, above the floor, below the old band; not chased, because both
+trees agree it is not this task's.
+
+## Task 40 — what it decided, and what it found
+
+**Implemented 2026-10-08, verified, not yet reviewed** — review is
+`.ai/workflows/task-sequence.md` step 2, in a session separate from the
+implementer's. **3 code files**: `ui_core/src/widgets/rotator.rs` (new,
+13 tests + 2 doctests), `ui_core/src/widgets/mod.rs` (+1 `pub mod` line),
+`ui_demo/src/main.rs` (+8 tests); `DEMO_APPLICATION.md` row `L4` carries the
+dated amendment (req 13, 2026-10-08). **The suite went 1568 → 1581 lib
+(+13), demo 228 → 236 (+8), doctests 227 → 229 (+2) — +23, none removed,
+none weakened.** The 1568 lib baseline counts the uncommitted prior work
+(`MESH_AMBIENT`/`mesh_ambient`/`set_mesh_ambient`, `load_standalone_texture`,
+`TextureCache::load_from_file_standalone`/`insert_standalone` + 3 texture
+tests), which this task uses and does not re-own: the colormap loads through
+the standalone path, which is what fixes the black car.
+
+### The widget, and the three constants with their arithmetic
+
+`Rotator { yaw, pitch, dragging, focused }` plus private
+`sensitivity`/`pitch_limit`/`node` — no `paint`, no `tick`, no
+`AnimationClock`. `ROTOR_SENSITIVITY = 0.0025` (a full-width 1280 px drag is
+3.2 rad ≈ 183°; 209 px of vertical travel reaches the clamp),
+`ROTOR_PITCH_LIMIT = FRAC_PI_6` (below the `atan(1.30/1.275) ≈ 45.5°`
+silhouette-square angle, symmetric because a one-way drag feels broken),
+`ROTOR_KEY_STEP = 0.0873` (5°, after `SLIDER_STEP = 5.0`). `rotate_by` is
+the only write path — `grep yaw.set\|pitch.set` returns exactly its two
+lines — and `clamp_pitch` answers `0.0` for non-finite input. A crate widget
+rather than demo-local state, for the task file's four reasons (Slider's
+shape, testability, row `L4` being phrased about widgets, the demo owning
+the camera); row `L4` is amended, not closed — `LongPress` and `Swipe` stay
+unconsumed by test. Two producers, one value: the gesture owns the yaw
+while dragging, the ambient term (`AMBIENT_YAW_RATE = 0.35` rad/s) owns it
+otherwise, and the handover is an accumulation that resumes where the
+gesture left off. Grab-and-turn, and `Scroll`'s "down is later" does not
+transfer (no second input breaks the tie here); the drag arm never reads
+`rect`, and the module doc says so. No inertia, no fling, no snap, no
+release animation — the crate has none anywhere, a snap needs presets the
+demo has not got, and a release animation needs a rest pose that does not
+exist.
+
+### Four deviations from the task file, each measured
+
+1. **`CAR_DISTANCE = 7.0`, not 2.6.** The file's derivation assumes the car
+   rect is the viewport; it is not (see 3). Fitted vertex by vertex instead:
+   all 3 184 positions through the production composition, every ambient yaw
+   at rest pitch — worst rect-fraction 1.654 at 4.0, 1.249 at 5.0, 1.028 at
+   6.0, **0.874 at 7.0** (front-bumper corners swinging across the edge).
+   Captured at 2.6 the rect shows a cropped fender; at 7.0 a front
+   three-quarter sedan with margin.
+2. **Window aspect plus an NDC recentre, not the rect aspect and the literal
+   composition.** Same cause: the viewport is the window, so the file's
+   matrix centres the orbit on the window (640, 510), outside the rect. The
+   demo recentres with a post-projection translation (`CAR_SHIFT_X/Y`,
+   derived from the rect's centre in the window) and divides by the window's
+   aspect — a rect aspect on a window viewport draws every wheel 12 % too
+   tall. `near`/`far` untouched, honouring 36's promise.
+3. **`Debug` is hand-written, not derived.** `Property` is `Clone` and not
+   `Debug`, so the file's `#[derive(Clone, Debug)]` cannot compile — Slider,
+   Toggle and Scroll carry neither attribute for the same reason.
+4. **`inked_box` answers `CAR_RECT` for `Mesh`.** The strip tests call it on
+   every command and it panicked on `Mesh`; the scissor confines mesh ink to
+   the car rect, so the rect *is* the ink box, pinned by the premise test
+   and the sign test rather than weakened past them.
+
+The model's facing is recorded nowhere, so `CAR_REST_YAW = 0.6` is settled
+from the first capture: a front three-quarter with the nose right, at
+`CAR_REST_PITCH = 0.21` from above. `frame_clips` returns `Some(CAR_RECT)`
+for the car node and `None` elsewhere — the first scissor in the pipeline
+that matters. `CAR_AMBIENT = 0.65` scoped to data-with-model frames in
+`Demo::draw` (`begin_frame` resets it); the capture shows no washout. The
+colormap loads standalone; `gl.get_error()` after the mesh frames reads
+`0x0` on all 960 batches of a 3 s data run (temporary instrument, quoted in
+the handoff, reverted — the `render.rs` diff is the prior work's alone).
+
+### The capture: five pages AE 0 above the band, the sixth inside its rect
+
+Before/after release binaries, six pages, window id re-read per capture,
+`pgrep -a -x` beside each `magick import -window`:
+pads/text/input/controls/overlays **AE 0 over y 0–679** (full-window diffs
+94–329, every pixel in the fps band); data **AE 0** over y 0–303 and over
+both side strips beside the rect, **87 969** differing inside `CAR_RECT`
+(the ambient turn moves the car between runs, by construction). The car
+crop's mean is 5× the background's — geometry with colormap, not a black
+quad. Six pages' fps (10 s runs, `roados-fps` line): pads 63.1, text 62.6,
+input 62.7, controls 62.5, **data 62.3**, overlays 61.3; `fps-check.sh 10 55`
+**63.0 PASS**. Data is the first page that draws a mesh — 2 032 triangles in
+five draw calls — and costs nothing measurable against the band.
+
+### Mutation evidence, with restore proved by `diff`
+
+Snapshot before each break, `diff` after each restore, green re-run. (1)
+`clamp_pitch` returns its input: 4 lib tests **FAILED** (both clamp halves,
+the arrow-keys clamp, the non-finite branch); restored, 13 pass. (2)
+`ROTOR_PITCH_LIMIT` → `FRAC_PI_4`: the constants test **FAILED**; restored.
+(3) `rotated_x`/`rotated_y` swapped in `orbit_view`: the sign test
+**FAILED**; restored. (4) the `-eye` negation dropped: the sign test
+**FAILED**; restored, passes.
+
+### What is NOT claimed
+
+The gesture logic is unit-tested through the crate's own event path and the
+demo's ambient turn moves the car on every run, and **no pointer event has
+ever been observed reaching this window** on this host, so nothing here is
+evidence that a finger turns it. `cargo audit` ran clean here (1 294
+advisories, 47 crates, exit 0); that is this host's result.
 
 ## Task 31 — what it decided, and what it found
 

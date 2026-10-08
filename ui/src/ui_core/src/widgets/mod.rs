@@ -183,6 +183,7 @@ pub mod keyboard;
 pub mod label;
 pub mod list;
 pub mod progress;
+pub mod rotator;
 pub mod scroll;
 pub mod slider;
 pub mod text_input;

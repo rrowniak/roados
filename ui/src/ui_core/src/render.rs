@@ -397,10 +397,10 @@ const MESH_LIGHT_DIR: [f32; 3] = [0.36, 0.48, 0.8];
 ///
 /// `0.35`, so `shade = ambient + (1 - ambient) * lambert` stays in
 /// `0.0..=1.0` by construction — which is what the premultiplication proof in
-/// [`mesh_fragment`] needs. A first-principles choice: high enough that a
+/// `mesh_fragment` needs. A first-principles choice: high enough that a
 /// surface turned fully away reads as shade rather than as a hole, low enough
 /// that turning toward the light is visible.
-const MESH_AMBIENT: f32 = 0.35;
+pub const MESH_AMBIENT: f32 = 0.35;
 
 /// The number of indices one quad contributes to an index buffer: two triangles.
 const INDICES_PER_QUAD: usize = 6;
@@ -2149,6 +2149,9 @@ pub struct Renderer {
     /// mesh batch from [`MESH_LIGHT_DIR`] and [`MESH_AMBIENT`].
     u_light_dir: Option<glow::UniformLocation>,
     u_ambient: Option<glow::UniformLocation>,
+    /// Per-frame ambient override for the mesh shader; defaults to [`MESH_AMBIENT`].
+    /// Set via [`Renderer::set_mesh_ambient`] for a single frame's draws.
+    mesh_ambient: f32,
     /// The material tint for the mesh program, per command.
     u_tint: Option<glow::UniformLocation>,
 }
@@ -2421,6 +2424,7 @@ impl Renderer {
             u_colormap,
             u_light_dir,
             u_ambient,
+            mesh_ambient: MESH_AMBIENT,
             u_tint,
         };
         // SAFETY: The GL context is current on this thread; `vao`, `vbo` and
@@ -2686,6 +2690,27 @@ impl Renderer {
         Ok(handle)
     }
 
+    /// Loads the image at `path` and always gives it a texture of its own,
+    /// even when it would fit in the shared atlas.
+    ///
+    /// A mesh's UVs address a whole 0-1 texture, and an atlas window is not
+    /// one: the 512x512 colormap packs into the atlas under the ordinary rule
+    /// and the mesh then samples it with its own UVs, which is a black car at
+    /// any ambient. So the colormap comes through here, and everything else
+    /// keeps going through [`Renderer::load_texture`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError::Texture`] with
+    /// [`crate::texture::TextureError`]'s message when the file cannot be opened
+    /// or decoded or has no addressable size, and [`RenderError::Gl`] when its
+    /// texture cannot be created.
+    pub fn load_standalone_texture(&mut self, path: &Path) -> Result<TextureHandle, RenderError> {
+        let handle = self.textures.load_from_file_standalone(path)?;
+        self.ensure_standalone_texture(handle)?;
+        Ok(handle)
+    }
+
     /// Returns the cache of decoded images, for a caller that needs to know
     /// what it has.
     ///
@@ -2704,10 +2729,21 @@ impl Renderer {
         self.context.sdl()
     }
 
+    /// Sets the mesh ambient term for this frame's draws.
+    ///
+    /// The value is clamped to 0.0..=1.0 and used for the next frame's mesh
+    /// draws, replacing the default [`MESH_AMBIENT`]. It resets to the default
+    /// at the start of the next frame via [`Renderer::begin_frame`].
+    pub fn set_mesh_ambient(&mut self, ambient: f32) {
+        self.mesh_ambient = ambient.clamp(0.0, 1.0);
+    }
+
     /// Starts a frame: clears the screen, resets the viewport to the window
     /// size, disables scissoring, clears the depth buffer with the writemask on,
     /// and establishes the frame's resting depth state (no test, no writes).
     pub fn begin_frame(&mut self) {
+        // Reset mesh ambient to default at start of frame
+        self.mesh_ambient = MESH_AMBIENT;
         let (width, height) = self.context.window_size();
         self.viewport = (width, height);
         let gl = self.context.gl();
@@ -3474,7 +3510,7 @@ impl Renderer {
                 MESH_LIGHT_DIR[1],
                 MESH_LIGHT_DIR[2],
             );
-            gl.uniform_1_f32(self.u_ambient.as_ref(), MESH_AMBIENT);
+            gl.uniform_1_f32(self.u_ambient.as_ref(), self.mesh_ambient);
             match batch.key.blend_mode {
                 BlendMode::Opaque => gl.disable(GL_BLEND),
                 BlendMode::Transparent => {

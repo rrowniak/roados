@@ -1193,7 +1193,7 @@ advisories, 47 crates, exit 0); that is this host's result.
 
 **Implemented 2026-10-08, verified, not yet reviewed** — review is
 `.ai/workflows/task-sequence.md` step 2, in a session separate from the
-implementer's. **8 code files**: `ui_core/src/render/target.rs` (`ColourTarget`,
+implementer's. **Nine code files**: `ui_core/src/render/target.rs` (`ColourTarget`,
 `allocate_texture`, `ColourTarget::capture`, +3 tests), `ui_core/src/paint.rs`
 (`BackdropMode`, `DrawCommand::Backdrop`, `Painter::backdrop` + its doctest),
 `ui_core/src/batch.rs` (`ShaderKind::Backdrop`, the `batch_key` arm,
@@ -1203,7 +1203,9 @@ locations, `Pass::Backdrop`, `create_backdrop_programs`, `draw_pass`'s arm,
 `backdrop_fragment`, `colour_capture_legal`, the `## Backdrops` section, +7
 tests), `ui_core/src/render/blur.rs` (`rect_quad` + a doc test +1 test),
 `ui_core/src/render/context.rs` (`MULTISAMPLE_SAMPLES` made `pub(crate)`, one
-caller), and **`ui_demo/src/main.rs` — 2 mechanical arms only, 13 lines**.
+caller), `ui_core/src/widgets/list.rs` (+21), `ui_core/src/widgets/scroll.rs`
+(+3−1), and **`ui_demo/src/main.rs` — 2 mechanical arms in test helpers only,
+13 lines**.
 **The suite went 1568 → 1587 lib (+19), 229 → 231 doctests (+2), 236 demo and 3
 integration unmoved — none removed, none weakened.**
 
@@ -1360,6 +1362,25 @@ coincidence:** no page records a backdrop, so the per-frame work added is **one
 `if let Some(backdrop)` per segment**, two program links in `Renderer::new`, and
 **zero captures** — `ColourTarget::new` allocates no storage and `ensure_size` is
 reached only from `draw_backdrop_offscreen`.
+
+
+### The composite-rect growth deviation, and the operator's call
+
+**TASK_UI_PRIM_41.md** requirement 15 step 7 and its acceptance criterion both
+named `blur::reach(sigma)` and required the composite to be drawn over the rect
+grown by the blur's reach. **The operator dropped the growth on 2026-10-08**,
+because the premise behind it does not hold: the shadow's blur spreads the *shape*
+it draws, so its composite must cover the shape plus the blur's reach or the
+edge is cut off. A backdrop has no shape — the blur is a full-window convolution
+of the whole capture, so the texels the rect's edges need are *already blurred*
+and come from just outside the rect, in the texture itself. Growing the composite
+therefore paints a halo of frosted scene up to four pixels **outside** the
+caller's rect — where the caller asked for nothing — and makes
+`DrawCommand::Backdrop`'s `rect` field doc false in the sentence a caller reads.
+**This is a deviation from the task file, recorded here rather than silently
+settled**, and the task file is amended in place, dated, so the two cannot
+contradict.
+
 
 ### What is NOT claimed
 

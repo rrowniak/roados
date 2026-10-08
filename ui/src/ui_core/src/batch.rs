@@ -1589,8 +1589,8 @@ mod tests {
 
     #[test]
     fn a_frame_with_no_mesh_and_no_shadow_has_no_boundary() {
-        // The trailing-run literal sets both boundary slots: a frame with
-        // neither kind of boundary is one segment whose two slots are `None`.
+        // The trailing-run literal sets all three boundary slots: a frame with
+        // neither kind of boundary is one segment whose three slots are `None`.
         let mut batcher = Batcher::new();
         batcher.add(rounded_at(0, opaque()));
         batcher.add(rounded_at(1, opaque()));
@@ -1639,7 +1639,7 @@ mod tests {
     #[test]
     fn no_segment_holds_a_shadow_and_a_mesh() {
         // A seal consumes exactly one singleton command, so at most one of the
-        // two boundary slots is `Some` — the invariant a two-`Option` type
+        // three boundary slots is `Some` — the invariant a three-`Option` type
         // cannot say for itself. A mesh and a shadow can never share a
         // segment, so their draw order relative to each other is unobservable.
         let mut batcher = Batcher::new();
@@ -1667,8 +1667,8 @@ mod tests {
 
     #[test]
     fn every_variant_has_a_key_and_every_kind_routes() {
-        // The compiler is the stronger check: one `match` over all ten
-        // `DrawCommand` variants and one over all five `ShaderKind`s, so a
+        // The compiler is the stronger check: one `match` over all eleven
+        // `DrawCommand` variants and one over all six `ShaderKind`s, so a
         // variant added without a key — or a kind added without a route — is a
         // non-exhaustive match, which is a compile error rather than a silent
         // pass.

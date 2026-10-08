@@ -1744,7 +1744,9 @@ mod tests {
     use super::*;
     use crate::font::FontSet;
     use crate::layout::{Layout, LayoutState as State};
-    use crate::paint::{Color, FadeRamp, FontWeight, PaintState, Painter, TextureId, UvRect};
+    use crate::paint::{
+        BackdropMode, Color, FadeRamp, FontWeight, PaintState, Painter, TextureId, UvRect,
+    };
     use std::cell::{Cell, RefCell};
 
     /// The list every virtualisation test scrolls: 100 rows 100 tall in a
@@ -2648,11 +2650,16 @@ mod tests {
             &[(25.0, 26.0), (27.0, 28.0), (29.0, 26.0)],
             Color::new(19, 20, 21, 255),
         );
+        painter.backdrop(
+            Rect::new(100.0, 200.0, 50.0, 60.0),
+            BackdropMode::Blur(2.0),
+            Color::new(236, 239, 244, 170),
+        );
         let every = painter.finish();
-        assert_eq!(every.len(), 8, "one of each variant the enum has");
+        assert_eq!(every.len(), 9, "one of each variant the enum has");
 
         let moved = translate_commands(&every, Offset::new(664.0, 120.0));
-        assert_eq!(moved.len(), 8, "and one of each out: none was dropped");
+        assert_eq!(moved.len(), 9, "and one of each out: none was dropped");
         for (before, after) in every.iter().zip(moved.iter()) {
             assert_eq!(
                 std::mem::discriminant(before),

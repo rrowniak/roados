@@ -958,6 +958,10 @@ full seven**, and records the overshoot rather than disguising it.
          `u_backdrop_tint` to `quad_color(tint)`. **`gl.enable(GL_BLEND)` and
          `gl.blend_func(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)`**, because the composite
          reads a destination.
+
+**Amended 2026-10-08 by operator decision:** the composite is now drawn over `drawn` (the rect intersected with the window), **not** grown by `blur::reach(sigma)`. The growth was the task file's original premise, but it does not hold for a backdrop: the blur is a full-window convolution of the whole capture, so the texels the rect's edges need are *already blurred* and come from just outside the rect, in the texture itself. Growing the composite therefore painted a halo of frosted scene up to four pixels **outside** the caller's rect — where the caller asked for nothing — and made `DrawCommand::Backdrop`'s `rect` field doc false in the sentence a caller reads. **This deviation is recorded in `doc/ui/IMPLEMENTATION_STATE.md` § *Task 41 — what it decided, and what it found* and this task file is amended in place so the two cannot contradict.** The acceptance criterion in requirement 15 step 7 that named `blur::reach(sigma)` is deviated from; the task file's own form is amended rather than the acceptance criterion silently settled.
+
+
       8. **The clip is the composite's, twice over, and the doc says so**: it is
          in `bind_default_target(clip)` and it is the rect, which is a second
          bound on the same pixels. **A caller whose clip is smaller than its

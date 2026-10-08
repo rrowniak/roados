@@ -705,8 +705,7 @@ pub enum DrawCommand {
     /// [`Segment`](crate::batch::Segment) boundary, so nothing recorded after it
     /// can merge into a batch recorded before it.
     Backdrop {
-        /// The rect of the window to capture, in window coordinates, **before** the
-        /// blur's reach is added.
+        /// The rect the backdrop covers, in window coordinates.
         ///
         /// **The capture is window-sized whatever this says**, because
         /// `glBlitFramebuffer` from a multisampled read framebuffer requires the

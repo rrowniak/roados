@@ -1053,17 +1053,87 @@ mod tests {
         // number of times, once per rectangle, and **both rectangles start at
         // `0, 0`**. A destination offset by `rect.x` would appear here as a
         // different expression, which is the mutation the criterion names.
-        let zero_origin = body.matches("0,\n                0,").count()
-            + body.matches("0, 0,").count()
-            + body
-                .matches("                    0,\n                    0,")
-                .count();
-        assert!(
-            zero_origin >= 1,
-            "both rectangles start at the origin — a rect-scoped destination is \
-             exactly what the ES 3.1 rule refuses, and this is the assertion that \
-             says so while the code is in front of you"
+        // **The rectangles are compared as parsed argument lists, not as counted
+        // substrings.** The previous form of this assertion counted occurrences of
+        // three indentation-specific patterns and accepted `>= 1`, which **could not
+        // tell "both rectangles at the origin" from "one at the origin and the other
+        // offset"** — and the criterion's own named mutation (offsetting the
+        // destination by `rect.x`) passed it. Verified before this was rewritten,
+        // not assumed: `cargo test -p ui_core --lib render::target` read
+        // **9 passed / 0 failed** with the destination's `x0` changed from `0` to
+        // `4`.
+        //
+        // What is asserted is the *rule*, as equality of two four-element lists —
+        // the source rectangle and the destination rectangle are the same four
+        // numbers — which is exactly what ES 3.1 requires, and which an offset, a
+        // half-scale, or any other difference fails by construction.
+        // **The argument list ends at the matching close paren, not the first one.**
+        // `split(')')` stops inside `i32::try_from(width)`, which is why a naive
+        // version of this read three arguments instead of ten.
+        let after = body
+            .split("gl.blit_framebuffer(")
+            .nth(1)
+            .expect("`capture` calls `blit_framebuffer`");
+        let mut nested = 1_i32;
+        let mut end = None;
+        for (offset, character) in after.char_indices() {
+            match character {
+                '(' => nested += 1,
+                ')' => {
+                    nested -= 1;
+                    if nested == 0 {
+                        end = Some(offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let call = &after[..end.expect("the call is closed")];
+        // **Split on top-level commas only.** `i32::try_from(width).unwrap_or(0)`
+        // contains two commas of its own, so a naive `split(',')` reads three
+        // arguments where the call has ten — and that mistake would make the
+        // rectangle comparison vacuous in exactly the way the previous form was.
+        // Depth is tracked over `(` and `[` so a nested comma is not a separator.
+        let mut args: Vec<&str> = Vec::new();
+        let mut depth = 0_i32;
+        let mut start = 0_usize;
+        for (offset, character) in call.char_indices() {
+            match character {
+                '(' | '[' => depth += 1,
+                ')' | ']' => depth -= 1,
+                ',' if depth == 0 => {
+                    args.push(call[start..offset].trim());
+                    start = offset + 1;
+                }
+                _ => {}
+            }
+        }
+        let tail = call[start..].trim();
+        if !tail.is_empty() {
+            args.push(tail);
+        }
+        assert_eq!(
+            args.len(),
+            10,
+            "ten arguments — four source, four destination, a mask and a filter — \
+             and a missing one would silently shift every later argument"
         );
+        let source = &args[0..4];
+        let destination = &args[4..8];
+        assert_eq!(
+            source, destination,
+            "**the source and destination rectangles are the same four numbers** — \
+             that is the ES 3.1 identical-bounds rule, and a destination offset by \
+             `rect.x` is what this assertion exists to refuse"
+        );
+        assert_eq!(
+            source[0], "0",
+            "and the source starts at the window's origin, so the capture is the \
+             whole window and not a viewport of it"
+        );
+        assert_eq!(args[8], "GL_COLOR_BUFFER_BIT", "the mask moves colour");
+        assert_eq!(args[9], "GL_NEAREST", "and the filter is the copy's");
         assert!(
             body.contains("GL_READ_FRAMEBUFFER"),
             "and the read framebuffer is named explicitly, because \
@@ -1112,7 +1182,20 @@ mod tests {
         );
         // Lazily: `new` allocates no storage, so the field is `None` and a frame
         // with no backdrop never reaches `ensure_size` at all.
-        let new_body = body_of(source, "pub fn new");
+        // **Scoped to `impl ColourTarget`, and it has to be.** `body_of` takes the
+        // *first* match in the string it is given, and in the whole file the first
+        // `pub fn new` is **`ShadowTarget::new`** — so an unscoped search asserts
+        // about the wrong type while its message claims `ColourTarget::new`. Found
+        // by review, and confirmed by mutation rather than by reading: setting
+        // `ColourTarget::new`'s `size` to `Some((0, 0))` and then to
+        // `Some((1, 1))` each left the suite **9 passed / 0 failed**. The second of
+        // those is the defect `a_zero_sentinel_for_the_allocation_would_hide_a_one_pixel_window`
+        // above exists to prevent — a 1×1 window would skip the only allocation it
+        // ever needs and sample a texture with no storage.
+        let new_body = body_of(
+            &source[source.find("impl ColourTarget").unwrap_or(0)..],
+            "pub fn new",
+        );
         assert!(
             new_body.contains("size: None"),
             "**`ColourTarget::new` allocates nothing**, which is what makes the six \

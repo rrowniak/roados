@@ -2148,7 +2148,7 @@ fn create_backdrop_programs(
 
 /// Links one program from a vertex source and a fragment source.
 ///
-/// The four programs above this used to be spelled out one by one, which is four
+/// The six programs above this used to be spelled out one by one, which is six
 /// copies of the same eleven unsafe lines and four places to forget one. This is
 /// the shape they all had.
 ///
@@ -3806,6 +3806,35 @@ impl Renderer {
         clip: Option<Rect>,
     ) -> Result<(), RenderError> {
         let (width, height) = self.viewport;
+        // **Step 0, and it is here for a reviewer's blocker, not for tidiness.**
+        //
+        // Once the probe has answered `Some(false)` this driver refuses the capture,
+        // so there is nothing to draw and this function returns immediately — and it
+        // must return **before** `ensure_size`, before the resting state and above
+        // all before `bind_for_write`, because that call binds the *colour*
+        // framebuffer, sets the viewport to the target and disables the scissor.
+        // `Renderer::end_frame` does not rebind: its per-segment prologue sets only
+        // `use_program`, `u_resolution` and the blend state, and the only two sites
+        // that bind the window's own framebuffer are `begin_frame` and
+        // `bind_default_target`. So an early return placed after `bind_for_write`
+        // leaves the offscreen target bound for **every command recorded after this
+        // backdrop**, and the window shows neither them nor the backdrop.
+        //
+        // **That was the defect, and it was invisible**: `colour_capture_legal()`
+        // answers `Some(false)`, so the accessor designed to make the quiet half
+        // non-silent reports exactly the state that looks correct. `begin_frame`
+        // rebinds at the start of the *next* frame, so the loss is one frame per
+        // backdrop frame rather than permanent — which is a real difference and not a
+        // mitigation.
+        //
+        // Returning first also means a driver that refuses never allocates the
+        // window-sized `GL_RGBA8` target at all, which is 5.22 MB at this window.
+        // **The first capture still runs the full path**, because the probe *is* the
+        // capture and the probe needs a target to capture into — which is why the
+        // check is `== Some(false)` and not "is it known".
+        if self.colour_capture_legal == Some(false) {
+            return Ok(());
+        }
         // 1. The target, window-sized and lazily — nothing is allocated on a frame
         // that records no backdrop at all, because this line is not reached.
         self.colour_target
@@ -3841,9 +3870,15 @@ impl Renderer {
         // per channel and still is not `GL_RGBA8`. Doing the blit and reading the
         // error asks the only question that has one right answer.
         //
-        // **Every later capture after `Some(false)` returns `Ok(())` without
-        // drawing**, and the doc above says why that is not a silent failure.
+        // **Every later capture after `Some(false)` returned at step 0**, before
+        // anything was bound — so reaching this point with `Some(false)` is not
+        // possible, and the remaining arms are `Some(true)` and `None` only. The
+        // `Ok` path from here draws, and the `Err` path aborts the frame before
+        // `context.swap()`, so the framebuffer it left bound is restored by the next
+        // `begin_frame`.
         match self.colour_capture_legal {
+            // Unreachable by construction; kept so that adding an arm below cannot
+            // quietly turn this into a fall-through that draws after a refusal.
             Some(false) => return Ok(()),
             Some(true) => {}
             None => {
@@ -3938,25 +3973,25 @@ impl Renderer {
         self.colour_target.swap();
 
         // 6. **The composite, over the rect and not the window** — the one saving
-        // this shape has. The rect grown by the blur's reach, intersected with the
-        // window so a rect hanging off the edge does not draw outside it.
-        let sigma = match mode {
-            BackdropMode::Blur(sigma) => sigma,
-            BackdropMode::Sharp => 0.0,
-        };
-        let reach = blur::reach(sigma);
+        // this shape has. **The rect, intersected with the window so a rect hanging
+        // off the edge does not draw outside it — and not grown by the blur's
+        // reach.**
+        //
+        // **The growth was removed, and it was the operator's call on 2026-10-08.**
+        // `TASK_UI_PRIM_41.md` requirement 15 step 7 and its acceptance criterion
+        // both name `blur::reach(sigma)`, and the premise behind it does not hold
+        // here: the shadow's blur really does spread the *shape* it draws, so its
+        // composite must cover the shape plus the blur's reach or the edge is cut
+        // off. A backdrop has no shape — the blur is a full-window convolution of
+        // the whole capture, so the texels the rect's edges need are *already
+        // blurred* and come from just outside the rect, in the texture itself.
+        // Growing the composite therefore paints a halo of frosted scene up to four
+        // pixels **outside** the caller's rect — where the caller asked for nothing
+        // — and makes `DrawCommand::Backdrop`'s `rect` field doc false in the exact
+        // sentence a caller reads. Found by review; the deviation is recorded in
+        // `doc/ui/IMPLEMENTATION_STATE.md` § *Task 41* and the task file is amended
+        // in place, dated.
         let drawn = rect.intersection(Rect::new(0.0, 0.0, u32_to_f32(width), u32_to_f32(height)));
-        let grown = if reach > 0.0 {
-            let moved = Rect::new(
-                drawn.x - reach,
-                drawn.y - reach,
-                drawn.width + reach * 2.0,
-                drawn.height + reach * 2.0,
-            );
-            moved.intersection(Rect::new(0.0, 0.0, u32_to_f32(width), u32_to_f32(height)))
-        } else {
-            drawn
-        };
         // **The framebuffer, the viewport, the scissor and (task 34's) the depth
         // state, in one call** — `bind_for_write` turned the scissor off and the
         // composite is the pass that puts it on the screen. No fourth thing is added
@@ -3995,7 +4030,7 @@ impl Renderer {
             gl.blend_func(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         }
         self.blur_quad
-            .draw(self.context.gl(), &blur::rect_quad(grown));
+            .draw(self.context.gl(), &blur::rect_quad(drawn));
         Ok(())
     }
 

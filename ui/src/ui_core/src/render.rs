@@ -91,6 +91,88 @@
 //!   and a rule that only holds because every 2D vertex shader happens to write
 //!   the same `z`. The `0.5 < 0.5` arithmetic makes this unnecessary.
 //!
+//! ## Backdrops
+//!
+//! A backdrop is the scene behind a rect, captured, optionally blurred, and
+//! composited back where it was recorded — the mechanism
+//! `doc/ui/DEMO_APPLICATION.md` row `L1` sub-items (a), (b) and (d) name, and the
+//! one sub-item that stays open is (c), rect-scoped capture.
+//!
+//! ### What it costs, in numbers
+//!
+//! Window: 1280 × 1020 = **1,305,600 pixels**. `GL_RGBA8` is 4 bytes per pixel
+//! (5.22 MB); `GL_R8` is 1 (1.31 MB). One blur pass is `2r+1` fetches with
+//! `r = taps_for(sigma)`, and `blur::MAX_TAPS` is 9, so the two passes together
+//! are **18 fetches per target pixel**.
+//!
+//! | stage | reads / window px | writes | bytes / window px | per frame |
+//! |---|---|---|---|---|
+//! | blit, 4 samples → 1 | 4 | 1 | 20 B | 26.1 MB |
+//! | blur H, 9 taps | 9 | 1 | 40 B | 52.2 MB |
+//! | blur V, 9 taps | 9 | 1 | 40 B | 52.2 MB |
+//! | composite, over the rect | 2 | 1 | 12 B | 15.7 MB full, **1.4 MB** rect-limited |
+//! | **total, rect-limited composite** | | | **112 B** | **146.2 MB** un-limited, **131.9 MB** as implemented |
+//!
+//! | mitigation | per frame | vs 131.9 MB | implemented? |
+//! |---|---|---|---|
+//! | **window capture + window blur + rect-limited composite** | **131.9 MB** | — | **yes, this is the deliverable** |
+//! | 5-tap blur instead of 9 (`Blur(σ)` with `σ ≤ 1.0`) | 90.2 MB | −32 % | **yes, free** — `blur::taps_for` already caps it, and no caller can widen it |
+//! | rect-scoped capture *and* blur, a 400 × 300 rect | 13.4 MB | −90 % | **no** — `GL_INVALID_OPERATION`; see below |
+//! | half-resolution tier | 34.1 MB | −74 % | **no** — a half-scale blit is the same rule, so it needs the row above first |
+//! | dirty flag: skip when nothing behind the rect changed | n/a | n/a | **the weak form is free**; the strong form is **not implementable here** |
+//!
+//! **Every byte in the first table assumes the default framebuffer is `GL_RGBA8`,
+//! and `Context::new` does not ask for it** — it sets no
+//! `SDL_GL_RED_SIZE` family, so the format is the driver's. **If it is not
+//! `GL_RGBA8` the table is not smaller, it is moot**: a three-channel `GL_RGB8`
+//! default framebuffer and an `GL_RGBA8` texture have *different formats*, which
+//! is the first disjunct of the ES 3.1 rule, so the blit is refused,
+//! `draw_backdrop_offscreen`'s probe says so in an error message, and **no
+//! backdrop draws at all**. **That is why the probe is a blit and not a format
+//! read-back, and why its answer is a thing a handoff records.**
+//!
+//! ### Why the arithmetic decides, and the measurement does not
+//!
+//! `render::target`'s module docs and `blur::MAX_TAPS`'s doc record the same
+//! measured fact: interleaved release runs at 1280 × 1020 with one shadow read
+//! **171, 182 and 211** jiffies at nine taps and **212, 202 and 188** at
+//! seventeen, against **191, 172 and 158** with no shadow at all — **the three
+//! sets overlap completely and the frame rate is 62.0–62.2 fps in every one of
+//! them.** A host that cannot tell nine taps from seventeen **cannot tell a
+//! 2.4 GB/s shadow from a 7.9 GB/s backdrop either**, so a decision made on this
+//! host's frame rate would be the same category of mistake as the gap row this
+//! section amends. The arithmetic decides; the frame rate is a regression gate.
+//!
+//! **The aarch64 threshold, as a number rather than a part.** 131.9 MB per frame
+//! at 60 fps is 7.9 GB/s of texture traffic, or **2.19 Gpixel-accesses per second**
+//! — and 1,305,600 pixels is a small head-unit panel by automotive standards, not
+//! a large one. **Any part whose RGBA8 fill rate is below about 2 GPix/s cannot
+//! afford a full-window backdrop on every frame it is asked for**, which is a
+//! threshold an operator holding the part can answer in one number.
+//!
+//! **And the implemented subset, as a list:** a rect-limited composite,
+//! `taps_for`'s cap on the blur, and *not paid at all on a frame that records
+//! none* — because a backdrop is a `Segment` boundary and a frame with none has
+//! one segment and one `if let`.
+//!
+//! ### Why (c) stays open
+//!
+//! The OpenGL ES 3.1 reference page for `glBlitFramebuffer` raises
+//! `GL_INVALID_OPERATION` when `GL_SAMPLE_BUFFERS` for the read buffer is greater
+//! than zero and **either** the formats differ **or** the source and destination
+//! rectangles do not have identical `(X0, Y0, X1, Y1)` bounds. Both clauses are
+//! live here, because this pipeline's default framebuffer holds
+//! `MULTISAMPLE_SAMPLES` samples. **So the only legal colour capture from this
+//! pipeline's default framebuffer is a full-window blit into a full-window
+//! texture** — rect scoping and a half-size target are both refused by the driver
+//! through this route.
+//!
+//! **What would close it** is a capture that is not a copy: a re-submission of the
+//! already-recorded commands into a scissored target, where rect scoping and a
+//! half-size viewport are ordinary. That is a different task with its own
+//! decision, and `ColourTarget::capture`'s doc says so where a reader implementing
+//! the blit will be.
+//!
 //! ## Transforms and the mesh matrix
 //!
 //! The mesh pass (task 37) uploads one pre-multiplied matrix per draw as
@@ -199,13 +281,13 @@ use crate::arena::{Arena, Handle};
 use crate::batch::{Batch, Batcher, ShaderKind};
 use crate::font::{Font, FontSet, FontWeight, GlyphAtlas, GlyphPlacement, PickedFont};
 use crate::node::WidgetNode;
-use crate::paint::{faded_color, DrawCommand, FadeRamp, Rect, UvRect};
+use crate::paint::{faded_color, BackdropMode, DrawCommand, FadeRamp, Rect, UvRect};
 use crate::property::Color;
 use crate::texture::{self, TextureCache, TextureError, TextureHandle};
 use blur::BlurQuad;
-use context::Context;
+use context::{Context, MULTISAMPLE_SAMPLES};
 use glow::HasContext;
-use target::ShadowTarget;
+use target::{ColourTarget, ShadowTarget};
 
 /// GL_VERTEX_SHADER constant (0x8B31).
 const GL_VERTEX_SHADER: u32 = 0x8B31;
@@ -292,6 +374,36 @@ const GL_GREATER: u32 = 0x0204;
 /// Used by the mesh pass (task 37). Declared here for the policy test.
 #[allow(dead_code)]
 const GL_DEPTH_WRITEMASK: u32 = 0x0B72;
+
+/// `GL_READ_FRAMEBUFFER` (`0x8CA8`), the target a blit reads from when the draw
+/// target is bound separately.
+///
+/// Appended for `render::target::ColourTarget::capture`, and the reason it exists
+/// at all is the same sentence its doc there gives: `glow::FRAMEBUFFER` binds
+/// **both** the read and the draw framebuffer, so a capture that had not rebound
+/// the read side after its own `bind_attach` would be a texture-to-itself blit,
+/// which is a documented `GL_INVALID_OPERATION`.
+const GL_READ_FRAMEBUFFER: u32 = 0x8CA8;
+
+/// `GL_DRAW_FRAMEBUFFER` (`0x8CA9`), the other half of the pair above.
+///
+/// Declared and pinned by a test against `glow::DRAW_FRAMEBUFFER` so the whole
+/// framebuffer-binding vocabulary this file needs is present and asserted rather
+/// than half of it being present and half of it being borrowed from `glow`
+/// ad hoc. **`ColourTarget::capture` names only the read side**, because
+/// `bind_attach` has already bound the draw side through `glow::FRAMEBUFFER`.
+#[allow(dead_code)]
+const GL_DRAW_FRAMEBUFFER: u32 = 0x8CA9;
+
+/// `GL_NEAREST` (`0x2600`), the blit filter for a colour capture.
+///
+/// Distinct from [`GL_LINEAR`] above, and the reason is arithmetic rather than
+/// taste: the capture's source and destination rectangles are the same size — the
+/// ES 3.1 identical-bounds rule `ColourTarget::capture`'s doc quotes — so every
+/// destination texel has exactly one source texel, and filtering would sample
+/// that same single point at a cost per pixel to arrive there. **`GL_LINEAR` is
+/// the blur's and the atlas's filter; `GL_NEAREST` is the copy's.**
+const GL_NEAREST: u32 = 0x2600;
 
 /// Converts a `u32` pixel count to the `i32` the texture and viewport setters
 /// take.
@@ -872,6 +984,108 @@ void main() {
 }
 "#;
 
+/// The colour blur: [`BLUR_FRAGMENT_SHADER_SRC`] with the accumulator widened
+/// from `float` to `vec4` and the write changed from a coverage value to the
+/// accumulated colour.
+///
+/// **It differs from the coverage blur in exactly those two places and in nothing
+/// else** — the same `#define`d array, the same loop bound, the same `u_texel`,
+/// the same `u_direction`, the same `highp`. A test asserts that by substring, so
+/// a third edit to either one is a failure rather than a difference.
+///
+/// **The weights arrive from `blur::kernel` already normalised to one**, so this is
+/// a plain dot product per channel and a shader that normalised again would be a
+/// second place where the normalisation could be wrong.
+///
+/// **The blur runs on premultiplied colour, and that is the order, not an
+/// accident.** `blur(rgb · a) ≠ blur(rgb) · blur(a)`: blurring premultiplied
+/// colour is linear convolution of premultiplied data and stays premultiplied,
+/// while blurring straight colour would fringe at every edge of a translucent
+/// primitive. It is the same arithmetic `render::target`'s module docs use to
+/// justify the shadow's `GL_R8`, one level up — and here it is not an optimisation
+/// but a correctness requirement, because the composite that follows multiplies by
+/// `u_tint` and writes straight to the screen.
+///
+/// **`highp`, and for a larger range than the coverage blur's reason alone.** The
+/// coverage blur needs it because nine 8-bit taps band at `mediump`'s ~11-bit
+/// mantissa. A colour sum is four times the range and three more channels wide,
+/// so banding here would show as a visible step across the whole frosted area
+/// rather than at an edge.
+const BLUR_COLOUR_FRAGMENT_SHADER_SRC: &str = r#"#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_source;
+uniform vec2 u_texel;
+uniform vec2 u_direction;
+uniform float u_weights[9];
+uniform int u_taps;
+out vec4 frag_color;
+void main() {
+    vec4 total = vec4(0.0);
+    for (int i = 0; i < 9; i++) {
+        if (i >= u_taps) {
+            break;
+        }
+        float offset = float(i) - float(u_taps - 1) * 0.5;
+        total = total + texture(u_source, v_uv + u_direction * u_texel * offset) * u_weights[i];
+    }
+    frag_color = total;
+}
+"#;
+
+/// The backdrop's composite: the captured (and possibly blurred) scene, tinted,
+/// over the screen in the rect it was asked for.
+///
+/// ```glsl
+/// vec4 texel = texture(u_source, v_uv);
+/// frag_color = vec4(texel.rgb * u_tint.rgb, texel.a * u_tint.a);
+/// ```
+///
+/// **It multiplies by `u_tint` and it does *not* multiply `texel.rgb` by
+/// `texel.a`**, and the reason the second half matters is a recorded defect.
+/// [`SHADOW_COMPOSITE_FRAGMENT_SHADER_SRC`] gets its premultiplication from the
+/// coverage channel; this gets it from `u_tint`, which is `quad_color(tint)` and
+/// premultiplied because [`Color`]'s own contract says its components are. The
+/// composition of two premultiplied colours — `vec4(a.rgb · b.rgb, a.a · b.a)` —
+/// is premultiplied whenever both operands are, since `a.rgb · b.rgb ≤ a.a · b.a`
+/// follows from `a.rgb ≤ a.a` and `b.rgb ≤ b.a`. That inequality is what
+/// `backdrop_fragment` asserts on the CPU, with no display.
+///
+/// The mistake this avoids is the one `widgets::chart`'s module docs measure: a
+/// source that is not premultiplied composites as `rgb + dst·(1 − a)` under
+/// `GL_ONE, GL_ONE_MINUS_SRC_ALPHA` and reads brighter over a lighter destination.
+/// **The honest limit, which the reviewer needs:** the backdrop is exactly as
+/// premultiplied as *what it captured* — a translucent **solid** primitive
+/// recorded before it contributes straight alpha to the capture, which is
+/// `doc/ui/IMPLEMENTATION_STATE.md` § *The finding that is not this task's: the
+/// solid pass does not premultiply*. This shader neither introduces a second
+/// instance of that defect nor fixes the first.
+///
+/// **The rejected arrangement, named.** Making this an *input* to the image and
+/// text passes — so the text drawn over a frosted card picks up the frost — would
+/// mean a second sampler and a second uniform in two existing programs, and a
+/// source that is a copy of the frame rather than an image. It also cannot be one
+/// [`COMPOSITED_PASSES`] member: that list is walked per segment, and a backdrop
+/// captured from the frame *so far* is a different texture at every segment
+/// boundary. A caller who wants text over the frost asks for a second backdrop,
+/// which composites after the text and is already expressible.
+///
+/// **No new vertex source is needed**: [`BLUR_VERTEX_SHADER_SRC`] is reused
+/// unchanged, because its positions are window coordinates and its `v_uv` flip is
+/// correct for a rect quad exactly as it is for a window quad — `normalized` is
+/// `a_pos / u_size` either way.
+const BACKDROP_COMPOSITE_FRAGMENT_SHADER_SRC: &str = r#"#version 300 es
+precision mediump float;
+in vec2 v_uv;
+uniform sampler2D u_source;
+uniform vec4 u_tint;
+out vec4 frag_color;
+void main() {
+    vec4 texel = texture(u_source, v_uv);
+    frag_color = vec4(texel.rgb * u_tint.rgb, texel.a * u_tint.a);
+}
+"#;
+
 /// An error that can occur while creating a [`Renderer`] or submitting a
 /// frame.
 #[derive(Debug)]
@@ -1398,6 +1612,28 @@ fn mesh_fragment(texel: [f32; 4], tint: [f32; 4], shade: f32) -> [f32; 4] {
     [base[0] * shade, base[1] * shade, base[2] * shade, base[3]]
 }
 
+/// A CPU mirror of the backdrop composite's two arithmetic lines.
+///
+/// `texel` is the captured scene and `tint` is [`quad_color`]'s premultiplied
+/// output. It exists so the premultiplication invariant — every result satisfies
+/// `r <= a && g <= a && b <= a` componentwise — can be asserted with no display,
+/// which is the only kind of test `AGENTS.md` permits. The GLSL string and this
+/// function **must be edited together**, the same obligation
+/// `MESH_FRAGMENT_SHADER_SRC`'s mirror carries.
+///
+/// Read by the invariant test and by nothing else: the production composite
+/// happens in GLSL, and this function is the obligation that the two stay the
+/// same.
+#[allow(dead_code)]
+fn backdrop_fragment(texel: [f32; 4], tint: [f32; 4]) -> [f32; 4] {
+    [
+        texel[0] * tint[0],
+        texel[1] * tint[1],
+        texel[2] * tint[2],
+        texel[3] * tint[3],
+    ]
+}
+
 /// Builds the quad for an axis-aligned rectangle, clamping the corner radius
 /// to half the smaller side so the SDF stays well-defined.
 fn rect_quad(rect: Rect, color: Color, radius: f32) -> Quad {
@@ -1581,10 +1817,19 @@ fn command_quads(command: &DrawCommand) -> Vec<Quad> {
         // A mesh expands to nothing here for the stronger version of the same
         // reason: it is not quads at all but indexed triangles through the mesh
         // program, and `draw_mesh_batch` is the only thing that knows which.
+        //
+        // **A backdrop expands to nothing here for the shadow's reason and one
+        // more of its own**: it is a capture, two blur passes and a composite, and
+        // `draw_backdrop_batch` is the only thing that knows which — and unlike the
+        // shadow it cannot be drawn directly at all, because its destination is a
+        // framebuffer rather than a shape. Returning empty means a backdrop that
+        // reached the solid pass would draw nothing, which is a missing backdrop
+        // rather than a wrong picture.
         DrawCommand::Shadow { .. }
         | DrawCommand::Text { .. }
         | DrawCommand::Image { .. }
-        | DrawCommand::Mesh { .. } => Vec::new(),
+        | DrawCommand::Mesh { .. }
+        | DrawCommand::Backdrop { .. } => Vec::new(),
     }
 }
 
@@ -1872,6 +2117,35 @@ fn create_blur_programs(gl: &glow::Context) -> Result<(glow::Program, glow::Prog
     Ok((blur, composite))
 }
 
+/// Links the backdrop programs: the colour blur and the composite.
+///
+/// Both share [`BLUR_VERTEX_SHADER_SRC`] with the shadow's pair and with each
+/// other, and **no new vertex source is needed** — `BLUR_VERTEX_SHADER_SRC`'s
+/// positions are window coordinates and its `v_uv` flip is correct for a rect
+/// quad as it is for a window quad, because `normalized` is `a_pos / u_size`
+/// either way. That is a third fewer `GL_` constant's worth of surface.
+///
+/// **A new helper and not a four-tuple out of `create_blur_programs`**, for the
+/// reason the other pair-returning helpers exist: each names one layer's programs,
+/// so a caller that reads this one's doc knows what it got.
+///
+/// # Errors
+///
+/// Returns [`RenderError::ShaderCompile`] or [`RenderError::ProgramLink`] with
+/// the info log on failure.
+fn create_backdrop_programs(
+    gl: &glow::Context,
+) -> Result<(glow::Program, glow::Program), RenderError> {
+    let blur =
+        create_program_with_fragment(gl, BLUR_VERTEX_SHADER_SRC, BLUR_COLOUR_FRAGMENT_SHADER_SRC)?;
+    let composite = create_program_with_fragment(
+        gl,
+        BLUR_VERTEX_SHADER_SRC,
+        BACKDROP_COMPOSITE_FRAGMENT_SHADER_SRC,
+    )?;
+    Ok((blur, composite))
+}
+
 /// Links one program from a vertex source and a fragment source.
 ///
 /// The four programs above this used to be spelled out one by one, which is four
@@ -1926,6 +2200,28 @@ enum Pass {
     Text,
     /// A triangle mesh, through the mesh program, with the depth test on.
     Mesh,
+    /// A captured scene, blurred and composited where it was recorded, with no
+    /// depth test.
+    ///
+    /// **The fourth variant of this enum at the tree task 41 was written against**
+    /// — it counts `Solid`, `Image`, `Text`, `Mesh` and this one, five. It is a
+    /// pass and **not** a fourth [`COMPOSITED_PASSES`] member, for task 37's
+    /// stated reason generalised: a composited pass is drawn at a fixed place in
+    /// the frame's layering, and a backdrop must be drawn where it was recorded,
+    /// at its segment's boundary, not at a fixed place.
+    ///
+    /// **`#[allow(dead_code)]` because nothing constructs it yet, and that is this
+    /// task's deliberate state rather than an oversight.** No widget in the tree
+    /// records a `DrawCommand::Backdrop`, so `draw_pass` is never reached with this
+    /// variant — the same state tasks 34, 35, 37 and 38 recorded in their own
+    /// words, and the reason the first pixels of a backdrop are a later task's
+    /// capture. The arm is kept anyway, because `draw_pass`'s `match` is the
+    /// exhaustive dispatch: **a pass added later without an arm there should be a
+    /// compile error rather than a pass that quietly draws nothing.** This follows
+    /// `PassDepth` and `depth_state_for` below, which carry the same attribute for
+    /// the same reason.
+    #[allow(dead_code)]
+    Backdrop,
 }
 
 /// The passes [`Renderer::end_frame`] draws, in order.
@@ -1945,7 +2241,9 @@ enum Pass {
 /// A mesh is deliberately **not** one of the three: a composited pass is drawn
 /// over the opaque and transparent groups at a fixed place in the frame's
 /// layering, and a mesh must be drawn at its recorded position — its segment's
-/// boundary — rather than at a fixed one.
+/// boundary — rather than at a fixed one. **A backdrop is not one of the three for
+/// the same reason**: it composites whatever was recorded before it, and where
+/// that is is the caller's recording order, not a fixed slot in this list.
 const COMPOSITED_PASSES: [Pass; 3] = [Pass::Solid, Pass::Image, Pass::Text];
 
 /// The depth state for a single pass: whether it tests depth and whether it writes.
@@ -1986,6 +2284,22 @@ fn depth_state_for(pass: Pass, blend: crate::batch::BlendMode) -> PassDepth {
         },
         (Pass::Mesh, BlendMode::Transparent) => PassDepth {
             test: true,
+            writes: false,
+        },
+        // **A backdrop is a 2D pass for this table's purposes, and the reason is
+        // that it has no depth attachment at all.** The capture is a
+        // `GL_COLOR_BUFFER_BIT` blit and nothing else, so a depth attachment would
+        // have to be written by a second blit whose formats must match and whose
+        // bounds must be identical — more constraints for a buffer nothing reads.
+        // And under the module's `## Depth` policy the depth buffer orders mesh
+        // geometry only, so the two blur passes and the composite are 2D passes by
+        // definition: **neither test nor write, for either blend mode.** The
+        // unconditional `Transparent` in `DrawCommand::batch_key` means the
+        // `Opaque` row here is never reached in practice; it is written anyway so
+        // that the table is complete over its own input rather than over the
+        // subset that happens to occur.
+        (Pass::Backdrop, _) => PassDepth {
+            test: false,
             writes: false,
         },
     }
@@ -2124,6 +2438,50 @@ pub struct Renderer {
     /// The window size `blur_vertices` was built for, and the test for whether
     /// they need rebuilding.
     blur_vertex_size: (u32, u32),
+    /// The colour blur, over one axis per pass — the four-channel counterpart of
+    /// `blur_program`, on the backdrop's own [`ColourTarget`].
+    ///
+    /// **Its own program and not the shadow's**, because the accumulator type is
+    /// the difference: the shadow's sums one channel and writes
+    /// `vec4(total, 0, 0, 0)`, and this sums four channels and writes `total`. A
+    /// shared program would have to branch on a uniform to choose between them, and
+    /// the branch would be read once per fragment to pick a type.
+    blur_colour_program: glow::Program,
+    /// Multiplies the captured scene and composites it over the rect.
+    backdrop_composite_program: glow::Program,
+    /// The offscreen target a backdrop captures into, allocated the first time one
+    /// needs it.
+    ///
+    /// [`ColourTarget::new`] allocates no storage, so **a frame with no backdrop
+    /// allocates nothing** and the six gallery pages pay zero for this field
+    /// beyond its own existence.
+    colour_target: ColourTarget,
+    /// The one-shot capture probe's answer, and `None` until the first backdrop.
+    ///
+    /// **Why it is cached rather than re-probed**, and the reason is the loud half
+    /// and the quiet half together: the first backdrop on a driver that refuses the
+    /// blit returns [`RenderError::Gl`] naming the driver and the ES 3.1 rule, and
+    /// every later one returns `Ok(())` without drawing. The loud one already
+    /// happened, and repeating the probe on every backdrop forever would cost a
+    /// `get_error` pipeline round trip per backdrop per frame to learn the same
+    /// thing. Read it through [`Self::colour_capture_legal`], which is why that
+    /// accessor exists: **the quiet half is not silent, it is queryable.**
+    colour_capture_legal: Option<bool>,
+    /// The backdrop's six uniforms — the two programs' blur set plus the
+    /// composite's three — **each queried against the program it belongs to.**
+    ///
+    /// Per the field doc above: a uniform location belongs to the program it was
+    /// queried from, and writing one program uniform through another's location is
+    /// an undefined no-op rather than an error.
+    u_backdrop_blur_size: Option<glow::UniformLocation>,
+    u_backdrop_blur_texel: Option<glow::UniformLocation>,
+    u_backdrop_blur_direction: Option<glow::UniformLocation>,
+    u_backdrop_blur_weights: Option<glow::UniformLocation>,
+    u_backdrop_blur_taps: Option<glow::UniformLocation>,
+    u_backdrop_blur_source: Option<glow::UniformLocation>,
+    u_backdrop_size: Option<glow::UniformLocation>,
+    u_backdrop_source: Option<glow::UniformLocation>,
+    u_backdrop_tint: Option<glow::UniformLocation>,
     /// Mesh VAO, VBO, IBO for triangle mesh rendering (task 35).
     mesh_vao: glow::VertexArray,
     mesh_vbo: glow::Buffer,
@@ -2289,6 +2647,54 @@ impl Renderer {
         // `width · height` bytes, which is the decision the image atlas above
         // already makes and the same one.
         let shadow_target = ShadowTarget::new(context.gl())?;
+        // The backdrop's pair, beside the shadow's and the blur's: two programs,
+        // linked once at start-up and never touched again unless a frame records a
+        // backdrop.
+        let (blur_colour_program, backdrop_composite_program) =
+            create_backdrop_programs(context.gl())?;
+        // Nothing is allocated here either, for the same reason as above: a frame
+        // that records no backdrop never allocates `width · height · 4` bytes.
+        let colour_target = ColourTarget::new(context.gl())?;
+        // **Every one of the nine backdrop locations is queried against the program
+        // it belongs to**, and six of them against `blur_colour_program` rather
+        // than the shadow's `blur_program` — the two blur programs have the same
+        // uniform *names* and are different programs, so reusing the shadow's
+        // locations here would be writing one program's uniforms through another
+        // program's handles: an undefined no-op with no error.
+        // SAFETY: The GL context is current on this thread and each program is the
+        // linked program the location is asked of.
+        let (
+            u_backdrop_blur_size,
+            u_backdrop_blur_texel,
+            u_backdrop_blur_direction,
+            u_backdrop_blur_weights,
+            u_backdrop_blur_taps,
+            u_backdrop_blur_source,
+        ) = unsafe {
+            let gl = context.gl();
+            (
+                gl.get_uniform_location(blur_colour_program, "u_size"),
+                gl.get_uniform_location(blur_colour_program, "u_texel"),
+                gl.get_uniform_location(blur_colour_program, "u_direction"),
+                // The array itself, which is what `uniform_1_f32_slice` writes
+                // through.
+                gl.get_uniform_location(blur_colour_program, "u_weights"),
+                gl.get_uniform_location(blur_colour_program, "u_taps"),
+                gl.get_uniform_location(blur_colour_program, "u_source"),
+            )
+        };
+        // SAFETY: The GL context is current on this thread and
+        // `backdrop_composite_program` is the linked program. **`u_tint`, not the
+        // shadow composite's `u_color`** — the two composite programs are separate
+        // objects and a location from one would be meaningless in the other.
+        let (u_backdrop_size, u_backdrop_source, u_backdrop_tint) = unsafe {
+            let gl = context.gl();
+            (
+                gl.get_uniform_location(backdrop_composite_program, "u_size"),
+                gl.get_uniform_location(backdrop_composite_program, "u_source"),
+                gl.get_uniform_location(backdrop_composite_program, "u_tint"),
+            )
+        };
         // SAFETY: The GL context is current on this thread and each program is
         // the linked program the location is asked of — a location belongs to
         // its own program, so every one of these is a separate query rather than
@@ -2412,6 +2818,22 @@ impl Renderer {
             u_composite_source,
             blur_vertices: Vec::new(),
             blur_vertex_size: (0, 0),
+            blur_colour_program,
+            backdrop_composite_program,
+            colour_target,
+            // `None` until the first backdrop: the probe has not run, so this is
+            // "not yet asked", which is a third answer beside the two the bool
+            // itself can hold.
+            colour_capture_legal: None,
+            u_backdrop_blur_size,
+            u_backdrop_blur_texel,
+            u_backdrop_blur_direction,
+            u_backdrop_blur_weights,
+            u_backdrop_blur_taps,
+            u_backdrop_blur_source,
+            u_backdrop_size,
+            u_backdrop_source,
+            u_backdrop_tint,
             mesh_vao,
             mesh_vbo,
             mesh_ibo,
@@ -2936,12 +3358,21 @@ impl Renderer {
                     self.draw_pass(pass, batch)?;
                 }
             }
-            // The shadow and the mesh both come after everything the segment recorded
-            // and before everything the next one will, which is the whole of what the
-            // segmentation is for. They cannot both be here — a seal consumes exactly
-            // one singleton command — so their order relative to each other is not
-            // observable; the shadow is drawn first because a composited full-window
-            // effect belongs above everything else in its segment.
+            // The backdrop, the shadow and the mesh each come after everything
+            // their own segment recorded and before everything the next one will.
+            // They cannot be in the same segment — a seal consumes exactly one
+            // singleton command — so their order relative to each other is not
+            // observable. The backdrop comes first because it is the layer a caller
+            // wants *under* everything the rest of the frame draws: the recording
+            // contract is scene, backdrop, chrome.
+            //
+            // **The one case where the relative order *is* observable** is a shadow
+            // recorded immediately after a backdrop: it lands **on** the backdrop.
+            // That is the caller's ordering again, and
+            // `draw_backdrop_batch`'s doc names it.
+            if let Some(backdrop) = &segment.backdrop {
+                self.draw_backdrop_batch(backdrop)?;
+            }
             if let Some(shadow) = &segment.shadow {
                 self.draw_shadow_batch(shadow)?;
             }
@@ -2965,6 +3396,7 @@ impl Renderer {
             Pass::Image => self.draw_image_batch(batch),
             Pass::Text => self.draw_text_batch(batch),
             Pass::Mesh => self.draw_mesh_batch(batch),
+            Pass::Backdrop => self.draw_backdrop_batch(batch),
         }
     }
 
@@ -3293,6 +3725,277 @@ impl Renderer {
             gl.blend_func(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         }
         self.blur_quad.draw(self.context.gl(), &self.blur_vertices);
+        Ok(())
+    }
+
+    /// Returns whether a backdrop's colour capture is legal on this driver, and
+    /// whether the one-shot probe has run at all.
+    ///
+    /// *`None` before the first backdrop; `Some(true)` when the blit was accepted;
+    /// `Some(false)` when the driver refused it.*
+    ///
+    /// **`#[must_use]` because the quiet half of this feature depends on it.**
+    /// The first backdrop on a driver that refuses the capture returns
+    /// [`RenderError::Gl`] and says so in the log — but every later one returns
+    /// `Ok(())` and draws nothing, because the loud one already happened and a
+    /// `get_error` per backdrop per frame forever is not worth re-learning the same
+    /// answer. **That makes a missing backdrop silent unless something reports it**,
+    /// and this accessor is what reports it: a caller can ask, and a handoff can
+    /// quote the answer. A capture is not a substitute — *the absence of a backdrop*
+    /// and *a backdrop that drew nothing* are the same picture, which is the whole
+    /// of `bind_attach`'s recorded lesson in one sentence.
+    #[must_use]
+    pub fn colour_capture_legal(&self) -> Option<bool> {
+        self.colour_capture_legal
+    }
+
+    /// Draws one backdrop, where it was recorded.
+    ///
+    /// **Three steps, and the first two are the recording contract.** The command
+    /// is found with `find_map` and a batch that holds no backdrop is `Ok(())`
+    /// rather than a panic — the shape every `draw_*_batch` uses — then the clip
+    /// is applied, then the offscreen half runs.
+    ///
+    /// **The clip is enforced twice, and the second one is the one that matters**,
+    /// for exactly [`Self::draw_shadow_batch`]'s reason:
+    /// [`ColourTarget::bind_for_write`] turns the scissor test **off** because the
+    /// offscreen passes cover the whole window, so the **composite** is the pass
+    /// that puts the clip on the screen — it re-applies it through
+    /// [`Self::bind_default_target`].
+    ///
+    /// **A caller whose clip is smaller than its `rect` gets the smaller one.** The
+    /// clip is in `bind_default_target` *and* the rect is a second bound on the same
+    /// pixels, so the two intersect by construction — `draw_shadow_batch`'s recorded
+    /// lesson applied to the backdrop's own box.
+    ///
+    /// **A shadow recorded immediately after a backdrop lands on it**, and that is
+    /// the caller's ordering rather than a subtlety of this function: both are
+    /// `Segment` boundaries and `end_frame` draws the backdrop first.
+    fn draw_backdrop_batch(&mut self, batch: &Batch) -> Result<(), RenderError> {
+        let Some(command) = batch.commands.iter().find_map(|command| match command {
+            DrawCommand::Backdrop { rect, mode, tint } => Some((*rect, *mode, *tint)),
+            _ => None,
+        }) else {
+            return Ok(());
+        };
+        let (rect, mode, tint) = command;
+        self.apply_clip(batch.clip);
+        self.draw_backdrop_offscreen(rect, mode, tint, batch.clip)
+    }
+
+    /// Runs the offscreen half of one backdrop: capture, two blur passes,
+    /// composite.
+    ///
+    /// **There is no "sharp" fast path, and that is what `BackdropMode` is for.**
+    /// [`Self::draw_shadow_batch`] draws a zero-blur shadow straight to the screen
+    /// because the destination is a *shape*; a backdrop's destination is a
+    /// framebuffer, so it cannot be drawn directly at all — `Sharp` skips the two
+    /// blur passes and keeps the capture and the composite, which is the cheapest
+    /// this can be and is still a round trip through an FBO.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError::Gl`] when the offscreen target cannot be allocated at
+    /// the window's size, or when **the first** capture on this driver raises a GL
+    /// error — see step 4.
+    fn draw_backdrop_offscreen(
+        &mut self,
+        rect: Rect,
+        mode: BackdropMode,
+        tint: Color,
+        clip: Option<Rect>,
+    ) -> Result<(), RenderError> {
+        let (width, height) = self.viewport;
+        // 1. The target, window-sized and lazily — nothing is allocated on a frame
+        // that records no backdrop at all, because this line is not reached.
+        self.colour_target
+            .ensure_size(self.context.gl(), width, height)?;
+        // 2. **The resting state asserted locally, immediately before the capture.**
+        // This is task 34's requirement 7's move for `draw_shadow_offscreen`, for
+        // 34's reason: **depth test state is global and not a property of a
+        // framebuffer**, so a mesh pass that left `GL_DEPTH_TEST` enabled would
+        // leak it into these offscreen passes. Blending goes off for the same class
+        // of reason — the capture and both blur passes read a texture they are not
+        // compositing over, and a blended pass into a target is the wrong
+        // operation entirely.
+        //
+        // SAFETY: The GL context is current on this thread.
+        unsafe {
+            let gl = self.context.gl();
+            gl.disable(GL_DEPTH_TEST);
+            gl.depth_mask(false);
+            gl.disable(GL_BLEND);
+        }
+        // 3. The write texture attached, the viewport set, the scissor off — the
+        // shadow target's shape, with its scissor sentence restated in
+        // `ColourTarget::bind_for_write`'s own doc.
+        self.colour_target.bind_for_write(self.context.gl());
+
+        // 4. **The capture, and the one-shot legality probe.**
+        //
+        // The probe drains `get_error()` *before* the blit and reads it *after*,
+        // and only on the first capture in the process. **It is a blit and not a
+        // format read-back**, and the reason is that a read-back is a necessary and
+        // not a sufficient condition: the *internal formats* must match, and a
+        // driver whose default framebuffer is `GL_SRGB8_ALPHA8` reports eight bits
+        // per channel and still is not `GL_RGBA8`. Doing the blit and reading the
+        // error asks the only question that has one right answer.
+        //
+        // **Every later capture after `Some(false)` returns `Ok(())` without
+        // drawing**, and the doc above says why that is not a silent failure.
+        match self.colour_capture_legal {
+            Some(false) => return Ok(()),
+            Some(true) => {}
+            None => {
+                // SAFETY: The GL context is current on this thread. Draining
+                // before the blit is what makes the code *after* the blit
+                // attributable to the blit rather than to whatever call preceded
+                // it on this frame.
+                unsafe {
+                    let _ = self.context.gl().get_error();
+                }
+                self.colour_target.capture(self.context.gl())?;
+                // SAFETY: as above.
+                let code = unsafe { self.context.gl().get_error() };
+                if code != glow::NO_ERROR {
+                    self.colour_capture_legal = Some(false);
+                    return Err(RenderError::Gl(format!(
+                        "colour capture is refused by this driver: 0x{code:04X} after \
+                         glBlitFramebuffer from the default framebuffer — this \
+                         context's default framebuffer holds {samples} samples, so \
+                         ES 3.1 requires the source and destination rectangles to \
+                         have identical bounds and the two formats to match",
+                        samples = MULTISAMPLE_SAMPLES,
+                    )));
+                }
+                self.colour_capture_legal = Some(true);
+            }
+        }
+
+        let target = self.colour_target.size();
+
+        // 5. The two blur passes, one per axis, exactly as the shadow's loop is.
+        // **Sharp skips the loop entirely** and leaves the capture as the composite's
+        // source, which is what makes it one FBO copy rather than three.
+        if !matches!(mode, BackdropMode::Sharp) {
+            let sigma = match mode {
+                BackdropMode::Blur(sigma) => sigma,
+                BackdropMode::Sharp => 0.0,
+            };
+            let weights = blur::kernel(sigma);
+            let taps = weights.len();
+            // The window-sized quad's six vertices, rebuilt only when the window
+            // moves — the same buffer the shadow's two passes share, because it is
+            // the same geometry.
+            if self.blur_vertex_size != (width, height) {
+                self.blur_vertices =
+                    blur::full_quad(u32_to_f32(width), u32_to_f32(height)).to_vec();
+                self.blur_vertex_size = (width, height);
+            }
+            // **There is no `swap` between the capture and this loop, and the count
+            // inside it is the shadow's own:** the capture went in through the
+            // *write* side and nothing reads it until the first pass, so the loop's
+            // first `swap` is spent turning the write target into the first pass's
+            // source. The two inside the loop and the one after it are three.
+            for direction in [(1.0_f32, 0.0_f32), (0.0_f32, 1.0_f32)] {
+                self.colour_target.swap();
+                self.colour_target.bind_for_write(self.context.gl());
+                self.colour_target.bind_for_read(self.context.gl());
+                // SAFETY: The GL context is current on this thread;
+                // `blur_colour_program` is the linked program and each location was
+                // queried from it.
+                unsafe {
+                    let gl = self.context.gl();
+                    gl.use_program(Some(self.blur_colour_program));
+                    gl.uniform_2_f32(
+                        self.u_backdrop_blur_size.as_ref(),
+                        u32_to_f32(width),
+                        u32_to_f32(height),
+                    );
+                    gl.uniform_1_i32(self.u_backdrop_blur_source.as_ref(), 0);
+                    // **The *target's* texel size, not the window's**, because the
+                    // target is what is sampled. They differ whenever `allocation`
+                    // raised a zero extent.
+                    gl.uniform_2_f32(
+                        self.u_backdrop_blur_texel.as_ref(),
+                        1.0 / u32_to_f32(target.0).max(1.0),
+                        1.0 / u32_to_f32(target.1).max(1.0),
+                    );
+                    gl.uniform_2_f32(
+                        self.u_backdrop_blur_direction.as_ref(),
+                        direction.0,
+                        direction.1,
+                    );
+                    gl.uniform_1_f32_slice(self.u_backdrop_blur_weights.as_ref(), &weights);
+                    gl.uniform_1_i32(
+                        self.u_backdrop_blur_taps.as_ref(),
+                        i32::try_from(taps).unwrap_or(0),
+                    );
+                }
+                self.blur_quad.draw(self.context.gl(), &self.blur_vertices);
+            }
+        }
+        self.colour_target.swap();
+
+        // 6. **The composite, over the rect and not the window** — the one saving
+        // this shape has. The rect grown by the blur's reach, intersected with the
+        // window so a rect hanging off the edge does not draw outside it.
+        let sigma = match mode {
+            BackdropMode::Blur(sigma) => sigma,
+            BackdropMode::Sharp => 0.0,
+        };
+        let reach = blur::reach(sigma);
+        let drawn = rect.intersection(Rect::new(0.0, 0.0, u32_to_f32(width), u32_to_f32(height)));
+        let grown = if reach > 0.0 {
+            let moved = Rect::new(
+                drawn.x - reach,
+                drawn.y - reach,
+                drawn.width + reach * 2.0,
+                drawn.height + reach * 2.0,
+            );
+            moved.intersection(Rect::new(0.0, 0.0, u32_to_f32(width), u32_to_f32(height)))
+        } else {
+            drawn
+        };
+        // **The framebuffer, the viewport, the scissor and (task 34's) the depth
+        // state, in one call** — `bind_for_write` turned the scissor off and the
+        // composite is the pass that puts it on the screen. No fourth thing is added
+        // to `bind_default_target`, which is the way it stays small enough that the
+        // policy in it stays visible.
+        self.bind_default_target(clip);
+        self.colour_target.bind_for_read(self.context.gl());
+        // SAFETY: The GL context is current on this thread;
+        // `backdrop_composite_program` is linked and every location was queried
+        // from it.
+        unsafe {
+            let gl = self.context.gl();
+            gl.use_program(Some(self.backdrop_composite_program));
+            // **`u_size` is the *window*, not the rect.** The vertex shader divides
+            // *window* coordinates by it, and a rect quad's UVs land over the
+            // full-window texture because the capture was full-window — which is
+            // the dependency the two facts are: a rect-limited composite is only
+            // correct because the capture was not rect-limited.
+            gl.uniform_2_f32(
+                self.u_backdrop_size.as_ref(),
+                u32_to_f32(width),
+                u32_to_f32(height),
+            );
+            gl.uniform_1_i32(self.u_backdrop_source.as_ref(), 0);
+            let tint = quad_color(tint);
+            gl.uniform_4_f32(
+                self.u_backdrop_tint.as_ref(),
+                tint[0],
+                tint[1],
+                tint[2],
+                tint[3],
+            );
+            // **Blending on, because the composite reads a destination.** It was
+            // disabled in step 2 for the capture and the blur passes.
+            gl.enable(GL_BLEND);
+            gl.blend_func(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        }
+        self.blur_quad
+            .draw(self.context.gl(), &blur::rect_quad(grown));
         Ok(())
     }
 
@@ -5588,6 +6291,348 @@ mod tests {
             !COMPOSITED_PASSES.contains(&Pass::Mesh),
             "a mesh is a boundary, not a composited pass"
         );
+        // **A backdrop is not one of the three for the same reason**, and this is
+        // the assertion that keeps it that way: it composites whatever was recorded
+        // before it, and where that is is the caller's recording order rather than a
+        // fixed slot in the frame's layering.
+        assert!(
+            !COMPOSITED_PASSES.contains(&Pass::Backdrop),
+            "a backdrop is a boundary, not a composited pass"
+        );
+    }
+
+    #[test]
+    fn depth_state_for_the_backdrop_pass_is_no_test_and_no_write() {
+        // **Both blend modes**, and the `Opaque` row is written although
+        // `DrawCommand::batch_key` never produces it — the table is complete over
+        // its own input rather than over the subset that happens to occur, which is
+        // the whole reason the policy is data.
+        for blend in [
+            crate::batch::BlendMode::Opaque,
+            crate::batch::BlendMode::Transparent,
+        ] {
+            let depth = depth_state_for(Pass::Backdrop, blend);
+            assert!(
+                !depth.test,
+                "a backdrop composite has no depth attachment to test against"
+            );
+            assert!(
+                !depth.writes,
+                "and writes none — the 2D passes are the degenerate case of \
+                 *a pass that blends writes no depth*"
+            );
+        }
+    }
+
+    #[test]
+    fn every_pass_and_blend_mode_pair_has_a_depth_row_and_the_2d_rows_are_unchanged() {
+        // **The completeness half**: a pass added later without a row is a
+        // non-exhaustive `match` above, and this test is what turns "the compiler
+        // asked" into "the compiler asked and the answer was sensible". Five passes
+        // × two blend modes = ten rows, and every one is reachable from here — which
+        // is also what resolves the `Pass::Backdrop` never-constructed warning,
+        // because nothing in the tree records a backdrop yet.
+        let passes = [
+            Pass::Solid,
+            Pass::Image,
+            Pass::Text,
+            Pass::Mesh,
+            Pass::Backdrop,
+        ];
+        assert_eq!(passes.len(), 5, "one entry per Pass variant");
+        for pass in passes {
+            for blend in [
+                crate::batch::BlendMode::Opaque,
+                crate::batch::BlendMode::Transparent,
+            ] {
+                let _ = depth_state_for(pass, blend);
+            }
+        }
+        // **And the three 2D rows are asserted identically before and after this
+        // change** — the no-regression half, so a later edit to the policy cannot
+        // quietly move them.
+        for pass in [Pass::Solid, Pass::Image, Pass::Text] {
+            for blend in [
+                crate::batch::BlendMode::Opaque,
+                crate::batch::BlendMode::Transparent,
+            ] {
+                let depth = depth_state_for(pass, blend);
+                assert!(
+                    !depth.test && !depth.writes,
+                    "the 2D passes neither test nor write depth, whatever the blend"
+                );
+            }
+        }
+        // The mesh pass keeps its own rule: writes when opaque, tests always.
+        let mesh_opaque = depth_state_for(Pass::Mesh, crate::batch::BlendMode::Opaque);
+        assert!(mesh_opaque.test && mesh_opaque.writes);
+        let mesh_blend = depth_state_for(Pass::Mesh, crate::batch::BlendMode::Transparent);
+        assert!(mesh_blend.test && !mesh_blend.writes);
+    }
+
+    #[test]
+    fn the_backdrop_composite_stays_premultiplied() {
+        // **`backdrop_fragment` is the CPU mirror of the composite's two lines**, and
+        // this asserts the invariant that makes the mirror worth having: over a grid
+        // of contract-honouring inputs, every result satisfies `r <= a && g <= a &&
+        // b <= a` componentwise. That inequality is what makes the composition of
+        // two premultiplied colours premultiplied, and it is the property a capture
+        // cannot show — a wrong composite looks like a slightly wrong colour.
+        //
+        // The grid includes a fully transparent texel (all four zero, so `rgb` must
+        // come out zero), a fully opaque one, and several midtones.
+        let texels = [
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 1.0, 1.0, 1.0],
+            [0.5, 0.5, 0.5, 0.5],
+            [0.25, 0.1, 0.4, 0.6],
+            [0.9, 0.9, 0.9, 0.9],
+            [0.3, 0.3, 0.3, 1.0],
+            [0.2, 0.1, 0.05, 0.35],
+        ];
+        // **The tints go through `quad_color`, which is the production path**, and they are
+        // **premultiplied in the fixture itself** — `(157, 159, 162, 170)` is
+        // `#eceff4` at alpha 170 with every channel already scaled by `170/255`.
+        //
+        // **That is not tidiness, it is the contract, and finding out why cost one
+        // failing assertion.** `Color::new` does **not** premultiply its arguments:
+        // `Color`'s doc says its components *are* premultiplied, which means the
+        // caller supplies them that way. A hand-written `(236, 239, 244, 170)` —
+        // the same colour at the same alpha, un-premultiplied — has `b = 0.957` over
+        // `a = 0.667`, **breaks `rgb <= a`, and breaks the invariant below for a
+        // reason that has nothing to do with the composite.** So the precondition is
+        // asserted rather than assumed: this is the line that would catch a fixture
+        // built by hand, and it is also why `DrawCommand::Backdrop`'s `tint` doc says
+        // what it says.
+        let tints = [
+            quad_color(Color::new(0, 0, 0, 0)),
+            quad_color(Color::new(255, 255, 255, 255)),
+            quad_color(Color::new(236, 239, 244, 255)),
+            // `#eceff4` at alpha 170, premultiplied: (236, 239, 244) * 170/255.
+            quad_color(Color::new(157, 159, 162, 170)),
+            quad_color(Color::new(128, 128, 128, 128)),
+        ];
+        // **The precondition, asserted rather than assumed** — and this line is what
+        // would have caught a fixture built by hand. Every operand satisfies
+        // `rgb <= a`, which is what makes the composition of two of them
+        // premultiplied.
+        for operand in texels.iter().chain(tints.iter()) {
+            assert!(
+                operand[0] <= operand[3] && operand[1] <= operand[3] && operand[2] <= operand[3],
+                "the fixture operand `{operand:?}` is not premultiplied, so any \
+                 failure below would be the fixture's rather than the composite's"
+            );
+        }
+        for texel in texels {
+            for tint in tints {
+                let out = backdrop_fragment(texel, tint);
+                assert!(
+                    out[0] <= out[3] && out[1] <= out[3] && out[2] <= out[3],
+                    "`vec4({:?}, {:?})` -> `{out:?}` breaks r <= a && g <= a && b <= a, \
+                     so the composite is not premultiplied",
+                    texel,
+                    tint
+                );
+                assert!(
+                    out.iter().all(|component| component.is_finite()),
+                    "and nothing in it is NaN or infinite"
+                );
+            }
+        }
+        // **The as-captured case by hand**, which is the one the docs promise:
+        // tint 1.0 over an opaque capture is the picture unchanged.
+        let opaque_capture = [0.4, 0.5, 0.6, 1.0];
+        let as_captured = backdrop_fragment(opaque_capture, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(as_captured, opaque_capture, "as captured, exactly");
+
+        // **And the identity over *every* texel, not just the opaque one** — and
+        // this clause is here because of a mutation that **survived the inequality
+        // above**. Making the mirror `texel.rgb * texel.a * tint.rgb` — the
+        // double-premultiply, the other of the two mistakes this task names — keeps
+        // `r <= a` true, because a premultiplied texel already satisfies
+        // `rgb <= a` and `rgb * a <= a² <= a`. **So the premultiplication invariant
+        // is necessary and not sufficient**, and a test built on it alone passes a
+        // mirror that darkens every honest capture. The assertion that does catch it
+        // is the identity: an opaque white tint means *as captured*, for any texel,
+        // so a texel that came out changed has been multiplied by its own alpha
+        // twice.
+        for texel in texels {
+            let through = backdrop_fragment(texel, [1.0, 1.0, 1.0, 1.0]);
+            assert_eq!(
+                through, texel,
+                "an opaque white tint passes `{texel:?}` through unchanged — \
+                 anything else has been multiplied by its own alpha a second time"
+            );
+        }
+        // And a half-present frost darkens the alpha without touching `rgb`
+        // separately — the alpha *is* the opacity, per `Painter::backdrop`'s doc.
+        // **The tint is premultiplied**, so white at alpha 0.5 is `(0.5, 0.5, 0.5,
+        // 0.5)` and not `(1.0, 1.0, 1.0, 0.5)`: see the precondition assertion above
+        // for why that distinction is the whole difference between a colour this
+        // pipeline accepts and one it does not.
+        let frost = backdrop_fragment(opaque_capture, [0.5, 0.5, 0.5, 0.5]);
+        assert_eq!(frost[3], 0.5, "half present");
+        assert!(
+            frost[0] <= frost[3] && frost[1] <= frost[3] && frost[2] <= frost[3],
+            "and still premultiplied"
+        );
+    }
+
+    #[test]
+    fn the_backdrop_shader_does_not_double_or_skip_premultiplication() {
+        // **The mirror has not drifted from its GLSL**, which is the obligation
+        // `backdrop_fragment`'s doc states. Asserted as a source string over the
+        // production half of the file, so the assertion cannot be satisfied by the
+        // test's own text.
+        let production = include_str!("render.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("no test module in this file");
+        let shader_start = production
+            .find("const BACKDROP_COMPOSITE_FRAGMENT_SHADER_SRC")
+            .expect("the backdrop composite shader is declared above the test module");
+        let shader = &production[shader_start..];
+        let body = shader
+            .split("\"#;")
+            .next()
+            .expect("the shader string is closed");
+        assert!(
+            body.contains("texel.rgb * u_tint.rgb"),
+            "the composite multiplies by `u_tint` — the premultiplied tint"
+        );
+        assert!(
+            body.contains("texel.a * u_tint.a"),
+            "the alpha is the tint's alpha, which is the backdrop's opacity"
+        );
+        // **The two wrong forms, named rather than as a bare substring.**
+        // `TASK_UI_PRIM_41.md` requirement 19 words this as *"does not contain
+        // `texel.a *`"*, and **that wording cannot be right as a literal substring**:
+        // the requirement's own two-line shader — quoted verbatim in §
+        // *Premultiplied alpha* and reproduced above — contains `texel.a * u_tint.a`,
+        // so the substring is present in the correct source and the criterion would
+        // fail it. **What the criterion means is that `rgb` is not multiplied by the
+        // texel's own alpha**, and these two assertions are that, written so they
+        // cannot be satisfied by the correct form. The discrepancy is recorded here
+        // rather than resolved by picking the substring.
+        assert!(
+            !body.contains("texel.rgb * texel.a"),
+            "**`rgb` is not multiplied by the texel's own alpha** — the \
+             double-premultiply, which darkens every honest capture"
+        );
+        assert!(
+            !body.contains("vec4(texel.rgb, texel.a * u_tint.a)"),
+            "**and `rgb` is not passed through straight** — the straight-alpha \
+             mistake `chart.rs`'s module docs measure, where a source that is not \
+             premultiplied composites as `rgb + dst·(1 − a)` and reads brighter over \
+             a lighter destination"
+        );
+    }
+
+    #[test]
+    fn the_colour_blur_differs_from_the_coverage_blur_only_in_its_accumulator_and_its_write() {
+        // **Two places, and nowhere else.** `BLUR_COLOUR_FRAGMENT_SHADER_SRC` sums
+        // four channels where the coverage blur sums one, and writes the sum rather
+        // than writing it into `.r` — and a third edit to either one would be a
+        // silent difference between the two passes' geometry.
+        let colour = BLUR_COLOUR_FRAGMENT_SHADER_SRC;
+        let coverage = BLUR_FRAGMENT_SHADER_SRC;
+        assert!(
+            colour.contains("vec4 total = vec4(0.0)"),
+            "a four-channel accumulator"
+        );
+        assert!(
+            colour.contains("frag_color = total;"),
+            "and the whole sum is written"
+        );
+        assert!(
+            !colour.contains("frag_color = vec4(total, 0.0, 0.0, 0.0)"),
+            "**and not the coverage blur's one-channel write**"
+        );
+        // Everything the two share, present in both.
+        for shared in [
+            "precision highp float;",
+            "uniform float u_weights[9];",
+            "uniform int u_taps;",
+            "if (i >= u_taps) {",
+            "break;",
+            "float offset = float(i) - float(u_taps - 1) * 0.5;",
+            "v_uv + u_direction * u_texel * offset",
+        ] {
+            assert!(
+                colour.contains(shared) && coverage.contains(shared),
+                "`{shared}` is in both — the colour blur is the coverage blur with a \
+                 wider accumulator, not a second kernel"
+            );
+        }
+        // The one line that differs, and it differs by reading `.r`.
+        assert!(
+            coverage.contains("* u_weights[i];\n    }") || coverage.contains(".r * u_weights[i]"),
+            "the coverage blur reads `.r` where the colour blur reads the whole texel"
+        );
+        assert!(
+            !colour.contains(".r * u_weights[i]"),
+            "**the colour blur does not** — it convolves all four channels"
+        );
+    }
+
+    #[test]
+    fn the_backdrop_shaders_reuse_the_blur_vertex_source() {
+        // **`BLUR_VERTEX_SHADER_SRC` is named by both new programs' creation path,
+        // and neither new fragment source contains `gl_Position`.** Together those
+        // say no new vertex stage can drift in unannounced: a future edit that adds
+        // one would either stop naming the shared source or put `gl_Position` in a
+        // fragment shader, and both fail here.
+        let production = include_str!("render.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("no test module in this file");
+        let start = production
+            .find("fn create_backdrop_programs")
+            .expect("the program's linking helper is above the test module");
+        let body: String = production[start..].chars().take(600).collect();
+        assert_eq!(
+            body.matches("BLUR_VERTEX_SHADER_SRC").count(),
+            2,
+            "**both** programs are linked against the shared vertex source"
+        );
+        for (name, source) in [
+            (
+                "BLUR_COLOUR_FRAGMENT_SHADER_SRC",
+                BLUR_COLOUR_FRAGMENT_SHADER_SRC,
+            ),
+            (
+                "BACKDROP_COMPOSITE_FRAGMENT_SHADER_SRC",
+                BACKDROP_COMPOSITE_FRAGMENT_SHADER_SRC,
+            ),
+        ] {
+            assert!(
+                !source.contains("gl_Position"),
+                "`{name}` is a fragment shader and writes no vertex position"
+            );
+            assert!(
+                source.contains("#version"),
+                "`{name}` still carries its `#version` line, so it is a complete \
+                 source rather than a fragment"
+            );
+        }
+    }
+
+    #[test]
+    fn the_backdrop_blit_constants_agree_with_glow() {
+        // **A duplicate with no test is two numbers that can drift**, the same reason
+        // `the_depth_constants_agree_with_glow` exists. All three, because the blit
+        // is the one place this feature can silently do nothing at all.
+        assert_eq!(GL_READ_FRAMEBUFFER, glow::READ_FRAMEBUFFER);
+        assert_eq!(GL_DRAW_FRAMEBUFFER, glow::DRAW_FRAMEBUFFER);
+        assert_eq!(GL_NEAREST, glow::NEAREST);
+        // **And the hex values**, so a reader does not have to look them up.
+        assert_eq!(GL_READ_FRAMEBUFFER, 0x8CA8);
+        assert_eq!(GL_DRAW_FRAMEBUFFER, 0x8CA9);
+        assert_eq!(GL_NEAREST, 0x2600);
+        // The control: `GL_NEAREST` is not `GL_LINEAR`, which is the filter the blur
+        // and the atlas use. A copy that filtered would sample the same single point
+        // at a cost per pixel.
+        assert_ne!(GL_NEAREST, GL_LINEAR);
     }
 
     #[test]

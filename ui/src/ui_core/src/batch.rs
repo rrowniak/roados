@@ -56,6 +56,18 @@ pub enum ShaderKind {
     /// draw calls however their keys compare — see
     /// [`BatchKey::is_singleton`].
     Mesh,
+    /// A captured scene, blurred and composited where it was recorded.
+    ///
+    /// **What the kind is:** the scene already on screen, copied into an
+    /// offscreen target, optionally blurred, and composited back over its own rect.
+    ///
+    /// **Why it can never merge:** a backdrop needs an offscreen target and a
+    /// per-command rect, **neither of which can ride in a vertex buffer** — the way
+    /// a rounded rectangle's radius and size do. So two backdrops are two draw
+    /// calls however their keys compare, and the key is what stops the batcher
+    /// from trying — see [`BatchKey::is_singleton`], which is where the frame is
+    /// split at one.
+    Backdrop,
 }
 
 /// The key that groups draw commands into batches.
@@ -75,19 +87,22 @@ pub struct BatchKey {
 impl BatchKey {
     /// Returns whether a batch under this key must hold exactly one command.
     ///
-    /// **The only such keys are the shadow's and the mesh's**, and the reason is about *where* a
-    /// command draws rather than what it draws. [`Batcher::submit_order`]
-    /// splits a frame into [`Segment`]s at every shadow, so a shadow that shared
-    /// a batch with anything else — with the shadow before it, or with a solid
-    /// rect — would take that neighbour across the boundary with it, and the
-    /// composite would land one command too early or too late.
+    /// **Three such keys are the shadow's, the mesh's and the backdrop's**, and
+    /// the reason is about *where* a command draws rather than what it draws.
+    /// [`Batcher::submit_order`] splits a frame into [`Segment`]s at every one of
+    /// them, so a command that shared a batch with anything else — with the
+    /// boundary before it, or with a solid rect — would take that neighbour across
+    /// the boundary with it, and the composite would land one command too early or
+    /// too late.
     ///
-    /// Two keys are singletons and they are singletons for the same reason, which is that
-    /// `submit_order` splits the frame at each of them: a command recorded after a
-    /// mesh or a shadow must not merge into a batch recorded before it, or it lands on
-    /// the wrong side of it. They differ in the second reason — a shadow needs an
-    /// offscreen target, a mesh needs a per-command transform — and in neither does
-    /// merging buy anything: each is one draw call already.
+    /// Three keys are singletons and they are singletons for the same reason, which
+    /// is that `submit_order` splits the frame at each of them: a command recorded
+    /// after a mesh, a shadow or a backdrop must not merge into a batch recorded
+    /// before it, or it lands on the wrong side of it. **They differ only in the
+    /// second reason** — a shadow needs an offscreen target, a mesh needs a
+    /// per-command transform, a backdrop needs an offscreen target and a
+    /// per-command rect — and in none of them does merging buy anything: each is
+    /// one draw call already.
     ///
     /// Merging is otherwise strictly good: it is the difference between one draw
     /// call and two. A singleton batch pays a second draw call every frame, which
@@ -95,7 +110,10 @@ impl BatchKey {
     /// to remember to set.
     #[must_use]
     pub fn is_singleton(&self) -> bool {
-        matches!(self.shader, ShaderKind::Shadow | ShaderKind::Mesh)
+        matches!(
+            self.shader,
+            ShaderKind::Shadow | ShaderKind::Mesh | ShaderKind::Backdrop
+        )
     }
 }
 
@@ -201,11 +219,24 @@ pub struct Segment {
     /// A [`Batch`] and not a [`DrawCommand`] for the same reason as `shadow`:
     /// the draw is a draw call, and a draw call has one scissor.
     ///
-    /// The boundary the segment ends with — at most one of `shadow` and
-    /// `mesh` is `Some`, because a seal consumes exactly one singleton
+    /// The boundary the segment ends with — at most one of `shadow`, `mesh` and
+    /// `backdrop` is `Some`, because a seal consumes exactly one singleton
     /// command. Not a sum type: the invariant needs a test rather than a
     /// type, and a sum would rename a `pub` field twenty-three tests name.
     pub mesh: Option<Batch>,
+    /// The backdrop to composite once this segment is on screen, as a batch
+    /// holding that one command and the clip it was recorded under.
+    ///
+    /// A [`Batch`] and not a [`DrawCommand`] for the same reason as `shadow`: the
+    /// composite is a draw call, and a draw call has one scissor.
+    ///
+    /// The boundary the segment ends with — **at most one of `shadow`, `mesh` and
+    /// `backdrop` is `Some`, because a seal consumes exactly one singleton
+    /// command.** Which also means **a backdrop, a shadow and a mesh are never
+    /// adjacent**, so their order relative to each other is not observable; the
+    /// one case where it *is* is a shadow recorded immediately after a backdrop,
+    /// which lands on it, and that is the caller's ordering again.
+    pub backdrop: Option<Batch>,
 }
 
 /// Groups draw commands into batches by [`BatchKey`].
@@ -382,13 +413,16 @@ impl Batcher {
                 }
             };
             // A seal consumes exactly one singleton command, so the boundary is
-            // whichever kind it was — and a mesh and a shadow never share a
-            // segment, which is the invariant the suite asserts rather than the
-            // type.
-            let (shadow, mesh) = match popped {
-                Some(batch) if batch.key.shader == ShaderKind::Shadow => (Some(batch), None),
-                Some(batch) => (None, Some(batch)),
-                None => (None, None),
+            // whichever kind it was — and a mesh, a shadow and a backdrop never
+            // share a segment, which is the invariant the suite asserts rather
+            // than the type.
+            let (shadow, mesh, backdrop) = match popped {
+                Some(batch) if batch.key.shader == ShaderKind::Shadow => (Some(batch), None, None),
+                Some(batch) if batch.key.shader == ShaderKind::Backdrop => {
+                    (None, None, Some(batch))
+                }
+                Some(batch) => (None, Some(batch), None),
+                None => (None, None, None),
             };
             let BatchedCommands {
                 opaque,
@@ -399,6 +433,7 @@ impl Batcher {
                 transparent,
                 shadow,
                 mesh,
+                backdrop,
             });
         }
         // The trailing run after the last boundary is a segment with no boundary
@@ -415,6 +450,7 @@ impl Batcher {
             transparent,
             shadow: None,
             mesh: None,
+            backdrop: None,
         });
         segments
     }
@@ -513,6 +549,23 @@ impl DrawCommand {
                 texture: None,
                 blend_mode: BlendMode::from_color(*color),
                 shader: ShaderKind::Shadow,
+            },
+            // **The blend mode is [`BlendMode::Transparent`] unconditionally, and
+            // it declines [`BlendMode::from_color`]'s rule on purpose.** A
+            // backdrop at `tint.a == 255` is still a *blend*, because the
+            // capture's alpha is the framebuffer's accumulated coverage and a
+            // translucent primitive recorded before the backdrop left that below
+            // 1.0 somewhere — an `Opaque` batch would overwrite it with `src`
+            // rather than `src + dst·(1 − a)`, and put a hard edge exactly where a
+            // blur has none. `from_color` answers *"does this command's own colour
+            // ask for blending?"*, which is the right question for every other
+            // variant here and the wrong one for this: a backdrop's blend mode does
+            // not come from its tint at all, which is also why the command carries
+            // no separate `opacity` scalar the way `Image` and `Mesh` do.
+            DrawCommand::Backdrop { .. } => BatchKey {
+                texture: None,
+                blend_mode: BlendMode::Transparent,
+                shader: ShaderKind::Backdrop,
             },
             // A mesh draws in the opaque pass only when it asks for no blending
             // of its own: exactly `1.0`, not "at least", for the same reason
@@ -1771,5 +1824,304 @@ mod tests {
         assert_eq!(segments[1].opaque[0].commands.len(), 3);
         assert_eq!(segments[0].opaque.len(), 1, "and one before it");
         assert_eq!(segments[0].opaque[0].commands.len(), 1);
+    }
+
+    /// A backdrop request, through the crate's own public recording path.
+    fn backdrop_of() -> DrawCommand {
+        let mut painter = crate::paint::Painter::new();
+        painter.backdrop(
+            Rect::new(240.0, 160.0, 320.0, 200.0),
+            crate::paint::BackdropMode::Blur(2.0),
+            Color::new(236, 239, 244, 170),
+        );
+        let commands = painter.finish();
+        match commands.into_iter().next() {
+            Some(command) => command,
+            None => panic!("a backdrop request records one command"),
+        }
+    }
+
+    #[test]
+    fn a_public_backdrop_request_reaches_the_renderer_as_a_segment_boundary() {
+        // **The label on this assertion is exact and the handoff must repeat it: it
+        // proves the request reaches the renderer's *submission structure*, which is
+        // as far as a display-free test can reach.** The GL half — whether the blit
+        // is legal, whether the composite draws — is not claimed here, and no test in
+        // this suite can claim it: it is the one-shot capture probe's job.
+        let clip = Some(Rect::new(0.0, 64.0, 1280.0, 640.0));
+        let mut batcher = Batcher::new();
+        batcher.add_clipped(rounded_at(0, opaque()), clip);
+        batcher.add_clipped(backdrop_of(), clip);
+        batcher.add_clipped(rounded_at(1, opaque()), clip);
+
+        let segments = batcher.submit_order();
+        assert_eq!(
+            segments.len(),
+            2,
+            "one boundary among three commands, and a trailing segment"
+        );
+        let boundary = segments[0]
+            .backdrop
+            .as_ref()
+            .expect("the backdrop reached the segment as its boundary");
+        assert_eq!(boundary.key.shader, ShaderKind::Backdrop);
+        assert!(boundary.key.texture.is_none(), "and it samples no texture");
+        assert_eq!(
+            boundary.key.blend_mode,
+            BlendMode::Transparent,
+            "**unconditionally** — the next test is why"
+        );
+        assert_eq!(
+            boundary.clip, clip,
+            "**the clip it was recorded under**, because a composite is a draw call \
+             and a draw call has one scissor — `Segment::shadow`'s recorded reason"
+        );
+        assert_eq!(boundary.commands.len(), 1, "and it holds one command");
+
+        // **The property the singleton exists for**: a command recorded after the
+        // backdrop lands in a later segment, so it is over the backdrop rather than
+        // merged into a batch recorded before it.
+        assert_eq!(
+            segments[1].opaque.len(),
+            1,
+            "the command recorded after the backdrop is in a later segment"
+        );
+        assert_eq!(segments[1].opaque[0].commands.len(), 1);
+        assert!(segments[0].shadow.is_none(), "and it is not also a shadow");
+        assert!(segments[0].mesh.is_none(), "nor a mesh");
+    }
+
+    #[test]
+    fn a_backdrop_batches_transparent_even_when_its_tint_is_opaque() {
+        // **The control is `BlendMode::from_color` on the same tint**, which says
+        // `Opaque` and is wrong here. The capture's alpha is the framebuffer's
+        // accumulated coverage, and a translucent primitive recorded before the
+        // backdrop left that below 1.0 somewhere; an `Opaque` batch overwrites it
+        // with `src` and puts a hard edge exactly where a blur has none.
+        let as_captured = DrawCommand::Backdrop {
+            rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+            mode: crate::paint::BackdropMode::Sharp,
+            tint: Color::new(255, 255, 255, 255),
+        };
+        assert_eq!(
+            BlendMode::from_color(Color::new(255, 255, 255, 255)),
+            BlendMode::Opaque,
+            "the rule this arm declines would answer `Opaque` for this tint"
+        );
+        assert_eq!(
+            as_captured.batch_key().blend_mode,
+            BlendMode::Transparent,
+            "**and the answer is `Transparent` anyway** — as captured is a blend, \
+             not a cover"
+        );
+        assert_eq!(as_captured.batch_key().shader, ShaderKind::Backdrop);
+        assert!(as_captured.batch_key().is_singleton());
+
+        // The translucent case, so the arm is not passing on one value by accident.
+        let frost = DrawCommand::Backdrop {
+            rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+            mode: crate::paint::BackdropMode::Blur(2.0),
+            tint: Color::new(236, 239, 244, 170),
+        };
+        assert_eq!(frost.batch_key().blend_mode, BlendMode::Transparent);
+    }
+
+    #[test]
+    fn no_segment_has_two_boundaries_filled() {
+        // **Task 37's invariant, over three slots now.** A seal consumes exactly one
+        // singleton command, so at most one of `shadow`, `mesh` and `backdrop` is
+        // `Some` in any segment — the invariant a three-`Option` type cannot say for
+        // itself.
+        let mut batcher = Batcher::new();
+        // A frame that alternates all three boundary kinds, so the control below
+        // cannot pass by every boundary being classified as one of them.
+        batcher.add(rounded_at(0, opaque()));
+        batcher.add(shadow());
+        batcher.add(rounded_at(1, opaque()));
+        batcher.add(backdrop_of());
+        batcher.add(rounded_at(2, opaque()));
+        batcher.add(mesh(1.0));
+        batcher.add(rounded_at(3, opaque()));
+        batcher.add(backdrop_of());
+        batcher.add(rounded_at(4, opaque()));
+
+        let segments = batcher.submit_order();
+        let filled = |segment: &Segment| {
+            usize::from(segment.shadow.is_some())
+                + usize::from(segment.mesh.is_some())
+                + usize::from(segment.backdrop.is_some())
+        };
+        let boundaries = segments.iter().map(filled).sum::<usize>();
+        assert_eq!(boundaries, 4, "four boundaries across five segments");
+        assert_eq!(segments.len(), 5, "and the trailing one after the last");
+        // **The vacuity control**, without which a classifier that filed every
+        // boundary as a shadow would pass the invariant above: all three slots are
+        // reached.
+        assert!(
+            segments.iter().any(|segment| segment.backdrop.is_some()),
+            "the fixture records backdrops — without this line a classification \
+             that never fills this slot passes the invariant vacuously"
+        );
+        assert!(segments.iter().any(|segment| segment.mesh.is_some()));
+        assert!(segments.iter().any(|segment| segment.shadow.is_some()));
+        for (index, segment) in segments.iter().enumerate() {
+            assert!(
+                filled(segment) <= 1,
+                "segment {index} holds {} boundaries",
+                filled(segment)
+            );
+        }
+    }
+
+    #[test]
+    fn a_backdrop_key_is_a_singleton_and_its_neighbours_still_are_not() {
+        // The third singleton, with **both pre-existing controls kept present and
+        // unweakened** — a `matches!` arm that named the backdrop *instead of* adding
+        // it would make every command a boundary, and these two lines are what catch
+        // that.
+        assert!(backdrop_of().batch_key().is_singleton());
+        assert!(shadow().batch_key().is_singleton());
+        assert!(mesh(1.0).batch_key().is_singleton());
+
+        assert!(!rect(opaque()).batch_key().is_singleton());
+        assert!(!rounded_at(0, opaque()).batch_key().is_singleton());
+        assert!(!image(1).batch_key().is_singleton());
+    }
+
+    #[test]
+    fn every_variant_has_a_key_and_every_kind_routes_including_the_backdrop() {
+        // **The compiler is the stronger check, and this is where it earns it**: one
+        // `match` over all eleven `DrawCommand` variants and one over all six
+        // `ShaderKind`s, so a variant added without a key — or a kind added without a
+        // route — is a non-exhaustive match, which is a compile error rather than a
+        // silent pass. **The count is asserted**, because a fixture that grew a
+        // duplicate would otherwise make the array longer than the enum and the
+        // assertion vacuous.
+        let commands = [
+            rect(opaque()),
+            rounded_at(0, opaque()),
+            shadow(),
+            image(1),
+            backdrop_of(),
+            DrawCommand::Text {
+                x: 0.0,
+                y: 0.0,
+                text: "a".to_string(),
+                color: opaque(),
+                font_size: 16.0,
+                extra_advance: 0.0,
+                family: FamilyId::default(),
+                weight: FontWeight::Regular,
+                fade: None,
+                clip: None,
+            },
+            DrawCommand::Line {
+                start: (0.0, 0.0),
+                end: (1.0, 1.0),
+                width: 1.0,
+                color: opaque(),
+            },
+            DrawCommand::Circle {
+                center: (0.0, 0.0),
+                radius: 1.0,
+                color: opaque(),
+            },
+            DrawCommand::Path {
+                points: Vec::new(),
+                width: 1.0,
+                color: opaque(),
+                closed: false,
+            },
+            DrawCommand::Polygon {
+                points: Vec::new(),
+                color: opaque(),
+            },
+            mesh(1.0),
+        ];
+        assert_eq!(commands.len(), 11, "one command per DrawCommand variant");
+        for command in &commands {
+            let _ = command.batch_key();
+        }
+        for kind in [
+            ShaderKind::Solid,
+            ShaderKind::Text,
+            ShaderKind::Image,
+            ShaderKind::Shadow,
+            ShaderKind::Mesh,
+            ShaderKind::Backdrop,
+        ] {
+            let _ = BatchKey {
+                texture: None,
+                blend_mode: BlendMode::Opaque,
+                shader: kind,
+            }
+            .is_singleton();
+        }
+    }
+
+    #[test]
+    fn a_frame_with_no_mesh_shadow_or_backdrop_has_no_boundary() {
+        // **The trailing-run literal sets all three slots.** A frame with no boundary
+        // of any kind is one segment whose three slots are `None` — and a literal
+        // that set only two would leave the third as whatever the previous frame put
+        // there, which is the lifecycle leak task 24.1 found once already.
+        let mut batcher = Batcher::new();
+        batcher.add(rounded_at(0, opaque()));
+        batcher.add(rounded_at(1, opaque()));
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 1);
+        assert!(segments[0].shadow.is_none());
+        assert!(segments[0].mesh.is_none());
+        assert!(segments[0].backdrop.is_none());
+    }
+
+    #[test]
+    fn two_backdrops_of_the_same_material_are_still_two_boundaries() {
+        // The merge this has to refuse, and it is the one the shadow's own test
+        // established: two backdrops with the same rect, tint and mode share a key,
+        // so the rule that merges everything else merges them into one batch of two —
+        // and one batch has one position in the recorded stream, so the boundary
+        // between them would be gone and the first composite would land after the
+        // second.
+        let mut batcher = Batcher::new();
+        batcher.add(backdrop_of());
+        batcher.add(backdrop_of());
+
+        let segments = batcher.submit_order();
+        assert_eq!(segments.len(), 3, "two backdrops are two boundaries");
+        for segment in &segments[..2] {
+            let boundary = segment.backdrop.as_ref().expect("a backdrop of its own");
+            assert_eq!(
+                boundary.commands.len(),
+                1,
+                "and each backdrop's batch holds one command, not two"
+            );
+        }
+    }
+
+    #[test]
+    fn a_backdrop_keeps_the_clip_it_was_recorded_under() {
+        // **The composite is a draw call and a draw call has one scissor**, so a
+        // backdrop recorded inside a scrolling viewport carries that viewport with
+        // it. The *effective* clip is what rides: the batcher intersects the caller's
+        // clip with the command's own, and a backdrop carries none of its own, so the
+        // caller's is the whole answer.
+        let viewport = Some(Rect::new(0.0, 64.0, 1280.0, 600.0));
+        let mut batcher = Batcher::new();
+        batcher.add_clipped(rounded_at(0, opaque()), viewport);
+        batcher.add_clipped(backdrop_of(), viewport);
+        batcher.add_clipped(rounded_at(1, opaque()), viewport);
+
+        let segments = batcher.submit_order();
+        assert_eq!(
+            segments[0].backdrop.as_ref().expect("the backdrop").clip,
+            viewport,
+            "the viewport, not the window and not the command's own rect"
+        );
+        assert_eq!(
+            segments[1].opaque[0].clip, viewport,
+            "and so does the batch after it"
+        );
     }
 }

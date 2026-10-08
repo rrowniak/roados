@@ -1634,6 +1634,27 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
             // translated content today, so the arm never fires — it exists
             // because the match is exhaustive.
             DrawCommand::Mesh { .. } => command.clone(),
+            // **The rect moves; the mode and the tint do not.** A backdrop's
+            // `rect` is a window-space position like every other position here, so
+            // a list that translated its content and left this one behind would
+            // composite a picture of the wrong part of the screen. `mode` is a
+            // kernel width and `tint` is a colour, and neither is a position.
+            //
+            // **This arm is reachable for a different reason than `Mesh`'s.** A
+            // mesh cannot be translated here at all (its position is its `mvp`, in
+            // clip space), so that arm passes the command through. A backdrop
+            // *can*, and not translating it would be the `Text` fade window's
+            // defect: a position left behind in a translated list.
+            //
+            // **No widget records one today** — `Painter::backdrop` has no caller
+            // in the tree — so like the mesh arm this exists because the match is
+            // exhaustive. It exists so that the day one does, the answer is right
+            // rather than missing.
+            DrawCommand::Backdrop { rect, mode, tint } => DrawCommand::Backdrop {
+                rect: moved_rect(*rect, by),
+                mode: *mode,
+                tint: *tint,
+            },
         })
         .collect()
 }

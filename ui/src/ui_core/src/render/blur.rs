@@ -248,6 +248,64 @@ pub fn full_quad(width: f32, height: f32) -> [BlurVertex; BLUR_QUAD_SIZE] {
     ]
 }
 
+/// The vertices of the quad covering `rect`, in the order `GL_TRIANGLES` reads
+/// them.
+///
+/// **The same six-vertex shape as [`full_quad`], offset by the rect's origin** —
+/// the same corner order `[[0,0], [w,0], [w,h], [0,h]]`, the same two triangles,
+/// no index buffer — because the geometry is one shape and putting the rect form
+/// anywhere else would split a module whose whole argument is that the blur's
+/// geometry is one shape.
+///
+/// **Two things here are easy to get wrong and are stated rather than left to a
+/// reader.** The order is the same one `quad_indices` produces for a quad,
+/// *because* the triangle winding is the same, so a reader who knows the rest of
+/// the pipeline recognises it. And **`pos` is in window coordinates with `y`
+/// increasing downward**, which is why the blur's vertex shader negates `clip.y`:
+/// a position at the window's top edge is the framebuffer's *last* row.
+///
+/// **What a rect quad is for, and it is a composite and not a capture.** The
+/// capture behind a backdrop is window-sized — see
+/// [`ColourTarget`](crate::render::target::ColourTarget) for the ES 3.1
+/// identical-bounds rule that makes it so — and this quad draws a *rectangle of*
+/// that capture. The two facts are one dependency rather than two: a rect-limited
+/// composite is only correct **because** the capture was full-window, which is
+/// what gives the blur texels the rect's edges need. Compositing a window-sized
+/// quad instead would be correct too and would cost four times the bandwidth.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::paint::Rect;
+/// use ui_core::render::blur::{rect_quad, BLUR_QUAD_SIZE};
+///
+/// // Off the origin, so a fixture cannot mistake an offset for the quad's own size.
+/// let vertices = rect_quad(Rect::new(240.0, 160.0, 320.0, 200.0));
+/// let positions: Vec<[f32; 2]> = vertices.iter().map(|vertex| vertex.pos).collect();
+///
+/// assert_eq!(vertices.len(), BLUR_QUAD_SIZE);
+/// assert_eq!(positions[0], [240.0, 160.0], "the rect's top left, not the origin");
+/// assert_eq!(positions[2], [560.0, 360.0], "... and its bottom right");
+/// assert_eq!(positions[5], [240.0, 360.0], "... down to bottom left");
+/// ```
+#[must_use]
+pub fn rect_quad(rect: crate::paint::Rect) -> [BlurVertex; BLUR_QUAD_SIZE] {
+    let positions = [
+        [rect.x, rect.y],
+        [rect.x + rect.width, rect.y],
+        [rect.x + rect.width, rect.y + rect.height],
+        [rect.x, rect.y + rect.height],
+    ];
+    [
+        BlurVertex { pos: positions[0] },
+        BlurVertex { pos: positions[1] },
+        BlurVertex { pos: positions[2] },
+        BlurVertex { pos: positions[0] },
+        BlurVertex { pos: positions[2] },
+        BlurVertex { pos: positions[3] },
+    ]
+}
+
 /// The bytes one blur pass uploads for `vertices`.
 ///
 /// # Safety
@@ -686,6 +744,57 @@ mod tests {
             "six vertices of two floats, not six floats"
         );
         assert_eq!(bytes.len(), 48);
+    }
+
+    #[test]
+    fn a_rect_quad_covers_the_rect_it_is_given() {
+        // **Off the origin on both axes**, so a fixture cannot mistake an offset for
+        // the quad's own size — a `rect_quad` that ignored `rect.x` would still
+        // produce a plausible six vertices, and only the coordinates say otherwise.
+        let rect = crate::paint::Rect::new(240.0, 160.0, 320.0, 200.0);
+        let vertices = rect_quad(rect);
+        assert_eq!(vertices.len(), BLUR_QUAD_SIZE);
+        let positions: Vec<[f32; 2]> = vertices.iter().map(|vertex| vertex.pos).collect();
+        assert_eq!(
+            positions,
+            vec![
+                [240.0, 160.0],
+                [560.0, 160.0],
+                [560.0, 360.0],
+                [240.0, 160.0],
+                [560.0, 360.0],
+                [240.0, 360.0],
+            ],
+            "**the same two triangles `full_quad` draws**, offset by the rect's \
+             origin — `0,1,2` then `0,2,3`, because the winding is the same"
+        );
+        // Both triangles, stated as coverage rather than as a list: the first
+        // triangle is the top-left/top-right/bottom-right half, the second is its
+        // complement, and **a fan over all six would draw a bow tie.**
+        assert_eq!(
+            positions[0], positions[3],
+            "the shared corner is duplicated"
+        );
+        assert_eq!(positions[2], positions[4], "and so is the opposite one");
+
+        // **The dependency the two functions are one fact about:** a rect quad is
+        // only correct *because* the capture behind it was full-window. Asserted
+        // here as the relationship, because a test cannot see the sampling — a
+        // rect quad over a rect-sized capture would draw a plausible picture with the
+        // wrong texels and nothing to notice.
+        let full = full_quad(320.0, 200.0);
+        let full_positions: Vec<[f32; 2]> = full.iter().map(|vertex| vertex.pos).collect();
+        for (from, to) in full_positions.iter().zip(positions.iter()) {
+            assert_eq!(
+                [from[0] + 240.0, from[1] + 160.0],
+                *to,
+                "**the rect quad is the full quad translated, and nothing else** — \
+                 same size, same order, same two triangles"
+            );
+        }
+        // And the control that keeps the control honest: the full quad is *not*
+        // already offset, so the translation above is doing work.
+        assert_ne!(full_positions[0], positions[0]);
     }
 
     #[test]

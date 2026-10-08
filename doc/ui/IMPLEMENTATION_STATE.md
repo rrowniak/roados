@@ -11,192 +11,48 @@ The platform and cross-compilation tasks are a separate sequence —
 `doc/platform/TASK_CROSSPLATFORM_01..04.md` — with its own state in
 `doc/platform/IMPLEMENTATION_STATE.md`.
 
-**Last updated:** 2026-10-07 (**task 38 (ROADOSMF model format and its loader) implemented, verified, record written; task 37 (The mesh draw command, its shader and its batching) implemented, verified, record written; task 36 (Matrix maths and the transform-to-GPU path) implemented, verified, record written; task 35 (Mesh vertex format and GPU buffers) implemented, verified, record written; task 34 (Depth buffer) implemented, verified, and committed as `c83ff11` on 2026-10-06; task 32 implemented, verified as sub-tasks 32.1–32.3, not yet reviewed — § *Task 32 — what it decided, and what it found* is updated with the record from 32.3; task 31 committed as `8778c90`; task 30 committed as `75a896c`; tasks 24 and 33 as `e567634` and `1aa28e6`; operator committed `87da646` ("Demo app tasks breakdown") at 08:33**)
+**Last updated:** 2026-10-08 (**task 41 (`GL_RGBA8` colour capture and a public backdrop API) implemented, verified, record written, not yet reviewed — **two of its acceptance criteria deliberately not met and recorded open**, both demo-side, against the operator's instruction not to touch the demo; task 40 (Drag-to-rotate) and task 39 (offline asset pipeline) were both committed on 2026-10-08 in one commit, `26a7565`, whose message names only task 40 — **task 39 had no record written at the time and one is written now**; tasks 34–38 implemented, verified, record written**)
 
 ## Current position
 
-**Status: task 38 (`ROADOSMF` model format and its loader) is done — implemented, verified, record written on 2026-10-07.** Task 37 (The mesh draw command, its shader and its batching) is done — implemented, verified, record written on 2026-10-07. Task 36 (Matrix maths and the transform-to-GPU path) is done — implemented, verified, record written on 2026-10-07. Task 35 (Mesh vertex format and GPU buffers) is done — implemented, verified, record written on 2026-10-06. Task 34 (Depth buffer) is done — implemented, verified, and committed as `c83ff11` on 2026-10-06. Task 32 (Fade and clip truncation, drawn) is implemented, verified, and the record (32.3) is written — three sub-tasks, 32.1 the demo rows, 32.2 the mechanism, 32.3 this record, all on the tree and uncommitted. **Review for tasks 32, 34, 35, 36, 37, 38 is `.ai/workflows/task-sequence.md` step 2, in a session separate from the implementer's**; the operator's commit is step 5. **The next task after 38 is 39** (the asset pipeline): 33 is done, 34–38 are done, and 39–52 are specified but not started. **Advancing past uncommitted tasks 32–38 to 39 is the operator's decision to make** — advancing past 32–37 to 38 on 2026-10-07 was the operator's explicit decision ("move to the next task"), recorded here rather than skipped quietly — the *No uncommitted advance* gate is stepped over deliberately, as with 24's three sub-tasks in one commit.
+**Status: task 41 (`GL_RGBA8` colour capture and a public backdrop API) is done —
+implemented, verified, record written on 2026-10-08.** Task 40 (Drag-to-rotate)
+and task 39 (the offline asset pipeline) are **both committed**, in one commit,
+`26a7565`, on 2026-10-08.
 
-**Nothing is in flight, and the next task is 32 (Fade and clip truncation,
-drawn).** It is the lowest-numbered task of the sequence that is not done: 33 was
-split out of 28 and finished, 34 is done, and 35–52 are specified but not
-started. Task 30 — which this file recorded as
-**UNCOMMITTED** when it was written — **is committed, as `75a896c`**, so the
-sequence's *No uncommitted advance* gate is closed again. **That correction is
-this file's, not the commit's**: the "UNCOMMITTED" text went in *inside* `75a896c`
-itself, which is a state file written before the commit that closed it, and the
-task table row below was wrong in the same way for longer.
+**Three things about that commit, because the tree and this file disagreed and the
+tree wins.** First, **its message reads `doc/ui/TASK_UI_PRIM_40.md done` and it
+carries tasks 39 *and* 40's files** — task 39's whole `tools/asset-pipeline/`, its
+`LICENSES.md`, the `.gitignore` line, 66 icons, `sedan.roados` and `colormap.png`.
+Second, **task 40's record was written and task 39's was not**, so this file
+described task 39 as *"specified 2026-10-05, not started"* on a tree where its
+output was committed and `check_assets.py --all` is green. **That is the second
+time in this sequence a state file has contradicted its own artefact about a
+*uncommitted* claim**, and the correction is made now rather than at the next task.
+Third, **task 39 is verified, not reviewed** — as is task 40, and as is task 41.
 
-Task 33 is done and committed as `1aa28e6` on 2026-10-05. **Task 24 (Demo
-Application) is done and committed as `e567634` on
-2026-10-05** — all three sub-tasks in one commit, as the operator decided, so
-the sequence's *No uncommitted advance* gate was stepped over deliberately and
-recorded at the time rather than skipped quietly. **Task 24 was the last task of
-the `PRIM` sequence by number**, and tasks 30–32 are the text gaps task 11 left,
-created afterwards — so "the last task" was true when written and is not true
-now, and this sentence is the correction rather than a claim that the sequence
-continued as planned.
-Task 23 (Toast) is done, committed as `1fed4b6` on 2026-10-04, in a commit whose
-message reads *`doc/ui/TASK_UI_PRIM_22.md done`*. Task 22 is done, committed as
-`22356f6` on 2026-10-03; task 21 as `64d2b97`, task 20 as `79941cd`, task 19 as
-`b4a2db8`, tasks 15–18 as `d7240c8`, the frame-rate readout as `3ddf5fa`.
+**The next task after 41 is 42** (`ui_core::nav::Screens` — screen registry, back
+stack, four gates, gap `#3`). Tasks 42–52 and `DEMO-01..05` are specified and not
+started. **Review for tasks 39, 40 and 41 is `.ai/workflows/task-sequence.md`
+step 2, in a session separate from the implementer's**, and the operator's commit
+is step 5 — none of the three is committed in that order, and 39/40 are already
+committed, so their step 5 is done and their step 2 is not.
 
-**`e567634`'s message reads `doc/ui/TASK_UI_PRIM.md done`, and there is no such
-file** — the task files are `TASK_UI_PRIM_01.md` … `TASK_UI_PRIM_32.md` plus the
-three 24.x splits, and the parent is `TASK_UI_PRIM_24.md`. **It is recorded here
-because it is the second commit in this sequence whose message names a task file
-that does not exist or names the wrong one** — `1fed4b6` read
-*`TASK_UI_PRIM_22.md done`* while carrying task 23 — **and because a message
-naming a file that does not exist is the one kind of commit message a later
-`git log --grep` cannot find.** The SHA is what the table records, so nothing
-depends on the message.
+**Task 41 carries two acceptance criteria that are deliberately not met**, both
+demo-side and both against the operator's instruction not to touch the demo: the
+negative test `no_gallery_page_records_a_backdrop`, and requirement 21's one-shot
+capture instrument that would have been the **only** evidence that a backdrop
+draws. They are recorded as open in § *Task 41*, not waived. **The one thing the
+first would have tested is established structurally instead**: `grep -rn
+'\.backdrop('` finds two call sites, a doc example and a test, so no production
+caller exists.
 
-**What the six open decisions became.** They were all recorded as decisions and
-none was a defect, and **the commit carries them unresolved rather than
-silently settled**: `fps-check.sh` still cannot name a page and the criterion is
-explicitly not waived; six weakened assertions from 24.1's migration are accepted
-in the record rather than closed; 150 vs 300 ms stands with its unseen-on-screen
-consequence; the 300 ms dialog fade stands as cosmetic and unreachable in the
-feared form; and a repeated `--tab=` still discards an unknown name. **A fresh
-session resuming here reads all five in *What the operator still has to decide*
-below**, and the first and the last are the two a reader is most likely to meet
-by running the tool rather than reading the file.
-
-**The suite went 1796 → 1839 across task 24** (1404 + 217 + 218), and
-`ui/src/ui_demo/src/main.rs` went **13 675 lines and 164 tests → 20 083 and
-207**, with **every one of the 164 pre-existing tests still present** — verified
-by parsing every `#[test]` body at `HEAD` and now.
-
-### The tab bar exists, and what it took to get there
-
-**`ui_demo` now opens on one of six pages, chosen by `--tab=<name>` or by
-clicking one of six buttons across the top of the window.** The bar is a
-`Container` in `LayoutMode::row()` holding six `Button`s, 44 tall at y 10, their
-widths measured through `Button::content_size` rather than guessed, the active
-page's button carrying the theme's active `background`/`foreground` pair and the
-other five the rest pair. **It puts back on screen the five things the demo's own
-module doc records as lost on 2026-10-01** — the press transition, the release
-transition, the hover tint, the focus ring and the click callback — and a
-**pressed** button was captured mid-transition, which the task file calls *"the
-one thing this task puts back that nothing else on screen demonstrates."*
-
-**Nothing moved.** 24.1 moved no pixel at all; 24.2 shifted the gallery down 64
-and made the band page-local, which is what made room; 24.3 filled the room.
-**Across all three, 0 of 108 existing `const` values changed** and the only two
-added are `Page::DEFAULT` and `NOT_TEXT`.
-
-### The finding that ran through all twelve review rounds
-
-**Twenty-one findings on 24.1, ten on 24.2, eleven on 24.3 — and the majors are
-one finding, four times over: a gate with no test.** Every one was found by
-mutation and **none by reading**. The instances, in order:
-
-| # | Sub-task | The gate | How it was found |
-|---|---|---|---|
-| 1 | 24.1 | `raise_toast`'s `page_members.push` — a raised card was page content by comment alone | deleting it: **0 failed / 1811** |
-| 2 | 24.1 | `show_page`'s `sync_page_visibility()` — requirement 5's *"refreshed on a switch"* | deleting it: **0 failed / 1813** |
-| 3 | 24.1 | **`Demo::new`'s page table had no completeness assertion at all** | one dropped row: **0 failed / 1814**, and the text column drawn on the wrong page |
-| 4 | 24.1 | `raise_toast`'s table row grew a lifecycle leak — the table was pruned nowhere | after `K`×4: **`page_members` 38 against `order` 37**, six rows naming dead handles |
-| 5 | 24.2 | `Demo::placed_handles` had no completeness assertion — the *same* finding on the table 24.2 introduced | one dropped row: **0 failed / 1817** |
-| 6 | 24.3 | `release_tab`'s `animate_to_state` — press and release on the button of the page **already on show** | `left: 0.95, right: 1.0`, a button stuck at the pressed scale |
-
-**Four of them would have become waived acceptance criteria**, because in each
-case a test named for the criterion existed, passed, and **could not see the
-defect**. Number 3 is the sharpest: the test computed
-`let always = !demo.is_page_content(*handle);` and asserted `own || always`, so
-**a node missing from the table is trivially "always-painted" and the assertion
-passes.** It could see a node on the wrong page and was *structurally unable* to
-see one that was not in the table at all.
-
-**The lesson is now the file's own, in three entries rather than one:** *a sweep
-of a mechanism's call sites is not a sweep of the data it is built from*, *a
-survivor is a missing assertion*, and — the one that generalises furthest —
-**the complement, not the members**: `assert_every_drawn_leaf_is_named_or_excused`
-was written because completeness assertions catch a row deleted and a row added
-and **cannot catch a widget that was never added**, which the three pads were.
-
-### Three premises that measurement refuted, and what each cost
-
-**This is the sequence's third appearance of the pattern — a task file
-describing a mechanism this pipeline does not have** — and each is now amended in
-place, dated, because a task file owns its requirements:
-
-1. **24.1's central trap: a stale page cannot survive a frame.** The task file
-   said `PaintState::new()` leaves *"the batch it already submitted … in the
-   frame"*. **There is no per-node command cache**: `begin_frame` clears the GL
-   buffer and `batcher.reset()`s, `draw_node_clipped` records only into this
-   frame's batcher. **So the two forms are equivalent on screen, and no capture
-   distinguishes them** — which is the opposite of what the file's Context and
-   *Deliberate break 2* required. The requirement's literal form was kept; the
-   deliberate break's survival is now evidence of *equivalence*, not a warning.
-2. **24.2's pads card: `set_position` on a `Stack` child is a no-op.** The write
-   compiled and the card stayed at `y: 0`. **The root became
-   `LayoutMode::Absolute`**, one token in `ui_demo`, which is behaviour-preserving
-   for its other three children because `arrange_stack` and `arrange_absolute`
-   differ in exactly one field — the origin — and an unpositioned child sits at
-   the parent's origin in both modes. **The alternative, an `Absolute` wrapper
-   node, would have needed a row in `page_members`**, which is failure mode 3
-   above.
-3. **24.3's requirement 4 named a call and a duration that are different
-   numbers.** `Motion::from_theme` reads `DurationFast` — **150 ms** — and
-   `THEME_TRANSITION` is **300 ms**. The call landed, pinned by an `assert_ne!`.
-
-### What the operator still has to decide — and what the commit carried
-
-**Six decisions, none of them a defect, and all six are still open in the
-commit `e567634` rather than settled by it.** They are recorded here and in the
-task files with their reasons, and they are in this section rather than a
-"closed" heading because none was closed — the operator committed the work with
-each one written down and unresolved, which is the honest state of them.
-
-1. **`fps-check.sh` cannot name a page.** It runs the binary with no `"$@"`, and
-   the demo reads only `ROADOS_RUN_SECONDS` and `ROADOS_ASSET_DIR` — so it can
-   only ever measure `pads`. **All six pages were measured by hand** with the
-   same report line parsed by field against the same floor of 55, and **the
-   criterion is explicitly not waived**. **Forwarding `"$@"` is owed** and is an
-   `.ai/` change no task may make.
-2. **Six weakened assertions from 24.1's migration**, of which **two are recorded
-   losses** in-file and four satisfy the positive-half rule.
-   **Offered for acceptance, not waived.**
-3. **150 ms or 300 ms for the selection change.** 150 ms is what every widget in
-   the crate uses. **The consequence nobody has seen on screen** — `T` cannot be
-   injected here — is that **on a theme switch the bar's own `Surface` arrives
-   150 ms after its six buttons**, because the bar's background is a bound
-   property on the animating theme. **It is the one argument for the number.**
-4. **The 300 ms dialog fade window.** `dialog_is_modal()` is keyed on `visible`,
-   which `dismiss()` clears at once, so inside the fade a shortcut moves the page
-   and the scrim and the focus ring go in one frame. Cosmetic, one frame, and a
-   **6 start pages × {`D`,`K`} × 6 table rows × 3 timings sweep found no
-   reachable bad state.** Closing it is the operator's call with the tab bar now
-   designed.
-5. **A repeated `--tab=` silently discards an unknown name.** `--tab=nope` exits
-   1 and names all six; `--tab=pads --tab=nope` exits 1; and **`--tab=nope
-   --tab=pads` runs the demo**, because the rule is *last wins* and only the
-   winner is validated. **Against the parent's own stated reason for refusing
-   one** — *"a silently ignored argument is a test that passes against nothing."*
-6. **`the_plot_is_the_nodes_own_width_and_its_height_less_the_widgets_x_gutter`
-   and ten other geometry tests are byte-identical**, and that is the right
-   answer rather than a gap: a uniform shift cannot make a test that compares two
-   measured rects vacuous. **Seven of the twelve were read to establish it.**
-
-### What is NOT claimed
-
-- **Nothing about the 150-vs-300 ms divergence on `T`.** Structurally derived,
-  never seen: keyboard injection delivers one event in this project's history
-  and pointer injection none.
-- **Nothing about the pressed capture's reproducibility.** `press_29.png` and
-  `press_30.png` measure **3068 px of `srgb(49,49,49)` where the rest fill is
-  `(51,51,51)` and the arrived fill is `(42,42,42)`** — 2/9 = **22 %** of the way,
-  on the same node in the same gesture — but it needed a **temporary, reverted**
-  seed, because `magick import` is slower than a 150 ms transition and XTEST
-  delivered nothing (`XQueryPointer` reported the pointer unmoved with mask 0
-  against a held request). **`grep -c SEED24` is 0** and the tree was
-  md5-verified. **At a 161 ms sampling interval against a 150 ms window this
-  evidence class cannot be repeated** — which is why the shipped verification is
-  an assertion on the painted colour strictly between the two ends, and the
-  capture is the at-rest/pressed pair it can actually support.
-- **Nothing about `SURFACE_OPACITY`, or about task 23's findings** — see above.
-- **`cargo audit` has not run on this host** for the eighth task running.
+**What is in flight: nothing.** The tree builds, the suite is green at 1587 + 3 +
+236 + 231, `cargo fmt --check`, `cargo build --all-targets --all-features`,
+`cargo clippy --all-targets --all-features -- -D warnings` and `cargo doc --no-deps`
+are clean apart from **two `cargo doc` warnings that pre-date this work on lines it
+did not touch**, and `cargo audit` exits 0 on this host. Nothing is committed —
+every task-41 change is on the tree and uncommitted, awaiting step 5.
 
 ## A second amendment, 2026-10-04, and it is one page's contents.** The
 2026-10-03 amendment put the `Dialog` alone on `overlays` and gave the reason
@@ -1168,6 +1024,66 @@ unchanged at 71.
 binaries, above the floor, below the old band; not chased, because both
 trees agree it is not this task's.
 
+## Task 39 — what it decided, and what it found
+
+**Committed 2026-10-08 in `26a7565`, verified, no record was written at the time,
+and one is written now. Not reviewed.** `26a7565`'s message reads
+`doc/ui/TASK_UI_PRIM_40.md done`, and this file said task 39 was *not started* on a
+tree that carried its whole output — **the second time in this sequence a state
+file has been wrong about a task's status in the direction that makes the sequence
+look further behind than it is.**
+
+**What it delivered**: `tools/asset-pipeline/` in full (`README.md`,
+`fetch_upstream.sh`, `upstream.sha256`, `model.json`, `icons.json`,
+`glb_to_model.py`, `bake_icons.py`, `check_assets.py`), `LICENSES.md` at the root,
+the `/.asset-cache/` line in `.gitignore`, and under
+`ui/src/ui_demo/assets/`: `sedan.roados`, `colormap.png`, `icons/LICENSE`,
+`icons/{dark,light}/` (33 icons × 2 themes = **66** PNGs) and `MANIFEST.sha256`.
+**Zero Rust files** in the task, as its file specifies.
+
+**Verified on the committed tree, 2026-10-08** — `check_assets.py --all`, pasted
+verbatim because its own output is the evidence:
+
+```
+check_assets: [measured] ok: model.json agrees with the GLB on every field
+check_assets: [hashes] ok: byte-stable ui/src/ui_demo/assets/sedan.roados matches MANIFEST.sha256
+check_assets: [hashes] ok: byte-stable ui/src/ui_demo/assets/colormap.png matches MANIFEST.sha256
+check_assets: [hashes] ok: 66 icons/** are encoder-dependent: presence checked, bytes deliberately not compared (see check_pixels)
+check_assets: [licences] ok: both upstreams named with licences; ISC notice verbatim here and travelling
+check_assets: [denylist] ok: no denylisted string outside the documented exemption (LICENSES.md:81: simple-icons (marked refusal); LICENSES.md:81: tesla (marked refusal); icons.json unmapped reason: simple-icons; icons.json unmapped reason: tesla)
+check_assets: [icons] ok: 66 files, manifest and directory agree both ways, all within 512px
+check_assets: [pixels] ok: 66 committed PNGs re-asserted (size, RGBA, non-empty, colour mean)
+check_assets: --all green
+```
+
+**Three things the checker answers that a file count would not**, and they are why
+the task wrote the checker rather than a build step: the **`[hashes]` line names
+which artefacts are byte-stable and which are not** — the `.roados` and the copied
+colormap are compared, and the PNGs are deliberately *not*, because their `IDAT`
+stream is zlib output and a byte-hash of a PNG would be a claim about this host's
+encoder rather than about reproducibility. The **`[pixels]` line re-asserts all 66
+committed PNGs' values**, so a hand-edited icon is caught rather than only a bad
+run. And the **`[denylist]` line reports its four hits and marks each as a
+documented refusal**, which is the trademark guard reporting that it is working
+rather than reporting nothing.
+
+**The `gauge-metric` miss is recorded, and that is the point**: `icons.json` carries
+a 33-entry closed allow-list and an `unmapped` array saying `gauge-metric` does not
+exist in Lucide 1.52.0, `gauge.svg` is the substitute, and *an absent glyph is the
+moment an agent reaches for a set that has it — and the set that has it is CC0 and
+therefore looks safe.* `simple-icons` ships `tesla.svg`; both facts are recorded in
+the pipeline and the denylist refuses both strings outside the one documented
+exemption.
+
+**What is NOT claimed**: no acceptance criterion was re-run from scratch here
+beyond the checker, so the task file's own end-to-end criterion (`rm -rf
+.asset-cache/`, one fetch, regenerate, `git status --porcelain` empty) is **not
+re-verified by this record** — the committed bytes and the committed hashes agree,
+which is the weaker and sufficient claim for a file already in the tree. The
+trademark question in `DEMO_APPLICATION.md` § *Open questions* item 3 **stays
+open**; what this task decided is only that the pipeline cannot ingest a mark. And
+like tasks 39's two siblings, it is **not reviewed**.
+
 ## Task 40 — what it decided, and what it found
 
 **Implemented 2026-10-08, verified, not yet reviewed** — review is
@@ -1272,6 +1188,203 @@ demo's ambient turn moves the car on every run, and **no pointer event has
 ever been observed reaching this window** on this host, so nothing here is
 evidence that a finger turns it. `cargo audit` ran clean here (1 294
 advisories, 47 crates, exit 0); that is this host's result.
+
+## Task 41 — what it decided, and what it found
+
+**Implemented 2026-10-08, verified, not yet reviewed** — review is
+`.ai/workflows/task-sequence.md` step 2, in a session separate from the
+implementer's. **8 code files**: `ui_core/src/render/target.rs` (`ColourTarget`,
+`allocate_texture`, `ColourTarget::capture`, +3 tests), `ui_core/src/paint.rs`
+(`BackdropMode`, `DrawCommand::Backdrop`, `Painter::backdrop` + its doctest),
+`ui_core/src/batch.rs` (`ShaderKind::Backdrop`, the `batch_key` arm,
+`Segment::backdrop`, +6 tests), `ui_core/src/render.rs` (2 shaders, 9 uniform
+locations, `Pass::Backdrop`, `create_backdrop_programs`, `draw_pass`'s arm,
+`end_frame`'s `if let`, `draw_backdrop_batch`, `draw_backdrop_offscreen`,
+`backdrop_fragment`, `colour_capture_legal`, the `## Backdrops` section, +7
+tests), `ui_core/src/render/blur.rs` (`rect_quad` + a doc test +1 test),
+`ui_core/src/render/context.rs` (`MULTISAMPLE_SAMPLES` made `pub(crate)`, one
+caller), and **`ui_demo/src/main.rs` — 2 mechanical arms only, 13 lines**.
+**The suite went 1568 → 1587 lib (+19), 229 → 231 doctests (+2), 236 demo and 3
+integration unmoved — none removed, none weakened.**
+
+### Two things the operator should know before this is reviewed
+
+1. **`ui_demo/src/main.rs` was touched, against the instruction not to touch the
+   demo**, and the change is two arms in two *test helpers* — `inked_box` and
+   `command_box`. **It was not optional**: adding a variant to the public
+   `DrawCommand` enum makes every exhaustive `match` over it a compile error, and
+   those two are the only ones in `ui_demo`. The alternative was a workspace that
+   does not compile. No page, widget, `--tab=` name, constant or behaviour changed,
+   and the six pages' captures are the evidence (§ *The capture* below).
+2. **Two acceptance criteria from the task file are NOT met, deliberately, and are
+   recorded as open rather than waived**: `no_gallery_page_records_a_backdrop`
+   (the demo-side negative test) and requirement 21's one-shot capture instrument.
+   Both are demo-side. **The claim the first would have tested is instead
+   established structurally** — `grep -rn '\.backdrop(' ui/src/` returns exactly two
+   sites, the `Painter::backdrop` doc example and one test, so no production caller
+   exists and no page *can* record one.
+
+### The decision: a second type, and the format is a literal
+
+`ColourTarget` is a **second `pub struct`** beside `ShadowTarget`, not a format
+argument on the first, and **`GL_RGBA8` / `GL_RGBA` are declared as two constants in
+`target.rs`** — deliberately *not* imported from `render.rs`, which has a constant
+of each name for the image atlas. Three reasons, recorded in `target.rs`'s module
+docs § *The colour target, and why it is a second type*: the format is a property
+of the shaders, which are compile-time text; `GL_R8` **cannot** represent a
+backdrop, because a shadow's colour is one constant and a backdrop's `rgb` varies
+per pixel; and a shared `ensure_size` would have to answer a legality question only
+one of the two has. **The accepted duplication is four bookkeeping methods and the
+cheapest reversal is named** — a third target moves them into a private
+`PingPongTarget` and neither public signature changes, because the format was never
+a field.
+
+**The one thing the `ensure_size` refactor changed in `ShadowTarget`**: its inline
+`glTexImage2D` and four `tex_parameter_i32` calls became one call to the shared
+`allocate_texture(gl, texture, w, h, GL_R8, GL_RED)`. Its public surface,
+semantics and `Drop` are untouched.
+
+### The capture is full-window, and why (c) stays open
+
+`ColourTarget::capture` is **one `glBlitFramebuffer` with both rectangles the
+whole window**, `GL_COLOR_BUFFER_BIT`, `GL_NEAREST`, and **no depth bit**. The
+OpenGL ES 3.1 rule is quoted in the method's own doc: with `GL_SAMPLE_BUFFERS > 0`
+on the read buffer, differing source/destination bounds are an
+`GL_INVALID_OPERATION`, and this pipeline's default framebuffer holds
+`MULTISAMPLE_SAMPLES` samples. **So a rect-scoped or half-scale blit does not
+capture — it raises an error and the backdrop is simply not there.**
+`a_colour_capture_blits_the_same_rectangle_twice` enforces that on the source, so
+`DEMO_APPLICATION.md` row `L1` sub-item (c) stays open *as a test*.
+
+**The read binding comes after `bind_attach`, and the order is load-bearing**:
+`glow::FRAMEBUFFER` binds both read and draw, so a blit issued before the read
+rebind is a texture-to-itself blit.
+
+### The bandwidth decision, in numbers, and why the host cannot make it
+
+`render.rs`'s new `## Backdrops` section carries the table: **131.9 MB per frame
+as implemented** at 1280×1020 (26.1 capture + 104.4 two 9-tap blurs + 1.4
+rect-limited composite), **13.4 MB if rect-scoped (−90 %) and not implemented**,
+**34.1 MB at half resolution and not implementable through the blit**,
+**40.5 MB for the `GL_R8` shadow it is compared against** — **3.3×** — and
+**2.19 Gpixel-accesses per second at 60 fps**, giving the operator a threshold
+rather than a part number: *any part below about 2 GPix/s of RGBA8 fill cannot
+afford a full-window backdrop every frame.* **The arithmetic decides and the frame
+rate does not**, because the recorded measurements cannot tell nine taps from
+seventeen (171/182/211 against 212/202/188 against 191/172/158 with no shadow, all
+at 62.0–62.2 fps).
+
+### Premultiplication, and the honest limit
+
+`backdrop_fragment` is a CPU mirror of the composite's two lines, so the invariant
+`r <= a && g <= a && b <= a` is asserted over a 7 × 5 grid **with no display**.
+`BLUR_COLOUR_FRAGMENT_SHADER_SRC` differs from `BLUR_FRAGMENT_SHADER_SRC` in exactly
+two places — `vec4 total` and `frag_color = total` — and a test asserts that by
+substring, including the eight lines the two share. **The limit, recorded rather
+than hidden: the backdrop is exactly as premultiplied as what it captured**, so a
+translucent *solid* primitive recorded before it contributes straight alpha — the
+defect `chart.rs` measures, which this task neither introduces a second instance of
+nor fixes.
+
+### Two findings, and one of them is a test that could not fail
+
+1. **`Color::new` does not premultiply, and a hand-written tint breaks the
+   composite's invariant for a reason that has nothing to do with the composite.**
+   `(236, 239, 244, 170)` — `#eceff4` at alpha 170, the obvious way to write a
+   frost — has `b = 0.957` over `a = 0.667`. `Color`'s doc says its components
+   *are* premultiplied, so the caller supplies them that way: the correct value is
+   `(157, 159, 162, 170)`. **Found by a failing test, then recorded on
+   `DrawCommand::Backdrop`'s `tint` field**, and the fixture now asserts its own
+   precondition so the next hand-written tint fails as a fixture rather than as a
+   composite.
+2. **`the_backdrop_composite_stays_premultiplied` could not catch the
+   double-premultiply, and that was measured rather than assumed.**
+   `texel.rgb * texel.a * tint.rgb` **keeps `r <= a` true** — a premultiplied texel
+   already satisfies `rgb <= a`, so `rgb * a <= a² <= a`. **The premultiplication
+   invariant is necessary and not sufficient**, and the task file's claim that this
+   mutation fails that test is false as written. **The assertion that does catch it
+   is the identity**: an opaque white tint means *as captured*, for any texel. Both
+   mutations are now killed, each with its reason:
+   - straight-alpha form → `vec4([1,1,1,1], [0,0,0,0])` -> `[1,1,1,0]`, breaks `r <= a`.
+   - double-premultiply form → an opaque white tint fails to pass `[0.5,0.5,0.5,0.5]`
+     through unchanged.
+
+### Mutation evidence, with restore proved by re-running
+
+| break | result |
+|---|---|
+| `ShadowTarget::ensure_size`'s format pair → `GL_RGBA8`/`GL_RGBA` | `the_colour_target_is_rgba_and_the_shadow_target_is_red` **FAILED** — *"the shadow target still allocates its `GL_R8` / `GL_RED` pair"*; restored, passes |
+| `backdrop_fragment` → straight-alpha form | **FAILED** — breaks `r <= a`, quoting the offending pair |
+| `backdrop_fragment` → double-premultiply form | **FAILED** — the identity assertion |
+
+**The first of those three found a real violation on its first run, not a
+hypothetical one**: a comment I had written *inside* `ShadowTarget::ensure_size`
+named `GL_RGBA8`, so the assertion was telling the truth about the file and the
+file was wrong about the criterion. The comment was reworded, and it now says why
+it does not name the other pair.
+
+### The capture: five pages AE 0, and `data` confined to `CAR_RECT`
+
+Release build, window id re-read per capture with `xwininfo -root -tree`,
+`pgrep -a -x ui_demo` in the same call as each `magick import -window`, before and
+after around a `git stash`:
+
+| page | full-window AE | AE over y 0–679 |
+|---|---|---|
+| pads | 197 | **0** |
+| text | 293 | **0** |
+| input | 211 | **0** |
+| controls | 306 | **0** |
+| overlays | 382 | **0** |
+| **data** | 8191 | 7752 — **all of it inside `CAR_RECT`** |
+
+**`data` is the one page that draws a mesh, and it differs by construction**: its
+ambient turn (`CAR_AMBIENT`) moves the car between runs, which § *Task 40* records
+as *"the ambient turn moves the car between runs, by construction."* **Measured
+region by region rather than asserted**: above the rect `1280x304+0+0` **AE 0**;
+the left strip `60x400+0+304` **AE 0**; the right strip `660x400+620+304` **AE 0**;
+inside `CAR_RECT` `560x400+60+304` **7752**; below `1280x316+0+704` **439**, which
+is entirely `y >= 680`, the fps readout's band. **So every differing pixel is inside
+the car rect or inside the fps band, and nothing this task touched is on screen.**
+
+### The frame rate: no measurable change, and why that is expected
+
+`.ai/tools/fps-check.sh 10 55` → **631 frames in 10.011s, average 63.0 fps, worst
+frame 18.2 ms, 0 frame(s) over 33 ms — PASS.** Per page
+(`ROADOS_RUN_SECONDS=8 … --tab=<page>`): **pads 63.2, text 62.8, input 62.8,
+controls 62.7, data 62.4** (one 44.2 ms frame), **overlays 62.1**. All above the
+floor of 55 and inside the recorded 61.1–63.9 band.
+
+**The expected result is no change, and the reason is structural rather than a
+coincidence:** no page records a backdrop, so the per-frame work added is **one
+`if let Some(backdrop)` per segment**, two program links in `Renderer::new`, and
+**zero captures** — `ColourTarget::new` allocates no storage and `ensure_size` is
+reached only from `draw_backdrop_offscreen`.
+
+### What is NOT claimed
+
+- **Nothing about a backdrop being seen on screen.** No widget requests one, so
+  **the first pixels of a backdrop in this repository are a later task's capture** —
+  the same state tasks 34, 35, 37 and 38 recorded in their own words. The GL half
+  of the route is proved by **no test in this file**; requirement 21's instrument,
+  which would have been that evidence, is the demo-side work this task did not do.
+- **Nothing about `colour_capture_legal`'s answer on this host.** The probe needs a
+  real backdrop to run, and nothing records one. Its arithmetic and its two
+  documented outcomes are unit-tested in shape only.
+- **`no_gallery_page_records_a_backdrop` is not written**, for the operator's
+  instruction; the structural substitute is in § *Two things the operator should
+  know* above.
+- **No rect-scoped capture and no half-resolution tier** — sub-item (c), blocked on
+  the ES 3.1 identical-bounds rule and not on time.
+- **`ui_demo` was modified**, 13 lines in two test helpers, and requirement 21's
+  instrument was not done at all.
+- **No new dependency.** `git diff --exit-code ui/Cargo.toml ui/Cargo.lock` is clean
+  and `find . -name build.rs -not -path './ui/target/*'` finds none.
+- **Nothing about the capture's antialiasing.** The MSAA resolve is the
+  specification's and the driver's, free, and the page says only that samples are
+  "converted to a single sample" — not how.
+- **`cargo audit` ran clean on this host** (1294 advisories, 47 crates, exit 0);
+  that is this host's result.
 
 ## Task 31 — what it decided, and what it found
 
@@ -6015,9 +6128,9 @@ verified. A blank cell is unknown, not "none".
 | 36 | Matrix maths and the transform-to-GPU path — **closes gap `L2`'s "no matrix" half** | **implemented 2026-10-07, verified, record written, not yet reviewed** — `render/matrix.rs` (new, 17 tests) + `render.rs` (+112, 2 tests); `L2` amended dated 2026-10-07 | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | All 14 requirements met bar three AC greps that count doc comments (recorded in § *Task 36* with code-level numbers). Suite 1500 → 1519 lib (+19, none removed), demo 226, doctests 225. Six pages AE 0 outside y≥680; fps 62.0 script line, per-page 58.7–62.2 (overlays ~59 on both binaries, above floor 55). 2 of 2 mutations killed with restore proved by diff. See *Task 36 — what it decided* |
 | 37 | The mesh draw command, its shader and its batching | **implemented 2026-10-07, verified, record written, not yet reviewed** — 4 code files + 3 helper arms; ten variants, five kinds, four passes, two boundary slots | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | Suite 1519 → 1531 lib (+12), demo 226, doctests 225 → 226. Six pages AE 0 outside y≥680; fps 62.9 script line, per-page 61.8–62.7. Real-triangle probe error `0x0`, seed reverted byte-clean. 8 of 8 mutations killed (2 findings → 2 strengthened tests). No page draws a mesh; first pixels are 38's. See *Task 37 — what it decided* |
 | 38 | `ROADOSMF` model format and its loader | **implemented 2026-10-07, verified, record written, not yet reviewed** — `render/meshio.rs` (new, 21 unit + 1 doctest), `render.rs` (`MeshError→RenderError::Mesh`), demo `Model` + `load_model` + status line; fixture `tests/data/sedan.roados` (81 561 bytes) + 3 integration tests; `TASK_UI_PRIM_37.md` amended dated | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | Suite 1970 → 1996 (lib 1531 → 1552, integration 0 → 3, demo 226 → 228, doctests 226 → 227), none removed. Six pages AE 0 outside y≥680 (band diffs = status line + fps only, accounted pixel for pixel); fps 62.4 script line, per-page 61.9–62.5. Magic/version/u32-arithmetic mutations kill their tests; one tiling survivor rewrote its fixture. Two honest deviations recorded (0xC000_0000 hostile count; wheel-extent assertion). `cargo doc` carries 2 pre-existing warnings on untouched lines. See *Task 38 — what it decided* |
-| 39 | Offline asset pipeline | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_39.md` | — | — |
-| 40 | Drag-to-rotate — **partially closes gap `L4`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_40.md` | — | — |
-| 41 | `GL_RGBA8` colour capture and a public backdrop API — **gap `L1`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_41.md` | — | — |
+| 39 | Offline asset pipeline | **done 2026-10-08** — committed, `check_assets.py --all` green, **no record was written at the time** | `26a7565` — that commit's message reads *`doc/ui/TASK_UI_PRIM_40.md done`*, so it also carries task 40's files | **none** — not reviewed | `check_assets.py --all` green on the committed tree: `measured` block agrees with the GLB, `sedan.roados` and `colormap.png` match `MANIFEST.sha256`, 66 icons present and re-asserted for size/RGBA/non-empty/colour mean, denylist clean, licences present with the ISC notice travelling. **No acceptance criterion is waived.** See § *Task 39 — what it decided* |
+| 40 | Drag-to-rotate — **partially closes gap `L4`** | **done 2026-10-08** | `26a7565` | **none yet** — review is step 2, in a session separate from the implementer's | Suite 1568 → 1581 lib (+13), demo 228 → 236 (+8), doctests 227 → 229 (+2), none removed. **Four deviations from the task file, each measured** — `CAR_DISTANCE` 7.0 fitted vertex by vertex rather than the file's 2.6; window aspect plus an NDC recentre; a hand-written `Debug` because `Property` is not `Debug`; `inked_box` answers `CAR_RECT` for `Mesh`. Row `L4` amended, not closed. **The gesture is unit-tested and the ambient turn runs every frame, and no pointer event has ever been observed reaching this window**, so nothing here is evidence that a finger turns it. See § *Task 40 — what it decided* |
+| 41 | `GL_RGBA8` colour capture and a public backdrop API — **gap `L1`**, sub-item (c) still open | **implemented 2026-10-08, verified, record written, not yet reviewed** | `—` — **awaiting the operator's commit** (`.ai/workflows/task-sequence.md` step 5) | **none yet** — review is step 2, in a session separate from the implementer's | Suite 1568 → 1587 lib (+19), doctests 229 → 231 (+2), demo 236 and integration 3 unmoved, none removed. Five pages **AE 0 over y 0–679**; `data`'s 7752 differing pixels measured region by region as **entirely inside `CAR_RECT`** (the ambient turn, by construction) plus the fps band. fps 63.0 script line, per-page 62.1–63.2. Three mutations killed. **Two acceptance criteria NOT met deliberately and recorded as open**: the demo-side `no_gallery_page_records_a_backdrop` and requirement 21's capture instrument — both demo-side, both against the operator's instruction not to touch the demo. **`ui_demo` changed by 13 lines in two test helpers**, which the exhaustive `match` over the new public enum variant made unavoidable. See § *Task 41 — what it decided* |
 | 42 | `ui_core::nav::Screens` — screen registry, back stack, four gates — **closes gap `#3`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_42.md` | — | — |
 | 43 | `TabBar` widget and `Button::selected` — **closes gap `#7`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_43.md` | — | — |
 | 44 | `Icon` widget and a tintable `DrawCommand::Image` — **closes gap `#4`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_44.md` | — | — |

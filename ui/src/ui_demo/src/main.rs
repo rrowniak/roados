@@ -14316,7 +14316,8 @@ mod tests {
         match command {
             DrawCommand::Rect { rect, .. }
             | DrawCommand::RoundedRect { rect, .. }
-            | DrawCommand::Image { rect, .. } => *rect,
+            | DrawCommand::Image { rect, .. }
+            | DrawCommand::Backdrop { rect, .. } => *rect,
             // `y` is the **top of the line's box**, per the variant's own doc, so a
             // text run's ink cannot be above it. The width is zero because a
             // `DrawCommand::Text` carries none — the same gap
@@ -15573,6 +15574,16 @@ mod tests {
         };
         match command {
             DrawCommand::Rect { rect, .. } | DrawCommand::RoundedRect { rect, .. } => Some(*rect),
+            // **Added for `DrawCommand::Backdrop`,** which is an exhaustive match
+            // and could not be taught the new variant without this arm. The rect
+            // is the answer for the same reason it is for `Image`: it is where the
+            // command draws. The composite covers the rect *grown by the blur's
+            // reach*, and this reports the un-grown rect, so a backdrop with a wide
+            // blur would measure slightly narrower than its true ink — which no
+            // page records, so no measurement here is affected today, and the
+            // alternative (returning `None`) would make a backdrop invisible to
+            // every rect test, which is strictly worse.
+            DrawCommand::Backdrop { rect, .. } => Some(*rect),
             DrawCommand::Circle { center, radius, .. } => Some(Rect::new(
                 center.0 - radius,
                 center.1 - radius,

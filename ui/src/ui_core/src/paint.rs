@@ -336,6 +336,35 @@ impl UvRect {
     }
 }
 
+/// How a captured scene is blurred before it is composited.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BackdropMode {
+    /// The capture is composited as it was taken: one FBO copy, no blur pass.
+    ///
+    /// **It is not the same picture as no backdrop at all**, which is why this is a
+    /// variant and not an optimisation away: it *replaces* the sharp scene in its
+    /// rect with the same pixels, and the sharp scene under it is gone — see
+    /// [`DrawCommand::Backdrop`]'s `tint` for the arithmetic. That is what a card
+    /// with a cut-out wants, and what a caller gets for free once the target
+    /// exists.
+    Sharp,
+    /// The capture is blurred with `sigma`, the Gaussian's standard deviation in
+    /// pixels, with [`blur::taps_for`](crate::render::blur::taps_for)'s cap and no
+    /// wider kernel.
+    ///
+    /// **A bare `f32` and not a newtype**, and the reason is that
+    /// [`DrawCommand::Shadow`]'s `blur` is one: two spellings of the same field is
+    /// one thing to be wrong about. It is an *enum* rather than a bare sigma
+    /// because `sigma == 0.0` does not mean the same thing here as it does for a
+    /// shadow — [`SOLID_BLUR`](crate::render::blur::SOLID_BLUR) is 0.0 and the
+    /// shadow path takes it as *"draw the shape directly"*, whereas a backdrop
+    /// **cannot be drawn directly at all**, because its destination is a
+    /// framebuffer rather than a shape. So sigma 0 is not a no-op for a backdrop:
+    /// it is the same picture with a pointless copy in front of it. Two modes and
+    /// no overlap.
+    Blur(f32),
+}
+
 /// A single draw command recorded during the paint pass.
 ///
 /// Colors are premultiplied alpha, matching the rest of the pipeline.
@@ -651,6 +680,77 @@ pub enum DrawCommand {
         points: Vec<(f32, f32)>,
         /// Fill color, premultiplied alpha.
         color: Color,
+    },
+    /// The scene behind a rect, captured, optionally blurred, and composited
+    /// over what is already on screen where it was recorded.
+    ///
+    /// **It captures what is *already* on screen**, so a command recorded before
+    /// this one is inside the backdrop and one recorded after it is over it. That
+    /// is the recording contract, it is the caller's, and it is the same contract
+    /// [`Mesh`](DrawCommand::Mesh) records: *record the scene first and the chrome
+    /// second.* A backdrop recorded before the scene captures an empty rect; one
+    /// recorded after the chrome blurs the chrome.
+    ///
+    /// **It replaces its rect, by default, and that is arithmetic rather than
+    /// taste.** The capture carries the default framebuffer's own alpha, which is
+    /// 1.0 everywhere an opaque primitive drew and the composited coverage
+    /// everywhere a translucent one did. `tint.a == 255` over an opaque capture
+    /// is `src + dst · (1 − 1) = src`: the backdrop *is* the picture in its rect,
+    /// and the sharp scene under it is gone. A caller wanting a frost rather than
+    /// a window passes `tint.a < 255`.
+    ///
+    /// **Where it lands in the frame is the caller's recording order, and there is
+    /// no flag that changes it** — for the same reason and with the same
+    /// consequence as `Mesh`: a backdrop is a
+    /// [`Segment`](crate::batch::Segment) boundary, so nothing recorded after it
+    /// can merge into a batch recorded before it.
+    Backdrop {
+        /// The rect of the window to capture, in window coordinates, **before** the
+        /// blur's reach is added.
+        ///
+        /// **The capture is window-sized whatever this says**, because
+        /// `glBlitFramebuffer` from a multisampled read framebuffer requires the
+        /// source and destination rectangles to have identical bounds — the
+        /// OpenGL ES 3.1 reference page raises `GL_INVALID_OPERATION` otherwise,
+        /// and this pipeline's default framebuffer holds four samples. **This rect
+        /// sizes the *composite*, and nothing else.**
+        ///
+        /// A caller that believed it scoped the capture would get a blit the
+        /// driver rejects, a backdrop that does not draw, and no GL error anybody
+        /// reads. That is why `doc/ui/DEMO_APPLICATION.md` row `L1` sub-item (c),
+        /// rect-scoped capture, is still open, and why
+        /// [`ColourTarget::capture`](crate::render::target::ColourTarget::capture)
+        /// is a full-window blit rather than a rect one.
+        rect: Rect,
+        /// How the capture is blurred, or that it is not.
+        mode: BackdropMode,
+        /// The colour the captured scene is multiplied by, premultiplied, like
+        /// every other colour on this enum.
+        ///
+        /// **Its alpha is the backdrop's opacity, and that is a deliberate
+        /// departure from `Image` and from `Mesh`.** Both of those carry a separate
+        /// `opacity` scalar, and `Mesh` gives the reason for its own: *it decides
+        /// the blend mode and the blend mode must not depend on how the caller chose
+        /// to express the alpha.* **A backdrop's blend mode does not come from its
+        /// tint at all** — it is always a blend, whatever the tint says — so there
+        /// is nothing for a second field to decide, and one field instead of two is
+        /// the honest shape. `Color::new(255, 255, 255, 255)` is *"as captured"*;
+        /// there is **no `Color` constant** for it because `Color::new` is not
+        /// `const`, so the value is named in [`Painter::backdrop`]'s doc and
+        /// pinned by a test.
+        ///
+        /// **The components are premultiplied by contract, and `Color::new` does
+        /// not premultiply for you.** `Color`'s own doc says its `r`, `g` and `b`
+        /// *are* premultiplied, which means the caller supplies them that way: a
+        /// frost of `#eceff4` at alpha 170 is `(157, 159, 162, 170)`, **not**
+        /// `(236, 239, 244, 170)`. The second has `b = 0.957` over `a = 0.667`,
+        /// which is not a colour in this pipeline's sense, and the composite's
+        /// premultiplication invariant does not hold for it — so the picture comes
+        /// out slightly wrong with nothing to notice. That is a property of `Color`
+        /// rather than of this variant, inherited here by name rather than repaired;
+        /// the fixture assertion in `the_backdrop_composite_stays_premultiplied` is
+        /// the line that catches it.
+        tint: Color,
     },
     /// A triangle mesh: one named sub-mesh of one uploaded mesh, through one
     /// transform, in one tint.
@@ -1296,6 +1396,67 @@ impl Painter {
             blur,
             offset,
         });
+    }
+
+    /// Records a request for the scene behind `rect`, blurred by `mode` and
+    /// composited back over its own place in the frame.
+    ///
+    /// **The one contract, and it is the caller's: record the scene first, then
+    /// the backdrop, then the chrome.** A backdrop captures what is *already* on
+    /// screen, so a command recorded before it is inside the backdrop and one
+    /// recorded after it is over it. Recorded before the scene it captures an empty
+    /// rect; recorded after the chrome it blurs the chrome.
+    ///
+    /// **`tint` of [`Color::new(255, 255, 255, 255)`] means "as captured"** — the
+    /// picture replaces the sharp scene in its rect. A caller wanting a frost
+    /// rather than a window passes `tint.a < 255`, and that alpha *is* the
+    /// backdrop's opacity: there is no separate opacity argument, because a
+    /// backdrop's blend mode is always a blend and nothing for a second field
+    /// would decide. There is **no `Color` constant** for the as-captured value
+    /// because [`Color::new`] is not `const`.
+    ///
+    /// **`rect` sizes the composite and not the capture.** The capture itself is
+    /// window-sized whatever this says, because `glBlitFramebuffer` from a
+    /// multisampled read framebuffer requires identical source and destination
+    /// bounds — see [`DrawCommand::Backdrop`]'s `rect`.
+    ///
+    /// **`Blur`'s sigma is capped**, not refused: a sigma past the kernel's reach
+    /// gets the widest blur there is, at
+    /// [`MAX_TAPS`](crate::render::blur::MAX_TAPS) taps either side. Nothing here
+    /// can widen the kernel, and a backdrop that wants a wider frost needs a
+    /// different kernel — a different decision, with its own measurement.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ui_core::paint::{BackdropMode, Color, DrawCommand, Painter, Rect};
+    /// let mut painter = Painter::new();
+    /// painter.backdrop(
+    ///     Rect::new(240.0, 160.0, 320.0, 200.0),
+    ///     BackdropMode::Blur(2.0),
+    ///     Color::new(236, 239, 244, 170),
+    /// );
+    /// // **This test needs no display**: it records and pattern-matches, and never
+    /// // opens a window — which is the only kind of test `AGENTS.md` permits.
+    /// let commands = painter.finish();
+    /// assert_eq!(commands.len(), 1);
+    /// assert!(matches!(commands[0], DrawCommand::Backdrop { .. }));
+    ///
+    /// // The mode round-trips as the value the caller passed, and `Blur(2.5)` and
+    /// // `Blur(0.0)` are different — which is the reason `mode` is an enum and not
+    /// // a bare sigma.
+    /// let DrawCommand::Backdrop { rect, mode, tint } = &commands[0] else {
+    ///     panic!("the backdrop is recorded");
+    /// };
+    /// assert_eq!(*rect, Rect::new(240.0, 160.0, 320.0, 200.0));
+    /// assert_eq!(*mode, BackdropMode::Blur(2.0));
+    /// assert_ne!(BackdropMode::Blur(2.5), BackdropMode::Blur(0.0));
+    /// assert_ne!(mode, &BackdropMode::Blur(0.0));
+    /// assert_eq!(tint, &Color::new(236, 239, 244, 170));
+    /// ```
+    pub fn backdrop(&mut self, rect: Rect, mode: BackdropMode, tint: Color) {
+        self.commands
+            .push(DrawCommand::Backdrop { rect, mode, tint });
     }
 
     /// Appends every command in `commands`, in order, to what this painter has

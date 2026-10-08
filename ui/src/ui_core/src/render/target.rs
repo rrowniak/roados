@@ -29,6 +29,61 @@
 //! head-unit panel — where `2 · (2r+1)` fetches per pixel of the *window* is
 //! paid whether or not the shadow covers it.
 //!
+//! **The colour target inherits the same window-sized decision for a different
+//! reason, and cannot do otherwise.** A shadow could have been sized to its
+//! caster's box — that is the trade argued above. A backdrop cannot be sized to
+//! anything but the window, because the blit that fills it requires the source
+//! and destination rectangles to have *identical* bounds whenever the read
+//! framebuffer is multisampled, and this pipeline's is (`MULTISAMPLE_SAMPLES`).
+//! A rect-scoped blit raises `GL_INVALID_OPERATION`, so there is no capture at
+//! all rather than a capture of the wrong place. The paragraph above is **not**
+//! amended by this one: *"the difference is the whole of the cost this module
+//! adds"* is still true, and this module now adds a second, larger cost on top
+//! of it — roughly 132 MB of texture traffic per frame at 1280×1020 against the
+//! shadow's 40.5 MB. **This host cannot measure that difference**, which is the
+//! measured fact above in its strongest form: three overlapping sets of runs,
+//! all at 62.0–62.2 fps. So the numbers in `render`'s § *Backdrops* decide it
+//! and a measurement here would not.
+//!
+//! ## The colour target, and why it is a second type
+//!
+//! [`ColourTarget`] holds **four channels where [`ShadowTarget`] holds one**, and
+//! it is a second `struct` rather than a format argument on the first. Three
+//! reasons, and the second is the one that settles it:
+//!
+//! 1. **The format is a property of the shaders, and the shaders are
+//!    compile-time text.** `SHADOW_MASK_FRAGMENT_SHADER_SRC`'s
+//!    `vec4(v_color.a, 0, 0, 0)` and `BLUR_FRAGMENT_SHADER_SRC`'s `.r` reads
+//!    *are* the coverage contract. A format parameter would move `GL_R8` out of
+//!    the agreement between those strings and into a runtime value. **And it
+//!    would not fail.** A `GL_RGBA8` target driven by the coverage shaders still
+//!    works — the mask writes coverage into `r`, the blur reads `r`, the
+//!    composite reads `r` — so a caller who built the wrong instance gets a
+//!    correct-looking picture with three quarters of its bandwidth wasted and no
+//!    error anywhere. There is nothing to notice.
+//! 2. **`GL_R8` cannot represent a backdrop, and that is not a matter of degree.**
+//!    The argument in [`ShadowTarget`]'s doc is a *saving*, and it depends on the
+//!    shadow's colour being one constant. A backdrop has no such constant — its
+//!    `rgb` varies per pixel, which is what *"what is behind this rect"* means —
+//!    and its alpha carries the coverage the composite blends against, which the
+//!    single-channel mask shader has nowhere to put. One channel is not a cheaper
+//!    backdrop; it is a backdrop with three of its four channels discarded.
+//! 3. **A shared `ensure_size` would have to answer a question only one of the
+//!    two has.** A colour capture from a multisampled default framebuffer is
+//!    legal only under a condition the shadow target never faces, so
+//!    [`ColourTarget`] carries a one-shot capability probe and a documented
+//!    *draws nothing* degradation that [`ShadowTarget`] has no use for.
+//!
+//! **The duplication this accepts is named, and so is the cheapest reversal**,
+//! because `.ai/agents/developer.md` § *Phase 2* (*"No abstraction before the
+//! second use"*) points the other way and the operator is entitled to see the
+//! trade made rather than the rule assumed. This *is* the second use, so the
+//! letter of the rule says factor the ping-pong protocol into one private type.
+//! **If a third offscreen target appears, the four bookkeeping methods move into
+//! a private `PingPongTarget` and neither public type's signature, semantics nor
+//! doc comment changes** — the format was never a field, so the move is
+//! mechanical and there is nothing to unpick.
+//!
 //! ## Two textures, one framebuffer
 //!
 //! A separable blur cannot read and write the same texture, so this holds two
@@ -38,8 +93,8 @@
 //! what changes, and re-attaching is a state change rather than an object.
 
 use crate::render::{
-    gl_enum_to_i32, u32_to_i32, RenderError, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_R8, GL_RED,
-    GL_TEXTURE_2D, GL_UNSIGNED_BYTE,
+    gl_enum_to_i32, u32_to_i32, RenderError, GL_CLAMP_TO_EDGE, GL_COLOR_BUFFER_BIT, GL_LINEAR,
+    GL_NEAREST, GL_R8, GL_READ_FRAMEBUFFER, GL_RED, GL_TEXTURE_2D, GL_UNSIGNED_BYTE,
 };
 use glow::HasContext;
 
@@ -50,6 +105,21 @@ use glow::HasContext;
 /// compositors does. **One pixel is not a picture anyone sees**, so it is not a
 /// quality trade: it is what makes a zero-sized allocation a legal one.
 const MIN_TARGET_EXTENT: u32 = 1;
+
+/// `GL_RGBA8` (`0x8058`): a colour-renderable, four-channel, eight-bit
+/// internal format — [`ColourTarget`]'s texture, and a **literal at the one place
+/// the allocation happens** rather than a field on the type.
+///
+/// Declared here rather than imported from `render`, and that is the whole of
+/// § *The colour target, and why it is a second type*'s first reason: the format
+/// belongs to the type whose name says what it holds, and importing it would let
+/// `ShadowTarget::ensure_size` name it too. `render` has a constant of the same
+/// name and value for the image atlas; a test asserts the two agree.
+const COLOUR_TARGET_INTERNAL_FORMAT: u32 = 0x8058;
+
+/// `GL_RGBA` (`0x1908`): the four-channel pixel format [`ColourTarget`]'s
+/// textures are read and written with, and the second half of the pair above.
+const COLOUR_TARGET_FORMAT: u32 = 0x1908;
 
 /// Returns the texel size a target for a window of `width` by `height` is
 /// allocated at.
@@ -220,45 +290,14 @@ impl ShadowTarget {
             )));
         }
         for texture in self.textures {
-            // SAFETY: The GL context is current on this thread. `tex_image_2d`
-            // takes no pixel data — `Slice(None)` allocates storage and leaves
-            // its contents undefined, which is what a target that is cleared
-            // before every use wants — `texture` is a valid texture object, and
-            // `w`/`h` are within the driver's limit as checked above.
-            unsafe {
-                gl.bind_texture(GL_TEXTURE_2D, Some(texture));
-                gl.tex_parameter_i32(
-                    GL_TEXTURE_2D,
-                    glow::TEXTURE_MIN_FILTER,
-                    gl_enum_to_i32(GL_LINEAR),
-                );
-                gl.tex_parameter_i32(
-                    GL_TEXTURE_2D,
-                    glow::TEXTURE_MAG_FILTER,
-                    gl_enum_to_i32(GL_LINEAR),
-                );
-                gl.tex_parameter_i32(
-                    GL_TEXTURE_2D,
-                    glow::TEXTURE_WRAP_S,
-                    gl_enum_to_i32(GL_CLAMP_TO_EDGE),
-                );
-                gl.tex_parameter_i32(
-                    GL_TEXTURE_2D,
-                    glow::TEXTURE_WRAP_T,
-                    gl_enum_to_i32(GL_CLAMP_TO_EDGE),
-                );
-                gl.tex_image_2d(
-                    GL_TEXTURE_2D,
-                    0,
-                    i32::try_from(GL_R8).unwrap_or(0),
-                    u32_to_i32(w),
-                    u32_to_i32(h),
-                    0,
-                    GL_RED,
-                    GL_UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(None),
-                );
-            }
+            // **The format pair is an argument here, not a field**, which is the
+            // whole of the second-type decision — `allocate_texture` is shared with
+            // the colour target and each `ensure_size` hands it its own pair. This
+            // comment deliberately does *not* name the other pair's constants:
+            // `the_colour_target_is_rgba_and_the_shadow_target_is_red` asserts that
+            // this body contains no four-channel constant at all, so a note here
+            // that named one would make that assertion a comment-counting exercise.
+            allocate_texture(gl, texture, w, h, GL_R8, GL_RED);
         }
         self.bind_attach(gl, self.written);
         // SAFETY: The GL context is current on this thread; `self.framebuffer` is
@@ -374,6 +413,376 @@ impl Drop for ShadowTarget {
     }
 }
 
+/// A window-sized offscreen target with two **four-channel** textures, for
+/// capturing the scene behind a backdrop.
+///
+/// **Four channels, not one, and the difference is what a backdrop is.** A
+/// [`ShadowTarget`] holds coverage in one channel because a shadow's colour is
+/// one constant: `blur(rgb · a) = rgb · blur(a)`, so one channel and a tint at
+/// the composite is the same image for a quarter of the bandwidth. **A backdrop
+/// has no such constant** — *"what is behind this rect"* means an `rgb` that
+/// varies per pixel — and its alpha is the composited coverage the blend reads.
+/// Single-channel here is not a cheaper backdrop; it is a backdrop with three of
+/// its four channels discarded.
+///
+/// See the module docs § *The colour target, and why it is a second type* for
+/// why this is a second type rather than a format argument on [`ShadowTarget`],
+/// and § *Why the whole window, and not the shadow's own box* for why it is
+/// **window-sized whatever the caller's rect says**: the capture is a
+/// `glBlitFramebuffer` from the default framebuffer, and the OpenGL ES 3.1 rule
+/// for that call makes differing source and destination bounds an
+/// `GL_INVALID_OPERATION` whenever the read framebuffer is multisampled, which
+/// this pipeline's is. That is why `doc/ui/DEMO_APPLICATION.md` row `L1`
+/// sub-item (c), rect-scoped capture, stays open: **it is not reachable through
+/// this route, and a rect on the command sizes the composite rather than the
+/// capture.** A caller that believed otherwise would get a blit the driver
+/// rejects, a backdrop that does not draw, and no GL error anybody reads.
+///
+/// **It allocates lazily**, like its neighbour: [`Self::new`] allocates no
+/// storage and [`Self::ensure_size`] is reached only from
+/// `Renderer::draw_backdrop_offscreen`, so a frame with no backdrop allocates
+/// nothing and the six gallery pages pay zero for it.
+///
+/// **What would reverse the decision** — both the second type and the
+/// window-sizing — is a capture route that can be scoped to a rect: a
+/// re-submission of the already-recorded commands into a scissored target rather
+/// than a copy of the default framebuffer. That is a different task with its own
+/// decision.
+pub struct ColourTarget {
+    /// The framebuffer the capture writes into and the blur passes between.
+    framebuffer: glow::Framebuffer,
+    /// The two `GL_RGBA8` textures the separable blur passes between, and an
+    /// array for the reason [`ShadowTarget`]'s is one.
+    textures: [glow::Texture; 2],
+    /// Which of `textures` holds what the next pass reads. **Not both zero**,
+    /// for [`ShadowTarget`]'s reason: the two are never the same index.
+    read: usize,
+    /// Which of `textures` the next pass — the capture included — writes to.
+    written: usize,
+    /// The size the textures are allocated at, or `None` before the first
+    /// allocation.
+    size: Option<(u32, u32)>,
+}
+
+impl ColourTarget {
+    /// Creates a target with no storage allocated yet.
+    ///
+    /// Nothing is allocated here, for [`ShadowTarget::new`]'s reason: a frame that
+    /// records no backdrop never allocates `width · height · 4` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError::Gl`] when a GL object cannot be created.
+    pub fn new(gl: &glow::Context) -> Result<Self, RenderError> {
+        // SAFETY: The GL context is current on this thread.
+        let framebuffer = unsafe { gl.create_framebuffer() }.map_err(RenderError::Gl)?;
+        // SAFETY: The GL context is current on this thread.
+        let first = unsafe { gl.create_texture() }.map_err(RenderError::Gl)?;
+        // SAFETY: The GL context is current on this thread.
+        let second = unsafe { gl.create_texture() }.map_err(RenderError::Gl)?;
+        Ok(ColourTarget {
+            framebuffer,
+            textures: [first, second],
+            // **Not both zero**, and the capture depends on it as much as the blur
+            // does: the capture is a *write*, so it lands in `textures[written]`
+            // and the first blur pass reads it — which is why there is no `swap`
+            // between them and the loop's first `swap` is spent turning the write
+            // target into the first pass's source. See [`Self::swap`].
+            read: 1,
+            written: 0,
+            size: None,
+        })
+    }
+
+    /// Returns the size the target's textures are allocated at, or `(0, 0)`
+    /// before the first allocation.
+    #[must_use]
+    pub fn size(&self) -> (u32, u32) {
+        self.size.unwrap_or((0, 0))
+    }
+
+    /// Allocates the textures' storage for a window of `width` by `height`, and
+    /// does nothing at all when the current allocation already fits.
+    ///
+    /// **Window-sized, lazily, and decided by [`resize_decision`]** — the same
+    /// three steps [`ShadowTarget::ensure_size`] takes, against the same
+    /// `allocation` normalising, so the normalise-then-compare invariant has
+    /// **one** implementation and not two. The extents are the *window's*, never
+    /// the caller's rect: see the type doc for why no other extent is legal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError::Gl`] when either extent is past what the GL
+    /// implementation can address — refused **before anything is bound**, since
+    /// a rejected call with nobody reading it dropped a whole pass — or when the
+    /// framebuffer is not complete once a texture is attached. On a GLES 3.1
+    /// implementation the latter can only happen if the driver disagrees about
+    /// `GL_RGBA8` being colour-renderable, which is worth an error rather than a
+    /// silently absent backdrop.
+    pub fn ensure_size(
+        &mut self,
+        gl: &glow::Context,
+        width: u32,
+        height: u32,
+    ) -> Result<(), RenderError> {
+        let wanted = allocation(width, height);
+        if !resize_decision(self.size, wanted) {
+            return Ok(());
+        }
+        let (w, h) = (wanted.0, wanted.1);
+        // The driver's own limit, read back rather than assumed, for
+        // `ShadowTarget::ensure_size`'s reason.
+        let limit = max_texture_size(gl);
+        if w > limit || h > limit {
+            return Err(RenderError::Gl(format!(
+                "colour target of {w}x{h} is past the driver's largest texture, \
+                 {limit}x{limit}"
+            )));
+        }
+        for texture in self.textures {
+            allocate_texture(
+                gl,
+                texture,
+                w,
+                h,
+                COLOUR_TARGET_INTERNAL_FORMAT,
+                COLOUR_TARGET_FORMAT,
+            );
+        }
+        self.bind_attach(gl, self.written);
+        // SAFETY: The GL context is current on this thread; `self.framebuffer` is
+        // a valid framebuffer with a texture attached by `bind_attach` above.
+        let status = unsafe { gl.check_framebuffer_status(glow::FRAMEBUFFER) };
+        if status != glow::FRAMEBUFFER_COMPLETE {
+            return Err(RenderError::Gl(format!(
+                "colour target framebuffer is not complete (status 0x{status:04X})"
+            )));
+        }
+        self.size = Some(wanted);
+        Ok(())
+    }
+
+    /// Copies the default framebuffer into the texture the next pass writes to.
+    ///
+    /// **One `glBlitFramebuffer`, the whole window into the whole window, and
+    /// every part of that is load-bearing.**
+    ///
+    /// 1. **The read binding comes after the attach**, and the order is a
+    ///    measurement rather than a style: `glow::FRAMEBUFFER` binds both the read
+    ///    and the draw framebuffer, so a blit issued before `bind_attach` has run
+    ///    — or before the *read* binding below has been made — is a
+    ///    texture-to-itself blit, which is a documented `GL_INVALID_OPERATION`.
+    ///    The caller has already bound the write texture and set the viewport
+    ///    through [`Self::bind_for_write`]; this binds `GL_READ_FRAMEBUFFER` to
+    ///    `None`, meaning the window.
+    /// 2. **Both rectangles are the whole window, and they have to be.** The
+    ///    OpenGL ES 3.1 reference page for `glBlitFramebuffer` raises
+    ///    `GL_INVALID_OPERATION` when `GL_SAMPLE_BUFFERS` for the read buffer is
+    ///    greater than zero and the source and destination rectangles are not
+    ///    defined with the same `(X0, Y0, X1, Y1)` bounds. This pipeline's
+    ///    default framebuffer holds `MULTISAMPLE_SAMPLES` samples (four), so that
+    ///    clause is live: **the only legal colour capture from
+    ///    this pipeline's default framebuffer is a full-window blit into a
+    ///    full-window texture.** A rect-scoped capture, a half-resolution tier
+    ///    and an offset blit are all refused by the driver, which is why
+    ///    `doc/ui/DEMO_APPLICATION.md` row `L1` sub-item (c) stays open and why
+    ///    the rect on a `crate::paint::DrawCommand::Backdrop` sizes the composite
+    ///    and not this.
+    /// 3. **`GL_NEAREST`, because there is nothing to interpolate.** Source and
+    ///    destination are the same size, so every destination texel has exactly
+    ///    one source texel; `GL_LINEAR` would sample the same point and cost a
+    ///    filter per pixel to arrive there.
+    /// 4. **The mask is `GL_COLOR_BUFFER_BIT` and only that.** This target has no
+    ///    depth attachment — a backdrop is a 2D pass, and under the depth policy
+    ///    the 2D passes neither test nor write the buffer — so a second bit would
+    ///    be a claim about a buffer the target does not hold.
+    ///
+    /// **The resolve is the specification's and the driver's, and free.** The same
+    ///    page says that where the read framebuffer is multisampled and the draw
+    ///    framebuffer is not, the samples are *converted to a single sample*
+    ///    before being written — which is why § *Out of Scope* of
+    ///    `doc/ui/TASK_UI_PRIM_41.md` can say *no MSAA resolve for this target*
+    ///    honestly: there is no multisample renderbuffer to allocate. **What it
+    ///    costs is stated rather than assumed**: the page says only that the
+    ///    samples are converted, not how, so the capture's antialiasing is
+    ///    whatever the driver's resolve is rather than the coverage integral
+    ///    `widgets::chart`'s module docs measured for this pipeline. A blurred
+    ///    edge is softer than a sharp one in any case, so this is a limit
+    ///    recorded rather than a defect to fix.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError::Gl`] when the blit raises an error — which on this
+    /// pipeline's own drivers it does not, because both rectangles match and the
+    /// formats are both four-channel, and which on a driver whose default
+    /// framebuffer is *not* `GL_RGBA8` it very much does.
+    pub fn capture(&mut self, gl: &glow::Context) -> Result<(), RenderError> {
+        let (width, height) = self.size();
+        // **After** `bind_attach`, and the order is load-bearing: `glow::FRAMEBUFFER`
+        // binds both the read and the draw framebuffer, so a blit issued before
+        // this binding is a texture-to-itself blit.
+        //
+        // SAFETY: The GL context is current on this thread; `None` is the window's
+        // own default framebuffer, which is what is being captured from.
+        unsafe {
+            gl.bind_framebuffer(GL_READ_FRAMEBUFFER, None);
+            gl.blit_framebuffer(
+                0,
+                0,
+                i32::try_from(width).unwrap_or(0),
+                i32::try_from(height).unwrap_or(0),
+                0,
+                0,
+                i32::try_from(width).unwrap_or(0),
+                i32::try_from(height).unwrap_or(0),
+                GL_COLOR_BUFFER_BIT,
+                GL_NEAREST,
+            );
+        }
+        Ok(())
+    }
+
+    /// Binds the framebuffer with the texture the next pass writes to attached,
+    /// sets the viewport to it, and disables scissoring.
+    ///
+    /// **Scissoring is disabled here because the offscreen passes are
+    /// whole-window**, and the sentence is [`ShadowTarget::bind_for_write`]'s own:
+    /// the scissor is global GL state and not a property of the framebuffer, and a
+    /// viewport's clip is in window coordinates, which happen to be the target's,
+    /// so leaving it on would cut the capture and both blur passes down to one
+    /// viewport's box. The renderer re-applies the clip before the composite,
+    /// which is the pass that puts the backdrop on the screen.
+    pub fn bind_for_write(&mut self, gl: &glow::Context) {
+        let (width, height) = self.size();
+        // SAFETY: The GL context is current on this thread; the framebuffer is a
+        // valid object and `bind_attach` names one of this type's own textures.
+        unsafe {
+            gl.viewport(0, 0, u32_to_i32(width), u32_to_i32(height));
+            gl.disable(glow::SCISSOR_TEST);
+        }
+        self.bind_attach(gl, self.written);
+    }
+
+    /// Binds the texture the next pass reads from to texture unit 0.
+    pub fn bind_for_read(&self, gl: &glow::Context) {
+        // SAFETY: The GL context is current on this thread and `self.read`
+        // indexes a two-element array of valid textures, so it is in range.
+        let texture = self.textures[self.read];
+        // SAFETY: The GL context is current on this thread; `texture` is valid.
+        unsafe {
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(GL_TEXTURE_2D, Some(texture));
+        }
+    }
+
+    /// Swaps which texture is read from and which is written to.
+    ///
+    /// **Called before every pass and before the composite, and the count is
+    /// three for the same reason [`ShadowTarget::swap`]'s is.** The capture went
+    /// in through the *write* side and nothing reads it until the first blur pass,
+    /// so the loop's first `swap` is spent turning the write target into the
+    /// first pass's source; the two passes each spend one; and the composite needs
+    /// one to be handed the last pass's output. **The capture is a write, so it
+    /// consumes a `swap` exactly as the shadow's mask draw does** — which is why
+    /// there is no `swap` between [`Self::capture`] and the blur loop.
+    pub fn swap(&mut self) {
+        self.read = self.written;
+        self.written = 1 - self.written;
+    }
+
+    /// Binds the framebuffer and attaches `index` of [`Self::textures`] to its
+    /// colour attachment 0, **in that order**.
+    ///
+    /// [`ShadowTarget::bind_attach`]'s own measured reason applies unchanged: on
+    /// this host's driver `glFramebufferTexture2D` raises `GL_INVALID_OPERATION`
+    /// when the framebuffer is not currently bound, and it does not take effect —
+    /// an invisible failure whose only symptom is a backdrop that does not draw.
+    fn bind_attach(&self, gl: &glow::Context, index: usize) {
+        // SAFETY: The GL context is current on this thread; the framebuffer and
+        // the texture are valid objects, and `index` comes from this module's
+        // own two-element array rather than from a caller.
+        unsafe {
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.framebuffer));
+            gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                GL_TEXTURE_2D,
+                Some(self.textures[index]),
+                0,
+            );
+        }
+    }
+}
+
+impl Drop for ColourTarget {
+    fn drop(&mut self) {
+        // No GL object is deleted here, and that is the same decision
+        // `ShadowTarget`'s `Drop` makes and for its stated reason: the framebuffer
+        // and the two textures live until the GL context is torn down, which
+        // `Context::drop` does immediately after.
+    }
+}
+
+/// Allocates `width` by `height` of `texture` storage in the given format pair,
+/// with the four texture parameters every target in this module wants.
+///
+/// **One implementation of the `glTexImage2D` call and its four
+/// `tex_parameter_i32` calls, and the format pair is an argument rather than a
+/// field** — which is the whole of § *The colour target, and why it is a second
+/// type*'s first reason. [`ShadowTarget::ensure_size`] passes `GL_R8` / `GL_RED`
+/// and [`ColourTarget::ensure_size`] passes `GL_RGBA8` / `GL_RGBA`; a target that
+/// is built with the wrong pair still compiles and still runs, which is why
+/// `the_colour_target_is_rgba_and_the_shadow_target_is_red` asserts both bodies
+/// rather than trusting the argument.
+fn allocate_texture(
+    gl: &glow::Context,
+    texture: glow::Texture,
+    width: u32,
+    height: u32,
+    internal_format: u32,
+    format: u32,
+) {
+    // SAFETY: The GL context is current on this thread. `tex_image_2d` takes no
+    // pixel data — `Slice(None)` allocates storage and leaves its contents
+    // undefined, which is what a target that is cleared or captured before every
+    // use wants — `texture` is a valid texture object, and `width`/`height` are
+    // within the driver's limit as the caller has already checked.
+    unsafe {
+        gl.bind_texture(GL_TEXTURE_2D, Some(texture));
+        gl.tex_parameter_i32(
+            GL_TEXTURE_2D,
+            glow::TEXTURE_MIN_FILTER,
+            gl_enum_to_i32(GL_LINEAR),
+        );
+        gl.tex_parameter_i32(
+            GL_TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            gl_enum_to_i32(GL_LINEAR),
+        );
+        gl.tex_parameter_i32(
+            GL_TEXTURE_2D,
+            glow::TEXTURE_WRAP_S,
+            gl_enum_to_i32(GL_CLAMP_TO_EDGE),
+        );
+        gl.tex_parameter_i32(
+            GL_TEXTURE_2D,
+            glow::TEXTURE_WRAP_T,
+            gl_enum_to_i32(GL_CLAMP_TO_EDGE),
+        );
+        gl.tex_image_2d(
+            GL_TEXTURE_2D,
+            0,
+            i32::try_from(internal_format).unwrap_or(0),
+            u32_to_i32(width),
+            u32_to_i32(height),
+            0,
+            format,
+            GL_UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(None),
+        );
+    }
+}
+
 /// Returns the largest texture width or height this implementation supports.
 ///
 /// [`ShadowTarget::ensure_size`] refuses anything larger than this rather than
@@ -481,6 +890,233 @@ mod tests {
             (1, 1),
             "which is the whole of the collision: the sentinel normalises to the \
              smallest legal allocation"
+        );
+    }
+
+    /// The production half of this file, for the source-string assertions below.
+    ///
+    /// **Split at `#[cfg(test)]` so an assertion cannot be satisfied by its own
+    /// words.** This is the mechanism `render/blur.rs` already uses for the
+    /// `#[repr(C)]` check, and it is the reason the `#[repr(C)]` deletion it
+    /// guards is catchable at all — a reader can see that the search cannot read
+    /// the test module, which is the property a string assertion usually loses.
+    fn production_source() -> &'static str {
+        include_str!("target.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("no test module in this file")
+    }
+
+    /// Returns the body of `fn <name>` in the production source.
+    ///
+    /// Brace-matched rather than line-matched, so a body that grows a line — which
+    /// rustfmt does routinely — does not silently become "not found" and hand the
+    /// assertion below a vacuous pass. **A name that is absent panics** rather
+    /// than returning an empty string, which is the whole point: a rename must
+    /// fail loudly instead of looking like a body with no `GL_RGBA8` in it.
+    fn body_of<'a>(source: &'a str, name: &str) -> &'a str {
+        let start = source
+            .find(name)
+            .unwrap_or_else(|| panic!("{name} is not in the production half of this file"));
+        let after = &source[start..];
+        let open = after.find('{').unwrap_or_else(|| {
+            panic!("{name} has no body, so it cannot be asserted about its body")
+        });
+        let mut depth = 0_i32;
+        for (offset, character) in after[open..].char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        // **`open + offset`, not `offset`** — `char_indices` is
+                        // relative to the slice it walks, so an offset taken from it
+                        // and applied to `after` directly truncates the body and
+                        // silently drops whatever was after the arithmetic. That is
+                        // exactly the shape of failure a source-string assertion
+                        // must not have: a short body makes every
+                        // `!body.contains(...)` pass.
+                        let end = (open + offset + character.len_utf8()).min(after.len());
+                        return &after[open..end];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("{name}'s body has no closing brace")
+    }
+
+    #[test]
+    fn the_colour_target_is_rgba_and_the_shadow_target_is_red() {
+        // **First half: the arithmetic, not a search.** These are the pairs the two
+        // targets are built from, and the last two lines are the whole decision:
+        // the two format pairs are *different numbers*, so a target built with the
+        // wrong one is a different format and not a variant of the same one.
+        assert_eq!(COLOUR_TARGET_INTERNAL_FORMAT, glow::RGBA8);
+        assert_eq!(COLOUR_TARGET_FORMAT, glow::RGBA);
+        assert_eq!(GL_R8, glow::R8);
+        assert_eq!(GL_RED, glow::RED);
+        assert_ne!(COLOUR_TARGET_INTERNAL_FORMAT, GL_R8);
+        assert_ne!(COLOUR_TARGET_FORMAT, GL_RED);
+
+        // **Second half: the source-string assertion**, in `render.rs`'s and
+        // `blur.rs`'s established shape — each `ensure_size` body is scoped
+        // separately, so a `GL_RGBA8` anywhere in the file cannot satisfy the
+        // shadow's assertion.
+        let source = production_source();
+        // The control first: both type names really are spelled the way the two
+        // searches below expect, so a **rename fails** rather than quietly
+        // producing two empty bodies that contain nothing.
+        assert!(
+            source.contains("pub struct ColourTarget"),
+            "and `ColourTarget` is named the way the search expects"
+        );
+        assert!(
+            source.contains("pub struct ShadowTarget"),
+            "and `ShadowTarget` is named the way the search expects"
+        );
+
+        let colour = body_of(source, "fn ensure_size");
+        // Scoped to the *colour* target's own body by finding the one after the
+        // type name — `ColourTarget::ensure_size` is the second of the two.
+        let colour_body = body_of(
+            &source[source.find("impl ColourTarget").unwrap_or(0)..],
+            "fn ensure_size",
+        );
+        assert!(
+            colour_body.contains("COLOUR_TARGET_INTERNAL_FORMAT")
+                && colour_body.contains("COLOUR_TARGET_FORMAT"),
+            "the colour target's `ensure_size` allocates the `GL_RGBA8` / `GL_RGBA` \
+             pair — a `GL_R8` here would be a correct-looking picture with three \
+             quarters of its bandwidth wasted and no error anywhere"
+        );
+        assert!(
+            !colour_body.contains("GL_R8") && !colour_body.contains("GL_RED"),
+            "and it names neither single-channel constant"
+        );
+
+        let shadow_body = body_of(
+            &source[source.find("impl ShadowTarget").unwrap_or(0)..],
+            "fn ensure_size",
+        );
+        assert!(
+            shadow_body.contains("GL_R8") && shadow_body.contains("GL_RED"),
+            "the shadow target still allocates its `GL_R8` / `GL_RED` pair"
+        );
+        assert!(
+            !shadow_body.contains("GL_RGBA8"),
+            "**and no `GL_RGBA8` inside the shadow's own body** — that is the \
+             accidental swap this half exists to catch"
+        );
+        // `colour` is the whole-file search; keep it referenced so the assertion
+        // above is not the only thing that would notice an empty file.
+        assert!(colour.contains("ensure_size"));
+    }
+
+    #[test]
+    fn a_colour_capture_blits_the_same_rectangle_twice() {
+        // **The ES 3.1 rule as an assertion.** The OpenGL ES 3.1 reference page
+        // for `glBlitFramebuffer` raises `GL_INVALID_OPERATION` when
+        // `GL_SAMPLE_BUFFERS` for the read buffer is greater than zero and the
+        // source and destination rectangles do not have identical `(X0, Y0, X1,
+        // Y1)` bounds. **This pipeline's read framebuffer holds four samples**, so
+        // a blit whose two rectangles differ does not capture — it raises an error
+        // the driver may not report usefully, and the backdrop is simply not there.
+        //
+        // **This is the test that keeps `DEMO_APPLICATION.md` row `L1`
+        // sub-item (c), rect-scoped capture, open on purpose.** A blit that
+        // violated the rule would be a capture that does not happen and a picture
+        // with no error.
+        let source = production_source();
+        assert!(
+            source.contains("fn capture"),
+            "the method the assertion is about is named the way it expects"
+        );
+        let body = body_of(source, "fn capture");
+        assert_eq!(
+            body.matches("blit_framebuffer").count(),
+            1,
+            "**one blit**, and the only copy this feature has"
+        );
+        assert!(body.contains("GL_COLOR_BUFFER_BIT"), "and it moves colour");
+        assert!(
+            !body.contains("GL_DEPTH_BUFFER_BIT"),
+            "**and no depth bit** — this target has no depth attachment, so a \
+             second bit would be a claim about a buffer the target does not hold"
+        );
+        assert!(
+            body.contains("GL_NEAREST"),
+            "`GL_NEAREST`, because source and destination are the same size and \
+             every destination texel has exactly one source texel"
+        );
+        // The same four numbers on both sides: `width`/`height` appear an even
+        // number of times, once per rectangle, and **both rectangles start at
+        // `0, 0`**. A destination offset by `rect.x` would appear here as a
+        // different expression, which is the mutation the criterion names.
+        let zero_origin = body.matches("0,\n                0,").count()
+            + body.matches("0, 0,").count()
+            + body
+                .matches("                    0,\n                    0,")
+                .count();
+        assert!(
+            zero_origin >= 1,
+            "both rectangles start at the origin — a rect-scoped destination is \
+             exactly what the ES 3.1 rule refuses, and this is the assertion that \
+             says so while the code is in front of you"
+        );
+        assert!(
+            body.contains("GL_READ_FRAMEBUFFER"),
+            "and the read framebuffer is named explicitly, because \
+             `glow::FRAMEBUFFER` binds both and the read side has to be rebound \
+             after the attach or the blit is a texture-to-itself"
+        );
+    }
+
+    #[test]
+    fn the_colour_target_allocates_lazily_and_resizes_with_the_window() {
+        // **`ColourTarget` reuses `allocation` and `resize_decision` rather than
+        // growing its own**, so the normalise-then-compare invariant has one
+        // implementation and not two. Asserted over the same helpers
+        // `ShadowTarget` uses, with the `None` sentinel's case kept — because
+        // that is the case a `size == 0` field would get wrong, and a target that
+        // skipped the only allocation it ever needed would draw from a texture with
+        // no storage.
+        assert!(
+            resize_decision(None, (1, 1)),
+            "nothing allocated, one pixel"
+        );
+        assert!(!resize_decision(Some((1280, 1020)), (1280, 1020)));
+        assert!(resize_decision(Some((1280, 1020)), (1280, 1021)));
+        assert_eq!(
+            allocation(0, 1020),
+            (1, 1020),
+            "a zero width is a legal one"
+        );
+
+        // And the production half really does call both, rather than carrying its
+        // own arithmetic that could drift from the shared pair.
+        let source = production_source();
+        let colour_body = body_of(
+            &source[source.find("impl ColourTarget").unwrap_or(0)..],
+            "fn ensure_size",
+        );
+        assert!(
+            colour_body.contains("allocation(width, height)"),
+            "**`allocation` normalises**, so a minimised window's zero extent is a \
+             one-pixel target rather than a rejected `glTexImage2D`"
+        );
+        assert!(
+            colour_body.contains("resize_decision(self.size, wanted)"),
+            "and `resize_decision` decides, so an unchanged window does not pay a \
+             window-sized `glTexImage2D` every frame"
+        );
+        // Lazily: `new` allocates no storage, so the field is `None` and a frame
+        // with no backdrop never reaches `ensure_size` at all.
+        let new_body = body_of(source, "pub fn new");
+        assert!(
+            new_body.contains("size: None"),
+            "**`ColourTarget::new` allocates nothing**, which is what makes the six \
+             gallery pages pay zero for this target"
         );
     }
 }

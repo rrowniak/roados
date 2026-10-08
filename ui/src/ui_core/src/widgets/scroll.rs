@@ -1540,7 +1540,8 @@ pub fn command_bounds(command: &DrawCommand) -> Option<Rect> {
     match command {
         DrawCommand::Rect { rect, .. }
         | DrawCommand::RoundedRect { rect, .. }
-        | DrawCommand::Image { rect, .. } => Some(*rect),
+        | DrawCommand::Image { rect, .. }
+        | DrawCommand::Backdrop { rect, .. } => Some(*rect),
         // The bounding rect of the point set, by the same rule the `Path` arm
         // below follows and for the same reason: a polygon of fewer than three
         // points encloses no area and draws nothing, and a command that draws

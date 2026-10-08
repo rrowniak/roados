@@ -103,7 +103,12 @@ const MULTISAMPLE_BUFFERS: u8 = 1;
 /// reads exactly as hard as it did before. That is the same reason an edge drawn
 /// at an integer offset looks aliased in every renderer, and it is why a
 /// capture of this change shows some edges smoothed and others untouched.
-const MULTISAMPLE_SAMPLES: u8 = 4;
+/// `pub(crate)` as of task 41, and for one caller: the backdrop capture probe's
+/// error message interpolates this so it names **this host's** sample count
+/// rather than a guess. The ES 3.1 rule the probe exists for turns on
+/// `GL_SAMPLE_BUFFERS` for the read framebuffer, so a reader handed
+/// `RenderError::Gl` needs the number that made the rule bite.
+pub(crate) const MULTISAMPLE_SAMPLES: u8 = 4;
 
 /// The depth buffer size this pipeline asks for on the **default** framebuffer.
 ///

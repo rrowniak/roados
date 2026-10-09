@@ -16,7 +16,7 @@ page mechanism in `ui_demo` and leave gaps #3 and #7 open in `ui_core` is
 **withdrawn**"* — makes it mandatory library work. Task 42 closed **#3**; this
 closes **#7**, and **this task sits on `TASK_UI_PRIM_42`**, whose § *Out of Scope*
 names this file: *"That is gap **#7** and `TASK_UI_PRIM_43` … This task hands 43 a
-`Screens::show` to call and nothing else, and 43's six buttons will read the active
+`Screens::show` to call and nothing else, and 43's seven buttons will read the active
 screen from `Screens::current_name()`."*
 
 **The row is explicit that what 24.3 built is the prescription and not the
@@ -54,7 +54,7 @@ is the thing that writes it, animates it, and reports it.
 | **`Button::on_event` consumes `Tap` unconditionally** and an activation key (`Return`, `KpEnter`, `Space`, gamepad `South`) **only while `focused`**, consulting `may_activate` on both. **`input::Focus` owns the focus order and nothing else**: `focus_next`, `focus_prev`, `handle_key` (`Tab` / `Shift+Tab`), `handle_scroll`. **It has no arrow-key movement at all.** | `button.rs`, `Button::on_event`; `ui_core/src/input.rs`, `Focus` |
 | **`input::contains` is private** in `input.rs`; `list.rs` has its own private `covers(rect, position)` with the same inclusive-edge convention, and `List::item_at` / `Keyboard::key_at` are the precedent for a widget's own point-to-item test. **`input::route` sends a positionless event to `root` alone**, and its doc records why a caller routes rather than calls `dispatch_event`: **a property write from inside a handler while `dispatch_event` holds a `Ref` on the arena is a `RefCell` double borrow, which panics.** | `input.rs`, `contains`, `route`, `dispatch_event`; `widgets/list.rs`, `List::item_at`; `widgets/keyboard.rs`, `Keyboard::key_at` |
 | **12 `pub enum`s in `widgets/`** — `GaugeType`, `ChartType`, `TextAlign`, `WrapMode`, `Truncation`, `Orientation`, `Severity`, `Anchor`, `ImageFit`, `ButtonState`, `KeyAction`, `Page` — **plus one private `enum Join` in `chart.rs`.** `keyboard::Page` is `{ Letters, Symbols }`, the on-screen keyboard's two-page toggle. **A name-collision risk for anything called a tab.** | `ui/src/ui_core/src/widgets/*.rs` |
-| **The demo's selected appearance is a `Palette` swap, and it is two palettes**: `tab_palette(theme, true)` is `Palette::from_theme(theme)` — `Primary` / `OnPrimary` — and `tab_palette(theme, false)` is `Border` / `Text` with a `Primary` ring. **`Demo::aim_tab_buttons(&[Page])` re-points all six palettes and aims the two it was handed.** | `ui/src/ui_demo/src/main.rs`, `tab_palette`, `Demo::aim_tab_buttons` |
+| **The demo's selected appearance is a `Palette` swap, and it is two palettes**: `tab_palette(theme, true)` is `Palette::from_theme(theme)` — `Primary` / `OnPrimary` — and `tab_palette(theme, false)` is `Border` / `Text` with a `Primary` ring. **`Demo::aim_tab_buttons(&[Page])` re-points all seven palettes and aims the two it was handed.** | `ui/src/ui_demo/src/main.rs`, `tab_palette`, `Demo::aim_tab_buttons` |
 | **`ui/src/ui_core/src/nav.rs` does not exist yet.** `TASK_UI_PRIM_42` creates it, and its § *Out of Scope* is the sentence this file answers. **This task does not depend on it**: requirement 1–15 touch no `nav` symbol, and only sub-task 43.2 — which reads `Screens::current_name` — does. | `doc/ui/TASK_UI_PRIM_42.md` |
 | **`LayoutState::visible`'s doc says *"only hit testing consults the flag"*, and task 42 amends it.** Task 42 also adds `LayoutState::hits`, defaults it to `true`, and gates `Focus` on visibility. **43.2 composes with both** and changes neither. | `layout.rs`; `doc/ui/TASK_UI_PRIM_42.md` requirements 8 and 9 |
 | **`AGENTS.md`: no new dependency without the operator**; the approved **direct** dependencies are `sdl3 0.20`, `glow 0.18`, `freetype-rs 0.38`. Edition **2021**, `rust-version = "1.85"`. Tests go in a `#[cfg(test)] mod tests` beside the code; **no test needing a display, a network, a filesystem or the wall clock.** **The demo cannot receive a pointer event on this host** — XTEST pointer injection has never delivered one, keyboard delivered exactly one. **No acceptance criterion here may require a pointer-driven interaction.** | `AGENTS.md`; `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture method* |
@@ -80,7 +80,7 @@ Five reasons for the shape, and the second is the one that makes the rest follow
    convention is not a mechanism: *"a sweep of a mechanism's call
    sites is not a sweep of the data it is built from"* is a finding about exactly
    that.
-2. **The second palette is what makes "the six pages are pixel-identical" a
+2. **The second palette is what makes "the seven pages are pixel-identical" a
    checkable claim instead of a hope, and that is a design argument rather than a
    preference.** The demo's two appearances are **`Primary`/`OnPrimary` against
    `Border`/`Text`** — a *hue* change, and `Border`/`Text` are neither
@@ -331,7 +331,7 @@ documents).**
 **The order is not 42 → 43 throughout.** `nav` does not exist yet, and **43.1 does
 not need it** — requirement 1 through 15 name no `nav` symbol, which is the test
 that the split is real. **43.2 cannot be briefed against a tree without `Screens`,
-`Screens::current_name` and the six screen hosts**, so **43.2 is briefed against
+`Screens::current_name` and the seven screen hosts**, so **43.2 is briefed against
 42's landed code** and is a stop condition until 42 has landed. **43.1 may start
 now.**
 
@@ -609,7 +609,7 @@ now.**
     - `selecting_a_tab_moves_the_selection_and_reports_it_once` — `on_select`'s counter.
     - **`selecting_the_current_tab_is_a_total_no_op_including_the_aim`** — the idempotence criterion: `select` returns `false`, `selected()` is unchanged, **the `on_select` counter does not move**, and **a `Property::on_change` counter on the selected button's `background` does not move either**, and `is_animating()` is false on both ends. **The `on_change` counter is the whole test**: a `select` that short-circuits the callback but still calls `animate_to_state` is not idempotent, and no return value can see it.
     - `selecting_past_the_last_tab_changes_nothing_and_says_so` — the `Option` arm of `tab`.
-    - **`select_name_resolves_a_label_and_refuses_one_that_is_not_a_tab`** — the **composition point with `Screens::current_name`**, asserted here rather than in the demo: `select_name` on a tab's own label moves the selection, on a name no tab carries changes nothing, and **the name it resolves against is `label(id)`, so the two cannot drift** — which is `Page::name` staying the only place the six names are written out, restated for the bar.
+    - **`select_name_resolves_a_label_and_refuses_one_that_is_not_a_tab`** — the **composition point with `Screens::current_name`**, asserted here rather than in the demo: `select_name` on a tab's own label moves the selection, on a name no tab carries changes nothing, and **the name it resolves against is `label(id)`, so the two cannot drift** — which is `Page::name` staying the only place the seven names are written out, restated for the bar.
     - **`the_selected_tab_is_aimed_on_a_press_and_on_a_release_that_changed_no_selection`** — **24.3's one major, by name, and the test this file exists to write.** `press(id)`; assert the scale is moving down; `release()`; tick to arrival; **assert `scale == 1.0` exactly and that `selected()` never changed** — no `select` call anywhere in the test. **Kills moving the release aim out of `release`, into `sync`, or away entirely**, which is the mutation the 24.3 sweep missed because every fixture went through a page switch.
     - `a_click_through_the_buttons_own_event_selects_the_tab_and_reports_it_on_the_next_sync` — a synthetic `InputEventKind::Tap` driven through **`Button::on_event`**, not through `select`: it must fill `requested`, **`selected()` must still be `None`, and `on_select` must still read zero** until `sync` runs. **Kills a click that bypasses the two-hop**, and it is the mechanism requirement 4's `RefCell` paragraph rests on.
     - `an_activation_key_on_the_focused_tab_selects_it_through_the_same_path` — `KeyDown { key: Return }` with `focused` true, driven through `Button::on_event` then `sync`. **The keyboard half of the free half of the activation path.**
@@ -638,7 +638,15 @@ now.**
     its own 42.1: **gap #7 must not be marked closed by a mechanism with no
     consumer.** 43.2 closes the row.
 
-### Sub-task 43.2 — the demo's six tabs become one `TabBar`, and gap #7 closes
+### Sub-task 43.2 — the demo's tabs become one `TabBar`, and gap #7 closes
+
+> **Amended 2026-10-09 by `TASK_UI_DEMO_01`, which added a seventh page.** Every
+> count of the demo's **tabs**, **pages**, **screen hosts** and **page names** in
+> this sub-task is **seven**. **The phrase *six gallery pages* still means six** —
+> the gallery is unchanged and `demo` is the seventh page beside it. **The three
+> test names that carry a count in the name are renamed** to match, because a task
+> file written against six pages and implemented against seven cannot write them
+> as named.
 
 17. **`Demo::tabs: Vec<Tab>` is replaced by `Demo::bar: TabBar`, and `struct Tab` is
     deleted by name.** `Demo::new` builds the bar **where it builds the container
@@ -712,9 +720,9 @@ now.**
     `tab_at` that computed its own rects would be a second geometry, and a
     demo-local `aim_tab_buttons` would be the aim 24.3's major came from.
 
-22. **`Demo::pending_page`'s writer count goes from six to one.**
+22. **`Demo::pending_page`'s writer count goes from seven to one.**
     `Demo::new` sets `self.bar.on_select = Callback::new(move |id: TabId| { if let Some(&page) = Page::ALL.get(id.index()) { asked.set(Some(page)); } })`,
-    and **the `Callback::new(move || …)` written into each of the six buttons in
+    and **the `Callback::new(move || …)` written into each of the seven buttons in
     `Demo::new` is deleted.** **The `get` and its `if let` are the point**, and §
     *Testing* says why in two names: an out-of-range index must not panic
     (`developer.md` § *Panics and unwrap*: no `unwrap`, no `expect`, no
@@ -784,7 +792,7 @@ now.**
       `press_tab(index)`, and **the three release arms call
       `self.bar.release()`** where they called `release_tab()`. **The modal guards
       are unchanged** on the argument `Demo::offer_to`'s doc already records.
-    - `Demo::frame`'s paint arm replaces the loop that records the six buttons at
+    - `Demo::frame`'s paint arm replaces the loop that records the seven buttons at
       `rect.into()` with **`self.bar.paint(&arena, &advance, tab_line_height(&self.metrics))`**
       appended after the bar container's own command, **in tab order**.
 
@@ -792,34 +800,34 @@ now.**
     `the_bar_is_exactly_as_tall_as_its_padding_and_its_buttons` (now reads
     `TAB_HEIGHT` for the buttons' half and the widget's own `bar_rect` for the
     bar's), `every_tab_button_is_at_least_the_touch_target_floor_tall`,
-    `tab_walks_the_six_buttons_before_the_pages_own_controls` (now over
+    `tab_walks_the_seven_buttons_before_the_pages_own_controls` (now over
     `self.bar.tab_ids()`), `every_page_places_every_rect_where_the_gallery_placed_it`,
     `no_two_placed_rects_overlap`, `assert_placed_handles_is_complete`,
     `placed_handles`, `page_rects`, `always_painted_handles`,
     `nothing_the_demo_places_reaches_into_the_strip`,
     `the_container_with_a_background_are_the_card_and_the_bar`,
     `the_tab_bar_follows_a_theme_switch`,
-    `the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its_six_buttons`
-    (task 42.2's, **on all six pages**, and 43.2 must not weaken it to one),
+    `the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its_seven_buttons`
+    (task 42.2's, **on all seven pages**, and 43.2 must not weaken it to one),
     `a_tap_over_a_bar_button_is_not_in_the_routed_chain`.
 
     New, each with its mutation in § *Testing`:
 
     - **`every_tab_index_names_the_page_at_that_index_of_page_all`** — **the complement assertion, and the one that kills 24.1's dropped row one level down.** It walks **`0 .. Page::ALL.len()`** and asserts `bar.tab_id_of`/`bar.tab_ids`/`Page::ALL` agree at every index, **and asserts `self.bar.tab_ids().len() == Page::ALL.len()`** — so a tab that was never added, and a `Page` that was never registered, are both visible. **A membership assertion passes for both; this one cannot.**
-    - `the_demo_bar_has_one_tab_per_page_and_no_tab_beyond_the_six` — the other direction, split out **so each name is about what it catches.**
-    - **`the_tab_bar_selection_and_the_screens_current_name_never_disagree`** — **the whole mitigation for keeping two representations of one fact, and a gate rather than a nicety.** It walks **all six pages** and **both switch paths** (the `pending_page` drain, and the `--tab=` constructor path) and asserts `self.bar.selected().map(|id| id.index())` is the index of `self.page` in `Page::ALL` **and** that `self.screens.current_name() == self.page.name()`. **Task 42's
+    - `the_demo_bar_has_one_tab_per_page_and_no_tab_beyond_the_seven` — the other direction, split out **so each name is about what it catches.**
+    - **`the_tab_bar_selection_and_the_screens_current_name_never_disagree`** — **the whole mitigation for keeping two representations of one fact, and a gate rather than a nicety.** It walks **all seven pages** and **both switch paths** (the `pending_page` drain, and the `--tab=` constructor path) and asserts `self.bar.selected().map(|id| id.index())` is the index of `self.page` in `Page::ALL` **and** that `self.screens.current_name() == self.page.name()`. **Task 42's
       `the_demo_page_field_and_the_librarys_current_screen_never_disagree` is the
       precedent and the shape.**
     - `the_bar_still_records_the_command_sequence_it_recorded_before` — **the
       pixel criterion's mechanism at the command level, and it is new**: a
-      `PaintState` recording of the whole frame on each of the six pages, compared
+      `PaintState` recording of the whole frame on each of the seven pages, compared
       against the same frame's recording with the selection moved to the page on
       show. **It asserts the command count, the kinds in order, the rects and the
       colours**, so a `TabBar` that records its background in the wrong place, or
       drops the last tab, or draws a tab twice, fails here. **A capture cannot see
       a command that was never recorded; this can.**
     - `a_page_switch_aims_exactly_the_two_tabs_it_moved_between` — the `on_change`
-      counters on all four animated properties of all six buttons, across one
+      counters on all four animated properties of all seven buttons, across one
       `show_page`, asserting **exactly two buttons moved `background` and
       `foreground` and the other four moved nothing.**
     - `a_tab_on_the_page_already_on_show_is_aimed_by_its_press_and_its_release` —
@@ -883,17 +891,17 @@ now.**
     that it has no demo consumer**; **`sync`'s convergence and the per-frame-aim
     guard**; **`LongPress` and `Swipe` still unconsumed**; **that `Grid` is still
     unimplemented and L7's missing cross-axis gap is still missing**; and **the
-    six pages' frame rates, with the script's own line pasted.**
+    seven pages' frame rates, with the script's own line pasted.**
 
 29. **The suite, the capture and the frame rate are all produced.** From `ui/`: the
-    six commands of requirement 16. Then **the six-page before/after capture**,
+    six commands of requirement 16. Then **the seven-page before/after capture**,
     with the commands of `IMPLEMENTATION_STATE.md`
     § *Verifying a change that draws — the capture method* verbatim: window id
     **re-read at the time of each capture** with `xwininfo -root -tree` (a root
     capture, and `ffmpeg x11grab`, return black for a GL window), `pgrep -a -x
     ui_demo` in the same call as each `magick import -window <id>`, then `magick
     compare -metric AE before.png after.png null:` per page. Then **the frame rate
-    on all six pages**.
+    on all seven pages**.
 
 ## Testing
 
@@ -943,8 +951,8 @@ rather than against a pointer event that has never arrived.**
 | **`the_selected_tab_is_aimed_on_a_press_and_on_a_release_that_changed_no_selection`** | **24.3's one major.** Press and release with **no selection change anywhere in the test**; asserts the scale returns to `1.0` exactly. Kills moving the release aim out of `release`, into `sync`, or away |
 | `a_click_through_the_buttons_own_event_selects_the_tab_and_reports_it_on_the_next_sync` | **The two-hop being bypassed** — a click reaching `select` directly. It would work in the test and panic in `input::route`'s double borrow on a real dispatch, which is the reason the two hops exist |
 | **`an_aim_is_not_repeated_on_a_second_sync_that_changes_nothing`** | **The per-frame aim.** One hundred `sync` calls after one `select` must move the counters exactly four times. A `sync` that re-aims unconditionally restarts every clock every frame and the colour creeps toward its target for ever and never arrives — `sync_toggle_state`'s argument, and the cheapest mutation in this file to ship |
-| `a_selection_change_aims_exactly_two_tabs_and_touches_no_other_flag` | `sync` aiming all six, or aiming the incoming one and not the outgoing one, or **aiming `scale` and `opacity` for a palette swap that does not move them** |
-| `the_focus_record_is_not_part_of_the_aimed_triple` | **`focused` in the triple.** It would cost six aims a frame for no visible change, because `Style::ring_width` is the one appearance `animate_to_state` never animates — and the frame-rate criterion would catch it only as a slow drift |
+| `a_selection_change_aims_exactly_two_tabs_and_touches_no_other_flag` | `sync` aiming all seven, or aiming the incoming one and not the outgoing one, or **aiming `scale` and `opacity` for a palette swap that does not move them** |
+| `the_focus_record_is_not_part_of_the_aimed_triple` | **`focused` in the triple.** It would cost seven aims a frame for no visible change, because `Style::ring_width` is the one appearance `animate_to_state` never animates — and the frame-rate criterion would catch it only as a slow drift |
 | `the_bar_follows_a_new_palette_and_a_new_selected_palette_on_the_next_sync` | **The two setters being wired to the same slot**, and `set_palette` moving a *selected* tab. The bar would render and no rect assertion would see it |
 | `a_bar_with_no_tabs_is_a_box_of_its_padding_and_says_so` | **`n - 1` underflow in `size`** for an empty bar — which is the edge a saturating subtraction would make look fine |
 | **`tab_at_tab_rect_and_hit_test_read_the_same_box`** | **The 2026-10-01 rule.** A bar that draws four tabs and hit-tests three, or tests a box `arrange_flex` never produced. **Four points per tab — centre and each edge's last pixel — against `input::hit_test`, the crate's own mechanism, rather than against a pointer event this host has never delivered** |
@@ -953,9 +961,9 @@ rather than against a pointer event that has never arrived.**
 | **`an_arithmetic_key_with_no_tab_focused_is_left_for_the_focused_control`** | Arrows consumed unconditionally, which would take left/right away from every control behind the bar |
 | **`the_bar_consumes_nothing_but_the_four_navigation_keys`** | **Row `L4`'s claim, enforced against this widget from its own side**: `LongPress` and `Swipe` asserted unconsumed by name, so a later task that consumes them here breaks a test deliberately rather than drifting past a claim in a document |
 | **`every_tab_index_names_the_page_at_that_index_of_page_all`** | **The data this task leaves in the demo: the `Page` ↔ index mapping.** A `TabBar` and a `Page::ALL` that disagree at one index put the right label on the wrong page, and `the_demo_page_field_and_the_librarys_current_screen_never_disagree` alone cannot see it — that one compares the two mirrors, and both mirrors can be consistently wrong together |
-| **`the_tab_bar_selection_and_the_screens_current_name_never_disagree`** | **Either half of the mirror being written without the other** — the whole mitigation for keeping two representations of one fact, on task 42's precedent. **Walked over all six names and both switch paths** |
+| **`the_tab_bar_selection_and_the_screens_current_name_never_disagree`** | **Either half of the mirror being written without the other** — the whole mitigation for keeping two representations of one fact, on task 42's precedent. **Walked over all seven names and both switch paths** |
 | **`the_bar_still_records_the_command_sequence_it_recorded_before`** | **The pixel criterion's mechanism.** Command count, kinds in order, rects and colours, per page, against a recording with the selection moved. **A bar that records its background after its tabs, drops a tab, or draws one twice fails here and nowhere else** |
-| `a_page_switch_aims_exactly_the_two_tabs_it_moved_between` | `sync` aiming all six on a switch, which is what the demo's `changed: &[Page]` list existed to prevent — **and that list is deleted, so the property now lives in the widget and needs a test here** |
+| `a_page_switch_aims_exactly_the_two_tabs_it_moved_between` | `sync` aiming all seven on a switch, which is what the demo's `changed: &[Page]` list existed to prevent — **and that list is deleted, so the property now lives in the widget and needs a test here** |
 | `a_tab_on_the_page_already_on_show_is_aimed_by_its_press_and_its_release` | **24.3's major, re-asserted on the demo**, with no selection change in it |
 | `the_focus_ring_follows_the_focus_record_and_the_selection_follows_the_screen` | The two records being moved together. **They answer two different questions and a test that moved both would pass on the first frame and be wrong by the next** |
 | `the_two_tab_palettes_differ_in_all_three_colours` | The selected/unselected pair collapsing in one of the three colours — **which is what makes "selected is legible at a glance" a fact rather than a hope, and no rect assertion can see it** |
@@ -1140,15 +1148,17 @@ rather than against a pointer event that has never arrived.**
       membership assertion passes for a row that was never added.** 24.1's round-3
       reviewer deleted one line of `Demo::new` and the whole suite stayed green
 
-- [ ] **The six gallery pages are pixel-identical outside `y ≥ 680`, and the
-      mechanism is stated rather than hoped for.** `Page::ALL`'s six names, release
+- [ ] **The gallery pages are pixel-identical outside `y ≥ 680`, and the
+      mechanism is stated rather than hoped for.** `Page::ALL`'s seven names —
+      **six gallery pages plus `demo`, which is the seventh and is captured like
+      the rest** — release
       build, captured **before and after** with the commands of
       `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
       method* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab`, return black for
       a GL window), `pgrep -a -x ui_demo` in the same call as each
       `magick import -window <id>`, then `magick compare -metric AE before.png
-      after.png null:` per page. **On all six the criterion is AE 0 outside
+      after.png null:` per page. **On all seven the criterion is AE 0 outside
       `y ≥ 680`**, every differing pixel inside the frame-rate readout's band, which
       `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it found*
       records as the one thing two captures of an unchanged frame differ in.
@@ -1161,7 +1171,7 @@ rather than against a pointer event that has never arrived.**
          through `Button::content_size` with the same `padding_h` and `font_size`
          the demo set — **the same six numbers the demo wrote yesterday**. The
          `Container` mode, padding and `FlexConfig` are the same three values, so
-         `arrange_flex` places the six at the same x's.
+         `arrange_flex` places the seven at the same x's.
       2. **Every colour is the colour the demo drew.** The unselected tab is
          `Border`/`Text` with a `Primary` ring and the selected one is
          `Palette::from_theme` — **`Primary`/`OnPrimary`/`OnPrimary` — which is what
@@ -1171,7 +1181,7 @@ rather than against a pointer event that has never arrived.**
          would have drawn six colours this repository does not draw today.
       3. **The recorded command sequence is the same, and that is a test rather than
          a hope.** `the_bar_still_records_the_command_sequence_it_recorded_before`
-         compares count, kinds in order, rects and colours on **each of the six
+         compares count, kinds in order, rects and colours on **each of the seven
          pages**, `the_bar_paints_its_background_and_then_its_tabs_in_the_bar_order`
          pins the order inside the bar, and the rect-level tests keep their names
          and every assertion: `every_page_places_every_rect_where_the_gallery_
@@ -1180,15 +1190,15 @@ rather than against a pointer event that has never arrived.**
       4. **What did change is invisible to a capture by construction**, because it
          is entirely about which node *reaches* the caller: `TabBar::tab_at` reads
          the same cached rect the demo's `Demo::tab_at` read, so a tap aims at the
-         same box, and the six buttons are reached through `TabBar::tab` rather than
+         same box, and the seven buttons are reached through `TabBar::tab` rather than
          through a `Demo::tabs` search. **A press produces no pixel change and that
          is the correct outcome**, so the criterion is the strong one
 
-- [ ] **The frame rate is measured on all six pages and reported**, with the
+- [ ] **The frame rate is measured on all seven pages and reported**, with the
       script's own line pasted rather than the number expected:
       `.ai/tools/fps-check.sh 10 55` on the default page, and
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of the
-      six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
+      seven with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
       name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records
       as the reason task 24.2's criterion 6 was amended rather than met by the
@@ -1198,9 +1208,9 @@ rather than against a pointer event that has never arrived.**
       **And the handoff states what the number is expected to be and why, rather
       than reporting a number and letting it be read as luck.** Per frame, this
       task **replaces** `for tab in &self.tabs { tab.button.tick(delta) }` with
-      `self.bar.tick(delta)` — the same six `AnimationClock::tick` calls — and
-      **adds** one `sync`, which is **six tuple comparisons and, on a settled bar,
-      six property reads that change nothing**. **A `Button::selected` write per
+      `self.bar.tick(delta)` — the same seven `AnimationClock::tick` calls — and
+      **adds** one `sync`, which is **seven tuple comparisons and, on a settled bar,
+      seven property reads that change nothing**. **A `Button::selected` write per
       changed tab is two per selection change and none per frame.** So the
       expected result is **no measurable change on any page**, and a page outside
       the band is **a finding rather than noise**. **The one honest risk is the
@@ -1214,7 +1224,7 @@ rather than against a pointer event that has never arrived.**
       the `AE = 0`, and `XQueryPointer` reporting window `0x0` — **and therefore
       that no acceptance criterion here is verified by a pointer-driven capture,
       and none asks for one.** The bar's operability is verified **by test against
-      `input::hit_test` and the painted rect**, the six pages' route chains are
+      `input::hit_test` and the painted rect**, the seven pages' route chains are
       verified **through `input::route`**, and the selection change is verified
       **by test through `Button::on_event` and `TabBar::sync`**. **The two together
       are not evidence that a finger switches a page**, and the
@@ -1276,7 +1286,7 @@ rather than against a pointer event that has never arrived.**
       separate, **43.1 was briefed against a tree with no `nav`** — which is the test
       that the split is real, since requirements 1–15 name no `nav` symbol — and
       **43.2 was briefed against task 42's landed code** and is a stop condition
-      until 42 has landed, because it reads `Screens::current_name` and the six
+      until 42 has landed, because it reads `Screens::current_name` and the seven
       screen hosts. **The review covers the integrated result**, because integration
       can break what the parts proved. **43.2 was not split further**, and the reason
       is stated rather than asserted: its two halves both edit
@@ -1312,7 +1322,7 @@ rather than against a pointer event that has never arrived.**
   composed in**, because a horizontally scrolling bar is a second interaction
   (fling, momentum, snap, a visible scrollbar) and every one of those is
   *a drawn control with nothing behind it* waiting to happen.
-  **The six-page gallery fits**, which is a fact about six labels and 1280 px and
+  **The seven-page gallery fits**, which is a fact about seven labels and 1280 px and
   not a property the widget has. **A bar that does not fit is the caller's to
   solve**, and this file names the limit rather than half-building the answer
 
@@ -1331,7 +1341,7 @@ rather than against a pointer event that has never arrived.**
   adds `let _ = self.bar.select_name(page.name());` after 42's
   `screens.show(page.name())` and `screens.sync(&mut nodes)`, and nothing else.
   **`nav.rs` is not edited, `ScreenId` gains nothing, and the hit-test, focus and
-  paint gates are unchanged** — including `LayoutState::hits`, which the demo's six
+  paint gates are unchanged** — including `LayoutState::hits`, which the demo's seven
   hosts keep, and which is what keeps the bar reachable on `overlays`. **The
   composition is one line, in one function, on the value side of both objects**
 
@@ -1396,13 +1406,13 @@ rather than against a pointer event that has never arrived.**
   is a licence decision against GPLv3 that nobody has asked for. `grep -c unsafe
   ui/src/ui_core/src/widgets/tab_bar.rs` is **0** and `button.rs` gains none
 
-- **No change to the demo's `Page`, its six names, or `CONTENT_TOP`.**
+- **No change to the demo's `Page`, its seven names, or `CONTENT_TOP`.**
   `Page::ALL`, `Page::name`, `Page::from_name`, `Page::DEFAULT`, `TAB_BAR_HEIGHT`
   and `CONTENT_TOP` are untouched — `DEMO_APPLICATION.md`
   § *What a seventh page costs* enumerates everything one costs, **and this task
   touches none of it.** `CONTENT_TOP` staying a constant is what keeps every
   `*_ORIGIN` doc that says "what it clears" true, **and `the_demo_bar_has_one_tab_
-  per_page_and_no_tab_beyond_the_six` is what says the bar gained no tab of its
+  per_page_and_no_tab_beyond_the_seven` is what says the bar gained no tab of its
   own**
 
 - **No acceptance criterion is waived, and none requires a pointer event, a GL

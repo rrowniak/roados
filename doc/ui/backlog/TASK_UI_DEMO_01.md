@@ -1,5 +1,17 @@
 # TASK_UI_DEMO_01: The Map Surface — a Procedural World, a Camera, and Four Draw Commands
 
+> **SUPERSEDED 2026-10-09 — not built, and not to be built as written.**
+> Replaced by [`doc/ui/TASK_UI_DEMO_01.md`](../TASK_UI_DEMO_01.md), which draws
+> a **map image as a background** and puts nothing on it. **This file is kept
+> whole** because its reasoning is why the replacement is cheap: § *The map
+> approach* proves a raster background was reachable all along
+> (`Renderer::load_texture` reads from disk, and `IMPLEMENTATION_STATE.md`
+> already records that *"a committed PNG would work today"*), and § *What this
+> approach cannot do* is an honest inventory of what the procedural design cost.
+> **Read those two sections before rewriting the replacement.** Everything below
+> describes a decision that was not taken; the operator's decision and its
+> reasons are in § *Decisions taken instead* at the end of this file.
+
 ## Goal
 
 Close **gap #1** — `DEMO_APPLICATION.md` § *Library gaps*, row **1**,
@@ -1210,3 +1222,45 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
   `developer.md` § *Phase 2* refuses drive-by cleanups (*"Do not restructure what
   you were not asked to touch"*). **It is recorded here so the next reader knows it
   was seen and not missed.**
+
+## Decisions taken instead
+
+**Recorded 2026-10-09, by the operator.** This section is why the file is here
+rather than deleted, and it is the only part of it that describes anything that
+is still true.
+
+**The scope was judged too ambitious.** The task file specifies a seeded world
+generator, a fixed camera, three road classes with a draw-order rule, a route
+that provably follows a road, three POI glyphs, a rotated car marker, a
+ten-field palette, 26 tests in a new module, 6 more in `main.rs`, four amended
+documents and a created state file. **The operator's judgement is that this is
+more than the demo needs to have a map**, and the argument was not about the code
+— `map.rs` is an LCG, a grid, a projection and a paint walk — but about the
+whole apparatus.
+
+**The replacement is a background image.** `assets/img/` holds a map picture,
+loaded through the mechanism `demo.png` already uses, drawn full-bleed under the
+tab bar, with **nothing on top of it**. `TASK_UI_DEMO_02`'s chrome and
+`TASK_UI_DEMO_03`'s car-status pane are what put things on it, and they were
+going to anyway.
+
+**Three consequences, recorded here rather than argued anywhere else.**
+
+1. **The licence of the image is the operator's decision and it is a risk
+   accepted, not a permission held.** The replacement task file names the terms
+   clauses and states the acceptance in full; a reader who disagrees can see
+   exactly what was accepted and on what grounds.
+2. **`ui/src/ui_demo/assets/img/` is not in this repository**, by operator
+   decision, which reverses what `TASK_UI_PRIM_39` decided for every other asset
+   in that directory. The consequence is recorded rather than solved: **the
+   seventh page's capture is not reproducible from a fresh clone.**
+3. **Gap #1 is not closed by either file.** A picture is not a map widget. The
+   row in `DEMO_APPLICATION.md` § *Library gaps` keeps its numbering, its
+   severity and its *Blocks* entry, and the replacement task file says so.
+
+**What would bring this file back.** A camera that moves — `TASK_UI_PRIM_46`
+(`L5`) is what a pan needs — or a pixels-to-texture entry point in `ui_core`,
+which no task in 41 to 52 adds and which this file's § *The map approach*
+establishes is the only thing standing between a procedural world and a raster
+one. **Either of those makes this design cheaper than the replacement, and
+neither exists today.**

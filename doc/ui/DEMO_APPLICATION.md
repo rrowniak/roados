@@ -51,6 +51,29 @@ in its own comments:
   no argument is still reproducible"* (`main.rs:1712-1716`). The demo tab must not
   become the default.
 
+**All six specified, 2026-10-09, by `TASK_UI_DEMO_01` — and none of the six is
+built yet.** The task was rewritten that day to draw a **map image** rather than a
+procedural vector map; **this list is what it specifies, not a record of what it
+delivered**, and it moves from specified to done only when the task's own
+acceptance criteria are met. **What the seventh page is for is recorded in
+§ *Design principles* item 2 and § *What this means for the demo's shape* item 1:
+it is the infotainment screen, the map is its base layer, and every other surface
+is a panel over it** — so the page is not a map page that later happens to grow
+chrome, and a reader meeting a picture on it has not met the page.
+`const ALL` is to become `[Page; 7]`, `Page::name()`'s
+doc is to say seven, `Demo::tabs` is to gain its row from the loop that builds it,
+the three gates are to take their rows, the page-membership table is to gain
+`on(Page::Demo, map_node, false)`, and `Page::DEFAULT` is not to move. **One item
+is not in the list above and is the seventh page's own trap: a seventh page whose
+content is full-bleed overlaps every other page's widgets by construction, so it
+must NOT gain a row in `Demo::placed_handles`.** That list feeds
+`no_two_placed_rects_overlap` and `every_page_places_every_rect_where_the_gallery
+_placed_it`, and both would fail on a rect that is supposed to cover the window.
+**The map node is covered by the paint gate instead** —
+`a_page_records_no_command_on_a_node_that_is_not_its_own` — which is the same
+arrangement `Demo::page_rects`'s own doc gives for the `overlays` page: *"The
+page is checked by the paint gate instead."*
+
 ## Goal
 
 Re-implement `ui_demo` as a Tesla-like infotainment interface after all UI
@@ -285,7 +308,7 @@ cannot mean two different rows — which it did, five times, before this pass.
 
 | # | Gap | Severity | Blocks |
 |---|---|---|---|
-| 1 | **Map widget** — no map renderer exists or is planned. The demo's centerpiece. | Critical | Map/navigation screen |
+| 1 | **Map widget** — no map renderer exists or is planned. The demo's centerpiece. **Specified 2026-10-09 by `TASK_UI_DEMO_01`, and NOT closed — and not built yet**: that task will add the seventh page (`--tab=demo`), which § *Design principles* item 2 makes the infotainment screen, and give it the base layer every panel goes over — **a map image** full-bleed under the tab bar, loaded through `Renderer::load_texture`, with the chrome, the car-status pane, the indicator column and the carousel still to come on top of it. **Whether a page shows a picture is a capture, and a capture is not a renderer.** **A picture is not a map widget** — there is no camera, nothing to pan or zoom, no route, no marker and no POI, and nothing in the image's own coordinates that a later surface could address. **This row keeps its numbering, its severity and its Blocks entry** (no navigation screen is built), because a picture on a screen does not close a row about a renderer. | Critical | Map/navigation screen |
 | 2 | **Grid layout non-functional** — `Grid` mode lays out no children and reports no rects; `wrap` is accepted and not honoured. | High | App launcher screen |
 | 3 | **No screen/navigation system** — no screen stack, tab controller, or transition system in the library. **Was left open by decision on 2026-10-03; that decision is withdrawn 2026-10-05** — this gap must now be closed in `ui_core`, so it blocks the demo like any other. What `TASK_UI_PRIM_24.1` built is the *demo-level* mechanism — `enum Page`, a page-membership table, and three gates (paint, hit test, focus), inside one binary — and **that was never this gap closed**, as the row itself said at the time. | High | Multi-screen app structure |
 | 4 | **No Icon widget** — `Image` (task 16) displays textures but icons need vector rendering, theme tinting, and uniform sizing. **Raised 2026-10-01 from Medium to High**: the completed Layout section needs an icon for every dock item, every top-bar status item, every tab row and every indicator light — and `Polygon` is convex-only with no bezier (**L10**), so this is the largest unsupported item in the design. | High | Visual quality — "real icons" requirement |
@@ -332,8 +355,44 @@ own asset and no library owns it.
    are written? Until this is answered no future agent can reproduce the primary
    evidence for the whole *Layout* section below, and a re-derivation would
    produce a different document.
-2. What map data source to use for the emulation? (procedural, hand-drawn, or
-   simplified real data?)
+2. **What map data source to use for the emulation?** (procedural,
+   hand-drawn, or simplified real data?)
+   **Partly answered 2026-10-09 by `TASK_UI_DEMO_01`, which is specified and not
+   built; the question stays on the list.** That task specifies the demo's map as
+   **one image file**, supplied by the operator, drawn as a full-bleed background
+   on the seventh page —
+   `ui/src/ui_demo/assets/img/map_demo.png`, **not committed**, loaded through the
+   mechanism `demo.png` already uses. **It is not procedural, hand-drawn or
+   simplified real data**; it is a captured picture, which is a fourth option
+   this item did not list.
+   **Three facts the decision rests on, and they are recorded because two of
+   them are costs rather than advantages.** First, the route is reachable
+   today: `Renderer::load_texture` reads from disk and `ui_demo` already calls
+   it for `demo.png`, and no task in 41 to 52 adds a pixels-to-texture entry
+   point — so nothing about a raster background required a `ui_core` change.
+   Second, **the image is not in this repository**, by operator decision, so
+   **the demo page's capture is not reproducible from a fresh clone**, the
+   asset gate does not cover the directory (§ *What a seventh page costs*, and
+   `TASK_UI_DEMO_01.md` § *Out of Scope*), and
+   the task's own handoff cannot show the map. Third, **the licence is a risk
+   accepted rather than a permission held**: the image was captured from Google
+   Maps, whose End User Additional Terms §2.2 restricts copying, whose Brand
+   Resource Centre Geo Guidelines scope the one screenshot permission to
+   annotation, and whose trademark guidelines cover the map's trade dress; the
+   operator accepted it for **local, undistributed** use on 2026-10-09, which
+   is not a use the guidelines grant either, and **the acceptance is void if
+   the image is ever committed, published or shipped.** **The full terms
+   clauses and the whole of the acceptance are in `TASK_UI_DEMO_01.md` § *The
+   licence, and what was accepted*.** **The decision is that task's; the
+   question is still the operator's**, and what would genuinely answer it is a
+   source that permits bundling — `Natural Earth` is public domain, and OSM
+   data rendered to an image is an ODbL Produced Work carrying attribution but
+   no share-alike (ODbL §4.5(b)).
+   **The asset inventory above lists *"Map elements (roads, route line, car
+   marker, POI icons)"* and is therefore also stale on this point**: the demo
+   gets roads, the route line, the car marker and the POI icons **inside the
+   one image**, so none of them is a separate asset, and the elements the demo
+   still needs as files are the icon sets `TASK_UI_PRIM_39` already delivers.
 3. How to handle the Tesla logo and branding? (avoid trademark issues)
 4. What vehicle model to display in the status screen? (Passat B5.5 or a generic
    car?)
@@ -349,10 +408,6 @@ own asset and no library owns it.
    `TASK_UI_DEMO_n` only if the operator would rather keep it inside the demo
    task. Since 2026-10-05 the gap cannot be deferred either way, so this is a
    question of *which sequence owns it*, not *whether*.
-7. **What is the seventh page called, and its `--tab=` value?** What a seventh
-   page has to touch is recorded in the header; the name is a decision this
-   direction has no authority to make, and `Page::name()` is the single place the
-   spelling lives.
 8. **Card carousel depth.** Two cards are visible side by side in photo `01`
    with a 3-dot pager. Should the demo implement paging (the real behaviour)
    or a swipe-with-peek (cheaper, and what the photo's evidence supports
@@ -360,6 +415,16 @@ own asset and no library owns it.
 
 **Answered 2026-10-05 and removed from this list: *Light or dark first?*** Dark is
 required and ships first. See § *Operator decisions (2026-10-05)* item 1.
+
+**Answered 2026-10-09 and removed from this list: *What is the seventh page
+called, and its `--tab=` value?*** **`demo`.** The page will hold a map image
+full-bleed under the tab bar, with nothing on it, and `Page::name()` remains the
+single place the spelling lives — see `TASK_UI_DEMO_01.md`, which is specified
+and not built. **The number this item's own text got wrong is worth keeping: what
+a seventh page *has to touch* is the six items in § *What a seventh page costs*,
+not the name.** **The name is settled now and the page is not, and the two are
+separate**: `DEMO_04` and `DEMO_05` name the page in their own gates, and neither
+is blocked by the code.
 
 ## Screens
 

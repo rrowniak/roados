@@ -13,3 +13,9 @@
 # ui/src/ui_demo/assets/ are NOT covered by this: they are in the tree.
 # Only .asset-cache/ (the 12 MB of pinned upstream archives) stays out.
 /.asset-cache/
+
+# The demo's map image is not committed: it is a local, undistributed
+# operator-supplied asset. Exclude both the repository-root drop path and the
+# assets path the demo searches by default, so a `git add -A` cannot stage it.
+/img/
+/ui/src/ui_demo/assets/img/

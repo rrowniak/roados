@@ -6163,7 +6163,7 @@ verified. A blank cell is unknown, not "none".
 | 50 | Theme scoping and the `FocusRing` token — **closes gap `L9`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_50.md` | — | — |
 | 51 | Convexity pre-test; `L10` escalated, **not closed** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_51.md` | — | — |
 | 52 | `LayoutMode::Grid` — **closes gap `L3` / `#2`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_PRIM_52.md` | — | — |
-| DEMO-01 | The map surface — **gap `#1`** | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_DEMO_01.md` | — | — |
+| DEMO-01 | **The demo page** — the seventh tab, and the map image under it; **gap `#1`, partly** | **specified 2026-10-05; rewritten 2026-10-09, not started.** The procedural vector map the first version specified was judged too ambitious and moved to `doc/ui/backlog/TASK_UI_DEMO_01.md`, whole and with its reasoning | `doc/ui/TASK_UI_DEMO_01.md` | — | — |
 | DEMO-02 | The tab shell and the persistent chrome | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_DEMO_02.md` | — | — |
 | DEMO-03 | The car-status pane and its three states | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_DEMO_03.md` | — | — |
 | DEMO-04 | The indicator-light column | **specified 2026-10-05, not started** | `doc/ui/TASK_UI_DEMO_04.md` | — | — |
@@ -6308,25 +6308,44 @@ and two name what they need *nothing* from and why — task 03 records that
 
 **Two findings this sequence surfaced that are not about the demo.**
 
-First, **`.ai/workflows/task-sequence.md` § *Scope* does not name this sequence** —
-it lists `TASK_UI_PRIM_*.md` and `TASK_CROSSPLATFORM_*.md` and nothing else, so
-the workflow this sequence runs under does not currently apply to it.
-`TASK_UI_DEMO_01` amends that section and creates
-`doc/ui/IMPLEMENTATION_STATE_DEMO.md`; **until 01 lands, these five tasks have no
-workflow and no state file**, and this row is the only place that is written down.
+First, **`.ai/workflows/task-sequence.md` § *Scope* did not name this sequence** —
+it listed `TASK_UI_PRIM_*.md` and `TASK_CROSSPLATFORM_*.md` and nothing else, so
+the workflow this sequence runs under did not apply to it. **`§ *Scope` was
+extended on 2026-10-09, when the `DEMO_01` rewrite amended it** — and that
+amendment landed **with the task file, not with the implementation**, which is
+earlier than the original task asked for and is the right order: the sequence had
+no workflow while it was being re-specified, and it has one now.
+**`doc/ui/IMPLEMENTATION_STATE_DEMO.md` is still not created** — the rewritten
+`DEMO_01` keeps that as a requirement of its implementation rather than of its
+specification, **so these five tasks still have no state file**, and this row is
+still the only place that is written down.
 
 Second, `DEMO_APPLICATION.md` § *Relationship to task 24* ends with a standing
 instruction: *"**It will need one** if a `TASK_UI_DEMO_n` task ever puts a tab bar
 on a Tesla surface, and that is the sentence to amend when it does."* `DEMO_02`
 does put the gallery's tab bar on screen over the map, so `DEMO_02` amends it.
 
-**The one evidence problem these tasks could not design around.** `DEMO_01` makes
-the map source a **provisional** decision — procedural, seeded, no geography — and
-**leaves `DEMO_APPLICATION.md` § *Open questions* item 2 on the list** rather than
-settling it by omission. It records the two facts that make it reversible: the
-real reason a raster tile layer is unavailable is that `Renderer`'s only texture
-entry point is `load_texture(path)` and **no task in 41–52 adds
-`textures_mut`/`from_pixels`**, so a committed PNG would work today.
+**The evidence problem this sequence could not design around — and on 2026-10-09
+it chose a different answer than the one recorded here on 2026-10-05.** The first
+`DEMO_01` made the map source a **provisional** decision — procedural, seeded, no
+geography — and left `DEMO_APPLICATION.md` § *Open questions* item 2 on the list
+rather than settling it by omission. **It also recorded, in the same paragraph,
+the fact that made its own decision unnecessary**: the real reason a *raster tile
+layer* was unavailable is that `Renderer`'s only texture entry point is
+`load_texture(path)` and no task in 41–52 adds `textures_mut`/`from_pixels`, **so
+a PNG would work today** — a sentence that contradicted the requirement two
+paragraphs earlier.
+
+**The operator rewrote the task on 2026-10-09 and took that sentence.** The map
+is now **one image file**, drawn full-bleed under the tab bar with nothing on it;
+the procedural world is at `doc/ui/backlog/TASK_UI_DEMO_01.md`, kept whole because
+its § *The map approach* is the argument for the rewrite. **Two things this state
+file records about the sequence as a whole are therefore superseded, and neither
+is a fact about the tree:** the first `DEMO_01` was 1212 lines specifying a seeded
+world, a camera, a ten-field palette and 32 tests, and **the procedural map source
+was never provisional because it was never adopted.** `DEMO_APPLICATION.md` §
+*Open questions* item 2 is amended and still open, and it now records the licence
+acceptance and the reason the image is not in this repository.
 
 **Where a source sentence is `[C]`, no task treats it as a specification.**
 `DEMO_05` carries the two-axis reshape, whose only source is the

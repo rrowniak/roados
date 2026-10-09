@@ -8,6 +8,17 @@ a **persistent region** of the map screen rather than a panel over it. Three
 regions, laid out at absolute rectangles, drawn over the map `TASK_UI_DEMO_01`
 delivered, in `ui_demo`.
 
+> **Amended 2026-10-09, when `TASK_UI_DEMO_01` was rewritten.** That task no
+> longer draws a procedural vector map: its map is now **one image file**, drawn
+> full-bleed as a background, with **nothing on top of it**, and it lives in
+> `main.rs` rather than in a `map.rs`. **Four of this task's references to it
+> below are amended accordingly** — the `MapSurface::paint` per-frame cost, the
+> `map.rs` separability precedent, the *large non-empty vector* control, and the
+> *car in the pane is the map's marker* line, which is **now false as written**
+> and is corrected in § *Out of Scope*. **The chrome this task builds is not
+> affected by any of it**: a translucent bar and dock go over a picture exactly as
+> they went over a vector scene.
+
 **The demo tab and `--tab=demo` already exist** — they are `TASK_UI_DEMO_01`'s
 deliverable, and this task does not add them, does not rename them and does not
 change `Page::DEFAULT`. Its first acceptance criterion **verifies** all three
@@ -44,7 +55,7 @@ map**."* Three rows carry this task:
 
 | row | what it says | what it means here |
 |---|---|---|
-| **Map** | *base screen*, over-the-map *—*, dismissed by *—* | the map from task 01, painted first, never occluded by a chrome node's background at alpha 0 |
+| **Map** | *base screen*, over-the-map *—*, dismissed by *—* | the map image from task 01, painted first, never occluded by a chrome node's background at alpha 0 |
 | **Car-status pane** | *persistent region of the map screen*, *"part of it"*, dismissed by *"never; resize drag only"* | **the pane is a region of the demo page, not a panel over it** — so it has no open/closed state and no dismissal, and this task builds neither |
 | **— (the other five rows)** | *panel*, *popup*, *strip ↔ panel*, *card*, *bottom slot*, all *"yes"* for over-the-map | **all five are later `TASK_UI_DEMO_n` tasks.** § *Screens* is also the section that records *"**Every dismissal is a drag, and the direction is part of the semantics**"* — a drag-to-dismiss gesture, which is `L4`'s half and `TASK_UI_PRIM_40`'s. **This task builds no gesture at all**, and says so |
 
@@ -322,19 +333,29 @@ belong to `TASK_UI_PRIM_42`'s `Screens`.**
 ### The baseline, and the counts that must not move
 
 **Measured on the tree this file is written against, `cargo test --all-features`
-from `ui/` reads 1894 — 1450 in `ui_core` (`1 ignored`, `layout_walk_cost`), 224 in
-`ui_demo` and 220 doctests.** **This task's own baseline is `1894 + 32 = 1926`**
-if `TASK_UI_DEMO_01` has landed and none of its tests moved — and the handoff must
-state which of the two numbers it started from, because **"the suite is green" is
-not a number** and `task-sequence.md` § *Gates* says *"No evidence by assertion. A
-claim about a file, a count, a version, or a build result is checked against the
-file or the command output."*
+from `ui/` read 1894 — 1450 in `ui_core` (`1 ignored`, `layout_walk_cost`), 224 in
+`ui_demo` and 220 doctests.** **Re-measured 2026-10-09 on the same tree: 2058
+passing and 1 ignored** — 1587 in `ui_core` passing of 1588 registered, plus 3 in
+`tests/model_file.rs`, 1 in `tests/test_painter.rs`, 236 in `ui_demo` and 231
+doctests. **The 1894 is stale and is kept only so the number this file was written
+against is still on the record**; § *Scope* in `TASK_UI_PRIM_41` and `TASK_UI_PRIM_42`
+record the work that grew the tree between the two measurements.
+
+**So this task has two possible baselines and the handoff must state which it
+started from**, because **"the suite is green" is not a number** and
+`task-sequence.md` § *Gates* says *"No evidence by assertion. A claim about a file,
+a count, a version, or a build result is checked against the file or the command
+output."* **2058** if `TASK_UI_DEMO_01` has not landed, **2064** if it has — **six
+tests, not the thirty-two its predecessor specified**, because the rewritten
+task 01 adds six and the procedural map went to `doc/ui/backlog/`.
 
 **The frame-rate floor is 55 fps on a release build**, and `IMPLEMENTATION_STATE.md`
 § *The frame rate, measured* records the band the six gallery pages sit in. **The
 demo page's rate is the number this task produces**, and the chrome is a real
-per-frame cost: one `MapSurface::paint` from task 01 plus five chrome surfaces plus
-the demo page's own label and button commands.
+per-frame cost: **one `DrawCommand::Image` from task 01 — not the roughly one
+thousand `Rect`/`Path`/`Circle` commands the superseded procedural map cost,
+which is the cheapest thing this rewrite bought** — plus five chrome surfaces
+plus the demo page's own label and button commands.
 
 ### Scope, measured against `developer.md` § *Scope check*
 
@@ -349,7 +370,7 @@ the demo page's own label and button commands.
 
 | component | what it is | why it is separable |
 |---|---|---|
-| 1 | `chrome.rs`'s palette, the premultiply arithmetic and the three paint bodies | **its tests drive `chrome_palette`, `premultiplied` and the `paint_*` functions with no arena**, so it is verifiable before `main.rs` builds a node — exactly how `map.rs` is separable in `TASK_UI_DEMO_01` |
+| 1 | `chrome.rs`'s palette, the premultiply arithmetic and the three paint bodies | **its tests drive `chrome_palette`, `premultiplied` and the `paint_*` functions with no arena**, so it is verifiable before `main.rs` builds a node — the arrangement task 01's superseded `map.rs` used, and which task 01 no longer needs because it has no module of its own |
 | 2 | `main.rs`'s node construction, its `page_members` rows and its one paint arm | **four rows and one arm; it needs component 1's `Chrome` to exist and nothing else** |
 | 3 | the four documents | **no code and no build** |
 
@@ -722,14 +743,35 @@ asserts a contract.** **Fourteen in `chrome.rs`, five in `main.rs`.**
   asserted as one.**
 - **`every_chrome_node_records_commands_on_the_demo_page_and_on_no_other_page`** —
   the paint gate over **every** chrome node, the three surfaces *and* their children
-  including the five dock buttons and the pager: **more than one command on
-  `Page::Demo`, empty on each of the six.** This is the criterion that the chrome
+  including the five dock buttons and the pager: **at least one command on
+  `Page::Demo`, empty on each of the six.**
+  **Corrected 2026-10-09 from *more than one*, and the correction is the same one
+  `TASK_UI_DEMO_01` needed for the map:** `Label::paint` records one `text_run` per
+  line (`widgets/label.rs:581`), so a single-word chrome label records **exactly
+  one** command and a `> 1` assertion fails on correct code. **The surfaces are
+  the ones that must record more than one**, and they do — a surface with children
+  and a background — so the number belongs to the surfaces if anywhere, which is
+  why the assertion is `>= 1` over every node and the surfaces' multiplicity is
+  `the_chrome_surfaces_draw_their_background_and_their_children_on_top_of_it`
+  instead. This is the criterion that the chrome
   does not leak onto the gallery, and **covering the children is the point** —
   a chrome surface that records commands while its own labels record none is a
   bar with nothing on it, and a drawn control with nothing behind it is a picture
   no test could see the difference in.
-  **Its control is the demo page's own map node**, which records a large non-empty
-  vector on the same page.
+  **Its control is the demo page's own map node** — **amended 2026-10-09**:
+  task 01's map will be **one `DrawCommand::Image`**, not the large non-empty
+  vector this sentence described. **A single command is still a control, and the
+  assertion is unchanged** — `more than one command` is what the chrome's own
+  node must record on `Page::Demo` and not on the six gallery pages, and **the
+  map's one command is the non-vacuity floor that stops the whole loop from
+  passing on a demo that paints nothing at all.** What a control is for here is
+  not the size of the vector but that *some* node on the page records a command
+  while the six gallery pages record none. **The two numbers are different and
+  both are right**: `more than one` is about the chrome's own node, which is a
+  surface with children and records several; `at least one` is about the map,
+  which is one image and records one (`ui_demo`'s own
+  `the_demo_page_draws_the_map_and_the_gallery_pages_do_not` says so, and a
+  `> 1` there would fail on correct code).
 - **`a_theme_switch_reaches_every_chrome_surface`** — `toggle_theme()` and then all
   three chrome surfaces' palettes differ in at least `surface`, and the whole
   gallery's six pages are pixel-different afterwards. **It is the test that the
@@ -897,7 +939,7 @@ Phase 3 says *"A test that has never failed is not a test"*:
       `cargo clippy --all-targets --all-features -- -D warnings`;
       `cargo test --all-features` with **each of the fourteen `chrome.rs` tests and
       each of the five new `main.rs` tests listed by name in the handoff**, from a
-      stated baseline of **1894** or **1926** depending on whether task 01 landed,
+      stated baseline of **2058** or **2064** depending on whether task 01 landed,
       **so the total is the baseline plus nineteen and nothing is removed**;
       `cargo doc --no-deps` clean; `cargo audit` **recorded as not installed on this
       host, not passed**. **`layout_walk_cost` is still `#[ignore]`d** and
@@ -954,9 +996,13 @@ Phase 3 says *"A test that has never failed is not a test"*:
       not have, and **a `std::time::SystemTime` in the chrome would be a wall-clock
       read in a paint path**; that **the indicator column is five rows and not the
       ~20 conditions**, with **no blink semantics and no latch**; that **the car in
-      the pane is the map's marker and not a 3-D car** — `DEMO_APPLICATION.md` §
-      *Open questions* item 5 records that the car's body *"is a required asset, not
-      an optional one"* and it stays open; that **the carousel does not page and does
+      the pane is the pane's own picture and not a 3-D car** — **amended 2026-10-09:
+      the sentence this replaces said *the car in the pane is the map's marker*, and
+      that was true of the superseded procedural map, which drew one. Task 01's map
+      is a picture with nothing on it, so there is no map marker to reuse and the
+      pane draws its own** — `DEMO_APPLICATION.md` § *Open questions* item 5 records
+      that the car's body *"is a required asset, not an optional one"* and it stays
+      open; that **the carousel does not page and does
       not swipe**, so § *Open questions* item 8 stays open; that **the pane does not
       resize**, because the sentence that specifies the two-axis reshape is `[C]`
       snippet-level and the corpus is unreachable from this host; and that **the
@@ -1080,9 +1126,13 @@ Phase 3 says *"A test that has never failed is not a test"*:
   themselves adding a `DrawCommand` variant is past the task's boundary
   (`developer.md` § *Stop conditions*).
 
-- **No asset file, and no `TASK_UI_PRIM_39` pipeline.** Nothing is read from disk,
-  nothing is decoded, no PNG is added under `ui/src/ui_demo/assets/`, and **every
-  colour in the chrome is a theme token or a first-principles literal** — because
+- **No asset file, and no `TASK_UI_PRIM_39` pipeline. Amended 2026-10-09**, because
+  the sentence was written when task 01's map drew nothing from disk: **task 01
+  now reads exactly one image file**, `ui/src/ui_demo/assets/img/map_demo.png`, and it
+  is **not in this repository** and not the pipeline's. **This task still adds no
+  asset and reads no file** — nothing is decoded, nothing is added under
+  `ui/src/ui_demo/assets/`, and **every colour in the chrome is a theme token or a
+  first-principles literal** — because
   `DEMO_APPLICATION.md` § *Could not verify* records that *"**Tesla publishes no
   design tokens at all.**"* and § *Asset requirements* repeats it.
 

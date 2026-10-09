@@ -127,8 +127,12 @@ row**, and to `ui/src` **by symbol and path**.
   Tesla's"*, so no rectangle in this task is attributed to Tesla.
 - § *What this means for the demo's shape*, item 1 — *"The demo must have a map
   it can put things on top of"* and *"gap #1 (the map widget …) is untestable
-  without one"*. **There is no map in this repository**, which is why the pane's
-  centre is an unfilled region and not a road.
+  without one"*. **Amended 2026-10-09, and this sentence was false before that
+  date too**: `TASK_UI_DEMO_01` and `TASK_UI_DEMO_02` are specified and not built,
+  so the repo had no map. **Task 01 as now written puts a map image on the demo
+  page**, and the pane's centre stays an unfilled region and not a road because
+  **a picture is not a road** — the region is the pane's own `Body`, and what it
+  shows is this task's floor and horizon, not the map behind it.
 
 ### The pane's geometry, and every number in it derived
 
@@ -542,9 +546,12 @@ that settles it:
       `ThemeToken::Background`** — **the pane's centre is unfilled, and this
       command is the hole made visible.** § *What this means for the demo's shape*
       item 1 records that gap `#1`, the map, as *"untestable without"* one and as
-      a `TASK_UI_DEMO_n` item; a map-less region drawn in the theme's own
-      background is a surface the next task paints over, and a region left
-      **transparent** is a hole in the page a reader has to diagnose;
+      a `TASK_UI_DEMO_n` item; a region drawn in the theme's own background is a
+      surface the next task paints over, and a region left **transparent** is a hole
+      in the page a reader has to diagnose. **Amended 2026-10-09: task 01's map is a
+      picture, and this command is what keeps the pane opaque over it** — a
+      `ThemeToken::Background` rect at alpha 255 is the only thing between a
+      `Surface` pane and the map image behind it;
    3. the floor, two `Painter::rect`s, horizon then ground;
    4. the contact shadow, one `Painter::shadow`;
    5. **the car, five `Painter::mesh` calls in `Model::ranges`' file order** —
@@ -885,10 +892,13 @@ that settles it:
 
 ## Out of Scope
 
-- **No map, and nothing that claims to be one.** Gap **#1** stays a
-  `TASK_UI_DEMO_n` item per § *What this means for the demo's shape* item 1. The
-  pane's centre is a `ThemeToken::Background` rect and a hole the next task paints
-  over. **The road visualisation, the detected other cars (composite row 7), the
+- **No map, and nothing that claims to be one. Amended 2026-10-09.** Gap **#1**
+  stays a `TASK_UI_DEMO_n` item per § *What this means for the demo's shape* item 1,
+  and **`TASK_UI_DEMO_01` does not close it** — its map is a picture. The pane's
+  centre is a `ThemeToken::Background` rect over that picture and a hole the next
+  task paints over. **The pane does not crop, scale or clip the map image**, and
+  it draws no route and no marker on it: **there is nothing in the image's own
+  coordinates this task could address.** **The road visualisation, the detected other cars (composite row 7), the
   power meter (composite row 6), the lane markers (composite row 8) and the
   speed-limit sign are not built**, and § *Could not verify*'s lane-guidance row
   records that feature as *"Excluded from the demo's scope"* in any case. **The
@@ -935,7 +945,8 @@ that settles it:
   commands. **Zero new `unsafe` blocks**, because there is no GL, no FFI and no
   pointer in this change.
 - **Found in the tree and deliberately not fixed.** `TASK_UI_DEMO_01` and
-  `TASK_UI_DEMO_02` are absent from the repository, so this file's two rows for
+  `TASK_UI_DEMO_02` are specified and not built, so they are absent from the
+  repository, so this file's two rows for
   them state structural facts and an open question rather than citations. **That
   is recorded here rather than resolved**, because inventing what they deliver
   would be the one error in this file that no test could catch.

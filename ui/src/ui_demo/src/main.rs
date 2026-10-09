@@ -1999,23 +1999,33 @@ enum Page {
     /// The dialog and the toast host — amended 2026-10-04, when task 23 landed and
     /// the amendment that excluded the toast stopped having a reason.
     Overlays,
+    /// The infotainment screen this repository's direction describes, reached at
+    /// `--tab=demo`. The map is its base layer and the chrome goes over it; today
+    /// it holds the map image and the tab bar and nothing else, and
+    /// `TASK_UI_DEMO_02` through `TASK_UI_DEMO_05` fill it in, one panel each.
+    Demo,
 }
 
 impl Page {
     /// Every page, in the order the parent's requirement 1 names them.
     ///
     /// **One list, and the order is load-bearing three times**: it is the order the
-    /// `--help` text and the unknown-name message print the six names in, it is the
-    /// order task 24.3's tab bar puts the six buttons in, and **it is the order
+    /// `--help` text and the unknown-name message print the seven names in, it is the
+    /// order task 24.3's tab bar puts the seven buttons in, and **it is the order
     /// [`Demo::tabs`] pairs the buttons with their pages in**, so a button and the
     /// page it asks for cannot be a pair two lists disagree about.
-    const ALL: [Page; 6] = [
+    ///
+    /// **`Demo` is last**, after `Overlays`. The order is load-bearing three times
+    /// (`--help`, the unknown-name message, the tab bar's button order) and this
+    /// doc says so. Amended 2026-10-09 by `TASK_UI_DEMO_01`.
+    const ALL: [Page; 7] = [
         Page::Pads,
         Page::Text,
         Page::Input,
         Page::Controls,
         Page::Data,
         Page::Overlays,
+        Page::Demo,
     ];
 
     /// The page a run with no `--tab=` opens on.
@@ -2026,16 +2036,21 @@ impl Page {
     /// reason: it is the one page every capture taken for tasks 11 to 22
     /// contains, so a capture that used to need no argument is still
     /// reproducible.
+    ///
+    /// **The seventh page does not become the default.** `Page::DEFAULT` is the
+    /// page every capture taken for tasks 11 to 22 contains, so a capture that
+    /// used to need no argument is still reproducible. `TASK_UI_DEMO_01`,
+    /// 2026-10-09.
     const DEFAULT: Page = Page::Pads;
 
     /// Returns the page's lowercase name: the `--tab=` value, and the word the
     /// unknown-name message names the others beside.
     ///
-    /// **The only place the six names are written out.** [`Page::from_name`] is
+    /// **The only place the seven names are written out.** [`Page::from_name`] is
     /// derived from this through [`Page::ALL`], and everything printable is derived
     /// from [`Page::ALL`], so there is one spelling of each name in the file —
     /// the property that made the 2026-10-03 `GALLERY_SHORTCUTS` finding a defect
-    /// rather than a style note.
+    /// rather than a style note. Amended 2026-10-09 by `TASK_UI_DEMO_01`.
     #[must_use]
     fn name(self) -> &'static str {
         match self {
@@ -2045,6 +2060,7 @@ impl Page {
             Page::Controls => "controls",
             Page::Data => "data",
             Page::Overlays => "overlays",
+            Page::Demo => "demo",
         }
     }
 
@@ -2052,13 +2068,13 @@ impl Page {
     ///
     /// **Derived from [`Page::ALL`] and [`Page::name`] rather than spelled out**, so
     /// a name that cannot be parsed is a name that was never written down. That is
-    /// the whole of the property, and it is the reason this function is six lines
+    /// the whole of the property, and it is the reason this function is seven lines
     /// long instead of a `match`.
     ///
     /// **Case-sensitive, and deliberately.** `--tab=Data` is a name that is not one
-    /// of the six, and it is answered with the six that are — a fold would make
+    /// of the seven, and it is answered with the seven that are — a fold would make
     /// `--tab=PADS` and `--tab=pads` two spellings of one page, and every spelling
-    /// is a second list of the six.
+    /// is a second list of the seven.
     #[must_use]
     fn from_name(name: &str) -> Option<Page> {
         Self::ALL.into_iter().find(|page| page.name() == name)
@@ -2314,6 +2330,28 @@ const ASSET_DIR_VAR: &str = "ROADOS_ASSET_DIR";
 /// `Cover` crop a different amount from the one on screen.
 const ASSET_SIZE: (u32, u32) = (320, 192);
 
+/// The file name of the demo's map image, under whichever directory is found.
+const MAP_IMAGE_FILE: &str = "map_demo.png";
+
+/// Where the map image is, relative to a directory in the workspace's own layout.
+///
+/// The image is not in this repository: it is a local, operator-supplied asset.
+/// This path is the crate-relative default the demo searches. [`map_candidates`]
+/// also checks `img/map_demo.png` at every ancestor, because the operator's file
+/// may sit at the repository root's `img/` directory, which this relative path
+/// does not reach. See `stand_in_map_picture` for why a missing file does not stop
+/// the demo.
+const MAP_IMAGE_RELATIVE: &str = "src/ui_demo/assets/img/map_demo.png";
+
+/// The size `map_demo.png` is, which the stand-in is built at.
+///
+/// It is written down rather than read, for the same reason [`ASSET_SIZE`] is:
+/// a stand-in has to be the shape of the thing it stands in for. The map's node
+/// is `1280` by `WINDOW.height - CONTENT_TOP`, which is a different aspect from
+/// the image's `1359` by `970`; that difference is what makes `ImageFit::Cover`
+/// observable in `the_map_is_an_image_at_the_node_s_own_rect_with_the_cover_fit`.
+const MAP_IMAGE_SIZE: (u32, u32) = (1359, 970);
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // **Before the window exists, and that is the whole of why it is here.** A
     // `--tab=` that opened a window and then picked a page would put one frame of
@@ -2398,12 +2436,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `None` means the demo draws no car and says so, on stderr and in the
     // model-status line. There is no stand-in mesh — see `load_model`.
     let model = load_model(&mut renderer);
+    // The demo page's map image, loaded through the same mechanism as the
+    // gallery's image. A missing file is non-fatal: the page draws a transparent
+    // stand-in of the image's own shape — see `stand_in_map_picture`.
+    let map_picture = load_map_picture(&mut renderer);
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
     let mut demo = Demo::new(
         TextMetrics::new(fonts.clone(), fonts.default_family()),
         fonts,
         picture,
+        map_picture,
         model,
         page,
     )?;
@@ -2753,6 +2796,90 @@ fn stand_in_picture() -> Option<Picture> {
     let mut cache = TextureCache::new();
     let mut loader = |_: &Path| Ok(Pixels::transparent(ASSET_SIZE.0, ASSET_SIZE.1));
     let texture = cache.load(Path::new("stand-in"), &mut loader).ok()?;
+    let source = ImageSource::of(&cache, texture)?;
+    Some(Picture { texture, source })
+}
+
+/// Returns the paths the demo's map image may be at, in the order it looks.
+///
+/// The same walk as [`asset_candidates`] with a different relative path: a
+/// second search-path walker would be a second answer to one question.
+///
+/// **The operator's image may sit at the repository root's `img/` directory,**
+/// which the crate-relative [`MAP_IMAGE_RELATIVE`] does not reach, so the walk
+/// also checks an `img/<file>` path at every ancestor. Both paths are ignored by
+/// `.gitignore`; the code does not decide which is canonical.
+fn map_candidates() -> Vec<PathBuf> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    let mut candidates = asset_candidates_from(
+        &exe,
+        std::env::var_os(ASSET_DIR_VAR).as_deref(),
+        MAP_IMAGE_RELATIVE,
+    );
+    candidates.extend(
+        exe.ancestors()
+            .skip(1)
+            .map(|directory| directory.join("img").join(MAP_IMAGE_FILE)),
+    );
+    candidates
+}
+
+/// Loads the demo's map image and returns it, or `None` after saying why.
+///
+/// Beside [`load_picture`] and in its shape: the candidate list comes from the
+/// **same** [`asset_candidates_from`] helper with [`MAP_IMAGE_RELATIVE`] rather
+/// than [`ASSET_RELATIVE`], plus the repository-root `img/` path the operator's
+/// drop may sit at, the first candidate that `is_file()` wins, and on no
+/// candidate one `eprintln!` names every path it looked at through
+/// [`join_paths`] — the same message shape, the same helper, the same override.
+///
+/// **A missing map must not take the window down.** The demo page draws the tab
+/// bar over a transparent stand-in and says so on stderr, because an unexplained
+/// blank rectangle is what two of this repository's defects were mistaken for.
+fn load_map_picture(renderer: &mut Renderer) -> Option<Picture> {
+    let candidates = map_candidates();
+    let path = candidates.iter().find(|path| path.is_file());
+    let Some(path) = path else {
+        eprintln!(
+            "ui_demo: {MAP_IMAGE_FILE} not found; looked in {}",
+            join_paths(&candidates)
+        );
+        return None;
+    };
+    let texture = match renderer.load_texture(path) {
+        Ok(texture) => texture,
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
+            return None;
+        }
+    };
+    match ImageSource::of(renderer.textures(), texture) {
+        Some(source) => Some(Picture { texture, source }),
+        None => {
+            eprintln!(
+                "ui_demo: {}: the cache could not place it; standing in",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+/// Returns a transparent image the shape of [`MAP_IMAGE_SIZE`], to stand in for
+/// the map when it could not be loaded.
+///
+/// It is a [`TextureCache`] and a handle rather than a texture of its own,
+/// because that is all an [`Image`] needs: the stand-in is not drawn from a GPU
+/// texture, it is given to the same widget with the same geometry, so the `Cover`
+/// crop is computed from the source's own `1359` by `970` whether the file was
+/// found or not. The cache is dropped on the way out, which is safe because
+/// [`Image`] holds the handle and the window and asks nothing of the cache again.
+fn stand_in_map_picture() -> Option<Picture> {
+    let mut cache = TextureCache::new();
+    let mut loader = |_: &Path| Ok(Pixels::transparent(MAP_IMAGE_SIZE.0, MAP_IMAGE_SIZE.1));
+    let texture = cache.load(Path::new("stand-in-map"), &mut loader).ok()?;
     let source = ImageSource::of(&cache, texture)?;
     Some(Picture { texture, source })
 }
@@ -3499,6 +3626,13 @@ struct Demo {
     image_focused: Property<bool>,
     /// The label naming the image's current fit.
     image_fit_readout: DemoLabel,
+    /// The map image, on the `demo` page: the full-bleed base layer the chrome
+    /// and panels go over.
+    map: Image,
+    /// Whether the map image is the transparent stand-in, because the file was
+    /// not found or could not be loaded. Read only by tests, hence the allow.
+    #[allow(dead_code)]
+    map_is_stand_in: bool,
     /// The progress bar, at the foot of the band's left column.
     progress: Progress,
     /// Whether the progress bar is sliding rather than showing a value.
@@ -3794,6 +3928,7 @@ impl Demo {
         metrics: TextMetrics,
         fonts: FontSet,
         picture: Option<Picture>,
+        map_picture: Option<Picture>,
         model: Option<Model>,
         page: Page,
     ) -> Result<Self, &'static str> {
@@ -3812,6 +3947,39 @@ impl Demo {
             let background_prop = theme.property(ThemeToken::Background);
             Property::bind(move || background_prop.get())
         };
+
+        // The map, full-bleed below the tab bar. It is built early so its node
+        // can be attached to `root` immediately after `background`, which paints
+        // it over the window background and under the tab bar and every gallery
+        // widget. A missing file becomes a transparent stand-in of the image's
+        // own shape, so the page is never empty and the paint gate has commands
+        // to measure on every page.
+        let (map_picture, map_is_stand_in) = match map_picture {
+            Some(picture) => (picture, false),
+            None => (
+                stand_in_map_picture().ok_or("ui_demo: no map image to show")?,
+                true,
+            ),
+        };
+        let mut map = Image::new(&mut nodes, map_picture.texture, map_picture.source);
+        // A map is a background, not a card: square corners and a `Cover` fit so
+        // it fills the node's rect without letterboxing or stretching.
+        map.set_fit(ImageFit::Cover);
+        map.snap_to_state();
+        {
+            let map_node = nodes
+                .get_mut(map.handle())
+                .ok_or("ui_demo: the map node is missing")?;
+            map_node
+                .layout_mut()
+                .set_constraints(Constraints::tight(Size::new(
+                    WINDOW.width,
+                    WINDOW.height - CONTENT_TOP,
+                )));
+            map_node
+                .layout_mut()
+                .set_position(Some(Offset::new(0.0, CONTENT_TOP)));
+        }
 
         for &rest_token in &PAD_TOKENS {
             let node = node::create(
@@ -5202,7 +5370,13 @@ impl Demo {
         let root = Container::new(&mut nodes, LayoutMode::Absolute);
         for &child in &[
             background,
-            // **The tab bar between the background and everything else**, which is
+            // **The map between the background and the tab bar**, so it paints over
+            // the window background and under the bar and every gallery widget. The
+            // position in this list is paint order and nothing else: hit testing is
+            // governed by the controls layer, which covers the window and is the
+            // last child, so a tap never reaches any `root` child below it.
+            map.handle(),
+            // **The tab bar between the map and everything else**, which is
             // requirement 1's *"as the first child so it paints over the background
             // and under everything else"*: the background is attached first, so the
             // bar is painted over it, and the card, the text panel and the controls
@@ -5542,6 +5716,12 @@ impl Demo {
                 on(Page::Overlays, handle, false);
             }
         }
+        // `demo`: the map image. Not focusable — a map is not a control `Tab` can
+        // move focus to. This row is written out because `page_members` is the one
+        // list the paint gate, the hit-test gate and the focus gate all read; a
+        // dropped row gave *0 failed / 1814, with the text column drawn on the wrong
+        // page* and a dropped `placed_handles` row gave *0 failed / 1817*.
+        on(Page::Demo, map.handle(), false);
 
         let mut demo = Demo {
             nodes,
@@ -5599,6 +5779,8 @@ impl Demo {
             image_fit,
             image_focused,
             image_fit_readout,
+            map,
+            map_is_stand_in,
             progress,
             progress_indeterminate,
             progress_focused,
@@ -7618,6 +7800,7 @@ impl Demo {
             if handle == self.gauge.handle()
                 || handle == self.toggle.handle()
                 || handle == self.image.handle()
+                || handle == self.map.handle()
                 || handle == self.progress.handle()
                 || handle == self.keyboard.handle()
                 || handle == self.chart.handle()
@@ -7626,6 +7809,7 @@ impl Demo {
                     Some(rect) if handle == self.gauge.handle() => self.gauge.paint(rect.into()),
                     Some(rect) if handle == self.toggle.handle() => self.toggle.paint(rect.into()),
                     Some(rect) if handle == self.image.handle() => self.image.paint(rect.into()),
+                    Some(rect) if handle == self.map.handle() => self.map.paint(rect.into()),
                     Some(rect) if handle == self.progress.handle() => {
                         self.progress.paint(rect.into())
                     }
@@ -9527,7 +9711,7 @@ mod tests {
     /// **`Page::DEFAULT` is `pads`,** so the tests whose subject really is on the
     /// default page are unchanged and the ones that are not name theirs.
     fn demo_on(page: Page) -> Demo {
-        Demo::new(mono_metrics(), demo_fonts(), None, None, page).unwrap()
+        Demo::new(mono_metrics(), demo_fonts(), None, None, None, page).unwrap()
     }
 
     /// Lays the demo out once, the way the first frame does, so a test can ask
@@ -13997,7 +14181,7 @@ mod tests {
     /// whatever the demo happens to draw — which is the mistake this file has made
     /// three times and this one exists to catch.
     fn undrawn_leaf_exemptions(demo: &Demo) -> Vec<Handle> {
-        let mut exempt = vec![demo.background, demo.tab_bar().handle()];
+        let mut exempt = vec![demo.background, demo.map.handle(), demo.tab_bar().handle()];
         exempt.extend(demo.tab_focusables());
         if demo.page == Page::Overlays {
             exempt.push(demo.dialog.handle());
@@ -15192,7 +15376,7 @@ mod tests {
             ],
             texture: TextureId::new(7),
         };
-        let mut demo = Demo::new(mono_metrics(), demo_fonts(), None, Some(model), page)
+        let mut demo = Demo::new(mono_metrics(), demo_fonts(), None, None, Some(model), page)
             .expect("a demo holding a model");
         demo.frame(WINDOW, Duration::from_millis(16));
         demo
@@ -16348,12 +16532,12 @@ mod tests {
         Page::ALL.len() + index + 1
     }
 
-    /// Returns how many stops `page` contributes of its own, below the six buttons.
+    /// Returns how many stops `page` contributes of its own, below the tab buttons.
     fn page_focusables_count(page: Page) -> usize {
         match page {
             Page::Controls => 3,
             Page::Data | Page::Input => 1,
-            Page::Pads | Page::Text | Page::Overlays => 0,
+            Page::Pads | Page::Text | Page::Overlays | Page::Demo => 0,
         }
     }
 
@@ -16374,6 +16558,7 @@ mod tests {
             Page::Controls => "the controls tab button",
             Page::Data => "the data tab button",
             Page::Overlays => "the overlays tab button",
+            Page::Demo => "the demo tab button",
         }
     }
 
@@ -16403,7 +16588,7 @@ mod tests {
             Page::Data => vec![("image", demo.image.handle())],
             // One: the field.
             Page::Input => vec![("text field", demo.text_input.handle())],
-            Page::Pads | Page::Text | Page::Overlays => Vec::new(),
+            Page::Pads | Page::Text | Page::Overlays | Page::Demo => Vec::new(),
         }
     }
 
@@ -16429,7 +16614,8 @@ mod tests {
             | "the input tab button"
             | "the controls tab button"
             | "the data tab button"
-            | "the overlays tab button" => Page::ALL
+            | "the overlays tab button"
+            | "the demo tab button" => Page::ALL
                 .into_iter()
                 .zip(demo.tab_focusables())
                 .find(|(page, _)| tab_name(*page) == what)
@@ -16514,9 +16700,9 @@ mod tests {
                 .iter()
                 .map(|page| expected_focus_order(&demo, *page).len())
                 .sum::<usize>(),
-            Page::ALL.len() * 6 + 5,
-            "six tab buttons on each of the six pages, plus the same five focusables \
-             the demo had as one walk, spread over three of the six pages"
+            Page::ALL.len() * Page::ALL.len() + 5,
+            "seven tab buttons on each of the seven pages, plus the same five focusables \
+             the demo had as one walk, spread over three of the seven pages"
         );
     }
 
@@ -19479,7 +19665,11 @@ mod tests {
 
     #[test]
     fn a_page_is_reachable_by_its_own_name() {
-        assert_eq!(Page::ALL.len(), 6, "six pages, as requirement 1 names them");
+        assert_eq!(
+            Page::ALL.len(),
+            7,
+            "seven pages, as requirement 1 names them"
+        );
         for page in Page::ALL {
             assert_eq!(
                 Page::from_name(page.name()),
@@ -22276,5 +22466,131 @@ mod tests {
                 );
             }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // TASK_UI_DEMO_01: the seventh page and its map image.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn the_seventh_page_is_named_demo_and_the_default_did_not_move() {
+        assert_eq!(Page::DEFAULT, Page::Pads);
+        assert_eq!(Page::ALL.len(), 7);
+        assert_eq!(Page::ALL[6], Page::Demo);
+        assert_eq!(Page::Demo.name(), "demo");
+    }
+
+    #[test]
+    fn the_seventh_tab_button_lays_out_inside_the_window() {
+        let demo = laid_out();
+        let last_tab = demo
+            .tabs
+            .last()
+            .expect("the bar has one button per page")
+            .button
+            .handle();
+        let rect = demo
+            .node_rect(last_tab)
+            .expect("the last tab button is laid out");
+        assert!(
+            rect.x + rect.width <= WINDOW.width,
+            "the seventh button's right edge at {} is inside the window width {}",
+            rect.x + rect.width,
+            WINDOW.width
+        );
+    }
+
+    #[test]
+    fn the_map_node_is_full_bleed_below_the_tab_bar() {
+        let demo = laid_out_on(Page::Demo);
+        let rect = demo
+            .node_rect(demo.map.handle())
+            .expect("the map node is laid out");
+        assert_eq!(rect.x, 0.0);
+        assert_eq!(rect.y, CONTENT_TOP);
+        assert_eq!(rect.width, WINDOW.width);
+        assert_eq!(rect.height, WINDOW.height - CONTENT_TOP);
+    }
+
+    #[test]
+    fn the_demo_page_draws_the_map_and_the_gallery_pages_do_not() {
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+            let commands = demo.commands_at(demo.map.handle());
+            if page == Page::Demo {
+                assert_eq!(
+                    commands.len(),
+                    1,
+                    "the demo page records exactly one command for the map"
+                );
+            } else {
+                assert!(
+                    commands.is_empty(),
+                    "{page:?}: the map records no commands when the demo page is not showing"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_map_is_an_image_at_the_node_s_own_rect_with_the_cover_fit() {
+        let demo = laid_out_on(Page::Demo);
+        // The test fixture has no map file, so the stand-in is what gives the node
+        // a source of the operator's image's own shape. The field is recorded to
+        // make that fact reachable, and this is the test that reaches it.
+        assert!(
+            demo.map_is_stand_in,
+            "the fixture uses the stand-in map picture"
+        );
+        assert_eq!(demo.map.fit(), ImageFit::Cover);
+
+        let rect = demo
+            .node_rect(demo.map.handle())
+            .expect("the map node is laid out");
+        let commands = demo.commands_at(demo.map.handle());
+        assert_eq!(commands.len(), 1, "the map records exactly one command");
+        let DrawCommand::Image {
+            rect: drawn_rect,
+            uv,
+            ..
+        } = &commands[0]
+        else {
+            panic!("the map's command is an Image, got {:?}", commands[0]);
+        };
+        assert_eq!(
+            *drawn_rect, rect,
+            "the image is drawn at the node's whole laid-out rect"
+        );
+        assert!(
+            uv.u0 > 0.0 && uv.u1 < 1.0,
+            "Cover on a source wider than its node crops the sides: uv = {uv:?}"
+        );
+        assert!(
+            (uv.v0 - 0.0).abs() < f32::EPSILON && (uv.v1 - 1.0).abs() < f32::EPSILON,
+            "Cover keeps the source's whole height: uv = {uv:?}"
+        );
+    }
+
+    #[test]
+    fn the_map_node_is_not_in_placed_handles_and_the_two_counts_did_not_move() {
+        let demo = laid_out_on(Page::Demo);
+        let placed = demo.placed_handles();
+        let expected_len = expected_placed_rect_names(demo.model_status.is_some()).len();
+        assert_eq!(
+            placed.len(),
+            expected_len,
+            "the placed_handles count did not move"
+        );
+        assert_eq!(
+            expected_len,
+            if demo.model_status.is_some() { 30 } else { 29 },
+            "the written-out expected count is still 29 or 30"
+        );
+        assert!(
+            !placed
+                .iter()
+                .any(|(_, handle)| *handle == demo.map.handle()),
+            "the map's full-bleed rect is not in placed_handles"
+        );
     }
 }

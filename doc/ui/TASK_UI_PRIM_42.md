@@ -35,7 +35,7 @@ read `ui/src/ui_demo/src/main.rs`.
 | **No navigation concept exists at all.** Zero identifiers `Screen`, `Route`, `Router`, `Navigator`, `NavStack`, `breadcrumb` anywhere in `ui_core/src`. | `ui_core`'s `lib.rs` publishes exactly `animation, arena, batch, font, input, layout, node, paint, property, render, texture, theme, widgets` |
 | **`LayoutMode::Stack` is a layout mode, not a navigation stack.** Its doc reads *"Children overlap, all placed at the parent's origin"*; `arrange_stack` places each child at the parent's origin and **ignores `set_position`**, which is why task 24.2 made the gallery's root `LayoutMode::Absolute`. | `ui_core/src/layout.rs`, `LayoutMode`, `arrange_stack` |
 | **A `Page` already exists and is a keyboard concept.** `pub enum Page { Letters, Symbols }` — the on-screen keyboard's two-page toggle, with `Default`, `Page::toggled`, a `label()` and its own tests. `KeyAction::PageUp` / `PageDown` are its callers' side of it. | `ui_core/src/widgets/keyboard.rs` |
-| **The demo has a `Page` too, and the two already coexist.** `enum Page { Pads, Text, Input, Controls, Data, Overlays }` with `const ALL: [Page; 6]`, `Page::name` (*"The only place the six names are written out"*), `Page::from_name`, `Page::DEFAULT`. A fixed-size array, so **the type carries the count**. | `ui/src/ui_demo/src/main.rs` |
+| **The demo has a `Page` too, and the two already coexist.** **Amended 2026-10-09 by `TASK_UI_DEMO_01`, which added `Page::Demo`** — `enum Page { Pads, Text, Input, Controls, Data, Overlays, Demo }` with `const ALL: [Page; 7]`, `Page::name` (*"The only place the seven names are written out"*), `Page::from_name`, `Page::DEFAULT`. A fixed-size array, so **the type carries the count**. | `ui/src/ui_demo/src/main.rs` |
 | **24.1's three gates are demo-local**, over one `Vec<PageMember>`: `Demo::shows`, `Demo::on_show`, `Demo::is_page_content` (paint and hit test), `Demo::focusables` (focus), `Demo::sync_page_visibility`, `Demo::empty_off_page_paint`. **A row is one node and one page**, so a subtree cannot be expressed: `text_panel` and the seven labels under it are eight rows. | `ui/src/ui_demo/src/main.rs` |
 | **`hit_test` already skips an invisible node with its whole subtree**, top-down, children in reverse, `visible` read from `LayoutState`. **This is free: the hit-test gate needs one write per screen *root*, not one per member.** | `ui_core/src/input.rs`, `hit_test_from` |
 | **`Focus` does *not* skip one.** `Focus::collect_focusable` walks the tree and pushes any handle in `focusable`, with **no `visible` test at all**; `Focus::current` returns whatever `self.current` holds. **So the focus gate does not exist in the crate.** | `ui_core/src/input.rs`, `collect_focusable`, `current` |
@@ -66,9 +66,9 @@ that makes every other decision follow.
    is therefore its § *Testing*: every gate gets a named test, and every named
    test names the mutation it kills.**
 2. **A screen is a subtree, and that is strictly less to get wrong than a table
-   of rows.** 24.1 needs **~30 rows** to express six pages, because a row carries
-   **one page per row** and so cannot say "these nine nodes are one thing". A
-   subtree says it with **six roots**, and then:
+   of rows.** 24.1 needs **~30 rows** to express six pages — **seven as of 2026-10-09**,
+   because a row carries **one page per row** and so cannot say "these nine
+   nodes are one thing". A subtree says it with **seven roots**, and then:
    - **the hit-test gate is free** — `hit_test_from` already skips an invisible
      node *with its whole subtree*, so one `set_visible` per screen root gates
      every member;
@@ -134,7 +134,7 @@ Four reasons, and the fourth settles it.
    the navigation value is read as `screens.current_name()`. Neither is imported
    bare.
 4. **The collision already exists in this repository and does no harm.** Today
-   `ui/src/ui_demo/src/main.rs` has a private `enum Page` with six variants **and**
+   `ui/src/ui_demo/src/main.rs` has a private `enum Page` with seven variants **and**
    `ui_core::widgets::keyboard` has a `pub enum Page` with two. Nothing is
    ambiguous, nothing is mis-resolved, and the demo drives its keyboard by key
    press through `offer_to` rather than by naming either type. **That is the
@@ -153,7 +153,7 @@ held to, and the rule is *two documents each claiming ownership of one
 definition*. `Screens` is the only thing that knows what "the
 screen before this one" is, because it knows the set. The demo's
 `pending_page: Property<Option<Page>>` is a **pending request, not a history**,
-and the two must never be confused: `pending_page` is written six times and read
+and the two must never be confused: `pending_page` is written once per page and read
 once, and `Screens` owns a `Vec<ScreenId>` that no property touches.
 
 - **`switch` clears the history and records the outgoing screen; `push` appends.**
@@ -227,12 +227,14 @@ a cut, and the cut is already correct in this pipeline.**
 
 **Decision: `Page` does not move into `ui_core`, is not renamed, and is not
 replaced. `Page::ALL`, `Page::name`, `Page::from_name` and `Page::DEFAULT` are
-untouched. What changes is that the demo's six page *subtrees* are registered
-with `Screens` under `Page::name()`, so `Page::name` stays the only place the six
+untouched. What changes is that the demo's page *subtrees* — **seven as of
+2026-10-09** — are registered with `Screens` under `Page::name()`, so
+`Page::name` stays the only place the seven
 names are written out.**
 
-- **It stays in `ui_demo` because it is the CLI's vocabulary.** A six-variant
-  `Page` with six lowercase spellings is what `--tab=`, `--help` and the
+- **It stays in `ui_demo` because it is the CLI's vocabulary.** A seven-variant
+  `Page` **— seven since 2026-10-09** — with seven lowercase spellings is what
+  `--tab=`, `--help` and the
   unknown-name message resolve against — `DEMO_APPLICATION.md` § *What a seventh
   page costs* enumerates all three, and `TASK_UI_PRIM_24.md` was written so that
   adding one page touches a known list. **Moving it into `ui_core` would make the
@@ -245,7 +247,7 @@ names are written out.**
 - **The demo keeps one mirror, and a named test says the mirror agrees.**
   `Demo::page: Page` stays, is written **only** by `show_page`, and
   `the_demo_page_field_and_the_librarys_current_screen_never_disagree` walks all
-  six pages and both switch paths. **Two representations of one fact is a
+  seven pages and both switch paths. **Two representations of one fact is a
   hazard and the mitigation is a test**, which is what this
   repository already does for `Demo::frame_clips` (*"One function, used by the
   loop and by the tests, closes that"*). The alternative — rewriting ~30 test
@@ -283,7 +285,7 @@ had to guess.** On page `overlays` the only visible host is the overlays host, s
 with hosts attached after `tab_bar` the reverse hit-test walk reaches that host
 before the bar — **and a tap on a bar button would come back with the chain
 `[overlays host, root]` instead of `[button, …, bar, root]`.** The bar would look
-perfect and stop responding, **on exactly one of the six pages**, and no rect test
+perfect and stop responding, **on exactly one of the seven pages**, and no rect test
 and no capture would see it. Ordering cannot fix it: `hit_test_from` reads the
 child list backwards and `Focus::focus_order` reads it forwards, and the entry
 already records that those two cannot both be satisfied by moving anything.
@@ -310,7 +312,7 @@ of the caller's shape — the same reason `Screens::add` does not attach.
 
 ### The demo's tree, and the one part of the migration that is not mechanical
 
-**Five of the six pages regroup by moving nodes. The sixth does not, and the reason
+**Six of the seven pages regroup by moving nodes. The seventh does not, and the reason
 is the demo's two-root structure.** 24.1 registers `Page::Overlays` against
 **three separate roots**: `dialog.handle()` — *"The dialog's node has no parent,
 because a dialog is an overlay and the widget says so in its own tests"* —
@@ -384,7 +386,15 @@ mechanism with no consumer — that is the failure § *Corrections to the second
 table* was written about, and the row's own sentence about 24.1 is what it looks
 like. **42.2 closes the row.**
 
-## Sub-task 42.2 — the demo's six pages become six subtrees, and gap #3 closes
+## Sub-task 42.2 — the demo's pages become subtrees, and gap #3 closes
+
+> **Amended 2026-10-09 by `TASK_UI_DEMO_01`, which added a seventh page.** Every
+> count of the demo's **pages**, **page hosts**, **tab buttons** and **page
+> names** in this sub-task is **seven**. **The phrase *six gallery pages* still
+> means six** — the gallery is unchanged and `demo` is the seventh page beside
+> it. **The test names that carry a count in the name are renamed** to match,
+> because a task file written against six pages and implemented against seven
+> cannot write them as named.
 
 **Three files, two components.** Files: `ui/src/ui_demo/src/main.rs`,
 `doc/ui/DEMO_APPLICATION.md`, `doc/ui/IMPLEMENTATION_STATE.md`. Components: the
@@ -396,7 +406,7 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
 `Demo::focusables`, `Demo::sync_page_visibility` and `Demo::empty_off_page_paint`.
 **Six functions and one table go, and what replaces them is one predicate
 (`Screens::shows`), one call (`Screens::sync`) and one list (`drawn_handles`).**
-`Demo` gains a `screens: Screens` field and six screen containers.
+`Demo` gains a `screens: Screens` field and seven screen containers.
 
 ## Requirements
 
@@ -678,8 +688,8 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
 
 ### Sub-task 42.2
 
-13. **`Demo` gains a `screens: Screens` field, and six screen containers.**
-    `Demo::new` builds them after the six panels exist and **before the root's
+13. **`Demo` gains a `screens: Screens` field, and seven screen containers.**
+    `Demo::new` builds them after the seven panels exist and **before the root's
     child list is assembled**:
 
     ```rust
@@ -733,16 +743,16 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
       moves each page's top-level nodes into it with `node::detach` then
       `node::attach` — **`attach` refuses a child that already has a parent, so
       the order of those two calls is not interchangeable.**
-    - **The root's child list is `background, tab_bar, <the six hosts>, controls`**
+    - **The root's child list is `background, tab_bar, <the seven hosts>, controls`**
       — `text_panel` moves into the `text` host and `controls` keeps only the
       frame-rate readout, which is requirement 8's *"Keep fps label"* and the
       operator's instruction. **`tab_bar` is second for `Focus::focus_order`,
       which walks children forward**, and
-      `tab_walks_the_six_buttons_before_the_pages_own_controls` pins that.
+      `tab_walks_the_seven_buttons_before_the_pages_own_controls` pins that.
       **Its position relative to the hosts no longer matters for hit testing**
       because of `hits(false)`, **and the tests say both halves**: that one pins
       the focus order, and `the_tab_bar_is_still_first_in_the_route_chain_for_each
-      _of_its_six_buttons` pins the route on **all six pages**, not on one.
+      _of_its_seven_buttons` pins the route on **all seven pages**, not on one.
     - **`text_panel`'s own child, `text_column`, stays where it is**, under
       `text_panel`. Only top-level nodes move.
     - **The `overlays` host also takes `dialog.handle()` and `toasts.handle()`**, in
@@ -799,11 +809,11 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
     `developer.md` § *Code quality* refuses.** **No dead code and no
     `#[allow(dead_code)]`.**
 
-18. **`Demo::focus_navigation` marks the six tab buttons and the five controls
+18. **`Demo::focus_navigation` marks the seven tab buttons and the five controls
     focusable, and stops there.** The per-page focusable flag is gone because
     **`Focus` now skips a hidden subtree**, so a node inside another page is not
     in the order and needs no flag to keep it out. `Demo::tab_focusables` stays —
-    the six buttons are on every page and `Screens` cannot put them anywhere —
+    the seven buttons are on every page and `Screens` cannot put them anywhere —
     and `tests::always_painted_handles` stays as the written-out list of the
     twelve nodes that are in no screen, which is now **asserted rather than
     described** by `the_always_painted_set_is_in_no_screen`.
@@ -831,7 +841,7 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
 
     - **`TASK_UI_PRIM_42` closes the row's claim about `ui_core`**:
       `ui_core::nav::Screens` is a table of named screens with a back stack and
-      four gates, and the demo's six pages are six subtrees registered in it.
+      four gates, and the demo's seven pages are seven subtrees registered in it.
     - **What is delivered is a screen stack and a visibility gate, and the row's
       third noun — *"or transition system"* — is NOT delivered.** Gap **#8** and
       gap **L2** stay **Critical** and keep every entry in their `Blocks` column,
@@ -853,10 +863,10 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
       while three rows are amended is a table that is wrong.
 
 22. **`doc/ui/IMPLEMENTATION_STATE.md` gains one entry** carrying: the
-    regrouping and the six hosts; **`Demo::page` kept as a vocabulary mirror and
+    regrouping and the seven hosts; **`Demo::page` kept as a vocabulary mirror and
     the named test that pins it**; **the seven deleted items by name**; the
     child-order constraint and the failure mode it answers; the
-    `PageMember` → `Screens` completeness tests; **the six pages' frame rates**;
+    `PageMember` → `Screens` completeness tests; **the seven pages' frame rates**;
     and **the honest limits** — the demo still has **no transition**, the
     renderer still has **no per-node visibility test**, and the demo's `Page` is
     **still not a library mechanism**.
@@ -870,7 +880,7 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
       not, this test says so rather than the capture.
     - `no_two_placed_rects_overlap`, `assert_placed_handles_is_complete`,
       `placed_handles`, `page_rects`
-    - `tab_walks_the_six_buttons_before_the_pages_own_controls` — now also
+    - `tab_walks_the_seven_buttons_before_the_pages_own_controls` — now also
       evidence that `Focus`'s gate holds in the demo.
     - `always_painted_handles` (the helper), `nothing_the_demo_places_reaches_into_the_strip`
 
@@ -878,12 +888,12 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
 
     - `a_page_switch_hides_the_five_other_screens_and_shows_this_one` — **all
       four gates on one switch**, read through the crate's own mechanisms.
-    - **`the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its_six_buttons`**
-      — `input::route(&nodes, root, &tap)` printed for a press on each of the six,
-      **on each of the six pages** rather than on one, asserting the button is on
+    - **`the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its_seven_buttons`**
+      — `input::route(&nodes, root, &tap)` printed for a press on each of the seven,
+      **on each of the seven pages** rather than on one, asserting the button is on
       the chain. **This is the test a reviewer should break first**, and it is the
       two-line diagnosis that failure prescribes. **Running
-      it on all six pages is the point**: the failure it guards against appears on
+      it on all seven pages is the point**: the failure it guards against appears on
       **one** page, the one whose host is the only visible one.
     - `every_pages_clickable_controls_are_still_in_the_route_chain` — the three
       pads, the slider, the toggle and the text field, each offered a press and
@@ -902,7 +912,7 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
     - `no_node_of_another_page_is_ever_drawn`
     - `the_demo_page_field_and_the_librarys_current_screen_never_disagree`
     - `no_screen_host_is_a_hit_test_target` — the `hits(false)` gate, on the
-      demo's own six hosts: each is invisible to `hit_test_from` as a target while
+      demo's own seven hosts: each is invisible to `hit_test_from` as a target while
       its children are reached.
 
     **Replaced, by name, and recorded as replacements rather than deletions:**
@@ -919,14 +929,14 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
     touches.**
 
 24. **The suite, the capture and the frame rate are all produced.** From `ui/`:
-    the six commands of requirement 12. Then **the six-page before/after
+    the seven commands of requirement 12. Then **the seven-page before/after
     capture**, with the commands of `IMPLEMENTATION_STATE.md`
     § *Verifying a change that draws — the capture method* verbatim: window id
     **re-read at the time of each capture** with `xwininfo -root -tree` (a root
     capture, and `ffmpeg x11grab`, return black for a GL window), `pgrep -a -x
     ui_demo` in the same call as each `magick import -window <id>`, then `magick
     compare -metric AE before.png after.png null:` per page. Then **the frame rate
-    on all six pages**.
+    on all seven pages**.
 
 ## Testing
 
@@ -966,9 +976,9 @@ predicate beside it.
 | `a_pop_with_nothing_on_the_stack_changes_nothing_and_leaves_the_flags_alone` | `pop` at the root wrapping the index and hiding a screen that was not on show. |
 | `a_name_registered_twice_is_refused_and_the_table_does_not_grow` | `add` appending a duplicate — **the same mutation class as `Demo::new`'s dropped row, one level down.** |
 | `a_name_that_was_never_registered_changes_nothing_current_history_or_flag` | `show` returning `true` for a name it did not resolve, which is 24.1's recorded *"a repeated `--tab=` silently discards an unknown name"* defect reappearing one layer down. |
-| **`the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its_six_buttons`** | **Dropping one host's `set_hits(false)`**, or moving a host after `tab_bar` without the flag — reproduces the 2026-10-05 failure: the bar becomes unclickable **on the one page whose host is the only visible one**, six handlers are wired, and nothing else in the suite sees it. **The mutation appears on `overlays` alone**, which is why the test loops the six pages |
+| **`the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its_seven_buttons`** | **Dropping one host's `set_hits(false)`**, or moving a host after `tab_bar` without the flag — reproduces the 2026-10-05 failure: the bar becomes unclickable **on the one page whose host is the only visible one**, seven handlers are wired, and nothing else in the suite sees it. **The mutation appears on `overlays` alone**, which is why the test loops all seven pages |
 | `every_pages_clickable_controls_are_still_in_the_route_chain` | The same move's other half: a control inside a host that a full-window sibling shadows. |
-| `no_screen_host_is_a_hit_test_target` | One host left at `hits(true)`. **Checked on the demo's six hosts and not on a fixture**, because the defect is about *these* boxes covering *this* window. |
+| `no_screen_host_is_a_hit_test_target` | One host left at `hits(true)`. **Checked on the demo's seven hosts and not on a fixture**, because the defect is about *these* boxes covering *this* window. |
 | `every_dialog_button_is_in_the_route_chain_without_the_manual_fallback` | The dialog left outside the tree, **or** the manual `chain.push(self.dialog.handle())` deleted while the dialog is still outside it — which would make the dialog's buttons unreachable and is the failure mode this test exists to gate the deletion with |
 | `the_dialog_is_drawn_above_the_two_toasts` | Swapping the overlays host's children to `[toasts, dialog]`, which would put the two notifications **over** the modal scrim. **A z-order change with no error and no failing rect assertion** — the capture is the second check and the named test is the first |
 | `every_page_is_a_member_of_exactly_one_screen` / `no_node_is_a_member_of_two_screens` | **24.1's surviving mutation**, reproduced on the table this task replaces. **Split into two tests so each name is about what it catches.** |
@@ -1115,14 +1125,14 @@ predicate beside it.
       a later transition would add: `Screens::tick` reading `is_dirty()` and
       `sync` becoming per-frame — **no signature change and no new type**
 
-- [ ] **The demo's `Page` stays, and the six names still have one home.**
+- [ ] **The demo's `Page` stays, and the seven names still have one home.**
       `git diff --stat` shows **`enum Page`, `Page::ALL`, `Page::name`,
       `Page::from_name` and `Page::DEFAULT` unchanged** — including
       `const ALL: [Page; 6]`, whose type still carries the count, because
       `DEMO_APPLICATION.md` § *What a seventh page costs* enumerates everything a
       seventh page touches and **this task must not touch any of it**.
-      `Page::name`'s doc still reads *"The only place the six names are written
-      out"*, **and `grep -n 'page.name()' ui/src/ui_demo/src/main.rs` shows the six
+      `Page::name`'s doc still reads *"The only place the seven names are written
+      out"*, **and `grep -n 'page.name()' ui/src/ui_demo/src/main.rs` shows the seven
       `Screens::add` calls reading it** — so the registry and the CLI resolve
       through one list. **`Screens` gains no `Page`, and `ui_core` gains no string
       registry for one consumer.** `the_demo_page_field_and_the_librarys_current_screen_never_disagree`
@@ -1134,9 +1144,9 @@ predicate beside it.
       is_page_content\|fn on_show\|fn focusables' ui/src/ui_demo/src/main.rs`
       returns **0**, `grep -c 'allow(dead_code)' ui/src/ui_demo/src/main.rs` returns
       **0**, and `cargo clippy --all-targets --all-features -- -D warnings` is
-      clean. **What replaced them is named**: `Screens::shows` at the six
+      clean. **What replaced them is named**: `Screens::shows` at the seven
       `*_at` predicates, `Screens::sync` in `show_page`, `LayoutState::hits` on the
-      six hosts, and `Demo::drawn_handles` in both walks.
+      seven hosts, and `Demo::drawn_handles` in both walks.
       **Ten items are deleted in total — the seven above plus
       `route_input_event`'s trailing `chain.push(self.dialog.handle())`, its
       `Dialog::action_rect` branch, and `Demo::frame`'s separate
@@ -1156,22 +1166,22 @@ predicate beside it.
 
 - [ ] **The tab bar and every page's own controls are still in the route chain, on
       every page.** **`the_tab_bar_is_still_first_in_the_route_chain_for_each_of_its
-      _six_buttons`** calls `input::route(&nodes, root, &tap)` for a press on each
-      of the six **on each of the six pages** and asserts the button is on the
+      _seven_buttons`** calls `input::route(&nodes, root, &tap)` for a press on each
+      of the seven **on each of the seven pages** and asserts the button is on the
       chain — the two-line diagnosis that failure
       prescribes, **and the test a reviewer should break first.**
-      **The six-page loop is not thoroughness, it is the whole test**: dropping one
+      **The seven-page loop is not thoroughness, it is the whole test**: dropping one
       host's `set_hits(false)` shadows the bar on **`overlays` alone**, because that
       is the only page whose host is visible, and a bar that looks perfect and stops
-      responding on one page of six is invisible to every other check in this file.
+      responding on one page of seven is invisible to every other check in this file.
       `every_pages_clickable_controls_are_still_in_the_route_chain` does the same
       for the three pads, the slider, the toggle and the text field, and
-      `no_screen_host_is_a_hit_test_target` asserts the flag on **the demo's six
+      `no_screen_host_is_a_hit_test_target` asserts the flag on **the demo's seven
       hosts rather than on a fixture**, because the defect is about *these* boxes
       covering *this* window.
-      **And `tab_walks_the_six_buttons_before_the_pages_own_controls` keeps its
+      **And `tab_walks_the_seven_buttons_before_the_pages_own_controls` keeps its
       name and every assertion**, which pins the other reader: `Focus::focus_order`
-      walks children **forward**, so `tab_bar` is second and the six buttons lead
+      walks children **forward**, so `tab_bar` is second and the seven buttons lead
       the order
 
 - [ ] **The `overlays` page's three former roots are one subtree, and the recorded
@@ -1212,15 +1222,17 @@ predicate beside it.
       `sdl3 0.20`, `glow 0.18` and `freetype-rs 0.38`, **and `Screens` needs
       none**: a `Vec`, an `Option`, a `bool` and `&'static str` are the whole of it
 
-- [ ] **The six gallery pages are pixel-identical outside `y ≥ 680`, and the
-      mechanism is stated rather than hoped for.** `Page::ALL`'s six names, release
+- [ ] **The gallery pages are pixel-identical outside `y ≥ 680`, and the
+      mechanism is stated rather than hoped for.** `Page::ALL`'s seven names —
+      **six gallery pages plus `demo`, which is the seventh and is captured like
+      the rest** — release
       build, captured **before and after** with the commands of
       `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
       method* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab`, return black
       for a GL window), `pgrep -a -x ui_demo` in the same call as each
       `magick import -window <id>`, then `magick compare -metric AE before.png
-      after.png null:` per page. **On all six pages the criterion is AE 0 outside
+      after.png null:` per page. **On all seven pages the criterion is AE 0 outside
       `y ≥ 680`**, every differing pixel inside the frame-rate readout's band,
       which `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it
       found* records as the one thing two captures of an unchanged frame differ in.
@@ -1247,9 +1259,9 @@ predicate beside it.
          `no_two_placed_rects_overlap`, `assert_placed_handles_is_complete`,
          `placed_handles` and `page_rects`. **Criterion 1's proof is a test, not
          the capture**, which is the point: a capture cannot tell a rect that moved
-         by a pixel on all six pages from one that did not, and
+         by a pixel on all seven pages from one that did not, and
          `every_page_places_every_rect_where_the_gallery_placed_it` compares the
-         six pages with each other, so a change common to all six passes it.
+         seven pages with each other, so a change common to all seven passes it.
       4. **What did change is invisible to a capture by construction**, because it
          is entirely about which nodes are *offered input*: which are hit, which
          `Tab` stops on, and which the paint and draw walks iterate. **A screen
@@ -1257,11 +1269,11 @@ predicate beside it.
          the criterion is the strong one rather than a restatement with a wider
          band.
 
-- [ ] **The frame rate is measured on all six pages and reported**, with the
+- [ ] **The frame rate is measured on all seven pages and reported**, with the
       script's own line pasted rather than the number expected:
       `.ai/tools/fps-check.sh 10 55` on the default page, and
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of the
-      six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
+      seven with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
       name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records
       as the reason task 24.2's criterion 6 was amended rather than met by the
@@ -1373,7 +1385,7 @@ predicate beside it.
   behind it either** — `Button` carries `hovered`, `pressed`, `disabled`,
   `focused` and `activatable` **and no `selected`**, so the active tab's
   `background`/`foreground` swap is the demo's. **This task hands 43 a
-  `Screens::show` to call and nothing else**, and 43's six buttons will read the
+  `Screens::show` to call and nothing else**, and 43's seven buttons will read the
   active screen from `Screens::current_name()`. **The bar's geometry, order and
   palette are untouched, and so is `Demo::tabs`**
 
@@ -1462,7 +1474,7 @@ predicate beside it.
 - **No acceptance criterion is waived, and none asks for an instrument this host
   cannot produce.** No criterion here requires a pointer event, a GL readback, a
   display, a network, a filesystem or the wall clock; the two things a capture
-  cannot see — a rect that moved on all six pages, and a frame-cost regression —
+  cannot see — a rect that moved on all seven pages, and a frame-cost regression —
   are covered by `every_page_places_every_rect_where_the_gallery_placed_it` and by
   `fps-check.sh` respectively, which is the pairing
   *a still screenshot of a 4 fps application looks exactly like a 60 fps one*

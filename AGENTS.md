@@ -112,6 +112,21 @@ opencode. The Task tool provides two subagent types:
 - `explore` — read-only facts about this repository
 - `general` — anything outside it: web, upstream sources, licences, standards
 
+### Skill: ponytail
+
+`~/.config/opencode/skills/ponytail/SKILL.md` (global, MIT), loaded with the
+**skill** tool on every coding task. It is active by default: smallest change
+that fully solves the task, one read to understand the answer.
+`/ponytail lite|full|ultra` switches the level, "stop ponytail" ends it for
+the session.
+
+It never overrides anything here — `.ai/agents/developer.md` and the workflows
+own the gates, and the skill's own "Never cut" list (trust-boundary validation,
+data-loss error handling, security, accessibility, real-hardware calibration)
+overrides its brevity rule. Depths it cannot cut: "No test that needs a
+display, a network, a filesystem or the wall clock", and the operator-gated
+dependency and commit decisions.
+
 ### Agent selection
 
 Use the relevant instructions from `.ai/agents/` according to the task:
@@ -141,3 +156,8 @@ contents; read this file again when they land.
 - `.ai/agents/architect.md` — architecture decisions
 
 Skills provide specialized instructions and workflows for specific tasks.
+
+## General rules
+
+- Whenever you create documentation, answers, reviews: be compact, precise, use minimum text to explain the thing, do not repeat yourself. Remember - less is more.
+- Don't you have knowledge while you just made assumptions. If you're not certain about something - point that out.

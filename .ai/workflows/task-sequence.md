@@ -79,15 +79,36 @@ prevent.
 Each sequence's `IMPLEMENTATION_STATE.md` records status, decisions, waivers,
 blockers and history for it, so a fresh session can resume without re-deriving
 it. Today there are two — `doc/ui/IMPLEMENTATION_STATE.md` and
-`doc/platform/IMPLEMENTATION_STATE.md` — and this workflow applies to both. A
-state file is **not** the source of the workflow, and it is not a source of
-evidence. A sidecar or state file that contradicts its artifact is wrong and gets
-fixed — see `AGENTS.md` on working context.
+`doc/platform/IMPLEMENTATION_STATE.md` — and this workflow applies to both. **The
+third is named but does not exist yet**: `doc/ui/IMPLEMENTATION_STATE_DEMO.md` is
+the `DEMO` sequence's state file, **named here on 2026-10-09 when § *Scope was
+extended to `doc/ui/TASK_UI_DEMO_*.md`, and created by
+`doc/ui/TASK_UI_DEMO_01.md` requirement 7 when that task is implemented.** It is
+listed as the sequence's state file rather than omitted, because a workflow that
+names a sequence and no state file for it has the gap this section exists to
+close. A state file is **not** the source of the workflow, and it is not a source
+of evidence. A sidecar or state file that contradicts its artifact is wrong and
+gets fixed — see `AGENTS.md` on working context.
+
+**`doc/ui/backlog/` is not a sequence and is not covered by this workflow.** A
+task file there is superseded: it has no state-file row, no review and no
+operator-commit gate, because nothing in it is being built. What moving a file
+there means is recorded in that directory's own `README.md`.
 
 ## Scope
 
-Applies to a task-file sequence: `doc/ui/TASK_UI_PRIM_*.md` and
-`doc/platform/TASK_CROSSPLATFORM_*.md`. The `CROSSPLATFORM` sequence was created
+Applies to a task-file sequence: `doc/ui/TASK_UI_PRIM_*.md`,
+`doc/ui/TASK_UI_DEMO_*.md` and `doc/platform/TASK_CROSSPLATFORM_*.md`.
+
+The `DEMO` sequence is `doc/ui/TASK_UI_DEMO_*.md` — the seven-page demo
+application — with `doc/ui/IMPLEMENTATION_STATE_DEMO.md` as its state file.
+**It was added to this list on 2026-10-09 by `TASK_UI_DEMO_01`**, which found
+that the sequence had no workflow and therefore nowhere to record progress;
+before that, the five `DEMO_*` task files specified the demo application with no
+loop over them. Its task files were specified 2026-10-05 and none was started
+when the sequence was added.
+
+The `CROSSPLATFORM` sequence was created
 2026-10-05 by moving tasks 25, 26, 27 and 29 out of the `UI_PRIM` sequence, and
 is deferred until the operator decides the target platform; nothing in it is in
 flight. A single self-contained change does not need a loop; it needs a build and

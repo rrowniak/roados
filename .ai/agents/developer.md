@@ -201,7 +201,7 @@ Verification is not a step you report on; it is a step you perform.
 - **After every run of the demo, measure its frame rate**:
   `.ai/tools/fps-check.sh [seconds] [minimum-fps]`. Every run of `ui_demo` an
   agent launches is a run that can be compared against the baseline in
-  `doc/ui/IMPLEMENTATION_STATE.md` § *The frame rate, measured*, and a change
+  `.ai/tools/README.md` § *Frame-rate baseline*, and a change
   that costs frames is invisible to every other check here — `cargo test` cannot
   see it, and a capture cannot either, because a still of a 4 fps application is
   pixel-identical to a still of a 60 fps one. Report the numbers in the handoff
@@ -250,6 +250,31 @@ Report, briefly:
 Then stop. Review is `reviewer.md`'s job, and it is a different agent on
 purpose.
 
+## Documentation
+
+- **Write each fact once, where it is read.** What the code does → the code's own
+  doc comment. What the task decided and why → the task file (`doc/ui/done/…`
+  once it is done). What is still owed → the sequence state file's *Left over*.
+  Three copies of one record is three things to keep in step and one of them
+  will be wrong.
+- **A state file is a status board, capped at 3 KB.**
+  `.ai/workflows/task-sequence.md` § *State* owns the rule; in short: *Current
+  position*, *Left over*, and where the task files are. **No per-task record
+  section, no task-table row, no per-task history, no re-measured numbers for a
+  task that is already in `done/`.** When the task file moves to `done/`, the
+  state file forgets it and says only what it left behind. This one cost this
+  repository a 527 KB state file and a fresh session that could not find the next
+  task in it.
+- **A paragraph is a claim with a number, a command and a limit.** If it is
+  growing a table of per-task measurements, the measurements belong next to the
+  thing they measure, not in a status file.
+- **Cite by section, never by line number** (`AGENTS.md`), and when you move or
+  delete a section, fix every citation that names it — in the same change. A
+  dangling citation is a defect, and a reviewer will find it after the next edit
+  makes it look plausible.
+- **Do not narrate what the diff already says.** A handoff is four bullets
+  (Phase 4), not a second narrative of the change.
+
 ## Stop conditions
 
 Stop and return to the operator — do not push through — when:
@@ -296,3 +321,7 @@ leave the tree broken.
 - **Using `static mut`.** Use `OnceLock` or atomics.
 - **Using `as` casts for numeric conversions.** Use `TryInto` or `unwrap_or_else`.
 - **Blocking I/O in async code.** Never do this.
+- **A state file that grew past its cap.** The record went somewhere it is read
+  from, or nowhere at all. See § *Documentation*.
+- **The same record written in three files.** Two of them will disagree, and the
+  one that disagrees with the tree is the one that gets quoted.

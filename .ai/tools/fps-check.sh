@@ -18,9 +18,9 @@
 #
 # The baseline this compares against is **not** written here. It is a number
 # about a machine and a build, and it belongs to whoever measured it;
-# `doc/ui/IMPLEMENTATION_STATE.md` § *The frame rate, measured* carries the one
-# this repository has. This script takes the floor as an argument so that there
-# is one copy of the number and not two.
+# `README.md` § *Frame-rate baseline* carries the one this repository has. This
+# script takes the floor as an argument so that there is one copy of the number
+# and not two.
 set -uo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

@@ -2,9 +2,8 @@
 
 **What this directory is.** Task files that were specified and are not going to
 be built as written. **Nothing here is deleted** — a superseded task file keeps
-its full text, because the reasoning in it is usually why the next attempt is
-cheaper than the first one was — and the file that replaced it says where it
-went.
+its reasoning, because that reasoning is usually why the next attempt is cheaper
+than the first one was — and the file that replaced it says where it went.
 
 **Why a task gets here rather than being rewritten.** A task file is a
 specification, and a specification that is rewritten in place destroys the
@@ -29,4 +28,4 @@ nothing here is being built.
 
 | file | superseded by | why |
 |---|---|---|
-| [`TASK_UI_DEMO_01.md`](TASK_UI_DEMO_01.md) | [`doc/ui/done/TASK_UI_DEMO_01.md`](../done/TASK_UI_DEMO_01.md), 2026-10-09 | A procedural vector map — a seeded world, a camera, three road classes, a route, POIs and a car marker, all from `Rect`, `Path`, `Circle` and `Polygon` — was judged too ambitious on 2026-10-09. The replacement keeps the same seventh page and its name and drops the map's geometry: one map image, full-bleed, as the base layer every later panel goes over. |
+| [`TASK_UI_DEMO_01.md`](TASK_UI_DEMO_01.md) | [`doc/ui/done/TASK_UI_DEMO_01.md`](../done/TASK_UI_DEMO_01.md), 2026-10-09 | A procedural vector map — a seeded world, a camera, three road classes, a route, POIs and a car marker, all from `Rect`, `Path`, `Circle` and `Polygon` — was judged too ambitious on 2026-10-09. The replacement keeps the same seventh page and its name and drops the map's geometry: one map image, full-bleed, as the base layer every later panel goes over. The reasoning was condensed 2026-10-10. |

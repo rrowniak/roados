@@ -42,8 +42,9 @@ One task at a time, in numeric order. Not overlapping, not batched.
    scope. Do not proceed to the next task.
 5. **Operator commits.** Per task, not per batch. The operator reviews, commits,
    and reports the SHA.
-6. **Record and advance.** Record the SHA in the state file, then begin the next
-   task.
+6. **Record and advance.** Move the task file to `doc/ui/done/`, record what is
+   left over on the sequence's state file — and only that — then begin the next
+   task. § *State* below owns the size cap and says what does not belong there.
 
 ## Gates
 
@@ -76,19 +77,46 @@ prevent.
 
 ## State
 
-Each sequence's `IMPLEMENTATION_STATE.md` records status, decisions, waivers,
-blockers and history for it, so a fresh session can resume without re-deriving
-it. Today there are two — `doc/ui/IMPLEMENTATION_STATE.md` and
-`doc/platform/IMPLEMENTATION_STATE.md` — and this workflow applies to both. **The
-third is named but does not exist yet**: `doc/ui/IMPLEMENTATION_STATE_DEMO.md` is
-the `DEMO` sequence's state file, **named here on 2026-10-09 when § *Scope was
-extended to `doc/ui/TASK_UI_DEMO_*.md`, and created by
-`doc/ui/done/TASK_UI_DEMO_01.md` requirement 7 when that task is implemented.** It is
-listed as the sequence's state file rather than omitted, because a workflow that
-names a sequence and no state file for it has the gap this section exists to
-close. A state file is **not** the source of the workflow, and it is not a source
-of evidence. A sidecar or state file that contradicts its artifact is wrong and
+Each sequence's `IMPLEMENTATION_STATE.md` is a **status board, not a log**. It
+answers three questions for a fresh session and carries nothing else:
+
+- **Current position** — what is in flight, what the next task is, and the last
+  measured suite figure.
+- **Left over** — todos, waived or unmet acceptance criteria, tasks whose review
+  or commit never happened, and the decisions that are the operator's to make.
+- **Where the sequence's task files are.** That is all.
+
+**The cap is 3 KB.** This file's rule, and the operator's on 2026-10-10: the
+`UI_PRIM` state file was 527 KB of per-task narrative — fifteen sections of "what
+it decided and what it found" — and a fresh session could not find the next task
+in it. `doc/ui/IMPLEMENTATION_STATE.md` and
+`doc/ui/IMPLEMENTATION_STATE_DEMO.md` are the two rewritten; this rule is why
+they stay that size.
+
+**A finished task is not in the state file at all.** Its task file moves to
+`doc/ui/done/` and that file is its record. Do not summarise a done task in the
+state file, do not keep a task-table row for it, and do not give it a record
+section — the state file's silence *is* the record of "this is finished", and a
+duplicate is a second copy to keep in step with the first. What survives the
+task is the *leftover*: an acceptance criterion not met, a review or commit
+still owed, a defect found and not fixed. Those go on *Left over*, dated.
+
+**A pending task file asks for the opposite** — a task-table row, a
+§ *Task NN — what it decided* section, a dated entry. Those requirements are
+**superseded** by this section, and each pending file carries a dated marker
+saying so. Put the durable fact where it belongs: the code's own doc for what
+the code does, the task file for what the task decided, *Left over* for what is
+still owed.
+
+A state file is **not** the source of the workflow, and it is not a source of
+evidence. A sidecar or state file that contradicts its artifact is wrong and
 gets fixed — see `AGENTS.md` on working context.
+
+There are three: `doc/ui/IMPLEMENTATION_STATE.md` (`TASK_UI_PRIM_*`),
+`doc/ui/IMPLEMENTATION_STATE_DEMO.md` (`TASK_UI_DEMO_*`, created 2026-10-09 by
+`doc/ui/done/TASK_UI_DEMO_01.md` requirement 7) and
+`doc/platform/IMPLEMENTATION_STATE.md` (`TASK_CROSSPLATFORM_*`). This workflow
+applies to all three.
 
 **`doc/ui/backlog/` is not a sequence and is not covered by this workflow.** A
 task file there is superseded: it has no state-file row, no review and no

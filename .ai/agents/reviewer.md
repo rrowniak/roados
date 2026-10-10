@@ -163,7 +163,7 @@ input is unexamined.
 - **A per-frame cost change with no measurement.** A change that touches what a
   frame does needs a rate, not a still: `.ai/tools/fps-check.sh`, per
   `.ai/agents/developer.md` § Phase 3, whose numbers and baseline are in
-  `doc/ui/IMPLEMENTATION_STATE.md` § *The frame rate, measured*. Treat a handoff
+  `.ai/tools/README.md` § *Frame-rate baseline*. Treat a handoff
   that says "it looked the same" as a finding: nothing in the suite can see a
   frame-cost regression, and a capture cannot either.
 
@@ -191,6 +191,15 @@ input is unexamined.
 - **Unformatted code.** `cargo fmt --check` must pass.
 - **`cargo doc` warnings.** Broken intra-doc links must be fixed.
 - **`cargo audit` findings.** No known vulnerabilities.
+- **A dangling citation.** Every `§ *Name*` a document names must exist in the
+  document it names; a line-number citation is a finding on sight (`AGENTS.md`).
+  A section this change moved or deleted is a finding even when the prose around
+  it still reads well.
+- **Documentation past its size.** A state file over 3 KB
+  (`.ai/workflows/task-sequence.md` § *State`), a record written in three files,
+  or a handoff that is a second narrative of the diff: flag it. This repository
+  had a 527 KB state file once, and the cost was a fresh session that could not
+  find the next task in it.
 
 ## Phase 4 — Findings
 

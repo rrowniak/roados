@@ -80,8 +80,8 @@ floor was given and missed, or when the run produced no report at all.
 
 - **Answering "did this change cost anything?"** The average over a fixed run, the
   worst single frame, and how many frames took longer than two of the loop's own
-  16 ms slots. `doc/ui/IMPLEMENTATION_STATE.md` § *The frame rate, measured*
-  carries the baseline this repository compares against.
+  16 ms slots. The baseline this repository compares against is § *Frame-rate
+  baseline*, below.
 - **Any performance claim at all.** A claim with a number behind it can be
   checked; the same claim with "it looked the same" behind it cannot, and a still
   of a 4 fps application is pixel-identical to a still of a 60 fps one.
@@ -92,8 +92,7 @@ floor was given and missed, or when the run produced no report at all.
   60 fps of a window drawing the wrong thing passes it.
 - **Claiming a regression on a shared or loaded machine from one run.** One run is
   one sample of a machine that may be running something else. Compare three runs
-  before and three after, as the benchmark tables in
-  `doc/ui/IMPLEMENTATION_STATE.md` do, and say which you did.
+  before and three after, in one session, and say which you did.
 - **Comparing a debug build with a release one.** This script builds release,
   because a debug build's rate is a fact about unoptimised Rust rather than about
   the interface. The two differ by about 15 fps on this repository's demo, which
@@ -104,12 +103,65 @@ floor was given and missed, or when the run produced no report at all.
 ### Known limits
 
 - **The rate it reports is the loop's, not the display's.** There is no vsync and
-  no frame pacing: the loop waits 16 ms for an event and then draws, so the two
-  costs are serialised and a ceiling of about 62 fps is built into the shape of
-  the loop. A number near that ceiling is a loop that nothing in the interface is
-  holding back.
+  no `SDL_GL_SetSwapInterval`. The loop is frame-budget paced — `FRAME_BUDGET =
+  16_666_667 ns` in `ui/src/ui_demo/src/main.rs`, and it waits only what is left
+  of the budget — so the ceiling is a number the pacing gives, not the monitor's
+  refresh rate. A number near that ceiling is a loop that nothing in the
+  interface is holding back.
 - **It needs a display.** A headless run measures nothing, and the script says so
   rather than reporting zero.
 - **The floor is an argument, not a constant in this file.** A number about a
   machine belongs to whoever measured it, and there is one copy of the baseline
   rather than two.
+
+## Frame-rate baseline
+
+**Target: 60 fps** (`doc/ui/DEMO_APPLICATION.md`, in scope and in the design
+principles). **Floor to check against: 55**, release build, this host.
+
+Measured 2026-10-09 at `cb5de91` (`TASK_UI_DEMO_02`), ten seconds per page, every
+page in 61.1–62.6 fps. Two rows have ever gone long: `data` (one ~40 ms frame)
+and `demo` (one ~51 ms frame) out of ~620.
+
+Three things a comparison has to respect:
+
+- **Release only.** The debug build sits at ~33 fps by construction — debug work
+  is longer than the budget — so a debug number is a fact about unoptimised Rust.
+- **One run is one sample.** The host is shared; three before and three after,
+  in one session, is the smallest comparison that means anything.
+- **The loop is frame-budget paced, not vsync.** `FRAME_BUDGET` is a hard-coded
+  16.67 ms, so the demo free-runs slightly over 60 and a 30 Hz panel would waste
+  half its budget. The number is a property of the loop, not of the display.
+
+## Capturing a window
+
+A GL window is not in the root pixmap, so root capture returns black. Capture it
+by id:
+
+```sh
+DISPLAY=:0 xwininfo -root -tree | rg '"roados ui_demo"' | rg -o '0x[0-9a-f]+' | head -1
+DISPLAY=:0 magick import -window <id> /tmp/shot.png
+magick compare -metric AE a.png b.png null:   # 0 means the two are identical
+```
+
+- **Re-read the id per capture.** The window is mapped and destroyed between
+  runs, and it is **not at the origin** — it sits somewhere in the root's larger
+  virtual screen.
+- **Compare named crops, not the whole window.** The fps readout is live, so a
+  whole-window AE is never zero; crop the region the change is in, and account for
+  the readout band separately.
+- **A pair of captures can be identical while the app animates.** Two samples of
+  a live readout repeat when the average lands on the same tenth. Compare three
+  or more before concluding nothing moved.
+- **Injected input is unreliable on this host.** There is no `xdotool`; keys and
+  pointer events go through a throwaway `libXtst` program in `/tmp`. It works
+  after a click on a known-good button, and it silently delivers nothing when it
+  does not. **Always click that button as the control**: if it does not count a
+  click, "0 pixels changed" says the input never arrived, not that the change is
+  broken. That ambiguity has already been misread in both directions.
+- **A temporary seed is acceptable, and reverting it is the obligation.** When a
+  state has no reachable route (a focused widget, a value the keys cannot set),
+  build a binary with a few lines that set it from the environment, capture, and
+  restore — then prove the restore with `diff -q` against the pre-seed snapshot
+  and `rg` for the seed's name. Say in the report that the capture came from a
+  seeded build, because it is not evidence about the app's own input path.

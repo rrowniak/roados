@@ -86,7 +86,7 @@ reachable from a cargo feature:
    (`nm --defined-only` returns nothing for each).
 5. **Do not change the subsystem policy.** The twelve subsystems stay at SDL's
    defaults. That is a separate decision, recorded in
-   `IMPLEMENTATION_STATE.md` § *Deviations* and `CROSSBUILD.md` §5.2.1, and this
+   `CROSSBUILD.md` §5.2.1, and this
    task is not where it is revisited.
 
 ## Acceptance Criteria

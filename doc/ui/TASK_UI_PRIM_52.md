@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_52: `LayoutMode::Grid` — Equal Columns, Filled Row-Major, Rows as Tall as Their Tallest Cell
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Give `LayoutMode::Grid` the algorithm it does not have. A grid node reads its
@@ -157,8 +164,8 @@ and a line number into `ui/src` is stale within the hour.
 - **`layout_walk_cost` in `layout.rs` is the suite's one `#[ignore]`d test** — a
   `use std::time::Instant` harness, so it reads the wall clock and is not a test.
   **This task does not touch it**, and the acceptance criterion says so by name,
-  because its numbers in `IMPLEMENTATION_STATE.md` § *Deviations from the spec,
-  and why* are reproducible only while the function it measures is unmodified.
+  because its numbers are reproducible only while the function it measures is
+  unmodified.
 - **`.ai/tools/fps-check.sh` takes `seconds` then `floor`, builds release, runs
   `./target/release/ui_demo` with no arguments and no page**, and exits 1 both on
   a missed floor **and on a run that printed no `roados-fps` line at all** —
@@ -1042,14 +1049,12 @@ conditions*).
       `cargo clippy --all-targets --all-features -- -D warnings` and
       `cargo doc --no-deps` clean. **And `layout_walk_cost` is still `#[ignore]`d
       and unmodified** — `git diff` over `layout.rs` shows no change to it, because
-      its numbers in `IMPLEMENTATION_STATE.md` § *Deviations from the spec, and why*
-      are reproducible only while it is. `cargo audit` is **recorded as not
+      its numbers are reproducible only while it is. `cargo audit` is **recorded as not
       installed on this host, not passed.**
 
 - [ ] **The six gallery pages are pixel-identical, and the mechanism is the
       criterion rather than the result.** `Page::ALL`'s six names, release build,
-      captured **before and after** with the commands of `IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      captured **before and after** with the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree` (a root
       capture, and `ffmpeg x11grab`, return black for a GL window), `pgrep -a -x
       ui_demo` in the same call as each `magick import -window <id>`, then
@@ -1057,8 +1062,7 @@ conditions*).
 
       - **The criterion on all six pages is AE 0 outside `y ≥ 680`**, every
       differing pixel inside the fps readout's band, which is the criterion tasks
-        34 to 39 inherited and what `IMPLEMENTATION_STATE.md` § *Task 24.1 — what
-        it decided, and what it found* records as the one thing two captures of an
+        34 to 39 inherited and what `.ai/tools/README.md` § *Capturing a window* records as the one thing two captures of an
         unchanged frame differ in.
       - **The mechanism is four facts, and saying so is the criterion:**
         **no node in either binary constructs `LayoutMode::Grid`** — the grep is in
@@ -1080,13 +1084,12 @@ conditions*).
       line pasted.** `.ai/tools/fps-check.sh 10 55` on the default page, **which
       is the only thing the script can do** — it takes `seconds` then `floor`,
       builds release and runs `./target/release/ui_demo` with **no arguments and no
-      page**, per `IMPLEMENTATION_STATE.md` § *Current position* recording as the
+      page**, per `.ai/tools/README.md` § *Frame-rate baseline* recording as the
       reason task 24.2's criterion 6 was amended rather than met by the script —
       and then `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for
       each of the six, with the `roados-fps` line parsed by hand. **Every page
       above the floor of 55**, and **every page expected to land inside the
-      recorded 61.1–63.9 band in `IMPLEMENTATION_STATE.md` § *The frame rate,
-      measured* and to have cost nothing** — with the reason stated rather than
+      recorded 61.1–63.9 band in `.ai/tools/README.md` § *Frame-rate baseline* and to have cost nothing** — with the reason stated rather than
       left as a coincidence: **the new function is never called on any page, so no
       frame does anything this task added.** This is the gate in
       `task-sequence.md` § *Gates* (*"No unmeasured run of the demo"*) and no
@@ -1211,8 +1214,8 @@ conditions*).
   **Zero new `unsafe` blocks**, because there is no GL, no FFI and no pointer in
   this change.
 - **Found in the tree and deliberately not fixed:**
-  `IMPLEMENTATION_STATE.md` § *Deviations from the spec, and why* writes
-  `LayoutMode`'s variants as `Flex { direction, wrap, flex_config }`, and
+  `LayoutMode`'s variants were written up as `Flex { direction, wrap,
+  flex_config }`, and
   **`flex_config` is a `LayoutState` field, not a `LayoutMode` field**. **It is
   recorded here rather than fixed**, because that section is the record of what
   task 24 decided and rewriting a past section's text is the drive-by cleanup

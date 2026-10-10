@@ -1359,14 +1359,13 @@ not "tidy" it into one number.
 - [ ] **The six gallery pages are pixel-identical, and the mechanism is stated
       because it is what makes the criterion achievable.** `Page::ALL`'s six
       names, release build, captured **before and after** with the commands of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim: window id **re-read at the time of each capture** with
+      `.ai/tools/README.md` § *Capturing a window* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab`, return black
       for a GL window), `pgrep -a -x ui_demo` in the same call as each
       `magick import -window <id>`. `magick compare -metric AE before.png
       after.png null:` reports **AE 0 outside the fps readout's band `y ≥ 680`**
       and every differing pixel inside it — which
-      `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it found*
+      `.ai/tools/README.md` § *Capturing a window*
       records as the one thing two captures of an unchanged frame differ in. The
       rect-level half is `every_page_places_every_rect_where_the_gallery_placed_it`.
       **The mechanism, and it is two facts rather than the comfortable one.**
@@ -1394,7 +1393,7 @@ not "tidy" it into one number.
       hand — **`fps-check.sh` takes `seconds` then `floor` and runs the binary
       with no arguments**, so it cannot name a page. Every page is above the floor
       of 55 and inside the recorded **61.1–63.9** band in
-      `IMPLEMENTATION_STATE.md` § *The frame rate, measured*. **The expected
+      `.ai/tools/README.md` § *Frame-rate baseline*. **The expected
       result is no change at all, and the handoff says why rather than treating a
       coincidence as a result**: this task changes **no Rust** and loads nothing,
       so the measurement is for the fact that nothing was accidentally wired in

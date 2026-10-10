@@ -1,5 +1,12 @@
 # TASK_UI_DEMO_05: The Card Carousel, the Callout Hotspots, and the Two-Axis Reshape
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Finish the car-status pane's contents in three sub-tasks, and be explicit about
@@ -723,8 +730,7 @@ conditions*).
       passed**.
 
 - [ ] **The seven pages are captured, and each sub-task's capture is compared with
-      its own before.** The commands of `IMPLEMENTATION_STATE.md` § *Verifying a
-      change that draws — the capture method* verbatim, window id **re-read at the
+      its own before.** The commands of `.ai/tools/README.md` § *Capturing a window* verbatim, window id **re-read at the
       time of each capture**, `pgrep -a -x ui_demo` in the same call as each `magick
       import`, `magick compare -metric AE` per page. **AE 0 outside `y ≥ 680` on
       the six unchanged pages**, and on the seventh page: 05-1's pager sits on a

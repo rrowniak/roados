@@ -247,16 +247,14 @@ makes the mask pass assert it locally.
 `developer.md` § Phase 3: *"A change that alters what is on screen is not verified
 until it has been seen"*, and `AGENTS.md` forbids wall-clock tests — so the
 non-regression claim needs a mechanism, not a promise. The method is
-`doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-method*, used verbatim: release build, `setsid ./target/release/ui_demo > log 2>&1 &`,
+`.ai/tools/README.md` § *Capturing a window*, used verbatim: release build, `setsid ./target/release/ui_demo > log 2>&1 &`,
 window id **re-read at the time of each capture** with `xwininfo -root -tree` (a
 root capture and `ffmpeg x11grab` both return black for a GL window),
 `pgrep -a -x ui_demo` in the same call as each `magick import -window <id>`, then
 `magick compare -metric AE before.png after.png null:` per page.
 
 **The band is part of the method.** Two captures of an unchanged frame differ
-inside the fps readout — `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided,
-and what it found* records **405 pixels, and AE 0 over y 80–680** — because the
+inside the fps readout — `.ai/tools/README.md` § *Capturing a window* records **405 pixels, and AE 0 over y 80–680** — because the
 readout is a moving number. So the criterion is **AE 0 outside `y ≥ 680`**, with
 every differing pixel inside that band, on all six of `Page::ALL`'s pages.
 
@@ -265,7 +263,7 @@ positional arguments — `seconds` then `floor` — and then runs
 `./target/release/ui_demo` with no arguments. Per-page measurement is
 therefore `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` with the
 `roados-fps` line parsed by hand — the same amendment
-`IMPLEMENTATION_STATE.md` § *Current position* records for task 24.2's criterion 6.
+`.ai/tools/README.md` § *Frame-rate baseline* records for task 24.2's criterion 6.
 
 **Why `unsafe` is not an operator decision here.** `AGENTS.md` records that
 `unsafe` was declined, and this task needs it anyway, because every GL call in the
@@ -420,8 +418,7 @@ on this thread"*. Requirement 10 is that constraint, written down.
     than the rate expected: `.ai/tools/fps-check.sh 10 55` for the default page,
     and `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of
     `Page::ALL`'s six, parsed by hand because the script cannot name a page. Every
-    page is inside the **61.1–63.9** band in `IMPLEMENTATION_STATE.md` § *The frame
-    rate, measured* and above the floor of 55. **The expected result is no
+    page is inside the **61.1–63.9** band in `.ai/tools/README.md` § *Frame-rate baseline* and above the floor of 55. **The expected result is no
     measurable change**, and the reason is stated in the handoff rather than left as
     a coincidence: no pass tests depth and no pass writes it, so the only new
     per-frame work is one extra bit in a clear that already happened and the
@@ -471,14 +468,13 @@ on this thread"*. Requirement 10 is that constraint, written down.
       policy in this task, code in task 37
 - [ ] **The 2D pass state is unchanged, by capture.** `Page::ALL`'s six pages,
       captured **before and after** the change, release build, the commands of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim: window id **re-read at the time of each capture** with
+      `.ai/tools/README.md` § *Capturing a window* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab` too, return black
       for a GL window), `pgrep -a -x ui_demo` in the same call as each
       `magick import -window <id>`, and `magick compare -metric AE before.png
       after.png null:` per page. **AE 0 outside `y ≥ 680`**, and every differing
       pixel inside the fps readout's band — which
-      `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it found*
+      `.ai/tools/README.md` § *Capturing a window*
       records as the one thing two captures of an unchanged frame differ in (405
       pixels there, AE 0 over y 80–680). The rect-level half is
       `every_page_places_every_rect_where_the_gallery_placed_it` in the demo's
@@ -490,7 +486,7 @@ on this thread"*. Requirement 10 is that constraint, written down.
       **`fps-check.sh` cannot name a page**, verified in `.ai/tools/fps-check.sh`
       — it reads `seconds` and `floor` and nothing else, and runs the binary with
       no arguments — and the reason
-      `IMPLEMENTATION_STATE.md` § *Current position* amended task 24.2's criterion
+      `.ai/tools/README.md` § *Frame-rate baseline* amended task 24.2's criterion
       6 rather than meeting it with the script. Every page inside the recorded
       **61.1–63.9** band and above the floor of 55
 - [ ] **What the driver granted is read back and recorded.**

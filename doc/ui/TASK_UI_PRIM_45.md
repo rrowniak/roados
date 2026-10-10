@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_45: Gap #5 — Per-Node Clipping Belongs to the Widget System, Not to the Demo's Frame Loop
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Give the **clip an owner**. `LayoutState::clip` already carries the rect a node
@@ -14,9 +21,7 @@ node's own clip, deletes the demo's clip table, and deletes the eleven claims.
 **This is the cheapest gap left, and the file says so rather than inventing work.**
 The mechanism is built, tested and shipped; `apply_clip`'s own doc already reads
 *"This is what makes a per-node clip possible at all"*; the operator's on-screen
-defect of 2026-09-30 is recorded discharged in
-`doc/ui/IMPLEMENTATION_STATE.md` § *A defect the operator found on screen, and
-what it was*. **What is missing is one line of wiring, the ownership decision
+defect of 2026-09-30 was discharged before this task. **What is missing is one line of wiring, the ownership decision
 that says who supplies the value, and eleven sentences that are the opposite of
 the code beside them.** Roughly four fifths of the work is already done, and the
 task file's honest form is *"finish it and correct the record"*, not *"build
@@ -46,7 +51,7 @@ number written today is wrong tomorrow.**
 | **`scroll::clip_commands` drops what is wholly outside and keeps a straddling command whole**, and its doc says why trimming is not clipping: a `RoundedRect` fills its rect, a `Circle` cannot express a partial disc, and a `Text` run carries no width. `scroll::command_bounds(command) -> Option<Rect>` is public and returns `None` for a command it cannot bound. | `ui/src/ui_core/src/widgets/scroll.rs`, `clip_commands`, `command_bounds` |
 | **No shadow is recorded anywhere in `ui/src/ui_demo/src/main.rs`.** `grep -n '\.shadow(' ui/src/ui_demo/src/main.rs` returns nothing. **The demo's only shadows are inside `Dialog` and `Toasts`, and both of their nodes are laid out as roots with `Constraints::tight(size)`, so their clips are the window.** Consequence in § *The shadow path, and what this task can and cannot show about it*. | `ui/src/ui_demo/src/main.rs`; `ui/src/ui_core/src/widgets/dialog.rs`, `ui/src/ui_core/src/widgets/toast.rs` |
 | **Test baseline: 1894** — `ui_core` **1450**, `ui_demo` **224**, doctests **220**. Measured at `75a896c` plus the uncommitted diff, in the session that wrote this file. | `cargo test --all-features` from `ui/` |
-| **The demo cannot receive a pointer event on this host.** XTEST pointer injection has never delivered one; keyboard has delivered exactly one. **No acceptance criterion here may require a pointer-driven interaction, and none does.** | `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture method* |
+| **The demo cannot receive a pointer event on this host.** XTEST pointer injection has never delivered one; keyboard has delivered exactly one. **No acceptance criterion here may require a pointer-driven interaction, and none does.** | `.ai/tools/README.md` § *Capturing a window* |
 | **`.ai/tools/fps-check.sh` takes `seconds` then `floor` and runs the binary with no arguments**, so it **cannot name a page**; per-page is `ROADOS_RUN_SECONDS=<n> ./target/release/ui_demo --tab=<page>`. Every run is measured — `.ai/workflows/task-sequence.md` § *Gates*. | `.ai/tools/fps-check.sh` |
 
 ### Row #5, in the document's own words
@@ -91,7 +96,7 @@ list is the acceptance criterion a reviewer greps.**
 | 8 | `ui/src/ui_core/src/widgets/image.rs` | module docs | *"[`DrawCommand`] has no scissor state of its own, which … records as a deferral to whichever task draws within a node's own bounds."* First clause kept, deferral withdrawn. |
 | 9 | `ui/src/ui_core/src/widgets/image.rs` | `ImageFit::Cover` | *"…only this one is right without one, because [`DrawCommand`] has no scissor state."* `Cover`'s behaviour **does not change** — see § *What this task does not change about `ImageFit`*, because the reason it survives is arithmetic and not the absence of a scissor. |
 | 10 | `ui/src/ui_demo/src/main.rs` | `TEXT_PANEL`'s doc comment | *"The height is the column's height at [`TEXT_SIZE_START`]; **the column is not clipped to it, so a larger `+` size overflows the window bottom by design.**"* **This is a code comment, not a doc comment, and it is an eleventh instance found while writing this file rather than one of the nine.** It becomes false the moment the scissor is applied, because `text_column` is a child of `text_panel` and the panel's box is the child's clip. |
-| 11 | `doc/ui/IMPLEMENTATION_STATE.md` | § *Deviations from the spec, and why*, the bullet *"A node's clip rect is computed, not applied."* | Contradicted by that same file's § *A defect the operator found on screen, and what it was*, which records the discharge in detail. **The bullet is amended, not deleted** — see requirement 9. |
+| 11 | `doc/ui/IMPLEMENTATION_STATE.md`, removed 2026-10-10 | the bullet *"A node's clip rect is computed, not applied."*, in a § *Deviations from the spec, and why* that the state file no longer carries | Contradicted by the same file's record of the operator's on-screen defect, which showed the discharge in detail. **The bullet is gone with the section** — see requirement 9, which moves it to where the claim lives. |
 
 `doc/ui/DEMO_APPLICATION.md` § *Corrections to the second gap table* carries the
 same failure **with line numbers in it** (`render.rs:1920-1925`, `list.rs:122-126`,
@@ -233,10 +238,10 @@ first.
 **Automatic derivation can cut something the demo draws today. That is not a
 hypothesis to reason about; it is a question with an instrument.**
 
-`doc/ui/IMPLEMENTATION_STATE.md` § *A defect the operator found on screen, and
-what it was* records the shape: *"every assertion in them asked **what was
-recorded** and not **where it landed**"*, and the rule is that **a survivor is
-a missing assertion, and only a sweep finds it**. So the question
+The shape of what went wrong here is recorded in this repository's own words:
+*"every assertion in them asked **what was recorded** and not **where it
+landed**"*, and the rule is that **a survivor is a missing assertion, and only a
+sweep finds it**. So the question
 *"would anything the demo records be cut by its node's own clip?"* gets a test
 rather than a paragraph, and **that test is written and run against the
 unmodified tree before `Renderer::draw_node_clipped` is edited.**
@@ -619,9 +624,9 @@ it did not have.
 9. **The two documents are amended, dated and attributed, and the bullet about the
    clip is amended rather than deleted.**
 
-   - **`doc/ui/IMPLEMENTATION_STATE.md` § *Deviations from the spec, and why`** —
-     the bullet *"**A node's clip rect is computed, not applied.**"* is
-     **rewritten in place** into a **resolved** entry, keeping its heading shape
+   - **The bullet *"**A node's clip rect is computed, not applied.**"*** — which
+     used to live in `doc/ui/IMPLEMENTATION_STATE.md` and no longer does — is
+     **rewritten into a resolved entry** where it now belongs, keeping its shape
      so the bullet's history is auditable. It carries: that the deferral it
      recorded was discharged by the operator's on-screen defect of 2026-09-30 and
      again by this task; **`Batch::clip` outside `BatchKey`, and
@@ -662,9 +667,8 @@ it did not have.
 
     - **The seed.** A **temporary** block in `Demo::new`, keyed off the
       environment variable **`CLIP_PROBE`**, in the shape
-      `doc/ui/IMPLEMENTATION_STATE.md` § *A defect the operator found on screen,
-      and what it was* records for `LIST_OFFSET` — *"the same six-line technique
-      task 14 used and recorded"* — and for the same reason: **no injected event
+      the same six-line technique task 14 used for `LIST_OFFSET` — and for the
+      same reason: **no injected event
       reaches this app, so without a seed the demo has nothing on screen whose
       clip is non-trivial.**
     - **What the seed builds.** One `Container` with `LayoutMode::Absolute` and a
@@ -866,8 +870,7 @@ it did not have.
       `Renderer::set_scissor`'s doc, one in `list.rs`'s module docs, one in
       `List::clip_rect`, three in `scroll.rs`'s module docs, one in
       `Scroll::clip_rect`, one in `clip_commands`, two in `image.rs`'s module docs
-      and `ImageFit::Cover`, and two in `doc/ui/IMPLEMENTATION_STATE.md` §
-      *Deviations from the spec, and why*. **And the ten `ui/src` sites are
+      and `ImageFit::Cover`. **And the ten `ui/src` sites are
       amended by symbol, not deleted:** the handoff lists each of the eleven by
       file and symbol as in § *The eleven claims this task deletes*, and
       **grep -n 'The scissor applies to the whole frame' ui/src/ui_core/src/render.rs
@@ -930,8 +933,7 @@ it did not have.
       outside it**, which is what an exact figure means. The window id is re-read
       with `xwininfo -root -tree` at the time of **each** capture, `pgrep -a -x
       ui_demo` is run in the same call as each `magick import -window <id>`, and
-      the commands are those of `IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim.
+      the commands are those of `.ai/tools/README.md` § *Capturing a window* verbatim.
       `rg -c "CLIP_PROBE" ui/src/ui_demo/src/main.rs` is **0** afterwards, and so
       is `rg -c "probe" ui/src/ui_demo/src/main.rs`
 
@@ -999,7 +1001,7 @@ it did not have.
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of the
       six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline* records
       as the reason task 24.2's criterion 6 was amended rather than met by the
       script. Every page above the floor of **55**, and **the report compares each
       page against its own pre-change number, not against the other pages** —

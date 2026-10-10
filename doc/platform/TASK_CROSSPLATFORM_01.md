@@ -32,9 +32,9 @@ passing build. It is:
      Least work; mixes arm64 packages into the host.
    - Buildroot or Yocto: a real rootfs with target headers and `.pc` files. More
      work up front; this is the production path for a head unit.
-   Write the decision and its consequences into `doc/ui/CROSSBUILD.md` and
-   `doc/ui/IMPLEMENTATION_STATE.md`. **The operator decides; the developer
-   implements.**
+   Write the decision and its consequences into `doc/ui/CROSSBUILD.md` and this
+   sequence's state file, `doc/platform/IMPLEMENTATION_STATE.md`. **The operator
+   decides; the developer implements.**
 
 2. **Produce the sysroot** at a known path, with a documented way to select it
    (`ROADOS_SYSROOT` already exists in the toolchain file and is the hook).

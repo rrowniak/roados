@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_49: Gap `L8` — a Text Run That Knows Its Own Width
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Put the width of a drawn text run **on the command**, so that
@@ -38,7 +45,7 @@ parallel and a line number written today is wrong tomorrow.
 | **`Font::from_path` is the only font loader** — there is no font-from-memory path — and `FontSet::new` creates an **empty** default family, so `FontSet::measure` on a bare set returns `replacement_advance(size)` per character. **No test may open a font file**, `AGENTS.md` forbids it, and task 30's record says the same about the mutations that needed one. | `ui/src/ui_core/src/font.rs`, `Font::from_path`, `FontSet::new` |
 | **Text IS tinted.** The text fragment shader multiplies `coverage` by a per-vertex `v_color`, over a `GL_R8` / `GL_RED` atlas sampled `GL_LINEAR`. **So a fade ramp is reachable without touching the atlas or the blend mode** — which is `TASK_UI_PRIM_32`'s finding, not this task's. | `ui/src/ui_core/src/render.rs`, the text shader sources |
 | **Per-node clipping is being closed by `TASK_UI_PRIM_45`**, and `apply_clip` sets a scissor per batch from the node's own `LayoutState::clip`. **A text run that overflows its node's box is not cut today**, and that is the consumer this task enables: with a width on the command, a caller can ask where a run ends, and 45's resolution can be reasoned about rather than assumed. **This task does not clip anything and delivers neither of row `L8`'s two blocked items.** | `doc/ui/TASK_UI_PRIM_45.md`, `Renderer::draw_node_clipped`, `Renderer::apply_clip` |
-| **`Truncation` is a `pub enum` with four variants** — `None`, `Clip`, `Ellipsis`, `Fade` — and `Fade`'s own doc says *"Layout-wise identical to [`Truncation::Clip`]: the fade is a rendering effect, and the renderer that will apply it does not exist yet."* **`doc/ui/IMPLEMENTATION_STATE.md` § *Tasks 30–32, the text gaps task 11 left*, row 32** records the state: *"`truncate_line` treats `Clip` and `Fade` identically and `Label::paint` never reads `truncation`, so there is **no fade ramp at all** and `Clip` is a layout cut, not a visual clip."* **Read before writing this file; see § *The fade ramp is out, and what this task owes it instead*.** | `ui/src/ui_core/src/widgets/label.rs`, `Truncation`, `truncate_line`, `Label::paint` |
+| **`Truncation` is a `pub enum` with four variants** — `None`, `Clip`, `Ellipsis`, `Fade` — and `Fade`'s own doc says *"Layout-wise identical to [`Truncation::Clip`]: the fade is a rendering effect, and the renderer that will apply it does not exist yet."* **The layout half of that still holds on the tree — `truncate_line` treats `Clip` and `Fade` identically and `Label::paint` never reads `truncation`, so there is **no fade ramp at all** and `Clip` is a layout cut, not a visual clip."* **Read before writing this file; see § *The fade ramp is out, and what this task owes it instead*.** | `ui/src/ui_core/src/widgets/label.rs`, `Truncation`, `truncate_line`, `Label::paint` |
 | **The text pass does not need a width, and that is why adding one costs nothing on the GPU.** `render.rs`'s `text_vertices` destructures `DrawCommand::Text` **exhaustively, with no `..`** — it is the production text pass and it names every field it reads. The pen advances from each glyph's own advance. | `ui/src/ui_core/src/render.rs`, `text_vertices`, `draw_text_batch` |
 | **Four places in the tree stop compiling against a ninth field, and each is named by symbol.** **Two exhaustive patterns**: `paint.rs`'s `text_bold_differs_from_text_in_the_weight_and_in_nothing_else`, whose own comment says *"If a second field ever rides along with the weight, this is what catches it"* — so it gains a binding and **not** a `..` — and `render.rs`'s `text_vertices`, the production text pass. **Two literal constructions**: `render.rs`'s `text_and_image_commands_expand_to_no_quads` and `scroll.rs`'s `a_text_run_is_kept_because_a_draw_command_does_not_carry_its_width`. **Every other `DrawCommand::Text` pattern in `ui/src` uses `..` already** and is unaffected. | `ui/src/ui_core/src/paint.rs`, `text_bold_differs_from_text_in_the_weight_and_in_nothing_else`; `ui/src/ui_core/src/render.rs`, `text_vertices`, `text_and_image_commands_expand_to_no_quads`; `ui/src/ui_core/src/widgets/scroll.rs`, `a_text_run_is_kept_because_a_draw_command_does_not_carry_its_width` |
 | **Test baseline: 1894** — `ui_core` **1450**, `ui_demo` **224**, doctests **220**. Measured at `75a896c` plus the uncommitted diff, in the session that wrote this file, and re-measured while writing it. | `cargo test --all-features` from `ui/` |
@@ -424,8 +431,7 @@ Plus the rect-level half keeps its name and every one of its assertions —
 `the_highest_ink_on_any_page_is_the_card_of_pads_at_the_tab_bar` — and the
 capture criterion is **AE 0 outside `y ≥ 680`** on all six pages, every differing
 pixel inside the fps readout's band, per
-`doc/ui/IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it
-found*.
+`.ai/tools/README.md` § *Capturing a window*.
 
 ## Requirements
 
@@ -843,8 +849,7 @@ found*.
     deleted, renamed away or weakened** beyond requirement 12's single named
     rename, `cargo doc --no-deps` clean, and `cargo audit` **recorded as not
     installed on this host, not passed**. Then the six-page before/after capture
-    with the commands of `IMPLEMENTATION_STATE.md`
-    § *Verifying a change that draws — the capture method* verbatim, and then
+    with the commands of `.ai/tools/README.md` § *Capturing a window* verbatim, and then
     **the frame rate on all six pages**.
 
 ## Testing the width without a font file at a path
@@ -870,14 +875,13 @@ and a font is a file.**
    `line.width` to the command, unchanged** — which is the plumbing this task is,
    and the only thing this task changed. **It does not prove that a font's
    advances are correct.** That needs a font file, it was already untested before
-   this task, and `doc/ui/IMPLEMENTATION_STATE.md` § *Task 30 — what it decided,
-   and what it found* records the same limit for `has_glyph`: *"one FreeType call
+   this task, and task 30 recorded the same limit for `has_glyph`: *"one FreeType call
    that needs a real font file, which `AGENTS.md` forbids a test to open"*. **So
    no acceptance criterion here claims anything about a typeface's metrics, and the
    handoff says so.**
 
 **The task-30 fixture rule, applied as a rule and not as a reminder.**
-`doc/ui/IMPLEMENTATION_STATE.md` § *Task 30* records that the demo's test fixture
+Task 30's record held that the demo's test fixture
 **called `define_family` for a family `main` never defined**, so every test saw two
 families and passed while the shipped binary resolved the unknown name to the
 default — *"a test fixture that builds what
@@ -1003,8 +1007,7 @@ production does not define"*. **Therefore, in this task:**
       `the_field_records_the_width_of_exactly_the_characters_it_drew` is the same
       mechanism in `TextInput`. **The handoff states what this does not prove: that
       a font's advances are correct.** That needs a font file, `AGENTS.md` forbids a
-      test to open one, and `doc/ui/IMPLEMENTATION_STATE.md` § *Task 30* records the
-      identical limit for `has_glyph`. **No criterion in this file claims anything
+      test to open one — the identical limit task 30 recorded for `has_glyph`. **No criterion in this file claims anything
       about a typeface's metrics**
 
 - [ ] **No test depends on a definition production is supposed to make.**
@@ -1080,15 +1083,13 @@ production does not define"*. **Therefore, in this task:**
 - [ ] **The six gallery pages are pixel-identical outside the fps band, and the
       mechanism is three facts and not one.** `Page::ALL`'s six names, release
       build, captured **before and after** with the commands of
-      `doc/ui/IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree` (a root
       capture, and `ffmpeg x11grab`, return black for a GL window),
       `pgrep -a -x ui_demo` in the same call as each `magick import -window <id>`,
       then `magick compare -metric AE before.png after.png null:` per page.
       **AE 0 outside `y ≥ 680`** on all six, every differing pixel inside the fps
-      readout's band, which `IMPLEMENTATION_STATE.md`
-      § *Task 24.1 — what it decided, and what it found* records as the one thing
+      readout's band, which `.ai/tools/README.md` § *Capturing a window* records as the one thing
       two captures of an unchanged frame differ in.
 
       - **1. No demo production line changes.**
@@ -1150,7 +1151,7 @@ production does not define"*. **Therefore, in this task:**
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of the
       six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `doc/ui/IMPLEMENTATION_STATE.md` § *Current position*
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline*
       records as the reason task 24.2's criterion 6 was amended rather than met by
       the script. Every page above the floor of **55**, and **each page is compared
       against its own pre-change number, not against the other pages.**
@@ -1186,9 +1187,9 @@ production does not define"*. **Therefore, in this task:**
       down where the next agent finds it.** `git diff` shows **no change** to
       `Truncation`, `truncate_line`, `LayoutOptions::truncation`,
       `Label::paint`'s truncation handling, or any shader source.
-      `doc/ui/IMPLEMENTATION_STATE.md` § *Tasks 30–32, the text gaps task 11 left*,
-      row **32**, still reads that **there is no fade ramp at all** — **it is not
-      edited by this task** — and the new entry says in one sentence that this task
+      **task 32 did build the fade ramp** — `doc/ui/done/TASK_UI_PRIM_32.md` —
+      and this task neither edits nor claims it — and this task's record says in one
+      sentence that this task
       **supplies the cut edge task 32's requirement 2 reads** (`x + width`) and
       **closes none of task 32**, whose requirement 6 (per-glyph factor or shader
       term) and requirement 4 (per-node clip not leaking, which is task 45's) are
@@ -1219,8 +1220,8 @@ production does not define"*. **Therefore, in this task:**
 - **No fade ramp, no alpha gradient, no per-glyph alpha factor, no shader term.**
   `TASK_UI_PRIM_32` owns it. `Truncation::Fade` stays layout-identical to
   `Truncation::Clip`, `truncate_line` keeps the arm it has, `Label::paint` still
-  never reads `truncation`, and `doc/ui/IMPLEMENTATION_STATE.md` § *Tasks 30–32*
-  row 32 keeps reading that **there is no fade ramp at all**. **This task supplies
+  and it adds no ramp of its own; `Truncation::Fade` and the ramp that draws it
+  are task 32's, and `label.rs` only arms the ellipsis arm. **This task supplies
   the one number task 32's requirement 2 needs and closes none of it** — see
   § *The fade ramp is out, and what this task owes it instead*, which says so in
   three checkable places rather than once

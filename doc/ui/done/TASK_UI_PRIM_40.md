@@ -253,8 +253,7 @@ left the value.**
 **This is the shape of the whole task, and it is a measured fact about this host
 rather than an assumption.**
 
-`doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-method* records, dated and attributed, that **XTEST pointer injection has never
+`.ai/tools/README.md` § *Capturing a window* records, dated and attributed, that **XTEST pointer injection has never
 delivered an event to the window**, across several sessions by several agents: a
 drag along the slider's track gave `magick compare -metric AE` = **0** against the
 capture before it; two presses on the button task 12 verified on screen twice gave
@@ -928,8 +927,7 @@ stop condition rather than an expansion** (`developer.md` § *Stop conditions*).
 - [ ] **The six gallery pages are pixel-identical outside two named bands, and the
       mechanism is stated rather than hoped for.** `Page::ALL`'s six names,
       release build, captured **before and after** with the commands of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim: window id **re-read at the time of each capture** with
+      `.ai/tools/README.md` § *Capturing a window* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab`, return black for
       a GL window), `pgrep -a -x ui_demo` in the same call as each
       `magick import -window <id>`, then `magick compare -metric AE before.png
@@ -938,8 +936,7 @@ stop condition rather than an expansion** (`developer.md` § *Stop conditions*).
       - **On the five pages that record no mesh command — `pads`, `text`, `input`,
         `controls`, `overlays` — the criterion is exactly task 34's: AE 0 outside
         `y ≥ 680`**, every differing pixel inside the fps readout's band, which
-        `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it
-        found* records as the one thing two captures of an unchanged frame differ
+        `.ai/tools/README.md` § *Capturing a window* records as the one thing two captures of an unchanged frame differ
         in (405 pixels there, **AE 0 over y 80–680**).
       - **On `data` the criterion is AE 0 outside `y ≥ 680` *and* outside
         `CAR_RECT`**, and every differing pixel inside one of those two bands.
@@ -964,7 +961,7 @@ stop condition rather than an expansion** (`developer.md` § *Stop conditions*).
       and `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of
       the six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline* records
       as the reason task 24.2's criterion 6 was amended rather than met by the
       script. Every page above the floor of **55**.
       **And the handoff reports `data`'s number separately, whatever it is, with the
@@ -973,7 +970,7 @@ stop condition rather than an expansion** (`developer.md` § *Stop conditions*).
       **2 032 triangles in five draw calls, five uniform sets and five
       `use_program`s per frame**, on top of a frame that already issues thousands of
       calls. **The five other pages are expected to be inside the recorded 61.1–63.9
-      band in `IMPLEMENTATION_STATE.md` § *The frame rate, measured* and to have
+      band in `.ai/tools/README.md` § *Frame-rate baseline* and to have
       cost nothing**, because nothing about them changed.
 
 - [ ] **No GL error on the first frame that draws the mesh**, read once with
@@ -985,8 +982,7 @@ stop condition rather than an expansion** (`developer.md` § *Stop conditions*).
 
 - [ ] **What the handoff does not claim, in those words.** It states that
       **no pointer event has ever been observed reaching this window** on this
-      host — `doc/ui/IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* records the drag, the
+      host — `.ai/tools/README.md` § *Capturing a window* records the drag, the
       two presses on task 12's button, the counter and the `AE = 0`, and
       `XQueryPointer` reporting window `0x0` — and therefore that **no acceptance
       criterion here is verified by a pointer-driven capture, and none asks for

@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_47: A Mode That Crosses a Widget Boundary — `mode::ModeScope`, `snapshot::Snapshot`, and `Segmented`
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Give `ui_core` the two of the three things row **`L6b`** of `DEMO_APPLICATION.md`
@@ -1015,8 +1022,7 @@ other two, which is its second:
       (`.ai/workflows/task-sequence.md` § *State*); it points at the code.
 
 16. **The suite, the capture and the frame rate are all produced**, by the commands
-    of `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-    method* and of the criterion below: `cargo fmt --check`, `cargo build
+    of `.ai/tools/README.md` § *Capturing a window* and of the criterion below: `cargo fmt --check`, `cargo build
     --all-targets --all-features`, `cargo clippy --all-targets --all-features --
     -D warnings`, `cargo test --all-features` with the per-binary counts pasted,
     `cargo doc --no-deps` clean, `cargo audit` **recorded as not installed on this
@@ -1172,9 +1178,10 @@ other two, which is its second:
       `a_snapshot_can_be_restored_twice_and_still_holds_its_writes`,
       `restore_returns_how_many_writes_ran`; in `segmented.rs` — the fourteen named
       above; in `slider.rs` — `a_saved_slider_value_is_put_back_where_it_was`; in
-      the demo — the ten named above. **The suite is at least 1894** — the baseline
-      `IMPLEMENTATION_STATE.md` § *Current position* records (1450 `ui_core` + 224
-      `ui_demo` + 220 doctests) — **plus the forty-one tests requirement 14 names**
+      the demo — the ten named above. **The suite is at least 1894** — the baseline this file
+      projects from, recorded at `75a896c` in `doc/ui/done/TASK_UI_PRIM_42.md`
+      § *What is in the crate at `75a896c`* (1450 `ui_core` + 224 `ui_demo` + 220
+      doctests) — **plus the forty-one tests requirement 14 names**
       (16 in `mode.rs` and `snapshot.rs`, 14 in `segmented.rs`, 1 in `slider.rs`, 10
       in the demo), so **1935 or more**, and **no test was deleted, renamed away or
       weakened**: the handoff lists the before and after counts per binary. **The handoff names the tree it measured on** — this
@@ -1188,8 +1195,7 @@ other two, which is its second:
 
 - [ ] **The six gallery pages are pixel-identical outside two named bands, and the
       mechanism is stated rather than hoped for.** Captured **before and after** with
-      the commands of `IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree` (a root
       capture, and `ffmpeg x11grab`, return black for a GL window),
       `pgrep -a -x ui_demo` in the same call as each
@@ -1247,7 +1253,7 @@ other two, which is its second:
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of the
       six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records as
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline* records as
       the reason task 24.2's criterion 6 was amended rather than met by the script.
       Every page above the floor of **55**. **The `controls` page is expected to
       cost something and the handoff reports its number separately, with the reason
@@ -1260,8 +1266,7 @@ other two, which is its second:
       depends on the mode**, which is the whole of the per-frame cost claim: there
       is no re-layout and no cache to invalidate.
       **The other five pages are expected to be inside the
-      recorded 61.1–63.9 band in `IMPLEMENTATION_STATE.md`
-      § *The frame rate, measured*, and to have cost nothing**, because the paint
+      recorded 61.1–63.9 band in `.ai/tools/README.md` § *Frame-rate baseline*, and to have cost nothing**, because the paint
       gate empties the strip's commands before they are recorded.
 
 - [ ] **Nothing from another task leaked in, and the dependency rule holds.**

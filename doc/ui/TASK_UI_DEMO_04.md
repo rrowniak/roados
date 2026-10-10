@@ -1,5 +1,12 @@
 # TASK_UI_DEMO_04: The Indicator-Light Column — ~20 Conditions, Five Colours, Three Timing Rules, and One Latch
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Build the **indicator-light column** that `TASK_UI_DEMO_03` left as an empty box:
@@ -701,8 +708,7 @@ sentence supports both and a reader who prefers the other has it written down.
 
 - [ ] **The seven pages are captured, and the six unchanged ones are
       pixel-identical by the same mechanism task 03 names.** The capture commands
-      of `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim, window id re-read at each capture, `pgrep -a -x ui_demo` in
+      of `.ai/tools/README.md` § *Capturing a window* verbatim, window id re-read at each capture, `pgrep -a -x ui_demo` in
       the same call as each `magick import`, `magick compare -metric AE` per page.
       **AE 0 outside `y ≥ 680` on the six**, and on the seventh page **the column is
       visible with at least one disc in at least two slots**, **the self-test is

@@ -40,10 +40,10 @@ in its own comments:
 - **The three gates** — paint, hit test and focus each need a row.
 - **The page-membership table in `Demo::new`** — **mutation-tested.** Task 24.1's
   review produced four majors that were all one finding, *a mechanism with no
-  test*, found by mutation rather than by reading; the sharpest instance is
-  recorded in `IMPLEMENTATION_STATE.md` as *"`Demo::new`'s page table had no
-  completeness assertion at all"* — one dropped row gave **0 failed / 1814**, with
-  the text column drawn on the wrong page. **24.2 found the same class again** on
+  test*, found by mutation rather than by reading; the sharpest instance was
+  `Demo::new`'s own page table, which had **no completeness assertion at all** —
+  one dropped row gave **0 failed / 1814**, with the text column drawn on the
+  wrong page. **24.2 found the same class again** on
   the table 24.2 introduced (`placed_handles`, 0 failed / 1817). A seventh row is
   exactly where it recurs.
 - **`Page::DEFAULT` stays `Pads`** — deliberately, because it is *"the one page
@@ -204,9 +204,7 @@ amended by this pass** — this direction is the owner and the others are histor
 
 | File | Records |
 |---|---|
-| `TASK_UI_PRIM_24.md:263-266`, *Out of Scope* | *"`DEMO_APPLICATION.md` gaps #3 and #7 stay open. Closing #3 is a library task with its own cycle, and the operator chose the demo-level route on 2026-10-03"* |
-| `TASK_UI_PRIM_24.3.md:13-21` and `:212-214`, *Context* and *Out of Scope* | *"The operator chose the demo-level route and gaps #3 and #7 stay open"* |
-| `IMPLEMENTATION_STATE.md:4336` and `:5606` | *"Two library gaps stay open by this decision"* / *"Three library gaps stay open by that decision"* |
+| `TASK_UI_PRIM_24.md` § *Out of Scope* and `TASK_UI_PRIM_24.3.md` § *Out of Scope* | *"`DEMO_APPLICATION.md` gaps #3 and #7 stay open. Closing #3 is a library task with its own cycle, and the operator chose the demo-level route on 2026-10-03"* |
 | `ui/src/ui_demo/src/main.rs:3247`, a comment on the tab bar | *"`DEMO_APPLICATION.md` gaps #3 and #7 stay open and this is what gap #7 prescribes"* |
 
 The last is **known-stale** and is left for a code task: it is a source comment
@@ -309,12 +307,12 @@ open by decision on 2026-10-03 and are no longer** — see § *Operator decision
 layout exposes in `ui_core`*, further down.
 
 **These eight rows keep their numbering**, because four files outside this one
-cite it by number: `TASK_UI_PRIM_24.md:142` and `:270` cite rows 7 and 8,
-`TASK_UI_PRIM_24.3.md:15`, `:17`, `:21`, `:216` and `:218` cite rows 7, 3, 8
-and 4, `IMPLEMENTATION_STATE.md:4336` and `:5606` cite rows 3 and 7, and
-`ui/src/ui_demo/src/main.rs:3247` cites rows 3 and 7. The second table is
-therefore cited as **L1..L11** instead, so that a bare "gap N" in this document
-cannot mean two different rows — which it did, five times, before this pass.
+cite it by number: `TASK_UI_PRIM_24.md` § *Out of Scope* cites rows 7 and 8,
+`TASK_UI_PRIM_24.3.md` § *Out of Scope* cites rows 7, 3, 8 and 4, and
+`ui/src/ui_demo/src/main.rs`'s tab-bar comment cites rows 3 and 7. The second
+table is therefore cited as **L1..L11** instead, so that a bare "gap N" in this
+document cannot mean two different rows — which it did, five times, before this
+pass.
 
 | # | Gap | Severity | Blocks |
 |---|---|---|---|

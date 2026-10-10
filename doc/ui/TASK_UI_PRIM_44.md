@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_44: `ui_core::widgets::Icon` — a Tintable Image Path, and the Widget That Uses It
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Close **gap `#4`** of `DEMO_APPLICATION.md` § *Library gaps* — *"**No Icon
@@ -929,8 +936,7 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
     `cargo test --all-features` **with the per-binary counts pasted and no test
     deleted, renamed away or weakened**, `cargo doc --no-deps` clean, and
     `cargo audit` **recorded as not installed on this host, not passed**. Then the
-    six-page before/after capture of `IMPLEMENTATION_STATE.md`
-    § *Verifying a change that draws — the capture method*, verbatim. Then
+    six-page before/after capture of `.ai/tools/README.md` § *Capturing a window*, verbatim. Then
     **`gl.get_error()` read once after the first frame that draws the `data`
     page's image**, with the instrument's code quoted — because a
     vertex layout that is wrong in a way GL accepts **draws the wrong picture or
@@ -1101,8 +1107,7 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
 - [ ] **The six gallery pages are pixel-identical outside the fps band, and the
       mechanism is three stated facts rather than one comfortable one.**
       `Page::ALL`'s six names, release build, captured **before and after** with
-      the commands of `IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree` (a root
       capture, and `ffmpeg x11grab`, return black for a GL window),
       `pgrep -a -x ui_demo` in the same call as each `magick import -window <id>`,
@@ -1110,8 +1115,7 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
 
       1. **The criterion is task 34's, unchanged: AE 0 outside `y ≥ 680` on all
          six pages**, every differing pixel inside the fps readout's band, which
-         `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it
-         found* records as the one thing two captures of an unchanged frame
+         `.ai/tools/README.md` § *Capturing a window* records as the one thing two captures of an unchanged frame
          differ in (405 pixels there, **AE 0 over y 80–680**).
       2. **`git diff --stat ui/src/ui_demo/src/main.rs` is empty**, and the handoff
          says why in one sentence: **`TASK_UI_PRIM_39`'s icon bytes are not in
@@ -1143,7 +1147,7 @@ condition rather than an expansion** (`developer.md` § *Stop conditions*).
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of
       the six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `IMPLEMENTATION_STATE.md` § *Current position*
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline*
       records as the reason task 24.2's criterion 6 was amended rather than met
       by the script. Every page at or above the floor of **55**, and **the
       handoff says in one sentence why no page is expected to move**: the demo

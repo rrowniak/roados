@@ -33,7 +33,7 @@ be added at all.
 > that two fonts' glyphs for one character do not collide — is
 > `the_same_letter_in_two_faces_is_two_atlas_entries`, written by task 22 and
 > still passing unchanged. What this task did to the key was different and is
-> recorded in `IMPLEMENTATION_STATE.md` § *Task 30*: the **replacement** glyph
+> recorded for task 30: the **replacement** glyph
 > needed a key of its own, because it belongs to no font and names no character,
 > and a key carrying a character would have had to fabricate one. `GlyphKey` is
 > an enum for that reason.

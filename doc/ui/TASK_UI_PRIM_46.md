@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_46: Gap `L5` — An Axis on `Scroll`, Momentum, and Snap Points
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Close the mechanism half of row **`L5`** in `doc/ui/DEMO_APPLICATION.md`
@@ -54,7 +61,7 @@ that rule for its own citations and it applies here for the same reason, and tas
 | **`Scroll` runs one clock today and clears it from two directions, so a second one is a decision rather than an invention.** `clock: RefCell<AnimationClock>` is cleared by `animate_to_state` and by `snap_to_state`, and `tick` is `self.clock.borrow_mut().tick(delta)`. `AnimationClock::add`'s own doc is the collision rule: *"Starting a second animation over one already running therefore leaves both writing it, and the last to be ticked wins; a caller that means to replace an animation clears the clock with [`clear`] first."* | `ui/src/ui_core/src/widgets/scroll.rs`, `Scroll::animate_to_state`, `Scroll::snap_to_state`, `Scroll::tick`; `ui/src/ui_core/src/animation.rs`, `AnimationClock::add`, `AnimationClock::clear` |
 | **Per-node clipping is task 45's, and a scroll viewport depends on it.** `LayoutState::clip` carries the per-node rect, `Batch::clip` carries it to the GPU, and `apply_clip` sets the scissor per batch. Row **#5** of `DEMO_APPLICATION.md` § *Library gaps* is the row, and `TASK_UI_PRIM_45.md` is the task that closes it. **A horizontal viewport needs it for the same reason a vertical one does, and needs it no more and no less.** | `doc/ui/DEMO_APPLICATION.md` § *Library gaps* row #5; `doc/ui/TASK_UI_PRIM_45.md`; `ui/src/ui_core/src/render.rs`, `Renderer::apply_clip` |
 | **Test baseline: 1894** — `ui_core` **1450** (plus **1 ignored**), `ui_demo` **224**, doctests **220**. Measured from `ui/` in the session that wrote this file, on `75a896c` plus the uncommitted diff. | `cargo test --all-features` from `ui/` |
-| **The demo cannot receive a pointer event on this host.** XTEST pointer injection has never delivered one; keyboard has delivered exactly one. **No acceptance criterion here requires a pointer-driven interaction, and none asks for a capture of one.** | `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture method* |
+| **The demo cannot receive a pointer event on this host.** XTEST pointer injection has never delivered one; keyboard has delivered exactly one. **No acceptance criterion here requires a pointer-driven interaction, and none asks for a capture of one.** | `.ai/tools/README.md` § *Capturing a window* |
 | **`.ai/tools/fps-check.sh` takes `seconds` then `floor` and runs the binary with no arguments**, so it **cannot name a page**; per-page is `ROADOS_RUN_SECONDS=<n> ./target/release/ui_demo --tab=<page>`. Every run is measured — `.ai/workflows/task-sequence.md` § *Gates*. | `.ai/tools/fps-check.sh` |
 
 ### Row `L5`, in the document's own words
@@ -1353,8 +1360,7 @@ same way the vertical one does, and task 45 owns it.
       no sleep, which is the `AGENTS.md` prohibition and the reason every test
       above is driven by an injected `InputEvent` and by `Duration`s the test
       chose. **No acceptance criterion in this file is met by a pointer-driven
-      capture, and none asks for one**, per `doc/ui/IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method*, which records that
+      capture, and none asks for one**, per `.ai/tools/README.md` § *Capturing a window*, which records that
       XTEST pointer injection has never delivered an event to this window. **The
       handoff states this in those words and does not claim otherwise.**
 
@@ -1378,16 +1384,14 @@ same way the vertical one does, and task 45 owns it.
 
 - [ ] **The six gallery pages are pixel-identical, and the mechanism is one
       checkable fact.** `Page::ALL`'s six names, release build, captured **before
-      and after** with the commands of `IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      and after** with the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree`, then
       `pgrep -a -x ui_demo` in the same call as each `magick import -window <id>`,
       then `magick compare -metric AE before.png after.png null:` per page.
 
       **`AE 0` over the `1280x680` crop on all six**, with every differing pixel
       inside the fps readout's band — which is the criterion task 34 established
-      and `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it
-      found* records as the one thing two captures of an unchanged frame differ in
+      and `.ai/tools/README.md` § *Capturing a window* records as the one thing two captures of an unchanged frame differ in
       (**AE 0 over `y 80–680`**).
 
       **The mechanism, stated as a grep rather than a hope:**
@@ -1414,7 +1418,7 @@ same way the vertical one does, and task 45 owns it.
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of
       the six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline* records
       as the reason task 24.2's criterion 6 was amended rather than met by the
       script. Every page above the floor of **55**, and **each page is compared
       against its own pre-change number**, which is the only comparison that

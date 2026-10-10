@@ -620,10 +620,10 @@ one developer's change.
       `Page::ALL`'s six, the `roados-fps` line parsed by hand — **`fps-check.sh`
       reads `seconds` then `floor` and nothing else, and runs the binary with no
       arguments (`.ai/tools/fps-check.sh`), so it cannot name a page**, which
-      `IMPLEMENTATION_STATE.md` § *Current position* records as the reason task
+      `.ai/tools/README.md` § *Frame-rate baseline* records as the reason task
       24.2's criterion 6 was amended rather than met by the script.
       **If task 34 has not landed when this task runs, the baseline is the band
-      recorded in `IMPLEMENTATION_STATE.md` § *The frame rate, measured* — 61.1 to
+      recorded in `.ai/tools/README.md` § *Frame-rate baseline* — 61.1 to
       63.9 across six pages — and the handoff says so in those words rather than
       claiming a comparison it did not make.** Every page above the floor of 55.
     - **The expected result is no measurable change, and the reason is stated in
@@ -722,14 +722,13 @@ one developer's change.
       **`4` for `first_index: 1`, not `1`**, and `Err` on an offset past `i32`
 - [ ] **The six gallery pages are pixel-identical.** `Page::ALL`'s six names,
       captured **before and after** the change, release build, the commands of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim: window id **re-read at the time of each capture** with
+      `.ai/tools/README.md` § *Capturing a window* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab` too, return
       black for a GL window), `pgrep -a -x ui_demo` in the same call as each
       `magick import -window <id>`, then `magick compare -metric AE before.png
       after.png null:` per page. **AE 0 outside `y ≥ 680`**, and every differing
       pixel inside the fps readout's band — which
-      `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it found*
+      `.ai/tools/README.md` § *Capturing a window*
       records as the one thing two captures of an unchanged frame differ in (405
       pixels there, **AE 0 over y 80–680**). The rect-level half is
       `every_page_places_every_rect_where_the_gallery_placed_it` in the demo's
@@ -743,8 +742,7 @@ one developer's change.
       with the `roados-fps` line parsed — **`fps-check.sh` cannot name a page**,
       verified in `.ai/tools/fps-check.sh`. Every page above the
       floor of 55 and inside 34's band if 34 has landed, or inside the recorded
-      **61.1–63.9** band in `IMPLEMENTATION_STATE.md`
-      § *The frame rate, measured* with the handoff saying which baseline it used.
+      **61.1–63.9** band in `.ai/tools/README.md` § *Frame-rate baseline* with the handoff saying which baseline it used.
       **The handoff also states the five-sub-mesh per-frame cost** — five draw
       calls, five uniform sets, five `use_program`s — as the number task 38's first
       capture is measured against

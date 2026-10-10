@@ -15,22 +15,20 @@ The Rust workspace is `ui/`: the `ui_core` library, the `ui_demo` binary, and
 Build output is `/ui/target/` and is ignored.
 
 Before changing a manifest, read `doc/ui/CROSSBUILD.md` §5.4 for the SDL
-features and the video-driver split, §5.5 for the options that no cargo feature
-can reach, and `doc/ui/IMPLEMENTATION_STATE.md` for the operator's decisions.
-Dependency **versions** are in `doc/ui/PRIMITIVES_ARCHITECTURE.md`
+features and the video-driver split and §5.5 for the options that no cargo feature
+can reach. Dependency **versions** are in `doc/ui/PRIMITIVES_ARCHITECTURE.md`
 § *Dependencies*, and only there — **and that section's feature list is
 authoritative as of 2026-10-05**: it was reconciled against both manifests, so
 it carries all four features. Its `features = ["build-from-source"]` — the form
 this paragraph used to warn about — would delete `build-from-source-unix-console`,
-which `IMPLEMENTATION_STATE.md` § *Task 28, added after the demo* makes mandatory
-for the aarch64 target, and which
-`PRIMITIVES_ARCHITECTURE.md` § *Dependencies* now also marks "do not shorten".
+which `PRIMITIVES_ARCHITECTURE.md` § *Dependencies* marks mandatory for the
+aarch64 target and marks "do not shorten".
 
 Citations here are **by section, never by line number**. A line number into
-`IMPLEMENTATION_STATE.md` or `PRIMITIVES_ARCHITECTURE.md` is stale within days
-of being written — this paragraph carried `:346` and `:221`, which by 2026-10-05
-pointed at unrelated content about toast animations. A section name is the thing
-that survives an edit.
+`PRIMITIVES_ARCHITECTURE.md` or any other living document is stale within days
+of being written — this paragraph carried `:346` and `:221` into
+`IMPLEMENTATION_STATE.md`, which by 2026-10-05 pointed at unrelated content about
+toast animations. A section name is the thing that survives an edit.
 
 The list below is a pointer document, not a second owner of any rule.
 `.ai/agents/developer.md` owns the agent rules and must be read before
@@ -66,7 +64,13 @@ A working document may have a sidecar: `<file>.context.md`, beside the file it
 describes. It holds live working state — status, what the operator ratified, what
 an agent added without approval, caveats, next step, dated history.
 
-Four rules keep it from becoming a shadow spec:
+A **state file** (`doc/ui/IMPLEMENTATION_STATE*.md`, `doc/platform/…`) is a
+status board: what is in flight, what is next, what is left over. **3 KB, and a
+done task is not in it at all** — its file lives in `doc/ui/done/` and that is
+its record. `.ai/workflows/task-sequence.md` § *State* owns the rule; the operator
+set the cap on 2026-10-10, when `doc/ui/IMPLEMENTATION_STATE.md` was 527 KB.
+
+Four rules keep a sidecar from becoming a shadow spec:
 
 - **A sidecar is not a source.** Nothing in it may be cited as evidence, and no
   confidence tag is earned by reading it.

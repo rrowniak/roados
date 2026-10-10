@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_50: A Theme That Scopes — `FocusRing`, `scope::ThemeScope`, and What a Switch Does Inside a Scope
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Close **row `L9`** of `DEMO_APPLICATION.md` § *Gaps this layout exposes in
@@ -159,10 +166,9 @@ seven tokens.
 - **`.ai/tools/fps-check.sh` takes `seconds` then `floor` and runs the binary
   with no arguments**, so it cannot name a page; the per-page form is
   `ROADOS_RUN_SECONDS=<n> ./target/release/ui_demo --tab=<page>`.
-  `IMPLEMENTATION_STATE.md` § *The frame rate, measured* records the band.
+  `.ai/tools/README.md` § *Frame-rate baseline* records the band.
 - **No pointer event has ever been observed reaching this window on this host**
-  (`IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-  method*, measured across several sessions). **Nothing in this task is verified
+  (`.ai/tools/README.md` § *Capturing a window*, measured across several sessions). **Nothing in this task is verified
   by a pointer, and no acceptance criterion here asks for one** —
   *an acceptance criterion that names an instrument which cannot
   produce the evidence is not met by producing the evidence another way* is the
@@ -917,8 +923,7 @@ table* was written about.
     update is a token name. **`Segmented` gains nothing here either** if 47 landed.
 
 11. **The suite, the capture and the frame rate are all produced**, by the
-    commands of `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the
-    capture method* and of the criterion below: `cargo fmt --check`,
+    commands of `.ai/tools/README.md` § *Capturing a window* and of the criterion below: `cargo fmt --check`,
     `cargo build --all-targets --all-features`,
     `cargo clippy --all-targets --all-features -- -D warnings`,
     `cargo test --all-features` with **the per-binary counts pasted**,
@@ -1067,8 +1072,7 @@ table* was written about.
 
 - [ ] **The six gallery pages are pixel-identical, and the mechanism is four facts
       rather than one comfortable one.** Captured **before and after** with the
-      commands of `IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree` (a root
       capture and `ffmpeg x11grab` return black for a GL window), `pgrep -a -x
       ui_demo` in the same call as each `magick import -window <id>`, then
@@ -1106,11 +1110,10 @@ table* was written about.
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of
       the six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline* records
       as the reason task 24.2's criterion 6 was amended rather than met by the
       script. **Every page above the floor of 55**, and expected inside the
-      recorded **61.1–63.9** band of `IMPLEMENTATION_STATE.md`
-      § *The frame rate, measured*.
+      recorded **61.1–63.9** band of `.ai/tools/README.md` § *Frame-rate baseline*.
 
       **And the per-frame cost claim is a fact about the diff, not a hope:** the
       demo's frame does exactly the work it did, because **no demo file changed and

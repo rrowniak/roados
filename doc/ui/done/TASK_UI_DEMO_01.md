@@ -117,8 +117,8 @@ what that costs; the two consequences a reader has to know are:
    that was built to be structural rather than a review instruction does not
    cover this directory.** `TASK_UI_PRIM_39.md` § *Out of Scope* says so of the
    network allow-list in its own words (*"the guard is structural rather than a
-   review instruction"*), and `IMPLEMENTATION_STATE.md` § *Task 39* records that
-   task as *not reviewed* — **so nothing in this repository has yet checked what
+   review instruction"*), and `doc/ui/IMPLEMENTATION_STATE.md` § *Left over* lists
+   task 39 among the tasks never reviewed — **so nothing in this repository has yet checked what
    its guard does with a hand-dropped binary.** Widening it is not this task's
    job and is named in § *Out of Scope*.
 2. **The licence of the image is the operator's decision and it is a risk
@@ -136,7 +136,7 @@ of the source, cited by symbol:
 | **`const ALL: [Page; 6]`** | `main.rs:2012` | becomes **`[Page; 7]`** — a fixed-size array, so the *type* carries the count and the compiler carries the change |
 | **`fn name(self) -> &'static str`** | `main.rs:2040`, whose doc says *"The only place the six names are written out"* | gains **`Page::Demo => "demo"`**. `from_name`, `page_names` and `usage` all derive from `ALL` through `name`, so one spelling reaches `--tab=`, `--help` and the unknown-name message |
 | **`Demo::tabs`** | the `Tab { page, button }` row, built by `for &tab_page in &Page::ALL` (`main.rs:3973`) | gains a seventh row **because it is built by the loop** — the seventh tab button is not written anywhere |
-| **`Demo::page_members`** | `main.rs:5462` | one row: `on(Page::Demo, map_node, false)`. **This table has been the site of two mutation-found majors** — `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it found* records a dropped row giving *"0 failed / 1814, with the text column drawn on the wrong page"*, and the task-table's row **24.2** records the same class on `placed_handles` at *0 failed / 1817*. **A seventh row is exactly where it recurs** |
+| **`Demo::page_members`** | `main.rs:5462` | one row: `on(Page::Demo, map_node, false)`. **This table has been the site of two mutation-found majors** — `.ai/tools/README.md` § *Capturing a window* records a dropped row giving *"0 failed / 1814, with the text column drawn on the wrong page"*, and the task-table's row **24.2** records the same class on `placed_handles` at *0 failed / 1817*. **A seventh row is exactly where it recurs** |
 | **`Page::DEFAULT`** | `main.rs:2029` | **stays `Page::Pads`**, and requirement 4 says so in a doc comment on the row |
 | **`root`'s child list** | `main.rs:5230` | the map node goes in **immediately after `background`**, for the reason in requirement 4's `root` bullet |
 
@@ -309,8 +309,7 @@ being rewritten, and has one now.
 `doc/ui/IMPLEMENTATION_STATE_DEMO.md` **does not exist**, and requirement 7
 creates it **as part of the implementation, not of this specification** — so
 until this task lands, the five `DEMO_*` tasks still have no state file and
-`IMPLEMENTATION_STATE.md` § *Tasks `DEMO_01`–`DEMO_05`* is still the only place
-that says so. **Two halves and not one is deliberate**: writing a state file
+`doc/ui/TASK_UI_DEMO_01..05.md` are still the only place that says so. **Two halves and not one is deliberate**: writing a state file
 about a task that has not run would record nothing, and creating it at
 specification time would be a file whose every row said *not started*.
 
@@ -723,8 +722,7 @@ weakened assertion, and the alternative — leaving it out — is three red test
 
 - [ ] **The page is on screen, on the demo page only, and the capture says
       which picture it is of.** Release build, `--tab=demo`, captured with the
-      stock method of `IMPLEMENTATION_STATE.md` § *Verifying a change that draws
-      — the capture method* verbatim — window id from
+      stock method of `.ai/tools/README.md` § *Capturing a window* verbatim — window id from
       `DISPLAY=:0 xwininfo -root -tree | grep '"roados ui_demo"'` and
       `DISPLAY=:0 magick import -window <id>` — with `pgrep -a -x ui_demo` in the
       same call as each capture.

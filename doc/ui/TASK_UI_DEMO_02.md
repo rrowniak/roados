@@ -1,5 +1,12 @@
 # TASK_UI_DEMO_02: The Chrome — a Top Status Bar, a Bottom Dock, and a Persistent Car-Status Pane
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Fill the Tesla tab with its **persistent chrome**: a **top status bar** across the
@@ -349,8 +356,7 @@ output."* **2058** if `TASK_UI_DEMO_01` has not landed, **2064** if it has — *
 tests, not the thirty-two its predecessor specified**, because the rewritten
 task 01 adds six and the procedural map went to `doc/ui/backlog/`.
 
-**The frame-rate floor is 55 fps on a release build**, and `IMPLEMENTATION_STATE.md`
-§ *The frame rate, measured* records the band the six gallery pages sit in. **The
+**The frame-rate floor is 55 fps on a release build**, and `.ai/tools/README.md` § *Frame-rate baseline* records the band the six gallery pages sit in. **The
 demo page's rate is the number this task produces**, and the chrome is a real
 per-frame cost: **one `DrawCommand::Image` from task 01 — not the roughly one
 thousand `Rect`/`Path`/`Circle` commands the superseded procedural map cost,
@@ -807,8 +813,7 @@ Phase 3 says *"A test that has never failed is not a test"*:
 
 - [ ] **The chrome is on screen, in the right places, and does not leak.**
       Release build, `--tab=demo`, captured by the stock method of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim — window id from
+      `.ai/tools/README.md` § *Capturing a window* verbatim — window id from
       `DISPLAY=:0 xwininfo -root -tree | rg '"roados ui_demo"'`, then
       `DISPLAY=:0 magick import -window <id>` — **with `pgrep -a -x ui_demo` in the
       same call as each capture and no seed, no environment variable and no rebuilt
@@ -1025,8 +1030,7 @@ Phase 3 says *"A test that has never failed is not a test"*:
   Swipe` and `LongPress` are consumed by no widget in `ui_core` today**, so a drag
   on this task's chrome would go nowhere. **And no acceptance criterion could
   verify one**: *pointer injection has never delivered an event to the window on
-  this host and keyboard injection delivered exactly one* — `IMPLEMENTATION_STATE.md`
-  § *Verifying a change that draws — the capture method* — and
+  this host and keyboard injection delivered exactly one* — `.ai/tools/README.md` § *Capturing a window* — and
   `TASK_UI_PRIM_42`'s § *Context* states the same rule as *"**no acceptance criterion
   here may require a pointer-driven interaction**"*. **A gesture-free chrome is a
   capture-verifiable chrome, and that is not a coincidence.**

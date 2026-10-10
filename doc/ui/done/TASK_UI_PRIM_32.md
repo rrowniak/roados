@@ -4,9 +4,10 @@
 **32.1** the demo rows (`ui_demo` only), **32.2** the mechanism (`ui_core`),
 **32.3** this record — and verified on the tree. **Not reviewed:** review is
 `.ai/workflows/task-sequence.md` step 2, in a session separate from the
-implementer's. The full record is `doc/ui/IMPLEMENTATION_STATE.md` § *Task 32
-— what it decided, and what it found*. This file owns the requirements; where
-it and the record disagree, this file wins and the record is corrected.
+implementer's. **The record was compacted out of `doc/ui/IMPLEMENTATION_STATE.md`
+on 2026-10-10** — that file is a 3 KB status board now and takes no per-task
+record. This file owns the requirements and, with the code, is what is left of
+the record.
 
 **Amended 2026-10-06 (sub-task 32.3):** two false premises in Context corrected,
 requirement 6 decision recorded, requirement 4 mechanism and task-45 boundary
@@ -42,8 +43,7 @@ of it is met.
 
 **Two premises in the original version of this section were false, corrected here
 in place, 2026-10-06, against the source by the implementer's own reading** —
-the same correction pattern `IMPLEMENTATION_STATE.md` § *Three premises that
-measurement refuted* records for tasks 24.1–24.3, and the reason this file
+the same correction pattern tasks 24.1–24.3 used, and the reason this file
 carries a correction rather than a rewrite is that a task file owns its
 requirements:
 

@@ -959,7 +959,7 @@ full seven**, and records the overshoot rather than disguising it.
          `gl.blend_func(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)`**, because the composite
          reads a destination.
 
-**Amended 2026-10-08 by operator decision:** the composite is now drawn over `drawn` (the rect intersected with the window), **not** grown by `blur::reach(sigma)`. The growth was the task file's original premise, but it does not hold for a backdrop: the blur is a full-window convolution of the whole capture, so the texels the rect's edges need are *already blurred* and come from just outside the rect, in the texture itself. Growing the composite therefore painted a halo of frosted scene up to four pixels **outside** the caller's rect — where the caller asked for nothing — and made `DrawCommand::Backdrop`'s `rect` field doc false in the sentence a caller reads. **This deviation is recorded in `doc/ui/IMPLEMENTATION_STATE.md` § *Task 41 — what it decided, and what it found* and this task file is amended in place so the two cannot contradict.** The acceptance criterion in requirement 15 step 7 that named `blur::reach(sigma)` is deviated from; the task file's own form is amended rather than the acceptance criterion silently settled.
+**Amended 2026-10-08 by operator decision:** the composite is now drawn over `drawn` (the rect intersected with the window), **not** grown by `blur::reach(sigma)`. The growth was the task file's original premise, but it does not hold for a backdrop: the blur is a full-window convolution of the whole capture, so the texels the rect's edges need are *already blurred* and come from just outside the rect, in the texture itself. Growing the composite therefore painted a halo of frosted scene up to four pixels **outside** the caller's rect — where the caller asked for nothing — and made `DrawCommand::Backdrop`'s `rect` field doc false in the sentence a caller reads. **This deviation is recorded here, in the task file that owns it; the `doc/ui/IMPLEMENTATION_STATE.md` record of it was compacted out on 2026-10-10.** The acceptance criterion in requirement 15 step 7 that named `blur::reach(sigma)` is deviated from; the task file's own form is amended rather than the acceptance criterion silently settled.
 
 
       8. **The clip is the composite's, twice over, and the doc says so**: it is
@@ -1142,8 +1142,7 @@ full seven**, and records the overshoot rather than disguising it.
       runs the binary with no arguments**, verified in `.ai/tools/fps-check.sh`, so
       it cannot name a page. Every page above the floor of **55** and inside the
       baseline, which is **task 34's if task 34 has landed** and otherwise the
-      **61.1–63.9 fps across six pages** band in `doc/ui/IMPLEMENTATION_STATE.md`
-      § *The frame rate, measured* — **and the handoff says in which of those two
+      **61.1–63.9 fps across six pages** band in `.ai/tools/README.md` § *Frame-rate baseline* — **and the handoff says in which of those two
       registers it compared.** **The expected result is no measurable change, and
       the reason is stated rather than left as a coincidence:** `no_gallery_page_
       records_a_backdrop` passes, so the per-frame work added is **one `if let
@@ -1410,15 +1409,13 @@ full seven**, and records the overshoot rather than disguising it.
 
 - [ ] **The six gallery pages are pixel-identical, and the mechanism is stated
       rather than hoped for.** `Page::ALL`'s six names, release build, captured
-      **before and after** with the commands of `doc/ui/IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      **before and after** with the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree` (a root
       capture, and `ffmpeg x11grab`, return black for a GL window),
       `pgrep -a -x ui_demo` in the same call as each `magick import -window <id>`,
       then `magick compare -metric AE before.png after.png null:` per page.
       **AE 0 outside `y ≥ 680`** on all six, every differing pixel inside the fps
-      readout's band — which `doc/ui/IMPLEMENTATION_STATE.md`
-      § *Task 24.1 — what it decided, and what it found* records as the one thing
+      readout's band — which `.ai/tools/README.md` § *Capturing a window* records as the one thing
       two captures of an unchanged frame differ in (405 pixels there, **AE 0 over
       y 80–680**). The rect-level half keeps its names and its assertions:
       `every_page_places_every_rect_where_the_gallery_placed_it` and
@@ -1441,8 +1438,7 @@ full seven**, and records the overshoot rather than disguising it.
       the floor of **55**.
       **The baseline is named explicitly and the handoff says which one it used:**
       **task 34's, if task 34 has landed; otherwise the 61.1–63.9 fps across six
-      pages band in `doc/ui/IMPLEMENTATION_STATE.md`
-      § *The frame rate, measured*.**
+      pages band in `.ai/tools/README.md` § *Frame-rate baseline*.**
       **The expected result is no measurable change, and the reason is stated
       rather than left as a coincidence**: no page records a backdrop, so the
       per-frame work added is one `if let` per segment and two program links in

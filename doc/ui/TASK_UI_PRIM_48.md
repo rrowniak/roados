@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_48: Margin, `flex-shrink`, and the cross-axis gap — closing gap `L7`
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Close **row `L7`** of `DEMO_APPLICATION.md` § *Gaps this layout exposes in
@@ -162,8 +169,7 @@ never by line number, because the tree is being modified in parallel.
 - **`layout_walk_cost`** in `layout.rs` is the suite's **one** `#[ignore]`d test,
   a `use std::time::Instant` harness that reads the wall clock. **This task does
   not touch it**, and acceptance criterion 12 says so by name, because its
-  numbers in `IMPLEMENTATION_STATE.md` § *Deviations from the spec, and why* are
-  reproducible only while the function it measures is unmodified.
+  numbers are reproducible only while the function it measures is unmodified.
 - **`.ai/tools/fps-check.sh` takes `seconds` then `floor`, builds release, runs
   `./target/release/ui_demo` with no arguments and no page**, and exits 1 both on
   a missed floor **and on a run that printed no `roados-fps` line at all** —
@@ -1486,8 +1492,7 @@ expansion** (`developer.md` § *Stop conditions*).
       `bounding_box`'s two `max` calls reading it. **And `git diff` over
       `layout.rs` shows no change to `layout_walk_cost`**, because the two added
       adds are inside the loop that harness measures and modifying the harness
-      would make `IMPLEMENTATION_STATE.md` § *Deviations from the spec, and why*
-      unreproducible.
+      would make the recorded figures unreproducible.
 
 - [ ] **`flex-shrink`'s default, its weighting and its floor are pinned by five
       tests.** `the_default_shrink_factor_is_one` asserts
@@ -1605,8 +1610,7 @@ expansion** (`developer.md` § *Stop conditions*).
 
 - [ ] **The six gallery pages are pixel-identical, and the mechanism is the
       criterion rather than the result.** `Page::ALL`'s six names, release build,
-      captured **before and after** with the commands of `IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      captured **before and after** with the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree` (a root
       capture, and `ffmpeg x11grab`, return black for a GL window), `pgrep -a -x
       ui_demo` in the same call as each `magick import -window <id>`, then
@@ -1614,8 +1618,7 @@ expansion** (`developer.md` § *Stop conditions*).
 
       - **The criterion on all six pages is AE 0 outside `y ≥ 680`**, every
         differing pixel inside the fps readout's band, which is the criterion tasks
-        34 to 39 inherited and what `IMPLEMENTATION_STATE.md`
-        § *Task 24.1 — what it decided, and what it found* records as the one
+        34 to 39 inherited and what `.ai/tools/README.md` § *Capturing a window* records as the one
         thing two captures of an unchanged frame differ in.
       - **The mechanism is six facts, and the first two are greps whose results
         are part of this claim rather than a remark:**
@@ -1670,13 +1673,12 @@ expansion** (`developer.md` § *Stop conditions*).
       own line pasted.** `.ai/tools/fps-check.sh 10 55` on the default page,
       **which is the only thing the script can do** — it takes `seconds` then
       `floor`, builds release and runs `./target/release/ui_demo` **with no
-      arguments and no page**, per `IMPLEMENTATION_STATE.md` § *Current position*
+      arguments and no page**, per `.ai/tools/README.md` § *Frame-rate baseline*
       recording as the reason task 24.2's criterion 6 was amended rather than met
       by the script — and then `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo
       --tab=<page>` for each of the six, with the `roados-fps` line parsed by hand.
       **Every page above the floor of 55**, and **every page expected to land
-      inside the recorded 61.1–63.9 band** in `IMPLEMENTATION_STATE.md`
-      § *The frame rate, measured*. **The handoff names the one place this task
+      inside the recorded 61.1–63.9 band** in `.ai/tools/README.md` § *Frame-rate baseline*. **The handoff names the one place this task
       costs something and does not hand-wave it:** `fn shrink` allocates one
       `vec![false; items.len()]` per flex container whose row overflows, which on
       the demo is **the card of pads alone and is a three-element `Vec`**, and

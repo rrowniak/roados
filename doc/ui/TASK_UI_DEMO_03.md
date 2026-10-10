@@ -1,5 +1,12 @@
 # TASK_UI_DEMO_03: The Car-Status Pane — the Pane, the Car, and Three Mutually Exclusive States
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Build **the car-status pane** as the seventh tab's content: a left-hand pane
@@ -26,8 +33,7 @@ This task delivers the pane **at** its documented width and nothing moves it.
 
 ### What this depends on, and the fact that none of it is built
 
-**Every library task below is specified and not built.** `doc/ui/IMPLEMENTATION_STATE.md`
-§ *Current position* records task 31 as the last implemented task, and § *The
+**Every library task below is specified and not built.** `.ai/tools/README.md` § *Frame-rate baseline* records task 31 as the last implemented task, and § *The
 task table* lists **34 through 52** as *"specified 2026-10-05, not started"*.
 **This task therefore cannot be started, and that is stated here rather than left
 for a developer to discover at `cargo build`.** The table says what each task
@@ -832,8 +838,7 @@ that settles it:
 - [ ] **The six gallery pages are pixel-identical, and the mechanism is the
       criterion rather than the result.** `Page::ALL`'s six original names, release
       build, captured **before and after** with the commands of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim: window id **re-read at the time of each capture** with
+      `.ai/tools/README.md` § *Capturing a window* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab`, return black
       for a GL window), `pgrep -a -x ui_demo` in the same call as each `magick
       import -window <id>`, then `magick compare -metric AE before.png after.png

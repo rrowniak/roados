@@ -345,12 +345,10 @@ of each capture** with `xwininfo -root -tree` (a root capture and
 same call as each `magick import -window <id>`, then
 `magick compare -metric AE before.png after.png null:` per page, over all six of
 `Page::ALL`'s pages (`pads`, `text`, `input`, `controls`, `data`, `overlays`) —
-the method of `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the
-capture method*, used verbatim.
+the method of `.ai/tools/README.md` § *Capturing a window*, used verbatim.
 
 **The band is part of the method.** Two captures of an unchanged frame differ
-inside the fps readout — `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it
-decided, and what it found* records **405 pixels, and AE 0 over y 80–680** — so
+inside the fps readout — `.ai/tools/README.md` § *Capturing a window* records **405 pixels, and AE 0 over y 80–680** — so
 the criterion is **AE 0 outside `y ≥ 680`, with every differing pixel inside that
 band**.
 
@@ -360,7 +358,7 @@ then `floor` — and then runs the binary with **no
 arguments**. Per-page measurement is therefore
 `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` with the
 `roados-fps` line parsed by hand — the same amendment
-`IMPLEMENTATION_STATE.md` § *Current position* records for task 24.2's criterion
+`.ai/tools/README.md` § *Frame-rate baseline* records for task 24.2's criterion
 6, and **an acceptance criterion that names an instrument which cannot produce
 the evidence is not met by producing the evidence another way** is why it is
 written that way here rather than as an instruction to use the
@@ -829,15 +827,13 @@ reserved uniform name and the docs — the third is four lines and a doc comment
 - [ ] **The six gallery pages are pixel-identical.** All six of `Page::ALL`'s
       pages (`pads`, `text`, `input`, `controls`, `data`, `overlays`), captured
       **before and after**, release build, `setsid ./target/release/ui_demo >
-      log 2>&1 &`, then the commands of `IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      log 2>&1 &`, then the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree` (a root
       capture, and `ffmpeg x11grab` too, return black for a GL window),
       `pgrep -a -x ui_demo` in the same call as each `magick import -window <id>`,
       and `magick compare -metric AE before.png after.png null:` per page.
       **`AE 0` outside the fps readout's band `y ≥ 680`**, and every differing
-      pixel inside it — the band `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it
-      decided, and what it found* records as the one thing two captures of an
+      pixel inside it — the band `.ai/tools/README.md` § *Capturing a window* records as the one thing two captures of an
       unchanged frame differ in (405 pixels there, **AE 0 over y 80–680**). The
       rect-level half is `every_page_places_every_rect_where_the_gallery_placed_it`
       in the demo's suite
@@ -848,9 +844,9 @@ reserved uniform name and the docs — the third is four lines and a doc comment
       `roados-fps` line parsed — **`fps-check.sh` cannot name a page**, verified in
       `.ai/tools/fps-check.sh` — it reads `seconds` and `floor` and nothing else,
       and runs the binary with no arguments — which is the amendment
-      `IMPLEMENTATION_STATE.md` § *Current position* records for task 24.2's
+      `.ai/tools/README.md` § *Frame-rate baseline* records for task 24.2's
       criterion 6. Every page is inside the recorded **61.1–63.9** band in
-      `IMPLEMENTATION_STATE.md` § *The frame rate, measured* and above the floor
+      `.ai/tools/README.md` § *Frame-rate baseline* and above the floor
       of 55. **The handoff states the expected result and its reason**: no
       measurable change, because this task adds no GL call, no uniform and no
       per-frame work

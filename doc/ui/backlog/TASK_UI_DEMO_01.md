@@ -228,7 +228,8 @@ the code, not after.**
   because there is nothing to move it with: task 46 (`L5`) is what a pan needs and
   it is not built, and a wheel event would be an input criterion this repository
   cannot verify — *pointer injection has never delivered an event to the window
-  and keyboard injection delivered exactly one* (§ *Verifying a change that draws — the capture method*).
+  and keyboard injection delivered exactly one* (`.ai/tools/README.md`
+  § *Capturing a window*).
   **The fixed camera is why the map is capture-verifiable at all**: `--tab=demo`
   reaches it with no input at all.
 - **A curve is a polyline.** There is no bezier anywhere in `ui/src` — zero hits
@@ -347,7 +348,7 @@ of the source, cited by symbol:
 | **`fn name(self) -> &'static str`** | same `impl`, whose doc says *"The only place the six names are written out"* | gains **`Page::Demo => "demo"`**. `from_name` derives from `ALL` through `name`, and `page_names` and `usage` derive from `ALL`, so one spelling reaches `--tab=`, `--help` and the unknown-name message |
 | **`Demo::tabs`** | `struct Tab { page, button }` | gains a seventh row **because it is built by `for &tab_page in &Page::ALL`** — the seventh tab button is not written anywhere |
 | **the three gates** | `Demo::on_show`, `Demo::shows`, `Demo::focusables` | the map node gets a `PageMember` row, and every existing row keeps its page. **The complement assertion `tests::always_painted_handles` is what will catch a row that was forgotten** |
-| **`Demo::new`'s page table** | the `on(Page, Handle, bool)` closure and its rows | one `on(Page::Demo, map_node, false)` row. **This table has been the site of two mutation-found majors** — `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it found* records the 24.1 finding (*"one dropped row gave 0 failed / 1814, with the text column drawn on the wrong page"*, and the lesson it drew is *a sweep of a mechanism's call sites is not a sweep of the data it is built from*), and the 24.2 row of the task table records the same class on `placed_handles` at *0 failed / 1817*. **A seventh row is exactly where it recurs** |
+| **`Demo::new`'s page table** | the `on(Page, Handle, bool)` closure and its rows | one `on(Page::Demo, map_node, false)` row. **This table has been the site of two mutation-found majors** — `.ai/tools/README.md` § *Capturing a window* records the 24.1 finding (*"one dropped row gave 0 failed / 1814, with the text column drawn on the wrong page"*, and the lesson it drew is *a sweep of a mechanism's call sites is not a sweep of the data it is built from*), and the 24.2 row of the task table records the same class on `placed_handles` at *0 failed / 1817*. **A seventh row is exactly where it recurs** |
 | **`Page::DEFAULT`** | the same `impl` | **stays `Page::Pads`**, and requirement 9 says so in a doc comment on the row. `DEMO_APPLICATION.md` § *What a seventh page costs* gives the reason: it is *"the one page every capture taken for tasks 11 to 22 contains, so a capture that used to need no argument is still reproducible"*, and **the demo tab must not become the default** |
 
 **Two places the map node must NOT be added, and both are load-bearing.**
@@ -985,7 +986,7 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
 
 - [ ] **The map is on screen, on the demo page only, and it is a real map.**
       Release build, `--tab=demo`, captured with the stock method of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture method* verbatim — window
+      `.ai/tools/README.md` § *Capturing a window* verbatim — window
       id from `DISPLAY=:0 xwininfo -root -tree | rg '"roados ui_demo"'`, and
       `DISPLAY=:0 magick import -window <id>` — with `pgrep -a -x ui_demo` in the
       same call as each capture, **and no seed, no environment variable and no
@@ -1046,7 +1047,7 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
       — and then `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for
       **each of the seven**, with the `roados-fps` line parsed by hand. **Every page
       above the floor of 55**, and the six gallery pages inside the recorded
-      61.1–63.9 band in `IMPLEMENTATION_STATE.md` § *The frame rate, measured*,
+      61.1–63.9 band in `.ai/tools/README.md` § *Frame-rate baseline*,
       **because nothing this task does runs on them** — the map node is not in
       `order`'s painted set on those pages and its commands are not recorded. **The
       `demo` page's rate is the real number this task produces and is reported

@@ -46,7 +46,7 @@ read `ui/src/ui_demo/src/main.rs`.
 | **`DrawCommand` has nine variants** — `Rect`, `RoundedRect`, `Shadow`, `Text`, `Image`, `Line`, `Circle`, `Path`, `Polygon` — and **only `Image` carries an `opacity: f32`**. None carries a transform or an animation. | `ui_core/src/paint.rs` |
 | **`node::attach` refuses a child that already has a parent**, so re-parenting is `detach` then `attach`, and `can_attach` also refuses a cycle. | `ui_core/src/node.rs` |
 | **Test baseline: 1894** — `ui_core` **1450**, `ui_demo` **224**, doctests **220**. Measured at `75a896c` plus the uncommitted diff, in the session that wrote this file. | `cargo test --all-features` from `ui/` |
-| **The demo cannot receive a pointer event on this host.** XTEST pointer injection has never delivered one; keyboard delivered exactly one. **So no acceptance criterion here may require a pointer-driven interaction**, and none does. | `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture method* |
+| **The demo cannot receive a pointer event on this host.** XTEST pointer injection has never delivered one; keyboard delivered exactly one. **So no acceptance criterion here may require a pointer-driven interaction**, and none does. | `.ai/tools/README.md` § *Capturing a window* |
 | **`.ai/tools/fps-check.sh` takes `seconds` then `floor` and runs the binary with no arguments**, so it **cannot name a page**; per-page is `ROADOS_RUN_SECONDS=<n> ./target/release/ui_demo --tab=<page>`. Every run is measured — `task-sequence.md` § *Gates*, *"No unmeasured run of the demo."* | `.ai/tools/fps-check.sh` |
 
 ### The decision: a table of screens, each named by a subtree root the caller owns
@@ -930,8 +930,7 @@ and so are `Demo::shows`, `Demo::on_show`, `Demo::is_page_content`,
 
 24. **The suite, the capture and the frame rate are all produced.** From `ui/`:
     the seven commands of requirement 12. Then **the seven-page before/after
-    capture**, with the commands of `IMPLEMENTATION_STATE.md`
-    § *Verifying a change that draws — the capture method* verbatim: window id
+    capture**, with the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
     **re-read at the time of each capture** with `xwininfo -root -tree` (a root
     capture, and `ffmpeg x11grab`, return black for a GL window), `pgrep -a -x
     ui_demo` in the same call as each `magick import -window <id>`, then `magick
@@ -1227,15 +1226,13 @@ predicate beside it.
       **six gallery pages plus `demo`, which is the seventh and is captured like
       the rest** — release
       build, captured **before and after** with the commands of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim: window id **re-read at the time of each capture** with
+      `.ai/tools/README.md` § *Capturing a window* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab`, return black
       for a GL window), `pgrep -a -x ui_demo` in the same call as each
       `magick import -window <id>`, then `magick compare -metric AE before.png
       after.png null:` per page. **On all seven pages the criterion is AE 0 outside
       `y ≥ 680`**, every differing pixel inside the frame-rate readout's band,
-      which `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it
-      found* records as the one thing two captures of an unchanged frame differ in.
+      which `.ai/tools/README.md` § *Capturing a window* records as the one thing two captures of an unchanged frame differ in.
 
       **The mechanism is four facts, and it is the first task in this sequence
       whose criterion is not restated:**
@@ -1275,10 +1272,10 @@ predicate beside it.
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of the
       seven with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline* records
       as the reason task 24.2's criterion 6 was amended rather than met by the
       script. Every page above the floor of **55** and **inside the recorded
-      61.1–63.9 band** in `IMPLEMENTATION_STATE.md` § *The frame rate, measured*.
+      61.1–63.9 band** in `.ai/tools/README.md` § *Frame-rate baseline*.
 
       **And the handoff states what the number is expected to be and why, rather
       than reporting a number and letting it be read as luck: this task's per-frame
@@ -1293,8 +1290,7 @@ predicate beside it.
 
 - [ ] **What the handoff does not claim, in those words.** It states that
       **no pointer event has ever been observed reaching this window** on this
-      host — `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the
-      capture method* records the drag, the two presses on task 12's button, the
+      host — `.ai/tools/README.md` § *Capturing a window* records the drag, the two presses on task 12's button, the
       counter and the `AE = 0`, and `XQueryPointer` reporting window `0x0` — **and
       therefore that no acceptance criterion here is verified by a pointer-driven
       capture, and none asks for one.** The gates are verified **by test through

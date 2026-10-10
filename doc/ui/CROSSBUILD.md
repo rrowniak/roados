@@ -437,7 +437,7 @@ against `ld-musl-x86_64.so.1` and will not start on glibc.
 | `zlib1g-dev` | Not in §2.3. `freetype-sys` builds its bundled libpng, libpng includes `zlib.h`, and `libz-sys` carries zlib's *sources* under `src/zlib` rather than its headers where libpng's include path looks. Without it: `cc-rs` fails with `libpng/pngstruct.h:30:10: fatal error: zlib.h`. Observed 2026-10-05. |
 | `libegl1 libgles2 libgl1 libglvnd0 libglx-mesa0 libgl1-mesa-dri` | Runtime only. SDL ships its own Khronos headers (§2.4) and links nothing but libc (§5.4), so nothing here is needed to *build*. `libgl1-mesa-dri` supplies the GLES 3.1+ driver the demo's `Context::new` refuses to start without, and the swrast fallback, so a container without `/dev/dri` still runs. |
 | `fonts-lato fonts-dejavu-core` | Hard requirement. `ui/src/ui_demo/src/main.rs` names `/usr/share/fonts/truetype/lato/Lato-Medium.ttf`, `Lato-Bold.ttf` and `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf` as absolute paths and propagates `Font::from_path`'s error, so a missing font is a failed run rather than a degraded one. These two packages place them at exactly those paths. |
-| `x11-utils imagemagick` | `xwininfo`, `magick import`, `magick compare` — the capture method in `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture method*, which `.ai/agents/developer.md` § Phase 3 — Verify makes a gate. |
+| `x11-utils imagemagick` | `xwininfo`, `magick import`, `magick compare` — the capture method in `.ai/tools/README.md` § *Capturing a window*, which `.ai/agents/developer.md` § Phase 3 — Verify makes a gate. |
 | `file binutils` | §3's `file target/debug/<binary>`, plus the `readelf -h` and `nm` checks. |
 | `cargo-audit`, `rustfmt`, `clippy` | The three commands in `.ai/agents/developer.md` § Phase 3 — Verify that a bare Rust toolchain does not provide. `cargo-audit` closes a gap `doc/ui/IMPLEMENTATION_STATE.md` records as standing — "**`cargo audit` is not installed** on this host, for the ninth task running" — at the cost of about three minutes of image build. |
 
@@ -466,9 +466,8 @@ same mounts opencode runs its bash tool in:
 - `cargo fmt --check`, `cargo clippy --all-targets --all-features -D warnings`,
   `cargo doc --no-deps` — clean.
 - `cargo test --all-features` — 1450 lib + 224 demo + 220 doc = **1894 passed**,
-  1 ignored, 0 failed. Higher than the 1871 in
-  `doc/ui/IMPLEMENTATION_STATE.md` § *What was measured and how*, which is the
-  tree's own movement rather than a difference of method; both counts come from
+  1 ignored, 0 failed. Higher than the 1871 this file recorded earlier, which is
+  the tree's own movement rather than a difference of method; both counts come from
   the same command.
 - `cargo audit` — 1290 advisories fetched, 47 dependencies scanned, none
   reported.
@@ -477,7 +476,7 @@ same mounts opencode runs its bash tool in:
   already recorded this on the host; the image adds nothing to it.
 - `.ai/tools/fps-check.sh 5 55` — 317 frames in 5.006 s, **63.3 fps**, worst
   frame 32.4 ms, 0 frames over 33 ms. At or above the ~55 fps floor in
-  `doc/ui/IMPLEMENTATION_STATE.md` § *What was measured and how* and consistent
+  `.ai/tools/README.md` § *Frame-rate baseline* and consistent
   with the host's own 61.6–61.9 band. One sample, not three, which
   `.ai/tools/README.md` § *fps-check.sh* § *Do not use it for* is right to insist
   on; a second run of the same command gave 63.1 fps, worst frame 23.5 ms.
@@ -700,8 +699,7 @@ The build carries this tree's thirteen source files — twelve in
 vendored 3.4.16. What it does **not** show is a target that runs: no sysroot, no
 runtime, no video driver (§6.7) — and the artifact still asks for
 `libSDL3.so.0` at load time, with no `RPATH` or `RUNPATH` to say where that
-should come from. That is the open linkage question, recorded in
-`doc/ui/IMPLEMENTATION_STATE.md` § *History*.
+should come from. That is the open linkage question, recorded in this file's § *History*.
 
 **The linker comes from `.cargo/config.toml`,** which sets
 `[target.aarch64-unknown-linux-gnu] linker = "aarch64-linux-gnu-gcc"`. It is at

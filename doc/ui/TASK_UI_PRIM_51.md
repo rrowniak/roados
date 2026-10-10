@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_51: Gap `L10` — the `Polygon` Precondition, Made Checkable, and the Reversal Asked For
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Take row **`L10`** of `doc/ui/DEMO_APPLICATION.md`
@@ -61,15 +68,16 @@ them up is the failure this section exists to prevent.**
   - `ui/src/ui_core/src/widgets/chart.rs`'s module doc, in the section on the area
     fill: *"Ear clipping and a stencil pass were both considered and the operator
     declined both on 2026-10-02."*
-  - `doc/ui/IMPLEMENTATION_STATE.md` § *Task 21 — what it decided, and what it
+  - `ui/src/ui_core/src/render/context.rs`, `MULTISAMPLE_SAMPLES` and the doc above
+    it:
     found*, item 2 of the four operator decisions taken that date: *"Area fill is
     per-segment convex quads. `DrawCommand::Polygon` — added in task 20 for the
     gauge needle — is **convex only**: the renderer fans `n - 2` triangles, which
     is exact for a convex polygon and a wrong picture for a concave one, and the
     region under a non-monotonic line is concave. **The operator declined
     ear-clipping triangulation in the renderer.**"*
-  - `doc/ui/IMPLEMENTATION_STATE.md` § *Deviations from the spec, and why*, in the
-    entry on task 21's line and area rendering: *"**The fan is exact for a convex
+  - `render.rs`'s `polygon_quad` doc and `paint.rs`'s `DrawCommand::Polygon` doc,
+    which is where task 21's line and area rendering recorded it: *"**The fan is exact for a convex
     polygon and for nothing else**, so a single polygon for the whole series would
     be a wrong picture rather than a rough one."*
 - **2026-10-05 — "every library gap must be closed."** `DEMO_APPLICATION.md`
@@ -96,10 +104,9 @@ build the reversal.**
 ### What is in the crate at `75a896c` plus the uncommitted diff, established and not re-derived
 
 Cited **by symbol and path**, never by line number, because the tree is being
-modified in parallel — the rule `AGENTS.md` § *Rust* states and
-`IMPLEMENTATION_STATE.md` § *Tasks 34–40 — the mesh-rendering sequence* records
-as *"Citations in these seven files are by symbol, not by line number … one line
-number went stale **inside a single drafting session**."*
+modified in parallel — the rule `AGENTS.md` § *Rust* states, and one task file in
+this sequence recorded as *"one line number went stale **inside a single drafting
+session**"*.
 
 | Fact | Where |
 |---|---|
@@ -116,10 +123,10 @@ number went stale **inside a single drafting session**."*
 | **The renderer's degenerate answer is already decided and is not an error.** `command_quads` returns `Vec::new()` for a `Polygon` of fewer than three points, and the test `a_polygon_of_fewer_than_three_points_expands_to_no_quads` pins it: *"Not an error and not a panic: a point list that cannot enclose an area has nothing to draw."* | `ui/src/ui_core/src/render.rs`, `command_quads` and that test |
 | **`ui_core/src/paint.rs` is a single 1 327-line file**, not a directory — `ui/src/ui_core/src/lib.rs` declares thirteen `pub mod`s and `render` is the only one with children (`blur.rs`, `context.rs`, `target.rs`). **So a new public predicate about a point list belongs in `paint.rs`, beside the doc that states the obligation.** | `ui/src/ui_core/src/lib.rs`, `ui/src/ui_core/src/paint.rs`, `ui/src/ui_core/src/render/` |
 | **`ui_core` carries `publish = false`**, so a source-breaking change to a `pub` item is internal to this repository. | `ui/src/ui_core/Cargo.toml` |
-| **The mesh path is specified but not landed.** `grep -c 'DrawCommand::Mesh\|MeshVertex'` returns **0** in both `paint.rs` and `render.rs`, and `ui/src/ui_core/src/render/` holds only `blur.rs`, `context.rs` and `target.rs` — **no `mesh.rs`, no `matrix.rs`, no `meshio.rs`**. Tasks 34 to 40 are written and unstarted (`IMPLEMENTATION_STATE.md` § *Tasks 34–40 — the mesh-rendering sequence*: *"Created 2026-10-05. **Nothing in it is started.**"*). | measured over `ui/src/`, and the state file by section |
-| **Test baseline: 1894** — `ui_core` **1450**, `ui_demo` **224**, doctests **220**, recorded in `IMPLEMENTATION_STATE.md` § *Task 31 — what it decided, and what it found* and restated in `TASK_UI_PRIM_42.md` § *What is in the crate at `75a896c`*. **The `#[test]` attribute count observed in the tree is 1451 in `ui_core` and 225 in `ui_demo`** — `grep -rc '#\[test\]' --include=*.rs`, and the two figures differ from the passed-test counts by the one ignored test and by the doctests, exactly as `TASK_UI_PRIM_44.md` § *Context* records. **The handoff pastes the real per-binary numbers rather than picking one.** | `cargo test --all-features` from `ui/`; the attribute count by grep |
-| **The demo cannot receive a pointer event on this host**, so no criterion here may require one — and none does. This task's deliverable is a pure function and two test migrations. | `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture method* |
-| **`cargo audit` is not installed on this host.** Tasks 07, 08, 09, 10 and 13 each carry it as *recorded, not passed*, in the task table. | `IMPLEMENTATION_STATE.md` § *Task table* |
+| **The mesh path has landed** — this row was written 2026-10-05 and is stale. Tasks 34 to 40 are done (`doc/ui/done/`): `paint.rs` carries `DrawCommand::Mesh` and `MeshVertex`, and `ui/src/ui_core/src/render/` holds `mesh.rs`, `matrix.rs` and `meshio.rs` beside `blur.rs`, `context.rs` and `target.rs`. Tasks 34 to 40 were written and unstarted when this row was drafted (*"Created 2026-10-05. **Nothing in it is started.**"*). | measured over `ui/src/`, and the state file by section |
+| **Test baseline: measure it, do not quote this file.** 1894 (1450 + 224 + 220) was the figure at `75a896c`; `.ai/tools/README.md` § *Frame-rate baseline* carries the last measured one. **The `#[test]` attribute count observed in the tree is 1451 in `ui_core` and 225 in `ui_demo`** — `grep -rc '#\[test\]' --include=*.rs`, and the two figures differ from the passed-test counts by the one ignored test and by the doctests, exactly as `TASK_UI_PRIM_44.md` § *Context* records. **The handoff pastes the real per-binary numbers rather than picking one.** | `cargo test --all-features` from `ui/`; the attribute count by grep |
+| **The demo cannot receive a pointer event on this host**, so no criterion here may require one — and none does. This task's deliverable is a pure function and two test migrations. | `.ai/tools/README.md` § *Capturing a window* |
+| **`cargo audit` is not installed on this host** — tasks 07, 08, 09, 10 and 13 each carry it as *recorded, not passed*. | `which cargo-audit` |
 | **`.ai/tools/fps-check.sh` takes `seconds` then `floor` and runs the binary with no arguments**, so it **cannot name a page**; per-page is `ROADOS_RUN_SECONDS=<n> ./target/release/ui_demo --tab=<page>`. Every run of `ui_demo` an agent launches is measured — `.ai/workflows/task-sequence.md` § Gates, *"No unmeasured run of the demo."* | `.ai/tools/fps-check.sh`; the gate |
 | **`ui/Cargo.toml` and `ui/Cargo.lock` are not touched by this task**, and no dependency is proposed — see § *Out of Scope*. | `AGENTS.md` § *Rust* |
 
@@ -223,8 +230,8 @@ and this file puts it in the escalation rather than acting on it.
   decompositions produce *batches* rather than special draws.
 - **On the target it is the option most likely to be refused or to cost most.**
   The default framebuffer is **4× multisampled** — an operator decision recorded
-  in `IMPLEMENTATION_STATE.md` § *Task 21 — what it decided, and what it found*
-  item 1 — and a stencil attachment on a multisampled default framebuffer is
+  in `ui/src/ui_core/src/render/context.rs` (`MULTISAMPLE_SAMPLES`) — and a stencil
+  attachment on a multisampled default framebuffer is
   bandwidth on an aarch64 target. **And `L1`'s own row** already records that
   *"`ShadowTarget` is `GL_R8`, one channel of coverage"* and that capturing a
   scene needs `GL_RGBA8` — **so the crate has one FBO, it is single-channel, it
@@ -807,8 +814,7 @@ themselves editing it, that is a stop condition rather than an expansion**
 - [ ] **The six gallery pages are pixel-identical outside the fps band — the
       full criterion, with no `CAR_RECT` restatement — and the mechanism is
       stated rather than hoped for.** `Page::ALL`'s six names, release build,
-      captured **before and after** with the commands of `IMPLEMENTATION_STATE.md`
-      § *Verifying a change that draws — the capture method* verbatim: window id
+      captured **before and after** with the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
       **re-read at the time of each capture** with `xwininfo -root -tree` (a root
       capture and `ffmpeg x11grab` both return black for a GL window),
       `pgrep -a -x ui_demo` in the same call as each
@@ -849,13 +855,12 @@ themselves editing it, that is a stop condition rather than an expansion**
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of the
       six with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline* records
       as the reason task 24.2's criterion 6 was amended rather than met by the
       script. Every page above the floor of **55**.
       **And the handoff states what was expected, so a good number is not a
       surprise and a bad one is a finding: every page is expected inside the
-      recorded 61.1–63.9 band in `IMPLEMENTATION_STATE.md`
-      § *The frame rate, measured*, because nothing on any frame path changed.**
+      recorded 61.1–63.9 band in `.ai/tools/README.md` § *Frame-rate baseline*, because nothing on any frame path changed.**
       **A page outside that band is reported as a finding with its number pasted,
       not as noise** — because `task-sequence.md` § Gates records that a four-fps
       regression survived three reviews in this repository, and that gate exists
@@ -898,9 +903,9 @@ themselves editing it, that is a stop condition rather than an expansion**
       decision against GPLv3 that nobody has asked for**; **`grep -c unsafe`
       over `paint.rs` is unchanged from before this task**, because the predicate
       is arithmetic on two `f32`s; `grep -rn 'unwrap()\|expect(\|panic!\|todo!\|unimplemented!' `
-      over the diff is empty; and **no task from the 34–40 sequence is started**,
-      which `IMPLEMENTATION_STATE.md` § *Tasks 34–40 — the mesh-rendering
-      sequence* must still say *"Nothing in it is started"* after this task.
+      over the diff is empty; and **this task starts nothing** — tasks 34 to 40
+      landed on 2026-10-06/07, so the state file's "nothing in it is started"
+      clause was already stale when this file was drafted.
 
 ## Out of Scope
 

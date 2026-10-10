@@ -1,5 +1,12 @@
 # TASK_UI_PRIM_43: `Button::selected`, and a `TabBar` That Owns Its Buttons
 
+> **2026-10-10 — this file's state-file requirements are superseded.**
+> `doc/ui/IMPLEMENTATION_STATE.md` is a status board of 3 KB or less
+> (`.ai/workflows/task-sequence.md` § *State*): *Current position* and *Left over*,
+> no per-task record section, no task-table row, no deviations list, no history.
+> Where this file asks for one, put the durable fact in the code's doc, in this
+> file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+
 ## Goal
 
 Close gap **#7** by giving `ui_core` the two things the gap row names and the demo
@@ -57,10 +64,10 @@ is the thing that writes it, animates it, and reports it.
 | **The demo's selected appearance is a `Palette` swap, and it is two palettes**: `tab_palette(theme, true)` is `Palette::from_theme(theme)` — `Primary` / `OnPrimary` — and `tab_palette(theme, false)` is `Border` / `Text` with a `Primary` ring. **`Demo::aim_tab_buttons(&[Page])` re-points all seven palettes and aims the two it was handed.** | `ui/src/ui_demo/src/main.rs`, `tab_palette`, `Demo::aim_tab_buttons` |
 | **`ui/src/ui_core/src/nav.rs` does not exist yet.** `TASK_UI_PRIM_42` creates it, and its § *Out of Scope* is the sentence this file answers. **This task does not depend on it**: requirement 1–15 touch no `nav` symbol, and only sub-task 43.2 — which reads `Screens::current_name` — does. | `doc/ui/done/TASK_UI_PRIM_42.md` |
 | **`LayoutState::visible`'s doc says *"only hit testing consults the flag"*, and task 42 amends it.** Task 42 also adds `LayoutState::hits`, defaults it to `true`, and gates `Focus` on visibility. **43.2 composes with both** and changes neither. | `layout.rs`; `doc/ui/done/TASK_UI_PRIM_42.md` requirements 8 and 9 |
-| **`AGENTS.md`: no new dependency without the operator**; the approved **direct** dependencies are `sdl3 0.20`, `glow 0.18`, `freetype-rs 0.38`. Edition **2021**, `rust-version = "1.85"`. Tests go in a `#[cfg(test)] mod tests` beside the code; **no test needing a display, a network, a filesystem or the wall clock.** **The demo cannot receive a pointer event on this host** — XTEST pointer injection has never delivered one, keyboard delivered exactly one. **No acceptance criterion here may require a pointer-driven interaction.** | `AGENTS.md`; `doc/ui/IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture method* |
-| **`.ai/tools/fps-check.sh` takes `seconds` then `floor` and runs the binary with no arguments**, so it **cannot name a page**; per page is `ROADOS_RUN_SECONDS=<n> ./target/release/ui_demo --tab=<page>`. **Every run is measured** — `task-sequence.md` § *Gates*, *"No unmeasured run of the demo."* | `.ai/tools/fps-check.sh`; `doc/ui/IMPLEMENTATION_STATE.md` § *What the operator still has to decide* item 1 |
+| **`AGENTS.md`: no new dependency without the operator**; the approved **direct** dependencies are `sdl3 0.20`, `glow 0.18`, `freetype-rs 0.38`. Edition **2021**, `rust-version = "1.85"`. Tests go in a `#[cfg(test)] mod tests` beside the code; **no test needing a display, a network, a filesystem or the wall clock.** **The demo cannot receive a pointer event on this host** — XTEST pointer injection has never delivered one, keyboard delivered exactly one. **No acceptance criterion here may require a pointer-driven interaction.** | `AGENTS.md`; `.ai/tools/README.md` § *Capturing a window* |
+| **`.ai/tools/fps-check.sh` takes `seconds` then `floor` and runs the binary with no arguments**, so it **cannot name a page**; per page is `ROADOS_RUN_SECONDS=<n> ./target/release/ui_demo --tab=<page>`. **Every run is measured** — `task-sequence.md` § *Gates*, *"No unmeasured run of the demo."* | `.ai/tools/fps-check.sh`; `.ai/tools/README.md` § *Frame-rate baseline* |
 | **Test baseline: 1894** — `ui_core` **1450**, `ui_demo` **224**, doctests **220** — measured at `75a896c` plus the uncommitted diff, in the session that wrote this file. | `cargo test --all-features` from `ui/` |
-| **The recorded release band is 61.1–63.9 fps**, floor **55**, from `demo.snap` after the frame-budget change. | `IMPLEMENTATION_STATE.md` § *The frame rate, measured* |
+| **The recorded release band is 61.1–63.9 fps**, floor **55**, from `demo.snap` after the frame-budget change. | `.ai/tools/README.md` § *Frame-rate baseline* |
 
 ### The decision: `Button::selected`, a second palette, and a `TabBar` that owns its buttons
 
@@ -895,8 +902,7 @@ now.**
 
 29. **The suite, the capture and the frame rate are all produced.** From `ui/`: the
     six commands of requirement 16. Then **the seven-page before/after capture**,
-    with the commands of `IMPLEMENTATION_STATE.md`
-    § *Verifying a change that draws — the capture method* verbatim: window id
+    with the commands of `.ai/tools/README.md` § *Capturing a window* verbatim: window id
     **re-read at the time of each capture** with `xwininfo -root -tree` (a root
     capture, and `ffmpeg x11grab`, return black for a GL window), `pgrep -a -x
     ui_demo` in the same call as each `magick import -window <id>`, then `magick
@@ -997,8 +1003,10 @@ rather than against a pointer event that has never arrived.**
       *colour* follows the base palette.** `a_selected_button_still_activates_and_
       still_draws_its_ring` and `a_selected_button_ring_colour_comes_from_the_
       selected_palette` are present and green, **and the four-quadrant matrix of
-      `IMPLEMENTATION_STATE.md`'s § *Closed: `Button::focused` no longer answers two
-      questions* still holds** — the same two rows, plus `selected`'s two columns.
+      the `Button::focused` / `selected` matrix matrix still holds** — the same two
+      rows, plus `selected`'s two columns. (The state-file section that carried
+      that matrix was compacted out on 2026-10-10; the matrix itself is
+      `button.rs`'s four tests.)
       **The mechanism is named: `disabled` remains the only thing that zeroes
       `ring_width`, which is unchanged code and is asserted by
       `the_disabled_button_draws_no_ring_and_its_opacity_is_the_disabled_one` in
@@ -1153,14 +1161,13 @@ rather than against a pointer event that has never arrived.**
       **six gallery pages plus `demo`, which is the seventh and is captured like
       the rest** — release
       build, captured **before and after** with the commands of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim: window id **re-read at the time of each capture** with
+      `.ai/tools/README.md` § *Capturing a window* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab`, return black for
       a GL window), `pgrep -a -x ui_demo` in the same call as each
       `magick import -window <id>`, then `magick compare -metric AE before.png
       after.png null:` per page. **On all seven the criterion is AE 0 outside
       `y ≥ 680`**, every differing pixel inside the frame-rate readout's band, which
-      `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it found*
+      `.ai/tools/README.md` § *Capturing a window*
       records as the one thing two captures of an unchanged frame differ in.
 
       **The mechanism is four facts, and the second is the reason `Button` grew a
@@ -1200,7 +1207,7 @@ rather than against a pointer event that has never arrived.**
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` for each of the
       seven with the `roados-fps` line parsed by hand — **`fps-check.sh` takes
       `seconds` then `floor` and runs the binary with no arguments, so it cannot
-      name a page**, which `IMPLEMENTATION_STATE.md` § *Current position* records
+      name a page**, which `.ai/tools/README.md` § *Frame-rate baseline* records
       as the reason task 24.2's criterion 6 was amended rather than met by the
       script. Every page above the floor of **55** and **inside the recorded
       61.1–63.9 band**.
@@ -1219,8 +1226,7 @@ rather than against a pointer event that has never arrived.**
 
 - [ ] **What the handoff does not claim, in those words.** It states that **no
       pointer event has ever been observed reaching this window** on this host —
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* records the drag, the two presses on task 12's button, the counter and
+      `.ai/tools/README.md` § *Capturing a window* records the drag, the two presses on task 12's button, the counter and
       the `AE = 0`, and `XQueryPointer` reporting window `0x0` — **and therefore
       that no acceptance criterion here is verified by a pointer-driven capture,
       and none asks for one.** The bar's operability is verified **by test against
@@ -1354,8 +1360,9 @@ rather than against a pointer event that has never arrived.**
 
 - **No transition, and no cross-fade of the selection change.** `Button`'s own clock
   carries it on `Motion::from_theme`'s `DurationFast` — **150 ms, not 300** — which
-  is `tab_motion`'s recorded decision and the operator's open item 3 in
-  `IMPLEMENTATION_STATE.md` § *What the operator still has to decide*. **This task
+  is `tab_motion`'s recorded decision and was the operator's open item 3 when
+  `doc/ui/IMPLEMENTATION_STATE.md` was compacted on 2026-10-10; it is carried on that
+  file's *Left over*. **This task
   does not change that number and does not settle the question.** A screen *switch*
   is a cut and stays one: nine `DrawCommand` variants, one `opacity`, no transform,
   no `u_model`, and gaps **#8** / **L2** keeping Critical

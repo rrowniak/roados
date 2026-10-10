@@ -299,15 +299,13 @@ down.
 - [ ] **The six gallery pages are pixel-identical.** `Page::ALL`'s six names,
       captured **before and after** the change, release build,
       `setsid ./target/release/ui_demo > log 2>&1 &`, then the commands of
-      `IMPLEMENTATION_STATE.md` § *Verifying a change that draws — the capture
-      method* verbatim: window id **re-read at the time of each capture** with
+      `.ai/tools/README.md` § *Capturing a window* verbatim: window id **re-read at the time of each capture** with
       `xwininfo -root -tree` (a root capture, and `ffmpeg x11grab` too, return
       black for a GL window), `pgrep -a -x ui_demo` in the same call as each
       `magick import -window <id>`. `magick compare -metric AE before.png
       after.png null:` reports **0 outside the fps readout's band `y ≥ 680`**, and
       every differing pixel is inside it — which is the band
-      `IMPLEMENTATION_STATE.md` § *Task 24.1 — what it decided, and what it
-      found* already records as the one thing two captures of an unchanged frame
+      `.ai/tools/README.md` § *Capturing a window* already records as the one thing two captures of an unchanged frame
       differ in (405 pixels there, **AE 0 over y 80–680**). The rect-level half is
       `every_page_places_every_rect_where_the_gallery_placed_it` in the demo's
       suite, which compares all six pages
@@ -316,10 +314,10 @@ down.
       the default page, and per page
       `ROADOS_RUN_SECONDS=10 ./target/release/ui_demo --tab=<page>` with the
       `roados-fps` line parsed — **`fps-check.sh` cannot name a page**, which
-      `IMPLEMENTATION_STATE.md` § *Current position* records as the reason task
+      `.ai/tools/README.md` § *Frame-rate baseline* records as the reason task
       24.2's criterion 6 was amended rather than met by the script. Every page
       is inside the recorded **61.1–63.9** band in
-      `IMPLEMENTATION_STATE.md` § *The frame rate, measured* and above the floor
+      `.ai/tools/README.md` § *Frame-rate baseline* and above the floor
       of 55. **The expected result is no per-frame cost at all**: no page draws a
       mesh in this task, so the only new work is three GL object creations in
       `Renderer::new`

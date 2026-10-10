@@ -18,10 +18,9 @@ needs its own manifest and its own measured decisions), converting a subset
 of this one (there is no --only/--mesh/--part flag on purpose), or running
 inside the demo (nothing produced here runs inside ui_demo).
 
-Layout reference: doc/ui/TASK_UI_PRIM_38.md requirement 2 owns the byte
-table; this tool emits it and does not restate it. The table is also
-verbatim in ui_core render/meshio.rs's module doc, which is the copy a
-reviewer diffs --print-layout against.
+Layout reference: the byte table lives in ui_core render/meshio.rs's module
+doc, which is the copy a reviewer diffs --print-layout against; this tool
+emits it and does not restate it.
 """
 
 import argparse

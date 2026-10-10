@@ -600,10 +600,10 @@ impl ColourTarget {
     /// **The resolve is the specification's and the driver's, and free.** The same
     ///    page says that where the read framebuffer is multisampled and the draw
     ///    framebuffer is not, the samples are *converted to a single sample*
-    ///    before being written — which is why § *Out of Scope* of
-    ///    `doc/ui/TASK_UI_PRIM_41.md` can say *no MSAA resolve for this target*
-    ///    honestly: there is no multisample renderbuffer to allocate. **What it
-    ///    costs is stated rather than assumed**: the page says only that the
+    ///    before being written — which is why this target can say *no MSAA
+    ///    resolve* honestly: there is no multisample renderbuffer to allocate.
+    ///    **What it costs is stated rather than assumed**: the page says only
+    ///    that the
     ///    samples are converted, not how, so the capture's antialiasing is
     ///    whatever the driver's resolve is rather than the coverage integral
     ///    `widgets::chart`'s module docs measured for this pipeline. A blurred

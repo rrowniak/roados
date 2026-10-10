@@ -4016,8 +4016,8 @@ impl Renderer {
         // reach.**
         //
         // **The growth was removed, and it was the operator's call on 2026-10-08.**
-        // `TASK_UI_PRIM_41.md` requirement 15 step 7 and its acceptance criterion
-        // both name `blur::reach(sigma)`, and the premise behind it does not hold
+        // The backdrop spec named `blur::reach(sigma)` in a requirement and in an
+        // acceptance criterion, and the premise behind it does not hold
         // here: the shadow's blur really does spread the *shape* it draws, so its
         // composite must cover the shape plus the blur's reach or the edge is cut
         // off. A backdrop has no shape — the blur is a full-window convolution of
@@ -6589,7 +6589,7 @@ mod tests {
             "the alpha is the tint's alpha, which is the backdrop's opacity"
         );
         // **The two wrong forms, named rather than as a bare substring.**
-        // `TASK_UI_PRIM_41.md` requirement 19 words this as *"does not contain
+        // The backdrop spec words this as *"does not contain
         // `texel.a *`"*, and **that wording cannot be right as a literal substring**:
         // the requirement's own two-line shader — quoted verbatim in §
         // *Premultiplied alpha* and reproduced above — contains `texel.a * u_tint.a`,

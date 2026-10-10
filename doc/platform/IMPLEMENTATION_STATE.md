@@ -136,7 +136,7 @@ and if it holds, the fix is in the toolchain file — most likely by leaving
   `doc/ui/`.** `TASK_UI_PRIM_25`, `_26`, `_27` and `_29` became
   `TASK_CROSSPLATFORM_01`–`_04` via `git mv`, so each keeps its history. Every
   cross-reference to the old numbers was corrected in the moved files, in
-  `doc/ui/TASK_UI_PRIM_28.md`, in `doc/ui/CROSSBUILD.md` and in
+  `doc/ui/done/TASK_UI_PRIM_28.md`, in `doc/ui/CROSSBUILD.md` and in
   `doc/ui/IMPLEMENTATION_STATE.md`. `doc/ui/IMPLEMENTATION_STATE.md`'s *History*
   records the move; its 2026-09-28 entry saying *"tasks 25–29 drafted"* was left
   as it stood, because it was true when written.

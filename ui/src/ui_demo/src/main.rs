@@ -176,8 +176,8 @@
 //! gauge needle from an injected press, and pointer injection has never delivered
 //! anything at all — so a dialog that began hidden could only ever be photographed
 //! through an instrument, and three of the captures in this task's history already
-//! rested on instrumented routes. Starting visible means the capture in
-//! `doc/ui/TASK_UI_PRIM_22.md` needs no seed, no rebuild and no environment variable
+//! rested on instrumented routes. Starting visible means the dialog's capture
+//! needs no seed, no rebuild and no environment variable
 //! and `--tab=overlays` reproduces it; that is where those captures live now, and the
 //! parent's requirement 3 records the same consequence for the pages in general.
 //!
@@ -317,7 +317,7 @@ const WINDOW: Size = Size {
 };
 
 /// How tall the tab bar at the top of the window is: the number
-/// `doc/ui/TASK_UI_PRIM_24.md`'s requirement 2 names.
+/// task 24's requirement 2 names.
 ///
 /// **The number was written by task 24.2 rather than left to 24.3**, so that the
 /// strip 24.2 reserved is the strip 24.3 fills: two agents choosing 64
@@ -677,8 +677,8 @@ const TEXT_SIZE_STEP: f32 = 2.0;
 
 /// The sentence **every** truncation row on the text page draws, verbatim.
 ///
-/// **One string for three rows, and that is `TASK_UI_PRIM_32.md` requirement 7's
-/// *"all three modes on comparable text"***: a reader has to be able to tell the
+/// **One string for three rows, and that is the *"all three modes on comparable
+/// text"* rule**: a reader has to be able to tell the
 /// three apart with their eyes, so the three rows differ in the truncation mode
 /// and in nothing else — the same words, the same half of
 /// [`TEXT_COLUMN_WIDTH`], the same [`TEXT_SIZE_START`] and the same theme colour.
@@ -10758,8 +10758,8 @@ mod tests {
     /// width, wrapped the same way, at the same size and in the same colour, and
     /// differing in nothing but the truncation mode.
     ///
-    /// **This is `TASK_UI_PRIM_32.md` requirement 7's "comparable text", and it
-    /// is the half that makes a screenshot answer anything.** Three rows of
+    /// **This is the "comparable text" rule, and it is the half that makes a
+    /// screenshot answer anything.** Three rows of
     /// different text, widths or sizes could differ in any number of ways at once,
     /// so a reader comparing them would be comparing the wrong thing; one field
     /// that differs is what turns the picture into evidence.
@@ -15033,8 +15033,7 @@ mod tests {
     /// `overlays` alone** because the dialog is presented at construction on the
     /// page that shows it and its first recorded command is a scrim over the whole
     /// window — a modal is *meant* to cover everything, the strip included, and
-    /// `TASK_UI_PRIM_24.md` requirement 8 puts the bar under the scrim with
-    /// everything else.
+    /// the bar goes under the scrim with everything else.
     ///
     /// **And task 24.3's seven, which is what this list was reserved for.** The
     /// bar and its six buttons are *in* the strip — that is the whole of what they
@@ -20262,8 +20261,8 @@ mod tests {
 
     // ---------------------------------------------------------------------
     // Task 24.1: `Page`, `--tab=`, and the three gates. Every acceptance
-    // criterion of `doc/ui/TASK_UI_PRIM_24.1.md` that a unit test can answer
-    // is answered here; the two that need a window are the frame rate and the
+    // criterion that a unit test can answer is answered here; the two that
+    // need a window are the frame rate and the
     // capture, and both are in the handoff.
     // ---------------------------------------------------------------------
 
@@ -21635,8 +21634,8 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // Task 24.3: the tab bar. Every acceptance criterion of
-    // `doc/ui/TASK_UI_PRIM_24.3.md` that a unit test can answer is answered
+    // Task 24.3: the tab bar. Every acceptance criterion that a unit test can
+    // answer is answered
     // here; the three that need a window are the two captures and the frame
     // rate, and all three are in the hand-over.
     // ---------------------------------------------------------------------

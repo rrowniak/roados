@@ -29,4 +29,4 @@ nothing here is being built.
 
 | file | superseded by | why |
 |---|---|---|
-| [`TASK_UI_DEMO_01.md`](TASK_UI_DEMO_01.md) | [`doc/ui/TASK_UI_DEMO_01.md`](../TASK_UI_DEMO_01.md), 2026-10-09 | A procedural vector map — a seeded world, a camera, three road classes, a route, POIs and a car marker, all from `Rect`, `Path`, `Circle` and `Polygon` — was judged too ambitious on 2026-10-09. The replacement keeps the same seventh page and its name and drops the map's geometry: one map image, full-bleed, as the base layer every later panel goes over. |
+| [`TASK_UI_DEMO_01.md`](TASK_UI_DEMO_01.md) | [`doc/ui/done/TASK_UI_DEMO_01.md`](../done/TASK_UI_DEMO_01.md), 2026-10-09 | A procedural vector map — a seeded world, a camera, three road classes, a route, POIs and a car marker, all from `Rect`, `Path`, `Circle` and `Polygon` — was judged too ambitious on 2026-10-09. The replacement keeps the same seventh page and its name and drops the map's geometry: one map image, full-bleed, as the base layer every later panel goes over. |

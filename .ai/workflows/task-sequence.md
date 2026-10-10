@@ -83,7 +83,7 @@ it. Today there are two — `doc/ui/IMPLEMENTATION_STATE.md` and
 third is named but does not exist yet**: `doc/ui/IMPLEMENTATION_STATE_DEMO.md` is
 the `DEMO` sequence's state file, **named here on 2026-10-09 when § *Scope was
 extended to `doc/ui/TASK_UI_DEMO_*.md`, and created by
-`doc/ui/TASK_UI_DEMO_01.md` requirement 7 when that task is implemented.** It is
+`doc/ui/done/TASK_UI_DEMO_01.md` requirement 7 when that task is implemented.** It is
 listed as the sequence's state file rather than omitted, because a workflow that
 names a sequence and no state file for it has the gap this section exists to
 close. A state file is **not** the source of the workflow, and it is not a source

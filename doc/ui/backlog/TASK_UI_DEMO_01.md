@@ -1,7 +1,7 @@
 # TASK_UI_DEMO_01: The Map Surface — a Procedural World, a Camera, and Four Draw Commands
 
 > **SUPERSEDED 2026-10-09 — not built, and not to be built as written.**
-> Replaced by [`doc/ui/TASK_UI_DEMO_01.md`](../TASK_UI_DEMO_01.md), which draws
+> Replaced by [`doc/ui/done/TASK_UI_DEMO_01.md`](../done/TASK_UI_DEMO_01.md), which draws
 > a **map image as a background** and puts nothing on it. **This file is kept
 > whole** because its reasoning is why the replacement is cheap: § *The map
 > approach* proves a raster background was reachable all along
@@ -408,7 +408,7 @@ and `.ai/protocols/subagents.md` § *Implementation fan-out*.
 | `ui/src/ui_demo/src/map.rs` | **new.** The world, `project`, `MapPalette`, `MapSurface`, `rotated`, `intersects`, and its `#[cfg(test)] mod tests` |
 | `ui/src/ui_demo/src/main.rs` | `mod map;`, `Page::Demo`, `Page::ALL` at seven, `fn name`'s seventh arm, the `Demo::map` and `Demo::map_node` fields, `Demo::new`'s node and its one `page_members` row, one arm in `Demo::frame`'s paint walk, and the four new tests of § *Testing* |
 | `doc/ui/DEMO_APPLICATION.md` | row #1 amended and **not closed**; § *Open questions* item 2 amended and **still open**; § *Open questions* item 7 answered; § *What a seventh page costs* gains a dated note |
-| `doc/ui/TASK_UI_PRIM_42.md` | every count in § *Sub-task 42.2* that names six becomes seven |
+| `doc/ui/done/TASK_UI_PRIM_42.md` | every count in § *Sub-task 42.2* that names six becomes seven |
 | `doc/ui/TASK_UI_PRIM_43.md` | the same in § *Sub-task 43.2*, plus the three test names that carry the count |
 | `doc/ui/IMPLEMENTATION_STATE_DEMO.md` | **new.** The task-table row, the record section, the waivers, the frame rate |
 | `.ai/workflows/task-sequence.md` | § *Scope* gains `doc/ui/TASK_UI_DEMO_*.md` and names this sequence's state file |
@@ -1074,7 +1074,7 @@ advance**: the three task-43 test names listed in requirement 11 are renamed **i
 
 - [ ] **The four documents carry the decision, and none is closed.**
       `git diff --stat` names exactly `doc/ui/DEMO_APPLICATION.md`,
-      `doc/ui/TASK_UI_PRIM_42.md`, `doc/ui/TASK_UI_PRIM_43.md` and
+      `doc/ui/done/TASK_UI_PRIM_42.md`, `doc/ui/TASK_UI_PRIM_43.md` and
       `.ai/workflows/task-sequence.md`, plus the new
       `doc/ui/IMPLEMENTATION_STATE_DEMO.md`. **Row #1 of `DEMO_APPLICATION.md` §
       *Library gaps* gains a dated note saying the map exists and where it lives,

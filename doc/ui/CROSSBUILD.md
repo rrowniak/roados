@@ -8,7 +8,7 @@ cross-compiled aarch64 Linux, both targeting OpenGL ES 3.1.
 `doc/ui/PRIMITIVES_ARCHITECTURE.md` § *Dependencies*.
 
 > **The project exists as of 2026-09-28.** `Cargo.toml`, `ui/src/ui_core/` and
-> `ui/src/ui_demo/` were created by `doc/ui/TASK_UI_PRIM_02.md`; the task table
+> `ui/src/ui_demo/` were created by `doc/ui/done/TASK_UI_PRIM_02.md`; the task table
 > in `doc/ui/IMPLEMENTATION_STATE.md` says how far each task got. Commands here
 > were written before the project existed, so read them as the procedure and
 > check them against the current tree. What *was* executed, and what it proved,

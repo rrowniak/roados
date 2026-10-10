@@ -1075,12 +1075,31 @@ void main() {
 /// correct for a rect quad exactly as it is for a window quad — `normalized` is
 /// `a_pos / u_size` either way.
 const BACKDROP_COMPOSITE_FRAGMENT_SHADER_SRC: &str = r#"#version 300 es
-precision mediump float;
+precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_source;
 uniform vec4 u_tint;
+uniform vec2 u_size;
+uniform vec4 u_rect;
+uniform float u_radius;
 out vec4 frag_color;
+
+// The signed distance to a rounded rectangle centred on the origin, negative
+// inside it. The same form the solid pass uses for a rounded rect.
+float rounded_rect_sdf(vec2 point, vec2 half_size, float radius) {
+    vec2 q = abs(point) - half_size + vec2(radius);
+    return min(max(q.x, q.y), 0.0) + length(max(q, vec2(0.0))) - radius;
+}
+
 void main() {
+    // `v_uv` is the window position over the window size, with `y` flipped by the
+    // vertex stage, so this recovers the fragment's window position.
+    vec2 position = vec2(v_uv.x * u_size.x, (1.0 - v_uv.y) * u_size.y);
+    vec2 half_size = 0.5 * u_rect.zw;
+    vec2 centre = u_rect.xy + half_size;
+    if (rounded_rect_sdf(position - centre, half_size, u_radius) > 0.0) {
+        discard;
+    }
     vec4 texel = texture(u_source, v_uv);
     frag_color = vec4(texel.rgb * u_tint.rgb, texel.a * u_tint.a);
 }
@@ -2482,6 +2501,9 @@ pub struct Renderer {
     u_backdrop_size: Option<glow::UniformLocation>,
     u_backdrop_source: Option<glow::UniformLocation>,
     u_backdrop_tint: Option<glow::UniformLocation>,
+    /// The rect and corner radius the composite is masked to.
+    u_backdrop_rect: Option<glow::UniformLocation>,
+    u_backdrop_radius: Option<glow::UniformLocation>,
     /// Mesh VAO, VBO, IBO for triangle mesh rendering (task 35).
     mesh_vao: glow::VertexArray,
     mesh_vbo: glow::Buffer,
@@ -2687,12 +2709,20 @@ impl Renderer {
         // `backdrop_composite_program` is the linked program. **`u_tint`, not the
         // shadow composite's `u_color`** — the two composite programs are separate
         // objects and a location from one would be meaningless in the other.
-        let (u_backdrop_size, u_backdrop_source, u_backdrop_tint) = unsafe {
+        let (
+            u_backdrop_size,
+            u_backdrop_source,
+            u_backdrop_tint,
+            u_backdrop_rect,
+            u_backdrop_radius,
+        ) = unsafe {
             let gl = context.gl();
             (
                 gl.get_uniform_location(backdrop_composite_program, "u_size"),
                 gl.get_uniform_location(backdrop_composite_program, "u_source"),
                 gl.get_uniform_location(backdrop_composite_program, "u_tint"),
+                gl.get_uniform_location(backdrop_composite_program, "u_rect"),
+                gl.get_uniform_location(backdrop_composite_program, "u_radius"),
             )
         };
         // SAFETY: The GL context is current on this thread and each program is
@@ -2834,6 +2864,8 @@ impl Renderer {
             u_backdrop_size,
             u_backdrop_source,
             u_backdrop_tint,
+            u_backdrop_rect,
+            u_backdrop_radius,
             mesh_vao,
             mesh_vbo,
             mesh_ibo,
@@ -3773,14 +3805,19 @@ impl Renderer {
     /// `Segment` boundaries and `end_frame` draws the backdrop first.
     fn draw_backdrop_batch(&mut self, batch: &Batch) -> Result<(), RenderError> {
         let Some(command) = batch.commands.iter().find_map(|command| match command {
-            DrawCommand::Backdrop { rect, mode, tint } => Some((*rect, *mode, *tint)),
+            DrawCommand::Backdrop {
+                rect,
+                mode,
+                tint,
+                radius,
+            } => Some((*rect, *mode, *tint, *radius)),
             _ => None,
         }) else {
             return Ok(());
         };
-        let (rect, mode, tint) = command;
+        let (rect, mode, tint, radius) = command;
         self.apply_clip(batch.clip);
-        self.draw_backdrop_offscreen(rect, mode, tint, batch.clip)
+        self.draw_backdrop_offscreen(rect, mode, tint, radius, batch.clip)
     }
 
     /// Runs the offscreen half of one backdrop: capture, two blur passes,
@@ -3803,6 +3840,7 @@ impl Renderer {
         rect: Rect,
         mode: BackdropMode,
         tint: Color,
+        radius: f32,
         clip: Option<Rect>,
     ) -> Result<(), RenderError> {
         let (width, height) = self.viewport;
@@ -4024,6 +4062,17 @@ impl Renderer {
                 tint[2],
                 tint[3],
             );
+            // The rect and radius the composite is masked to. `rect` is the
+            // already-clipped one the quad is built from, so the mask and the
+            // geometry agree.
+            gl.uniform_4_f32(
+                self.u_backdrop_rect.as_ref(),
+                drawn.x,
+                drawn.y,
+                drawn.width,
+                drawn.height,
+            );
+            gl.uniform_1_f32(self.u_backdrop_radius.as_ref(), radius);
             // **Blending on, because the composite reads a destination.** It was
             // disabled in step 2 for the capture and the blur passes.
             gl.enable(GL_BLEND);

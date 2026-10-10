@@ -1650,10 +1650,16 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
             // in the tree — so like the mesh arm this exists because the match is
             // exhaustive. It exists so that the day one does, the answer is right
             // rather than missing.
-            DrawCommand::Backdrop { rect, mode, tint } => DrawCommand::Backdrop {
+            DrawCommand::Backdrop {
+                rect,
+                mode,
+                tint,
+                radius,
+            } => DrawCommand::Backdrop {
                 rect: moved_rect(*rect, by),
                 mode: *mode,
                 tint: *tint,
+                radius: *radius,
             },
         })
         .collect()
@@ -2654,6 +2660,7 @@ mod tests {
             Rect::new(100.0, 200.0, 50.0, 60.0),
             BackdropMode::Blur(2.0),
             Color::new(236, 239, 244, 170),
+            12.0,
         );
         let every = painter.finish();
         assert_eq!(every.len(), 9, "one of each variant the enum has");

@@ -32,6 +32,7 @@ fn test_painter_records_all_commands() {
         Rect::new(100.0, 200.0, 50.0, 60.0),
         BackdropMode::Blur(2.0),
         Color::new(236, 239, 244, 170),
+        12.0,
     );
     let commands = painter.finish();
     assert_eq!(

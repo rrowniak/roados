@@ -750,6 +750,16 @@ pub enum DrawCommand {
         /// the fixture assertion in `the_backdrop_composite_stays_premultiplied` is
         /// the line that catches it.
         tint: Color,
+        /// The corner radius of the composite, in pixels, clamped to half the
+        /// smaller side. `0.0` is a sharp rectangle.
+        ///
+        /// **The composite is discarded outside this rounded rectangle**, so a
+        /// caller that wants a rounded frosted panel — the chrome's round fills —
+        /// leaves the four corner regions untouched rather than tinting them. A
+        /// rectangular composite over a rounded fill is the defect this field
+        /// exists to prevent: the corner regions outside the fill would otherwise
+        /// receive the tint and read as black over a bright map.
+        radius: f32,
     },
     /// A triangle mesh: one named sub-mesh of one uploaded mesh, through one
     /// transform, in one tint.
@@ -1425,6 +1435,10 @@ impl Painter {
     /// can widen the kernel, and a backdrop that wants a wider frost needs a
     /// different kernel — a different decision, with its own measurement.
     ///
+    /// **`radius` rounds the composite**, and it is what lets a backdrop sit under
+    /// a rounded fill without tinting the fill's empty corners. `0.0` is a sharp
+    /// rectangle.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1434,6 +1448,7 @@ impl Painter {
     ///     Rect::new(240.0, 160.0, 320.0, 200.0),
     ///     BackdropMode::Blur(2.0),
     ///     Color::new(236, 239, 244, 170),
+    ///     12.0,
     /// );
     /// // **This test needs no display**: it records and pattern-matches, and never
     /// // opens a window — which is the only kind of test `AGENTS.md` permits.
@@ -1444,7 +1459,13 @@ impl Painter {
     /// // The mode round-trips as the value the caller passed, and `Blur(2.5)` and
     /// // `Blur(0.0)` are different — which is the reason `mode` is an enum and not
     /// // a bare sigma.
-    /// let DrawCommand::Backdrop { rect, mode, tint } = &commands[0] else {
+    /// let DrawCommand::Backdrop {
+    ///     rect,
+    ///     mode,
+    ///     tint,
+    ///     radius,
+    /// } = &commands[0]
+    /// else {
     ///     panic!("the backdrop is recorded");
     /// };
     /// assert_eq!(*rect, Rect::new(240.0, 160.0, 320.0, 200.0));
@@ -1452,10 +1473,15 @@ impl Painter {
     /// assert_ne!(BackdropMode::Blur(2.5), BackdropMode::Blur(0.0));
     /// assert_ne!(mode, &BackdropMode::Blur(0.0));
     /// assert_eq!(tint, &Color::new(236, 239, 244, 170));
+    /// assert_eq!(*radius, 12.0);
     /// ```
-    pub fn backdrop(&mut self, rect: Rect, mode: BackdropMode, tint: Color) {
-        self.commands
-            .push(DrawCommand::Backdrop { rect, mode, tint });
+    pub fn backdrop(&mut self, rect: Rect, mode: BackdropMode, tint: Color, radius: f32) {
+        self.commands.push(DrawCommand::Backdrop {
+            rect,
+            mode,
+            tint,
+            radius,
+        });
     }
 
     /// Appends every command in `commands`, in order, to what this painter has

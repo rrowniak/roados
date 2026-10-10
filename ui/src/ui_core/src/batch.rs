@@ -1833,6 +1833,7 @@ mod tests {
             Rect::new(240.0, 160.0, 320.0, 200.0),
             crate::paint::BackdropMode::Blur(2.0),
             Color::new(236, 239, 244, 170),
+            12.0,
         );
         let commands = painter.finish();
         match commands.into_iter().next() {
@@ -1902,6 +1903,7 @@ mod tests {
             rect: Rect::new(0.0, 0.0, 10.0, 10.0),
             mode: crate::paint::BackdropMode::Sharp,
             tint: Color::new(255, 255, 255, 255),
+            radius: 0.0,
         };
         assert_eq!(
             BlendMode::from_color(Color::new(255, 255, 255, 255)),
@@ -1922,6 +1924,7 @@ mod tests {
             rect: Rect::new(0.0, 0.0, 10.0, 10.0),
             mode: crate::paint::BackdropMode::Blur(2.0),
             tint: Color::new(236, 239, 244, 170),
+            radius: 12.0,
         };
         assert_eq!(frost.batch_key().blend_mode, BlendMode::Transparent);
     }

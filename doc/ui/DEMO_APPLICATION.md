@@ -183,9 +183,19 @@ shell, and:
 underline or tab bar anywhere"*. **That is evidence about Tesla's own interface
 and it remains true of Tesla.** The gallery's tab bar is a demo affordance for
 switching between widget pages and says nothing about how the Tesla screens are
-navigated — so no override is needed here, and none is recorded. **It will need
-one** if a `TASK_UI_DEMO_n` task ever puts a tab bar on a Tesla surface, and that
-is the sentence to amend when it does.
+navigated — so no override is needed here, and none is recorded.
+
+**Amended 2026-10-09 by `TASK_UI_DEMO_02`.** That task **did** put the gallery's
+tab bar on a Tesla surface: the `demo` page *is* a page of the gallery, so the
+gallery's `TAB_BAR_HEIGHT` strip is drawn above the map on every frame the demo tab
+shows. **The gallery's bar stays**, because this section's own 2026-10-03 decision
+is that *"this application becomes one more tab, not a replacement for the
+gallery"*, and a page of a gallery does not remove the gallery's own chrome. The
+two bars are distinct: the top strip is the *gallery's* affordance for switching
+pages and carries the label `demo`; the status bar **inside** it is the Tesla top
+bar built by `TASK_UI_DEMO_02`. **Removing the gallery's bar while the demo tab is
+showing is a screen-level decision, and screen-level decisions belong to
+`TASK_UI_PRIM_42`'s `Screens`.**
 
 **Four places still record the withdrawn 2026-10-03 decision.** Recorded here so
 the divergence is visible rather than silent, per the repository's rule that the
@@ -550,6 +560,16 @@ rather than silently overwritten.
 
 ### The persistent chrome
 
+> **Amended 2026-10-09 by `TASK_UI_DEMO_02`.** The task built the persistent
+> chrome over the map: **three regions** — a top status bar, a left car-status pane
+> and a bottom dock — three always-on top-bar items (padlock, clock, airbag badge),
+> the two parked-only items (profile, Sentry), five indicator rows, the three-card
+> carousel, three pager dots, the four drive-mode targets and **five dock slots**
+> (Controls, climate, My Apps, App Launcher, Volume). **It did not build** any
+> panel, popup or app tray; any gesture; real iconography (the dock glyphs are
+> placeholders); a 3-D car; per-field staleness; the latch; a blinking tell-tale;
+> the resize drag; or carousel paging.
+
 #### Top bar
 
 **Order, parked, current software.** The middle is deliberately empty; the
@@ -654,6 +674,16 @@ notifications by touching the bell icon at the top of Controls."* [A] Stacking
 behaviour is **not documented** — see *Could not verify*.
 
 ### The car-status pane
+
+> **Amended 2026-10-09 by `TASK_UI_DEMO_02`.** The pane is built as a **persistent
+> region** of the demo page at `CAR_STATUS_PANE_FRACTION = 0.40` of the window's
+> width, down to the dock's top, with `PRND`/battery at its top, the drive-mode
+> strip's four targets inset at its left, five indicator rows (one per colour
+> class, in this section's red/amber/green/blue/grey order), and a static
+> three-card row above a three-dot pager. **It is not resizable, the strip's four
+> targets carry no gesture, the indicator column is not the ~20 conditions and has
+> no blink and no latch, and the carousel does not page or swipe** — the `[C]`
+> gesture model and § *Open questions* item 8 both stay open.
 
 Left ~40% in photo `02`, resizable: *"You can expand/condense the
 visualization by dragging the car status area from side to side. Expanding the

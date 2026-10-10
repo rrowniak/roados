@@ -107,7 +107,7 @@ can follow.
   judgement call.
 - **Comments explain why, not what.** A comment restating the line below it is
   noise; a comment recording a rejected alternative saves the next reader the
-  same dead end.
+  same dead end. Comments must be short and condensed.
 - **Do not restructure what you were not asked to touch.** Drive-by cleanups
   make review impossible and hide the change that matters.
 

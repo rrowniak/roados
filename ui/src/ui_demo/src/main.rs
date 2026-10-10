@@ -214,9 +214,13 @@
 //! press" instead of asking about the current focus, which by then is inside the
 //! dialog.
 
+mod chrome;
 mod fps;
+mod panel;
 
+use crate::chrome::Chrome;
 use crate::fps::FrameRate;
+use crate::panel::Panel;
 use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::Keycode;
 #[cfg(test)]
@@ -428,6 +432,24 @@ fn tab_motion(theme: &Theme) -> Motion {
 /// they are not `*_ORIGIN`s, and the first review round caught the count here
 /// being two when the diff carried five.)
 const CONTENT_TOP: f32 = TAB_BAR_HEIGHT;
+
+/// The font size every chrome label is drawn at.
+const CHROME_FONT: f32 = 16.0;
+
+/// The font size a dock button's glyph is drawn at.
+const DOCK_FONT: f32 = 24.0;
+
+/// The gap between two labels inside a chrome group.
+const CHROME_GROUP_SPACING: f32 = 8.0;
+
+/// How tall a dock button is drawn.
+const DOCK_BUTTON_TALL: f32 = 56.0;
+
+/// The gap between a dock button's glyph and its left and right edges.
+const DOCK_BUTTON_PADDING_H: f32 = 12.0;
+
+/// The padding inside the dock's own box.
+const DOCK_PADDING: f32 = 8.0;
 
 /// How long one frame is budgeted to take: **60 Hz**, the rate
 /// `doc/ui/DEMO_APPLICATION.md` lists as *"Smooth animations and transitions —
@@ -3323,6 +3345,55 @@ fn themed_color(token: &Property<PropertyValue>, fallback: Color) -> Property<Co
     Property::bind(move || token.get().as_color().unwrap_or(fallback))
 }
 
+/// Builds one chrome label: the widget, its node sized to the text, and the
+/// handle. A chrome label is measured through [`Demo::metrics`] like every other
+/// label in the demo, so the rect it is given is the rect its text needs.
+fn chrome_label(
+    nodes: &mut Arena<WidgetNode>,
+    metrics: &TextMetrics,
+    text: &str,
+    color: Property<Color>,
+) -> Result<(DemoLabel, Handle), &'static str> {
+    let mut label = Label::new(nodes, text);
+    label.font_size.set(CHROME_FONT);
+    label.color = color;
+    // **`WrapMode::None` and a measured width, not `DemoLabel::size`.** A chrome
+    // label is one short string that must never wrap, and `DemoLabel::size`
+    // returns `max_width.max(text widths)`; `max_width` must therefore stay
+    // `INFINITY` (a finite one would become the label's width) and the size is
+    // measured from the laid-out line instead.
+    let options = LayoutOptions {
+        max_width: f32::INFINITY,
+        line_height: metrics.line_height(CHROME_FONT),
+        wrap: WrapMode::None,
+        ..LayoutOptions::default()
+    };
+    let layout = label.layout(&options, &|ch: char| metrics.advance(ch, CHROME_FONT));
+    let width = layout
+        .lines
+        .iter()
+        .map(|line| line.width)
+        .fold(0.0, f32::max);
+    let size = Size::new(width, layout.total_height);
+    let demo_label = DemoLabel { label, options };
+    let handle = demo_label.label.handle();
+    let node = nodes
+        .get_mut(handle)
+        .ok_or("ui_demo: a chrome label's node is missing")?;
+    node.layout_mut().set_constraints(Constraints::tight(size));
+    Ok((demo_label, handle))
+}
+
+/// Returns the advance a dock button's glyph is measured with, at [`DOCK_FONT`].
+fn chrome_advance(metrics: &TextMetrics) -> impl Fn(char) -> f32 + '_ {
+    move |ch: char| metrics.advance(ch, DOCK_FONT)
+}
+
+/// Returns the line box a dock button's glyph is measured at.
+fn chrome_line_height(metrics: &TextMetrics) -> f32 {
+    metrics.line_height(DOCK_FONT)
+}
+
 /// Returns the colours a tab button is drawn in: the theme's **active** pair when
 /// the button is the one for the page on show, and its **rest** pair when it is
 /// not.
@@ -3633,6 +3704,45 @@ struct Demo {
     /// not found or could not be loaded. Read only by tests, hence the allow.
     #[allow(dead_code)]
     map_is_stand_in: bool,
+    /// The map background as a panel object, so it can be resized or moved.
+    #[allow(dead_code)]
+    map_panel: Panel,
+    /// The top status bar as a panel object.
+    #[allow(dead_code)]
+    status_panel: Panel,
+    /// The car-status pane as a panel object.
+    #[allow(dead_code)]
+    pane_panel: Panel,
+    /// The bottom dock as a panel object.
+    #[allow(dead_code)]
+    dock_panel: Panel,
+    /// The chrome's three translucent surfaces: the status bar, the car-status
+    /// pane and the bottom dock. See [`crate::chrome`].
+    chrome_nodes: Vec<Chrome>,
+    /// The bottom dock's five buttons. They carry no `set_palette`, because the
+    /// dock has no active-state highlight — see `chrome.rs` and
+    /// `DEMO_APPLICATION.md` § *The persistent chrome* § *Bottom dock*.
+    chrome_buttons: Vec<Button>,
+    /// Every chrome label, painted through [`record_label`] rather than through
+    /// the walk, on the same argument the text panel's labels are: the walk is
+    /// for widgets with their own `paint`, and a label is measured by the demo.
+    ///
+    /// **A `Vec` of its own and not `Demo::labels`**, because `Demo::placed_handles`
+    /// names every entry of `label_nodes` a *text panel label* and a chrome label
+    /// added there would enter `no_two_placed_rects_overlap` with a rect that
+    /// overlaps the card of pads.
+    chrome_labels: Vec<(DemoLabel, Handle)>,
+    /// Every node in the chrome's subtrees, in paint order. Used by the page
+    /// table, by the drawn-leaf exemption and by the leak test.
+    #[allow(dead_code)]
+    chrome_all: Vec<Handle>,
+    /// The chrome nodes that record a command: the three surfaces, the five dock
+    /// buttons, every chrome label and the pager. The sub-containers draw nothing
+    /// and are deliberately absent.
+    #[allow(dead_code)]
+    chrome_drawn: Vec<Handle>,
+    /// The pager's node, whose own paint arm records the three dots.
+    chrome_pager: Handle,
     /// The progress bar, at the foot of the band's left column.
     progress: Progress,
     /// Whether the progress bar is sliding rather than showing a value.
@@ -3966,6 +4076,11 @@ impl Demo {
         // it fills the node's rect without letterboxing or stretching.
         map.set_fit(ImageFit::Cover);
         map.snap_to_state();
+        // **The map is the first panel**: the full-bleed background object the
+        // chrome sits over. It wraps the image node, so resizing or moving the
+        // panel moves the picture with it.
+        let map_rect = Rect::new(0.0, CONTENT_TOP, WINDOW.width, WINDOW.height - CONTENT_TOP);
+        let map_panel = Panel::wrapping(map.handle(), map_rect);
         {
             let map_node = nodes
                 .get_mut(map.handle())
@@ -3973,12 +4088,12 @@ impl Demo {
             map_node
                 .layout_mut()
                 .set_constraints(Constraints::tight(Size::new(
-                    WINDOW.width,
-                    WINDOW.height - CONTENT_TOP,
+                    map_rect.width,
+                    map_rect.height,
                 )));
             map_node
                 .layout_mut()
-                .set_position(Some(Offset::new(0.0, CONTENT_TOP)));
+                .set_position(Some(Offset::new(map_rect.x, map_rect.y)));
         }
 
         for &rest_token in &PAD_TOKENS {
@@ -5333,6 +5448,304 @@ impl Demo {
             }
         }
 
+        // ----------------------------------------------- TASK_UI_DEMO_02: the chrome
+        //
+        // Three persistent regions drawn over the map: a status bar across the
+        // top, a car-status pane down the left, and a dock across the bottom.
+        // They are a region of the demo page and not panels over it — see
+        // [`crate::chrome`]. The three surfaces are `Chrome` values the paint
+        // walk records through `chrome_surface_commands`; their children are
+        // ordinary `Container`s and widgets.
+        let chrome_palette_now = chrome::chrome_palette(&theme);
+        // **Nicely rounded corners on every panel**, in both themes, and the map
+        // background follows with the chrome: the radius is a shape rather than
+        // an appearance, so it does not move with the theme.
+        let chrome_radius = chrome::CHROME_RADIUS;
+        map.corner_radius.set(chrome_radius);
+        let [status_rect, pane_rect, dock_rect] = chrome::chrome_regions(WINDOW, CONTENT_TOP);
+        let mut chrome_labels: Vec<(DemoLabel, Handle)> = Vec::new();
+        let text_color = themed_color(
+            &theme.property(ThemeToken::Text),
+            Color::new(255, 255, 255, 255),
+        );
+        let muted_color = themed_color(
+            &theme.property(ThemeToken::TextMuted),
+            Color::new(158, 158, 158, 255),
+        );
+
+        // The top status bar, as a panel object: a `row` with `SpaceBetween` and
+        // three child groups, its widgets positioned relative to the panel.
+        let (status_panel, status_bar) =
+            Panel::container(&mut nodes, status_rect, LayoutMode::row());
+        status_bar.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+        );
+        status_bar.set_padding(&mut nodes, Padding::all(DOCK_PADDING));
+        // The three groups: the padlock, profile and sentry on the left; the
+        // clock and ambient temperature on the right; the airbag badge alone.
+        // **No `PRND` and no battery here** — the photograph puts them in the
+        // car-status cluster, not the chrome, and they live at the pane's top.
+        let status_left = Container::new(&mut nodes, LayoutMode::row());
+        status_left.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+        );
+        for (text, color) in [
+            ("Unlocked", text_color.clone()),
+            ("Guest", text_color.clone()),
+            ("Sentry", muted_color.clone()),
+        ] {
+            let (label, handle) = chrome_label(&mut nodes, &metrics, text, color)?;
+            if !status_left.add_child(&mut nodes, handle) {
+                return Err("ui_demo: a status-bar label could not be attached");
+            }
+            chrome_labels.push((label, handle));
+        }
+        let status_right = Container::new(&mut nodes, LayoutMode::row());
+        status_right.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+        );
+        for text in ["2:37 pm", "65 F"] {
+            let (label, handle) = chrome_label(&mut nodes, &metrics, text, text_color.clone())?;
+            if !status_right.add_child(&mut nodes, handle) {
+                return Err("ui_demo: a status-bar label could not be attached");
+            }
+            chrome_labels.push((label, handle));
+        }
+        let status_airbag = Container::new(&mut nodes, LayoutMode::row());
+        status_airbag.set_flex_config(
+            &mut nodes,
+            FlexConfig::new().with_cross_axis_alignment(CrossAxisAlignment::Center),
+        );
+        let (airbag_label, airbag_handle) = chrome_label(
+            &mut nodes,
+            &metrics,
+            "PASSENGER AIRBAG OFF",
+            muted_color.clone(),
+        )?;
+        if !status_airbag.add_child(&mut nodes, airbag_handle) {
+            return Err("ui_demo: the airbag label could not be attached");
+        }
+        chrome_labels.push((airbag_label, airbag_handle));
+        for group in [
+            status_left.handle(),
+            status_right.handle(),
+            status_airbag.handle(),
+        ] {
+            if !status_panel.add_child(&mut nodes, group) {
+                return Err("ui_demo: a status-bar group could not be attached");
+            }
+        }
+
+        // The car-status pane, as a panel object: a `column` with the
+        // `PRND`/battery readout, the drive-mode strip, the indicator column, the
+        // card carousel and the pager. **`Stretch` so its children fill the
+        // panel's width**: that is what makes the pane resizable — widen the
+        // panel and the card row and pager widen with it.
+        let (pane_panel, pane) = Panel::container(&mut nodes, pane_rect, LayoutMode::column());
+        pane.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Stretch),
+        );
+        pane.set_padding(&mut nodes, Padding::all(chrome::PANE_INSET));
+        // The `PRND` and battery readouts, at the pane's top.
+        let prnd_row = Container::new(&mut nodes, LayoutMode::row());
+        prnd_row.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+        );
+        for text in ["PRND", "70%"] {
+            let (label, handle) = chrome_label(&mut nodes, &metrics, text, text_color.clone())?;
+            if !prnd_row.add_child(&mut nodes, handle) {
+                return Err("ui_demo: a PRND readout could not be attached");
+            }
+            chrome_labels.push((label, handle));
+        }
+        // The drive-mode strip: four read-outs and no gesture. The `[C]` tag on
+        // its gesture model is repeated in `chrome.rs` so a later task does not
+        // inherit it as a specification.
+        let drive_strip = Container::new(&mut nodes, LayoutMode::column());
+        drive_strip.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Start),
+        );
+        for text in ["\u{2191}", "P", "\u{2193}", "HOLD"] {
+            let (label, handle) = chrome_label(&mut nodes, &metrics, text, muted_color.clone())?;
+            if !drive_strip.add_child(&mut nodes, handle) {
+                return Err("ui_demo: a drive-mode readout could not be attached");
+            }
+            chrome_labels.push((label, handle));
+        }
+        // The indicator column: five rows, one per colour class, in the section's
+        // own order. It is not the ~20 conditions, and it has no blink and no
+        // latch.
+        let indicator = Container::new(&mut nodes, LayoutMode::column());
+        indicator.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Start),
+        );
+        for (token, text) in chrome::INDICATOR_TOKENS
+            .into_iter()
+            .zip(["Error", "Warning", "OK", "Info", "Muted"])
+        {
+            let color = themed_color(&theme.property(token), Color::new(255, 255, 255, 255));
+            let (label, handle) = chrome_label(&mut nodes, &metrics, text, color)?;
+            if !indicator.add_child(&mut nodes, handle) {
+                return Err("ui_demo: an indicator row could not be attached");
+            }
+            chrome_labels.push((label, handle));
+        }
+        // The card carousel: three static cards and no paging. § *Open questions*
+        // item 8 stays open; see `DEMO_APPLICATION.md`.
+        let card_row = Container::new(&mut nodes, LayoutMode::row());
+        card_row.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Start),
+        );
+        {
+            // **A fixed height, free width.** The width comes from the pane's
+            // `Stretch`, so the carousel fills whatever width the panel is given;
+            // only the height is declared here.
+            let node = nodes
+                .get_mut(card_row.handle())
+                .ok_or("ui_demo: the card row is missing")?;
+            node.layout_mut().set_constraints(Constraints::new(
+                0.0,
+                f32::INFINITY,
+                chrome::CARDS_HEIGHT,
+                f32::INFINITY,
+            ));
+        }
+        for text in ["Card 1", "Card 2", "Card 3"] {
+            let card = Container::new(&mut nodes, LayoutMode::column());
+            card.set_flex_config(
+                &mut nodes,
+                FlexConfig::new().with_cross_axis_alignment(CrossAxisAlignment::Start),
+            );
+            let (label, handle) = chrome_label(&mut nodes, &metrics, text, text_color.clone())?;
+            if !card.add_child(&mut nodes, handle) {
+                return Err("ui_demo: a card label could not be attached");
+            }
+            chrome_labels.push((label, handle));
+            if !card_row.add_child(&mut nodes, card.handle()) {
+                return Err("ui_demo: a card could not be attached");
+            }
+        }
+        // The pager: one container whose paint arm records three dots, below the
+        // card row. It is not a label, so it has an arm of its own.
+        let pager = Container::new(&mut nodes, LayoutMode::row());
+        {
+            // The width comes from the pane's `Stretch`; only the height is
+            // declared.
+            let node = nodes
+                .get_mut(pager.handle())
+                .ok_or("ui_demo: the pager is missing")?;
+            node.layout_mut().set_constraints(Constraints::new(
+                0.0,
+                f32::INFINITY,
+                chrome::PAGER_DOT_RADIUS * 4.0,
+                chrome::PAGER_DOT_RADIUS * 4.0,
+            ));
+        }
+        for child in [
+            prnd_row.handle(),
+            drive_strip.handle(),
+            indicator.handle(),
+            card_row.handle(),
+            pager.handle(),
+        ] {
+            if !pane_panel.add_child(&mut nodes, child) {
+                return Err("ui_demo: a pane child could not be attached");
+            }
+        }
+
+        // The bottom dock: a `row` of five `Button`s and no active-state
+        // highlight. **No `set_palette` on any of them** — the photograph reads
+        // *"no active-state highlight"*, and a `TabBar` that owns "which one is
+        // selected" has nothing to own over a dock whose items open panels.
+        let (dock_panel, dock) = Panel::container(&mut nodes, dock_rect, LayoutMode::row());
+        dock.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_main_axis_alignment(MainAxisAlignment::SpaceAround)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+        );
+        dock.set_padding(&mut nodes, Padding::all(DOCK_PADDING));
+        let mut chrome_buttons: Vec<Button> = Vec::with_capacity(chrome::DOCK_SLOTS);
+        for glyph in chrome::DOCK_GLYPHS {
+            let button = Button::new(&mut nodes, glyph);
+            // The geometry before the measurement, on the tab bar's own argument:
+            // `Button::content_size` reads `font_size`, `padding_h` and the label.
+            button.font_size.set(DOCK_FONT);
+            button.padding_h.set(DOCK_BUTTON_PADDING_H);
+            button.border_radius.set(chrome::CHROME_RADIUS);
+            {
+                let content =
+                    button.content_size(&chrome_advance(&metrics), chrome_line_height(&metrics));
+                let size = Size::new(content.width.max(DOCK_BUTTON_TALL), DOCK_BUTTON_TALL);
+                nodes
+                    .get_mut(button.handle())
+                    .ok_or("ui_demo: a dock button's node is missing")?
+                    .layout_mut()
+                    .set_constraints(Constraints::tight(size));
+            }
+            button.snap_to_state();
+            // **The dock's buttons open nothing**, and that is stated rather than
+            // left to be discovered: no Controls panel, no climate popup, no app
+            // tray, no launcher grid, no volume overlay, and no gesture.
+            if !dock_panel.add_child(&mut nodes, button.handle()) {
+                return Err("ui_demo: a dock button could not be attached");
+            }
+            chrome_buttons.push(button);
+        }
+
+        let chrome_nodes = vec![
+            Chrome {
+                node: status_panel.handle(),
+                radius: chrome_radius,
+                palette: chrome_palette_now,
+            },
+            Chrome {
+                node: pane_panel.handle(),
+                radius: chrome_radius,
+                palette: chrome_palette_now,
+            },
+            Chrome {
+                node: dock_panel.handle(),
+                radius: chrome_radius,
+                palette: chrome_palette_now,
+            },
+        ];
+        // Every node in the chrome's subtrees, in paint order. The three surfaces
+        // are siblings, so their walks concatenate in the order they are drawn.
+        let mut chrome_all: Vec<Handle> = Vec::new();
+        for surface in &chrome_nodes {
+            chrome_all.extend(paint_order(&nodes, surface.node));
+        }
+        let mut chrome_drawn: Vec<Handle> = chrome_nodes.iter().map(|chrome| chrome.node).collect();
+        chrome_drawn.extend(chrome_buttons.iter().map(Button::handle));
+        chrome_drawn.extend(chrome_labels.iter().map(|(_, handle)| *handle));
+        chrome_drawn.push(pager.handle());
+
         // A stack: the background fills the window behind the row of pads, the
         // text panel and the controls layer, and all three are painted over it.
         //
@@ -5405,6 +5818,14 @@ impl Demo {
             row.handle(),
             text_panel.handle(),
             controls.handle(),
+            // **The chrome last**, so the paint walk records the map and the
+            // gallery before it and the chrome draws on top of both. The three
+            // regions live below the gallery's tab bar and over the map; on the
+            // demo page the gallery widgets are emptied by the paint gate, so the
+            // only thing under the chrome is the map.
+            chrome_nodes[0].node,
+            chrome_nodes[1].node,
+            chrome_nodes[2].node,
         ] {
             if !root.add_child(&mut nodes, child) {
                 return Err("ui_demo: a panel could not be attached to the root");
@@ -5722,6 +6143,14 @@ impl Demo {
         // dropped row gave *0 failed / 1814, with the text column drawn on the wrong
         // page* and a dropped `placed_handles` row gave *0 failed / 1817*.
         on(Page::Demo, map.handle(), false);
+        // **One row per chrome node**, and the count is every node in the three
+        // subtrees rather than the three surfaces: `hit_test` skips the whole
+        // subtree of an invisible node, and a chrome container on no page's list
+        // would leave its children drawn on every page. A non-focusable row
+        // contributes no `Tab` stop, so the five-focusable count does not move.
+        for &handle in &chrome_all {
+            on(Page::Demo, handle, false);
+        }
 
         let mut demo = Demo {
             nodes,
@@ -5781,6 +6210,16 @@ impl Demo {
             image_fit_readout,
             map,
             map_is_stand_in,
+            map_panel,
+            status_panel,
+            pane_panel,
+            dock_panel,
+            chrome_nodes,
+            chrome_buttons,
+            chrome_labels,
+            chrome_all,
+            chrome_drawn,
+            chrome_pager: pager.handle(),
             progress,
             progress_indeterminate,
             progress_focused,
@@ -5929,6 +6368,87 @@ impl Demo {
             .iter()
             .find(|tab| tab.button.handle() == handle)
             .map(|tab| &tab.button)
+    }
+
+    /// Returns the chrome surface at `handle`, or `None` for any other node.
+    ///
+    /// A search over [`Demo::chrome_nodes`] rather than a position, for the
+    /// reason [`Demo::tab_button`] gives: a handle is what routing and the paint
+    /// walk arrive with.
+    fn chrome_of(&self, handle: Handle) -> Option<&Chrome> {
+        self.chrome_nodes
+            .iter()
+            .find(|chrome| chrome.node == handle)
+    }
+
+    /// Returns the dock button at `handle`, or `None` for any other node.
+    fn chrome_button(&self, handle: Handle) -> Option<&Button> {
+        self.chrome_buttons
+            .iter()
+            .find(|button| button.handle() == handle)
+    }
+
+    /// The four panel objects, in paint order.
+    #[must_use]
+    #[allow(dead_code)]
+    fn panels(&self) -> [&Panel; 4] {
+        [
+            &self.map_panel,
+            &self.status_panel,
+            &self.pane_panel,
+            &self.dock_panel,
+        ]
+    }
+
+    /// Returns the panel at `handle`, or `None` for any other node.
+    #[must_use]
+    #[allow(dead_code)]
+    fn panel(&self, handle: Handle) -> Option<&Panel> {
+        self.panels().into_iter().find(|panel| panel.is(handle))
+    }
+
+    /// Moves and resizes the panel at `handle`, **in its parent's coordinates**.
+    ///
+    /// The whole object follows: its widgets are positioned relative to the
+    /// panel, so one call repositions or resizes the region and its subtree. The
+    /// next frame's layout pass re-places everything under it.
+    ///
+    /// Returns whether `handle` names one of the panels.
+    #[allow(dead_code)]
+    fn set_panel_rect(&mut self, handle: Handle, rect: Rect) -> bool {
+        let mut panels = [
+            &mut self.map_panel,
+            &mut self.status_panel,
+            &mut self.pane_panel,
+            &mut self.dock_panel,
+        ];
+        let Some(panel) = panels.iter_mut().find(|panel| panel.is(handle)) else {
+            return false;
+        };
+        let mut nodes = self.nodes.borrow_mut();
+        panel.set_rect(&mut nodes, rect);
+        true
+    }
+
+    /// Moves the panel at `handle` by `(dx, dy)`, keeping its size.
+    #[allow(dead_code)]
+    fn move_panel(&mut self, handle: Handle, dx: f32, dy: f32) -> bool {
+        let Some(rect) = self.panel(handle).map(Panel::rect) else {
+            return false;
+        };
+        self.set_panel_rect(
+            handle,
+            Rect::new(rect.x + dx, rect.y + dy, rect.width, rect.height),
+        )
+    }
+
+    /// Resizes the panel at `handle`, keeping its origin.
+    #[allow(dead_code)]
+    fn resize_panel(&mut self, handle: Handle, size: Size) -> bool {
+        let Some(rect) = self.panel(handle).map(Panel::rect) else {
+            return false;
+        };
+        self.set_panel_rect(handle, Rect::new(rect.x, rect.y, size.width, size.height))
     }
 
     /// Returns the index of the tab button under `(x, y)`, and `None` for a point
@@ -7681,6 +8201,30 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
+            // The chrome's three surfaces. An arm of their own because a surface
+            // records a translucent rounded fill with no container background —
+            // see [`crate::chrome::chrome_surface_commands`].
+            if let Some(chrome) = self.chrome_of(handle) {
+                let commands = match node.layout().rect() {
+                    Some(rect) => chrome::chrome_surface_commands(rect.into(), chrome),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The pager's three dots. A dot is not a label, a button or a
+            // container, so the pager has an arm of its own; it records three
+            // `Circle`s and nothing else.
+            if handle == self.chrome_pager {
+                let commands = match (node.layout().rect(), self.chrome_nodes.first()) {
+                    (Some(rect), Some(chrome)) => {
+                        chrome::pager_commands(rect.into(), &chrome.palette)
+                    }
+                    _ => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
             if handle == self.slider.node() {
                 // The rect comes from the node the loop already holds, rather than
                 // from `slider_rect`: that borrows the arena, and the loop has it
@@ -7784,6 +8328,19 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
+            // The dock's five buttons, keyed by an arm of their own for the same
+            // reason the tab buttons have one: `Button::paint` measures its label.
+            if let Some(button) = self.chrome_button(handle) {
+                let advance = chrome_advance(&self.metrics);
+                let commands = match node.layout().rect() {
+                    Some(rect) => {
+                        button.paint(rect.into(), &advance, chrome_line_height(&self.metrics))
+                    }
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
             // The six widget nodes that paint themselves with nothing but a rect.
             // Each is the widget's **own** node, which is the whole of what it
             // takes to put one of them on the screen: `order` reaches it, the
@@ -7872,6 +8429,25 @@ impl Demo {
                 &self.fallback_label,
                 &self.fallback_metrics,
                 FALLBACK_FONT,
+                rect,
+            );
+        }
+
+        // The chrome's labels, painted through the same `record_label` the text
+        // panel's are — and kept out of `labels`/`label_nodes`, because a row there
+        // would be named a text-panel label and would enter the collision tests
+        // with a rect that overlaps the card of pads.
+        for (demo_label, handle) in &self.chrome_labels {
+            let rect = nodes
+                .get(*handle)
+                .and_then(|node| node.layout().rect())
+                .map(Into::into);
+            record_label(
+                &mut nodes,
+                *handle,
+                demo_label,
+                &self.metrics,
+                CHROME_FONT,
                 rect,
             );
         }
@@ -8575,6 +9151,16 @@ impl Demo {
         // "the dark theme if `dark`" in one file is the pair of lists
         // `GALLERY_SHORTCUTS` exists to prevent.
         let new_theme = self.target_theme();
+        // The chrome's three palettes are re-read here for the same reason every
+        // other palette in this function is: `ChromePalette` is a plain value, so
+        // a theme switch has to announce the new one. The chrome's *labels* are
+        // bound to the property graph and need no line.
+        let chrome_palette = chrome::chrome_palette(&new_theme);
+        // **The corners do not move with the theme** — every panel is rounded in
+        // both — so only the palette is re-read here.
+        for chrome in &mut self.chrome_nodes {
+            chrome.palette = chrome_palette;
+        }
         // Read every palette from `new_theme`, **before** `switch_to` consumes it.
         // The switch animates the theme's own tokens, so a palette read after it
         // is the palette the theme is leaving, which re-aims every widget at what
@@ -11451,6 +12037,21 @@ mod tests {
         let nodes = demo.nodes.borrow();
         let containers: Vec<Handle> = demo.containers.iter().map(Container::handle).collect();
         let widget_owned = widget_owned_parents(&demo);
+        // **The chrome's parents, which are `Container` widgets too** but are kept
+        // out of `Demo::containers` because their surfaces are painted by the
+        // chrome arm rather than by `Container::paint` (see `chrome.rs`, and
+        // requirement 5 of `TASK_UI_DEMO_02`). They are named here so the claim
+        // still holds: a parent the demo built is a `Container` widget.
+        let chrome_parents: Vec<Handle> = demo
+            .chrome_all
+            .iter()
+            .copied()
+            .filter(|handle| {
+                nodes
+                    .get(*handle)
+                    .is_some_and(|node| !node.children().is_empty())
+            })
+            .collect();
         let mut parents = 0;
         for &handle in &demo.order {
             let node = nodes.get(handle).expect("a node in the demo's tree");
@@ -11459,7 +12060,9 @@ mod tests {
             }
             parents += 1;
             assert!(
-                containers.contains(&handle) || widget_owned.contains(&handle),
+                containers.contains(&handle)
+                    || widget_owned.contains(&handle)
+                    || chrome_parents.contains(&handle),
                 "node {handle:?} has children but is neither a Container of the \
                  demo's nor one of the widget-owned parents {:?}",
                 widget_owned
@@ -11467,9 +12070,10 @@ mod tests {
         }
         assert_eq!(
             parents,
-            containers.len() + widget_owned.len(),
-            "and every parent in the tree is one of those six or a widget-owned one: \
-             the six the demo assembles, the dialog and the toast host"
+            containers.len() + widget_owned.len() + chrome_parents.len(),
+            "and every parent in the tree is one of those six, a widget-owned one, or \
+             one of the chrome's own containers: the six the demo assembles, the \
+             dialog and the toast host, and the chrome subtrees"
         );
         assert_eq!(
             containers.len(),
@@ -14189,6 +14793,11 @@ mod tests {
         for pad in &demo.pads {
             exempt.push(pad.node);
         }
+        // **The chrome's whole subtrees**, appended in paint order. The chrome is
+        // not in `placed_handles` — its pane overlaps the card of pads and its dock
+        // the keyboard — so `assert_every_drawn_leaf_is_named_or_excused` needs
+        // every drawing chrome node here.
+        exempt.extend(demo.chrome_all.iter().copied());
         exempt
     }
 
@@ -22592,5 +23201,218 @@ mod tests {
                 .any(|(_, handle)| *handle == demo.map.handle()),
             "the map's full-bleed rect is not in placed_handles"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // TASK_UI_DEMO_02: the chrome.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn the_demo_tab_exists_from_task_01_and_three_gates_hold_for_it() {
+        assert_eq!(Page::ALL.len(), 7);
+        assert_eq!(Page::Demo.name(), "demo");
+        assert_eq!(
+            Page::DEFAULT,
+            Page::Pads,
+            "a capture with no argument must still open on pads"
+        );
+        assert_eq!(Page::from_name("demo"), Some(Page::Demo));
+        assert_eq!(Page::from_name("dta"), None);
+    }
+
+    #[test]
+    fn the_chrome_is_on_the_demo_page_and_on_no_other_page() {
+        let demo = laid_out_on(Page::Demo);
+        // **The gallery's tab bar is still present on the demo page**, and this
+        // task never touches it: every tab button is still a node the demo page
+        // shows. This is the criterion that `TASK_UI_PRIM_43`'s arrival changes
+        // nothing here.
+        for button in demo.tab_focusables() {
+            assert!(
+                demo.on_show(button),
+                "the gallery's tab bar is still present on the demo page"
+            );
+        }
+        for &handle in &demo.chrome_all {
+            assert!(
+                demo.shows(handle),
+                "{handle:?} is a chrome node on the demo page"
+            );
+            assert!(
+                demo.order.contains(&handle),
+                "{handle:?} is a chrome row and is in the paint order"
+            );
+        }
+        for page in [
+            Page::Pads,
+            Page::Text,
+            Page::Input,
+            Page::Controls,
+            Page::Data,
+            Page::Overlays,
+        ] {
+            let demo = laid_out_on(page);
+            for &handle in &demo.chrome_all {
+                assert!(
+                    !demo.shows(handle),
+                    "{page:?}: the chrome does not leak onto this page"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_map_node_is_still_underneath_the_chrome_on_the_demo_page() {
+        let demo = laid_out_on(Page::Demo);
+        let map_at = demo
+            .order
+            .iter()
+            .position(|handle| *handle == demo.map.handle())
+            .expect("the map is in the paint order");
+        for chrome in &demo.chrome_nodes {
+            let at = demo
+                .order
+                .iter()
+                .position(|handle| *handle == chrome.node)
+                .expect("a chrome surface is in the paint order");
+            assert!(
+                map_at < at,
+                "the map is recorded before every chrome surface, so it is underneath"
+            );
+        }
+    }
+
+    #[test]
+    fn every_chrome_node_records_commands_on_the_demo_page_and_on_no_other_page() {
+        let demo = laid_out_on(Page::Demo);
+        assert!(
+            !demo.chrome_drawn.is_empty(),
+            "the chrome records something, or the loops below are vacuous"
+        );
+        for &handle in &demo.chrome_drawn {
+            assert!(
+                !demo.commands_at(handle).is_empty(),
+                "{handle:?} records a command on the demo page"
+            );
+        }
+        for page in [
+            Page::Pads,
+            Page::Text,
+            Page::Input,
+            Page::Controls,
+            Page::Data,
+            Page::Overlays,
+        ] {
+            let demo = laid_out_on(page);
+            for &handle in &demo.chrome_drawn {
+                assert!(
+                    demo.commands_at(handle).is_empty(),
+                    "{page:?}: {handle:?} records nothing when the demo page is not showing"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn panels_are_separate_objects_that_can_be_resized_and_repositioned() {
+        let mut demo = laid_out_on(Page::Demo);
+
+        // **The four panel objects, and the regions they own.** Each is a rect
+        // relative to its parent, and the map is a panel too.
+        let status = demo.status_panel.rect();
+        let pane = demo.pane_panel.rect();
+        let dock = demo.dock_panel.rect();
+        let map = demo.map_panel.rect();
+        assert_eq!(status.y, CONTENT_TOP, "the status bar opens the content");
+        assert_eq!(pane.x, 0.0);
+        assert_eq!(
+            pane.y,
+            CONTENT_TOP + status.height,
+            "the pane is under the bar"
+        );
+        assert_eq!(
+            dock.y + dock.height,
+            WINDOW.height,
+            "the dock closes the window"
+        );
+        assert_eq!(map.y, CONTENT_TOP, "the map is the full-bleed background");
+
+        // **A widget's position is relative to its panel.** Move the pane and a
+        // widget inside it moves by the same delta — no window coordinate is
+        // touched.
+        let pager_before = demo
+            .node_rect(demo.chrome_pager)
+            .expect("the pager is laid out");
+        assert!(demo.move_panel(demo.pane_panel.handle(), 20.0, 30.0));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let pager_after = demo
+            .node_rect(demo.chrome_pager)
+            .expect("the pager is laid out");
+        assert_eq!(pager_after.x, pager_before.x + 20.0);
+        assert_eq!(pager_after.y, pager_before.y + 30.0);
+        assert_eq!(demo.pane_panel.rect().x, pane.x + 20.0, "the object moved");
+
+        // **Resizing a panel resizes the widgets that fill it.** The pager
+        // stretches to the pane's width, so narrowing the pane narrows it.
+        let width_before = demo
+            .node_rect(demo.chrome_pager)
+            .expect("the pager is laid out")
+            .width;
+        assert!(demo.resize_panel(
+            demo.pane_panel.handle(),
+            Size::new(pane.width - 100.0, pane.height)
+        ));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let width_after = demo
+            .node_rect(demo.chrome_pager)
+            .expect("the pager is laid out")
+            .width;
+        assert!(
+            width_after < width_before,
+            "the pager filled the narrower pane: {width_after} against {width_before}"
+        );
+
+        // A handle that is not a panel reports so rather than moving anything.
+        assert!(!demo.move_panel(demo.chrome_pager, 1.0, 1.0));
+    }
+
+    #[test]
+    fn every_panel_is_rounded_in_both_themes() {
+        let mut demo = laid_out_on(Page::Demo);
+        let rounded = |demo: &Demo, theme: &str| {
+            for chrome in &demo.chrome_nodes {
+                assert_eq!(
+                    chrome.radius,
+                    chrome::CHROME_RADIUS,
+                    "{theme}: every chrome panel is rounded"
+                );
+            }
+            assert_eq!(
+                demo.map.corner_radius.get(),
+                chrome::CHROME_RADIUS,
+                "{theme}: the map background is rounded too"
+            );
+        };
+        rounded(&demo, "dark");
+        demo.toggle_theme();
+        rounded(&demo, "light");
+    }
+
+    #[test]
+    fn a_theme_switch_reaches_every_chrome_surface() {
+        let mut demo = laid_out_on(Page::Demo);
+        let before: Vec<chrome::ChromePalette> = demo
+            .chrome_nodes
+            .iter()
+            .map(|chrome| chrome.palette)
+            .collect();
+        assert_eq!(before.len(), 3, "three chrome surfaces");
+        demo.toggle_theme();
+        for (index, chrome) in demo.chrome_nodes.iter().enumerate() {
+            assert_ne!(
+                chrome.palette.surface, before[index].surface,
+                "the theme switch reached chrome surface {index}"
+            );
+        }
     }
 }

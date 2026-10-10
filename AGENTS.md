@@ -6,9 +6,6 @@ Read `doc/IDEA.md`.
 
 ## Architecture
 
-Read `doc/architecture/overview.md` before making architectural changes,
-when that document exists.
-
 Target architectures: aarch64 and x86_64. OpenGL ES 3.1.
 
 ## Rust

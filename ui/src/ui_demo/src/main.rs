@@ -434,8 +434,45 @@ fn tab_motion(theme: &Theme) -> Motion {
 /// being two when the diff carried five.)
 const CONTENT_TOP: f32 = TAB_BAR_HEIGHT;
 
-/// The font size every chrome label is drawn at.
-const CHROME_FONT: f32 = 16.0;
+/// Returns the font size every chrome label is drawn at.
+///
+/// Derived from the status bar's height — which is itself a tenth of
+/// [`WINDOW`]'s height — keeping the 16-on-48 ratio the old fixed pair held:
+/// the text fills the taller bar exactly as it filled the old one, and every
+/// widget measured from the text follows it with no second number.
+fn chrome_font() -> f32 {
+    chrome::status_font_size(chrome::status_bar_height(WINDOW))
+}
+
+/// Returns the baked icon size the status bar draws.
+///
+/// The master that fits the bar, picked from the bake table rather than
+/// written down, so a taller window restretches nothing and re-bakes nothing.
+fn chrome_icon_size() -> u32 {
+    icons::size_for_height(chrome::status_bar_height(WINDOW))
+}
+
+/// How much smaller the passenger-airbag badge is drawn: the whole badge at
+/// 85% — its two text lines measured at [`chrome_font`] times this, and its
+/// icon node at the master's drawn side times this with the full master
+/// mapped into it, minified by the sampler.
+///
+/// The operator's 2026-10-11 call on the capture: the badge read as the
+/// largest thing in the bar. The text follows by measurement; the icon follows
+/// without a new bake — `resvg` stays out of it — because a 0.85 minification
+/// is inside the window where `GL_LINEAR` downsampling is visually lossless,
+/// which baking a 41-pixel master would buy nothing over. Anything much
+/// smaller wants its own master instead.
+const AIRBAG_SCALE: f32 = 0.85;
+
+/// The padding inside the airbag badge's own button, on all four sides, and the
+/// edge the icon draws at within it.
+///
+/// **The horizontal padding is not just an inset**: the badge's node is widened
+/// by twice the icon's reserved block (see `Demo::new`), and `Button::paint`
+/// centres the label in that wider box, so this also sets how far left the icon
+/// sits and how much slack follows the text.
+const AIRBAG_PADDING: f32 = 8.0;
 
 /// The font size a dock button's glyph is drawn at.
 const DOCK_FONT: f32 = 24.0;
@@ -2327,10 +2364,15 @@ const ASSET_FILE: &str = "demo.png";
 /// Beside the SVG it was baked from, under `assets/icons/` — not beside the
 /// gallery's `demo.png`, because it belongs to the icon bake rather than to
 /// the gallery. Its file name is the file [`icons::baked_file`] names for
-/// [`icons::ICON_SIZE_PX`]: one white master, tinted at draw time, so there
+/// [`chrome_icon_size`]: one white master, tinted at draw time, so there
 /// is exactly one of it and no per-colour variant.
 /// `the_icon_asset_path_names_the_baked_size` holds the two together.
-const ICON_IMAGE_RELATIVE: &str = "src/ui_demo/assets/icons/airbag_24.png";
+fn icon_image_relative() -> String {
+    format!(
+        "src/ui_demo/assets/icons/{}",
+        icons::baked_file(chrome_icon_size())
+    )
+}
 
 /// The file name of the demo's car model, under whichever directory is found.
 const ASSET_MODEL_FILE: &str = "sedan.glb";
@@ -2915,11 +2957,8 @@ fn icon_candidates() -> Vec<PathBuf> {
     let Ok(exe) = std::env::current_exe() else {
         return Vec::new();
     };
-    asset_candidates_from(
-        &exe,
-        std::env::var_os(ASSET_DIR_VAR).as_deref(),
-        ICON_IMAGE_RELATIVE,
-    )
+    let relative = icon_image_relative();
+    asset_candidates_from(&exe, std::env::var_os(ASSET_DIR_VAR).as_deref(), &relative)
 }
 
 /// Returns a transparent image the shape of the icon master, to stand in for
@@ -2931,12 +2970,7 @@ fn icon_candidates() -> Vec<PathBuf> {
 /// swapping the master in later moves nothing.
 fn stand_in_icon_picture() -> Option<Picture> {
     let mut cache = TextureCache::new();
-    let mut loader = |_: &Path| {
-        Ok(Pixels::transparent(
-            icons::ICON_SIZE_PX,
-            icons::ICON_SIZE_PX,
-        ))
-    };
+    let mut loader = |_: &Path| Ok(Pixels::transparent(chrome_icon_size(), chrome_icon_size()));
     let texture = cache.load(Path::new("stand-in-icon"), &mut loader).ok()?;
     let source = ImageSource::of(&cache, texture)?;
     Some(Picture { texture, source })
@@ -2958,7 +2992,7 @@ fn load_icon_picture(renderer: &mut Renderer) -> Option<Picture> {
     let Some(path) = path else {
         eprintln!(
             "ui_demo: {} not found; looked in {}",
-            icons::baked_file(icons::ICON_SIZE_PX),
+            icons::baked_file(chrome_icon_size()),
             join_paths(&candidates)
         );
         return None;
@@ -3514,7 +3548,7 @@ fn chrome_label(
     color: Property<Color>,
 ) -> Result<(DemoLabel, Handle), &'static str> {
     let mut label = Label::new(nodes, text);
-    label.font_size.set(CHROME_FONT);
+    label.font_size.set(chrome_font());
     label.color = color;
     // **`WrapMode::None` and a measured width, not `DemoLabel::size`.** A chrome
     // label is one short string that must never wrap, and `DemoLabel::size`
@@ -3523,11 +3557,11 @@ fn chrome_label(
     // measured from the laid-out line instead.
     let options = LayoutOptions {
         max_width: f32::INFINITY,
-        line_height: metrics.line_height(CHROME_FONT),
+        line_height: metrics.line_height(chrome_font()),
         wrap: WrapMode::None,
         ..LayoutOptions::default()
     };
-    let layout = label.layout(&options, &|ch: char| metrics.advance(ch, CHROME_FONT));
+    let layout = label.layout(&options, &|ch: char| metrics.advance(ch, chrome_font()));
     let width = layout
         .lines
         .iter()
@@ -3546,6 +3580,18 @@ fn chrome_label(
 /// Returns the advance a dock button's glyph is measured with, at [`DOCK_FONT`].
 fn chrome_advance(metrics: &TextMetrics) -> impl Fn(char) -> f32 + '_ {
     move |ch: char| metrics.advance(ch, DOCK_FONT)
+}
+
+/// Returns the advance the airbag badge's label is measured with, at the
+/// badge scale: the same [`AIRBAG_SCALE`] of [`chrome_font`] the button is
+/// sized and painted with, so the three agree by construction.
+fn airbag_advance(metrics: &TextMetrics) -> impl Fn(char) -> f32 + '_ {
+    move |ch: char| metrics.advance(ch, chrome_font() * AIRBAG_SCALE)
+}
+
+/// Returns the line box the airbag badge's label is measured at.
+fn airbag_line_height(metrics: &TextMetrics) -> f32 {
+    metrics.line_height(chrome_font() * AIRBAG_SCALE)
 }
 
 /// Returns the line box a dock button's glyph is measured at.
@@ -3885,6 +3931,8 @@ struct Demo {
     /// Every chrome label, painted through [`record_label`] rather than through
     /// the walk, on the same argument the text panel's labels are: the walk is
     /// for widgets with their own `paint`, and a label is measured by the demo.
+    /// The airbag badge is **not** here — it is a [`Button`] with an arm of its
+    /// own.
     ///
     /// **A `Vec` of its own and not `Demo::labels`**, because `Demo::placed_handles`
     /// names every entry of `label_nodes` a *text panel label* and a chrome label
@@ -3903,19 +3951,31 @@ struct Demo {
     /// The pager's node, whose own paint arm records the three dots.
     chrome_pager: Handle,
     /// The status bar's icon: an `Image` node for layout and paint dispatch, holding
-    /// the white master the tinted arm draws. A sibling of the airbag text in
-    /// the status bar's airbag group — the composition the operator chose over
-    /// the task file's dock cell.
+    /// the white master the tinted arm draws. **A child of the airbag badge's
+    /// button**, stacked at its content origin, so the button's own background
+    /// wraps it — the composition the operator asked for (2026-10-11) over the
+    /// task file's dock cell.
     icon_image: Image,
     /// What the icon is drawn as: the baked size and the colour the tint
     /// carries when nothing bound overrides it. The paint arm re-tints from
     /// `icon_tint` every frame, so this is the size and the opening colour
     /// rather than a live value.
     icon_spec: icons::IconSpec,
-    /// The tint the icon follows the theme with, bound over the theme's ink
-    /// by [`icons::theme_tint`]. Read at paint time, so a theme switch
-    /// carries the icon with no clock beside the theme's own.
+    /// The tint the icon is drawn with: the **same** state colour the badge's
+    /// label uses, so the glyph turns orange with `OFF` and green with `ON`.
+    /// Bound over [`Demo::airbag_on`] and the theme's `Warning`/`Success`
+    /// tokens, so a theme switch carries the icon too, with no clock of its
+    /// own. Read at paint time.
     icon_tint: Property<Color>,
+    /// Whether the passenger airbag is on, flipped by tapping the badge.
+    /// Read only by tests, hence the allow: the callback owns the clones
+    /// that flip it.
+    #[allow(dead_code)]
+    airbag_on: Property<bool>,
+    /// The airbag badge as a real button: a tap on it — or on its icon, which
+    /// has no handler of its own — flips [`Demo::airbag_on`], and the label
+    /// and the foreground follow, orange for off and green for on.
+    airbag_button: Button,
     /// The progress bar, at the foot of the band's left column.
     progress: Progress,
     /// Whether the progress bar is sliding rather than showing a value.
@@ -5648,30 +5708,40 @@ impl Demo {
 
         // The demo's one icon: a white airbag master for the status bar's
         // airbag badge, tinted at draw time through `icons::paint`. An `Image`
-        // node for layout and paint dispatch, attached to the airbag group
-        // below — a sibling of the two-line text beside it. (2026-10-11: the
-        // operator moved it here from the dock; the task file's dock cell was
-        // the wrong panel for an airbag badge.)
+        // node for layout and paint dispatch, nested **inside** the badge's
+        // button below so the button's own background covers it. (2026-10-11:
+        // the operator moved it here from the dock, and then asked for the
+        // button to wrap it.)
+        //
+        // **The airbag's state, and the one colour everything about the badge
+        // follows.** `airbag_on` flips on a tap; the badge's label reads
+        // `OFF`/`ON` from it, the button's foreground *and* the icon's tint are
+        // this bound colour — orange (`Warning`) off, green (`Success`) on — so
+        // the glyph and the text can never disagree about which state they show.
+        let airbag_on = Property::new(false);
+        let airbag_color = {
+            let lit = airbag_on.clone();
+            let warn = theme.property(ThemeToken::Warning);
+            let ok = theme.property(ThemeToken::Success);
+            Property::bind(move || {
+                let state = if lit.get() { ok.get() } else { warn.get() };
+                state.as_color().unwrap_or(Color::new(255, 255, 255, 255))
+            })
+        };
         let icon_spec = icons::IconSpec {
-            size_px: icons::ICON_SIZE_PX,
+            size_px: chrome_icon_size(),
+            // The fallback the arm only reaches if a token holds a non-colour;
+            // the arm re-tints from `icon_tint` every frame regardless.
             color: theme
-                .get(ThemeToken::Text)
+                .get(ThemeToken::Warning)
                 .as_color()
                 .unwrap_or(Color::new(255, 255, 255, 255)),
         };
-        let icon_tint = icons::theme_tint(&theme);
+        let icon_tint = airbag_color.clone();
         let icon_stand_in = stand_in_icon_picture().ok_or("ui_demo: no icon image to show")?;
         let mut icon_image = Image::new(&mut nodes, icon_stand_in.texture, icon_stand_in.source);
         icon_image.set_fit(ImageFit::Fill);
         icon_image.snap_to_state();
-        {
-            let side = icons::drawn_side(icons::ICON_SIZE_PX);
-            nodes
-                .get_mut(icon_image.handle())
-                .ok_or("ui_demo: the icon node is missing")?
-                .layout_mut()
-                .set_constraints(Constraints::tight(Size::new(side, side)));
-        }
 
         // The top status bar, as a panel object: a `row` with `SpaceBetween` and
         // three child groups, its widgets positioned relative to the panel.
@@ -5684,10 +5754,16 @@ impl Demo {
                 .with_cross_axis_alignment(CrossAxisAlignment::Center),
         );
         status_bar.set_padding(&mut nodes, Padding::all(DOCK_PADDING));
-        // The three groups: the padlock, profile and sentry on the left; the
-        // clock and ambient temperature on the right; the airbag badge alone.
-        // **No `PRND` and no battery here** — the photograph puts them in the
-        // car-status cluster, not the chrome, and they live at the pane's top.
+        // The four groups: the padlock, profile and sentry on the left; the
+        // clock next; the ambient temperature between the clock and the
+        // airbag badge; the badge alone at the end. **No `PRND` and no
+        // battery here** — the photograph puts them in the car-status
+        // cluster, not the chrome, and they live at the pane's top.
+        //
+        // **The temperature is its own group, not the clock's second label.**
+        // Glued to the time at one 8-pixel gap it read as one stamp with it;
+        // as the row's third child under `SpaceBetween` it sits between the
+        // time and the badge with the row's own spacing on both sides.
         let status_left = Container::new(&mut nodes, LayoutMode::row());
         status_left.set_flex_config(
             &mut nodes,
@@ -5706,6 +5782,8 @@ impl Demo {
             }
             chrome_labels.push((label, handle));
         }
+        // The clock, alone: the temperature it used to share this group with
+        // now stands between it and the badge.
         let status_right = Container::new(&mut nodes, LayoutMode::row());
         status_right.set_flex_config(
             &mut nodes,
@@ -5713,16 +5791,45 @@ impl Demo {
                 .with_spacing(CHROME_GROUP_SPACING)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center),
         );
-        for text in ["2:37 pm", "65 F"] {
-            let (label, handle) = chrome_label(&mut nodes, &metrics, text, text_color.clone())?;
+        {
+            let (label, handle) =
+                chrome_label(&mut nodes, &metrics, "2:37 pm", text_color.clone())?;
             if !status_right.add_child(&mut nodes, handle) {
                 return Err("ui_demo: a status-bar label could not be attached");
             }
             chrome_labels.push((label, handle));
         }
-        // The airbag badge: the icon beside its text, which reads over two
-        // lines — `PASSENGER AIRBAG` over `OFF` — so the badge fits the bar's
-        // height with the 24-pixel master beside it.
+        // The ambient temperature in Celsius. **The `°` is U+00B0 DEGREE SIGN,
+        // drawn from the primary font**: Lato-Medium's own cmap covers it
+        // (parsed off the file on this host — present, where U+4E2D is absent
+        // exactly as the fallback label's doc says), with the DejaVu fallback
+        // behind it if a head-unit font ever is not.
+        let status_temp = Container::new(&mut nodes, LayoutMode::row());
+        status_temp.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+        );
+        {
+            let (label, handle) =
+                chrome_label(&mut nodes, &metrics, "23 \u{b0}C", text_color.clone())?;
+            if !status_temp.add_child(&mut nodes, handle) {
+                return Err("ui_demo: a temperature readout could not be attached");
+            }
+            chrome_labels.push((label, handle));
+        }
+        // The airbag badge: **one button** whose rounded background wraps the
+        // icon and the two text lines — `PASSENGER` over `AIRBAG OFF` — at
+        // [`AIRBAG_SCALE`] of the bar's text. The icon is not a sibling beside
+        // the button; it is a child of the button's own node, so the button's
+        // background (painted over the whole node) covers it, and the node is
+        // widened to hold it. A tap anywhere on the badge toggles: the button's
+        // callback flips `airbag_on`, the label follows with `OFF`/`ON`, and
+        // the foreground **and the icon's tint** follow the same bound state
+        // colour — orange off, green on. Like the dock's buttons it is not in
+        // the `Tab` order and carries no hover or press arms; the flip is the
+        // whole of its feedback.
         let status_airbag = Container::new(&mut nodes, LayoutMode::row());
         status_airbag.set_flex_config(
             &mut nodes,
@@ -5730,24 +5837,75 @@ impl Demo {
                 .with_spacing(CHROME_GROUP_SPACING)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center),
         );
-        if !status_airbag.add_child(&mut nodes, icon_image.handle()) {
-            return Err("ui_demo: the airbag icon could not be attached");
-        }
-        let airbag_text = Container::new(&mut nodes, LayoutMode::column());
-        for text in ["PASSENGER", "AIRBAG OFF"] {
-            let (airbag_label, airbag_handle) =
-                chrome_label(&mut nodes, &metrics, text, muted_color.clone())?;
-            if !airbag_text.add_child(&mut nodes, airbag_handle) {
-                return Err("ui_demo: an airbag line could not be attached");
+        let airbag_font = chrome_font() * AIRBAG_SCALE;
+        let icon_side = icons::drawn_side(chrome_icon_size()) * AIRBAG_SCALE;
+        let mut airbag_button = Button::new(&mut nodes, "PASSENGER\nAIRBAG OFF");
+        airbag_button.font_size.set(airbag_font);
+        airbag_button.padding_h.set(AIRBAG_PADDING);
+        airbag_button.padding_v.set(AIRBAG_PADDING);
+        airbag_button.border_radius.set(chrome::CHROME_RADIUS);
+        let button_size = {
+            // The widget's own `size` answer — the 44-pixel touch floor holds —
+            // **widened by the icon's reserved block on both sides**. The icon
+            // is stacked at the node's content origin; `Button::paint` centres
+            // the label in the whole node, so reserving the icon's width on
+            // *both* sides is what leaves the text sitting to the icon's right
+            // rather than over it. `AIRBAG_PADDING` is the outer inset.
+            let measured =
+                airbag_button.size(&airbag_advance(&metrics), airbag_line_height(&metrics));
+            let reservation = 2.0 * (icon_side + CHROME_GROUP_SPACING);
+            let size = Size::new(measured.width + reservation, measured.height);
+            let node = nodes
+                .get_mut(airbag_button.handle())
+                .ok_or("ui_demo: the airbag button's node is missing")?;
+            node.layout_mut().set_constraints(Constraints::tight(size));
+            // **The node's own layout padding, which is not the widget's
+            // `padding_h`/`padding_v`**: the icon is stacked at the node's
+            // *content* origin, so this is what insets it from the button's
+            // edge; the widget's padding is what centres the label.
+            node.layout_mut().set_padding(Padding::all(AIRBAG_PADDING));
+            size
+        };
+        airbag_button.snap_to_state();
+        // **The bind goes after the snap**: `snap_to_state` writes the
+        // foreground toward the button's style, which would throw the shared
+        // binding away — and nothing ever calls `animate_to_state` on this
+        // button, so the binding survives: no hover, press or focus arm touches
+        // it. The icon's tint is the *same property*, so the two cannot drift.
+        airbag_button.foreground = airbag_color.clone();
+        let flip = airbag_on.clone();
+        let badge_label = airbag_button.label.clone();
+        airbag_button.on_click = Callback::new(move || {
+            let next = !flip.get();
+            flip.set(next);
+            badge_label.set(if next {
+                String::from("PASSENGER\nAIRBAG ON")
+            } else {
+                String::from("PASSENGER\nAIRBAG OFF")
+            });
+        });
+        {
+            // The icon, sized to the badge's **inner** height so the glyph
+            // centres vertically as well as horizontally — `icons::paint` draws
+            // it centred in whatever rect it is given. Stacked at the button's
+            // content origin, so its left edge is `AIRBAG_PADDING` in.
+            let inner_height = button_size.height - AIRBAG_PADDING * 2.0;
+            nodes
+                .get_mut(icon_image.handle())
+                .ok_or("ui_demo: the icon node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(Size::new(icon_side, inner_height)));
+            if !node::attach(&mut nodes, airbag_button.handle(), icon_image.handle()) {
+                return Err("ui_demo: the airbag icon could not be nested in its button");
             }
-            chrome_labels.push((airbag_label, airbag_handle));
         }
-        if !status_airbag.add_child(&mut nodes, airbag_text.handle()) {
-            return Err("ui_demo: the airbag text could not be attached");
+        if !status_airbag.add_child(&mut nodes, airbag_button.handle()) {
+            return Err("ui_demo: the airbag button could not be attached");
         }
         for group in [
             status_left.handle(),
             status_right.handle(),
+            status_temp.handle(),
             status_airbag.handle(),
         ] {
             if !status_panel.add_child(&mut nodes, group) {
@@ -5954,6 +6112,7 @@ impl Demo {
         let mut chrome_drawn: Vec<Handle> = chrome_nodes.iter().map(|chrome| chrome.node).collect();
         chrome_drawn.extend(chrome_buttons.iter().map(Button::handle));
         chrome_drawn.extend(chrome_labels.iter().map(|(_, handle)| *handle));
+        chrome_drawn.push(airbag_button.handle());
         chrome_drawn.push(pager.handle());
         chrome_drawn.push(icon_image.handle());
 
@@ -6440,6 +6599,8 @@ impl Demo {
             icon_image,
             icon_spec,
             icon_tint,
+            airbag_on,
+            airbag_button,
             progress,
             progress_indeterminate,
             progress_focused,
@@ -7868,6 +8029,14 @@ impl Demo {
         if let Some(button) = self.tab_button(handle) {
             return button.on_event(event);
         }
+        // The airbag badge: a real button, so a tap on it toggles the
+        // passenger-airbag state — and a tap on its icon does too, because
+        // an `Image` has no handler of its own and the badge is one widget
+        // to a finger. `Button::on_event` takes no rect, like the tab arm
+        // above: the hit test already happened against the laid-out box.
+        if handle == self.airbag_button.handle() || handle == self.icon_image.handle() {
+            return self.airbag_button.on_event(event);
+        }
         // The dialog, and each of its actions, in the one place that turns a
         // handle into a widget. **The three numbers handed to `on_event` are the
         // three `paint` is handed, through the same three accessors** — that is
@@ -8570,6 +8739,23 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
+            // The airbag badge, keyed apart from the dock's buttons because it
+            // is measured at the badge scale: `Button::paint` must see the
+            // same advance and line height `content_size` saw, and the dock's
+            // arm would measure it at the dock's size.
+            if handle == self.airbag_button.handle() {
+                let advance = airbag_advance(&self.metrics);
+                let commands = match node.layout().rect() {
+                    Some(rect) => self.airbag_button.paint(
+                        rect.into(),
+                        &advance,
+                        airbag_line_height(&self.metrics),
+                    ),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
             // The six widget nodes that paint themselves with nothing but a rect.
             // Each is the widget's **own** node, which is the whole of what it
             // takes to put one of them on the screen: `order` reaches it, the
@@ -8695,7 +8881,7 @@ impl Demo {
                 *handle,
                 demo_label,
                 &self.metrics,
-                CHROME_FONT,
+                chrome_font(),
                 rect,
             );
         }
@@ -23632,13 +23818,178 @@ mod tests {
     #[test]
     fn the_icon_asset_path_names_the_baked_size() {
         // The asset path and the bake table agree: the demo loads the file
-        // `baked_file(ICON_SIZE_PX)` names, so a re-bake at another size
-        // cannot silently leave the demo pointing at the old master.
+        // `baked_file` names for the size the bar calls for, so a re-bake at
+        // another size cannot silently leave the demo pointing at the old master.
         assert!(
-            ICON_IMAGE_RELATIVE.ends_with(icons::baked_file(icons::ICON_SIZE_PX)),
-            "the demo loads the baked size it draws: {ICON_IMAGE_RELATIVE}"
+            icon_image_relative().ends_with(icons::baked_file(chrome_icon_size())),
+            "the demo loads the baked size it draws: {}",
+            icon_image_relative()
         );
-        assert_eq!(icons::ICON_SIZE_PX, 24);
+        assert_eq!(
+            chrome_icon_size(),
+            48,
+            "a tenth of the 1020-tall window is a 102-tall bar, whose half (51) \
+             is nearest the large master"
+        );
+    }
+
+    #[test]
+    fn tapping_the_badge_toggles_the_airbag_between_orange_off_and_green_on() {
+        // Through `Demo::offer_to`, the demo's own dispatcher, so the event
+        // travels the crate's route rather than a test's: a tap on the button
+        // — or on its icon, which borrows the button's handler — flips the
+        // state, the label follows with `OFF`/`ON`, and the foreground follows
+        // with the theme's Warning/Success.
+        let demo = laid_out_on(Page::Demo);
+        let tap = || InputEvent::new(InputEventKind::Tap, None);
+        let color_of = |token| {
+            demo.theme
+                .get(token)
+                .as_color()
+                .unwrap_or_else(|| panic!("{token:?} is a colour in the theme"))
+        };
+        assert!(!demo.airbag_on.get(), "it opens off");
+        assert_eq!(
+            demo.airbag_button.label.get(),
+            "PASSENGER\nAIRBAG OFF",
+            "two lines, like the labels it replaces"
+        );
+        assert_eq!(
+            demo.airbag_button.foreground.get(),
+            color_of(ThemeToken::Warning),
+            "and off is orange"
+        );
+        assert_eq!(
+            demo.icon_tint.get(),
+            color_of(ThemeToken::Warning),
+            "the icon is orange with it"
+        );
+
+        let mut first = tap();
+        assert!(
+            demo.offer_to(demo.airbag_button.handle(), &mut first),
+            "the button takes the tap"
+        );
+        assert!(first.consumed());
+        assert!(demo.airbag_on.get(), "and the state flipped");
+        assert_eq!(demo.airbag_button.label.get(), "PASSENGER\nAIRBAG ON");
+        assert_eq!(
+            demo.airbag_button.foreground.get(),
+            color_of(ThemeToken::Success),
+            "and on is green"
+        );
+        assert_eq!(
+            demo.icon_tint.get(),
+            color_of(ThemeToken::Success),
+            "and the icon is green with it"
+        );
+
+        // A tap on the icon toggles back: the badge is one widget to a finger.
+        let mut second = tap();
+        assert!(
+            demo.offer_to(demo.icon_image.handle(), &mut second),
+            "the icon borrows the button's handler"
+        );
+        assert!(second.consumed());
+        assert!(!demo.airbag_on.get(), "and the state flipped back");
+        assert_eq!(demo.airbag_button.label.get(), "PASSENGER\nAIRBAG OFF");
+        assert_eq!(
+            demo.airbag_button.foreground.get(),
+            color_of(ThemeToken::Warning),
+            "and off is orange again"
+        );
+        assert_eq!(demo.icon_tint.get(), color_of(ThemeToken::Warning));
+    }
+
+    #[test]
+    fn the_badge_buttons_background_wraps_the_icon() {
+        // The node is the widget's own `size` answer at the badge scale —
+        // the 44-pixel touch floor holds — **widened by the icon's reserved
+        // block on both sides**, and the icon is a child inside that rect, so
+        // the button's own background covers it.
+        let demo = laid_out_on(Page::Demo);
+        let node = demo
+            .node_rect(demo.airbag_button.handle())
+            .expect("the badge is laid out");
+        let measured = demo.airbag_button.size(
+            &airbag_advance(&demo.metrics),
+            airbag_line_height(&demo.metrics),
+        );
+        let icon_side = icons::drawn_side(chrome_icon_size()) * AIRBAG_SCALE;
+        let expected = measured.width + 2.0 * (icon_side + CHROME_GROUP_SPACING);
+        assert!(
+            (node.width - expected).abs() < 0.01 && (node.height - measured.height).abs() < 0.01,
+            "the laid-out rect is the measured size plus the icon reservation: \
+             {node:?} against {expected} by {}",
+            measured.height
+        );
+        assert!(
+            node.width >= 44.0 && node.height >= 44.0,
+            "and no smaller than the touch floor: {node:?}"
+        );
+
+        // **The icon is inside the button's rect**, which is the whole point:
+        // a sibling beside the button would sit outside the background.
+        let icon = demo
+            .node_rect(demo.icon_image.handle())
+            .expect("the icon is laid out");
+        assert!(
+            inside(node, icon),
+            "the icon at {icon:?} is inside the button at {node:?}"
+        );
+        assert!(
+            (icon.width - icon_side).abs() < 0.01,
+            "and it is the badge scale's side wide: {icon:?}"
+        );
+        // Stacked at the button's content origin, so its left edge is the
+        // button's own padding in from the button's left edge.
+        assert!(
+            (icon.x - (node.x + AIRBAG_PADDING)).abs() < 0.01,
+            "the icon draws at the button's leading edge: {icon:?} against {node:?}"
+        );
+
+        // **The glyph is drawn square, even though the node is tall.** The node
+        // is the button's inner height so the icon centres vertically, and
+        // `icons::paint` caps the square it draws to the node's *smaller*
+        // dimension — without that cap the full master would map into a tall
+        // rect and the icon would skew.
+        let commands = demo.commands_at(demo.icon_image.handle());
+        assert_eq!(commands.len(), 1, "the icon records one command");
+        match &commands[0] {
+            DrawCommand::Image { rect, .. } => assert!(
+                (rect.width - rect.height).abs() < 0.01,
+                "the painted icon is square, not stretched: {rect:?}"
+            ),
+            other => panic!("the icon records an image, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_temperature_stands_between_the_time_and_the_airbag() {
+        // The temperature is its own group now, not the clock's second label:
+        // laid out after the time ends and before the badge begins, reading
+        // Celsius with the degree sign the primary font covers.
+        let demo = laid_out_on(Page::Demo);
+        let rect_of = |text: &str| {
+            demo.chrome_labels
+                .iter()
+                .find(|(label, _)| label.label.text.get() == text)
+                .and_then(|(_, handle)| demo.node_rect(*handle))
+                .unwrap_or_else(|| panic!("the {text:?} label is laid out"))
+        };
+        let time = rect_of("2:37 pm");
+        let temp = rect_of("23 °C");
+        assert!(
+            temp.x > time.x + time.width,
+            "the temperature starts where the time ends: {time:?} against {temp:?}"
+        );
+        let icon = demo
+            .node_rect(demo.icon_image.handle())
+            .expect("the icon is laid out");
+        assert!(
+            temp.x + temp.width < icon.x,
+            "and it ends before the badge begins: {temp:?} against {icon:?}"
+        );
     }
 
     #[test]

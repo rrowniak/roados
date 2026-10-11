@@ -3,8 +3,9 @@
 //!
 //! **Five facts a reader would otherwise have to derive from `ui_core`:**
 //!
-//! 1. **What the three regions are.** A [`STATUS_BAR_HEIGHT`]-tall status bar
-//!    across the top, a car-status pane down the left at
+//! 1. **What the three regions are.** A status bar across the top, [`status_bar_height`]
+//!    tall — always [`STATUS_BAR_FRACTION`] of the window's height, never a
+//!    fixed pixel count — a car-status pane down the left at
 //!    [`CAR_STATUS_PANE_FRACTION`] of the window's width, and a
 //!    [`DOCK_HEIGHT`]-tall dock across the bottom. [`chrome_regions`] is the one
 //!    place their rectangles are computed.
@@ -54,11 +55,34 @@ pub const CHROME_ALPHA: u8 = 200;
 /// the 55 fps floor.
 pub const BACKDROP_SIGMA: f32 = 1.0;
 
-/// How tall the top status bar is.
+/// The status bar's share of the window's height.
 ///
-/// `48.0` — the smallest height that holds one line of the theme's `FontSizeMd`
-/// with room above and below. First-principles, per § *Could not verify*.
-pub const STATUS_BAR_HEIGHT: f32 = 48.0;
+/// **A fraction, not a pixel count.** The bar is one tenth of whatever window
+/// it is drawn in, so a taller window buys a taller bar and no number here can
+/// go stale when the window does.
+pub const STATUS_BAR_FRACTION: f32 = 0.10;
+
+/// Returns the status bar's height for a window of `window`.
+///
+/// Always [`STATUS_BAR_FRACTION`] of the window's height — computed on every
+/// call, never a fixed pixel count — so the bar and, through
+/// [`chrome_regions`], the car-status pane below it follow the window.
+#[must_use]
+pub fn status_bar_height(window: Size) -> f32 {
+    window.height * STATUS_BAR_FRACTION
+}
+
+/// Returns the font size the status bar's labels are drawn at for a bar of
+/// `status_height`.
+///
+/// The old bar was 48 tall with 16-point labels, and the size keeps that
+/// ratio: the text fills the taller bar exactly as it filled the old one, and
+/// every widget measured from the text — which is every label in the bar —
+/// follows without a second number to keep in step.
+#[must_use]
+pub fn status_font_size(status_height: f32) -> f32 {
+    status_height * 16.0 / 48.0
+}
 
 /// How tall the bottom dock is.
 pub const DOCK_HEIGHT: f32 = 96.0;
@@ -252,18 +276,22 @@ pub fn pager_commands(row: Rect, palette: &ChromePalette) -> Vec<DrawCommand> {
 /// Returns the three chrome regions' rectangles for a window of `window` whose
 /// content starts at `content_top`.
 ///
-/// The order is status bar, car-status pane, bottom dock. They are pairwise
+/// The order is status bar, car-status pane, bottom dock. The bar is
+/// [`status_bar_height`] tall, and the pane starts where the bar ends and runs
+/// to the dock — so growing the bar shrinks the pane by the same amount, and
+/// no second number names the pane's top. They are pairwise
 /// non-overlapping; `the_chrome_nodes_do_not_overlap_each_other` is the test.
 #[must_use]
 pub fn chrome_regions(window: Size, content_top: f32) -> [Rect; 3] {
+    let status_height = status_bar_height(window);
     let dock_top = window.height - DOCK_HEIGHT;
     [
-        Rect::new(0.0, content_top, window.width, STATUS_BAR_HEIGHT),
+        Rect::new(0.0, content_top, window.width, status_height),
         Rect::new(
             0.0,
-            content_top + STATUS_BAR_HEIGHT,
+            content_top + status_height,
             window.width * CAR_STATUS_PANE_FRACTION,
-            dock_top - content_top - STATUS_BAR_HEIGHT,
+            dock_top - content_top - status_height,
         ),
         Rect::new(0.0, dock_top, window.width, DOCK_HEIGHT),
     ]
@@ -470,6 +498,61 @@ mod tests {
                 ThemeToken::Primary,
                 ThemeToken::TextMuted,
             ]
+        );
+    }
+
+    #[test]
+    fn the_status_bar_is_always_a_tenth_of_the_window_height() {
+        // The bar is a fraction of whatever window it is drawn in, never a
+        // fixed pixel count: three window heights, three bar heights, one
+        // ratio. The epsilon is the float's, not the test's — `0.10` is not
+        // exact in binary, so `1020.0 * 0.10` is `102.0000015` rather than
+        // `102.0`.
+        for (height, expected) in [(600.0, 60.0), (1020.0, 102.0), (1200.0, 120.0)] {
+            let window = Size::new(1280.0, height);
+            let bar = status_bar_height(window);
+            assert!(
+                (bar - expected).abs() < 0.01,
+                "a {height}-tall window buys a {expected}-tall bar, got {bar}"
+            );
+            assert!(
+                (bar - height * STATUS_BAR_FRACTION).abs() < f32::EPSILON,
+                "and it is exactly the fraction, not a second number: {bar}"
+            );
+        }
+    }
+
+    #[test]
+    fn growing_the_bar_shrinks_the_pane_by_the_same_amount() {
+        // The pane starts where the bar ends and runs to the dock: its top
+        // and its height are the bar's height read twice, so no number here
+        // can disagree with `status_bar_height`.
+        let window = Size::new(1280.0, 1020.0);
+        let content_top = 64.0;
+        let regions = chrome_regions(window, content_top);
+        let bar = status_bar_height(window);
+        assert_eq!(regions[0].height, bar, "the bar is what the fraction gives");
+        assert_eq!(
+            regions[1].y,
+            content_top + bar,
+            "the pane opens where the bar closes"
+        );
+        assert_eq!(
+            regions[1].y + regions[1].height,
+            window.height - DOCK_HEIGHT,
+            "and it closes where the dock opens"
+        );
+    }
+
+    #[test]
+    fn the_status_font_keeps_its_share_of_the_bar() {
+        // The old pair was 16 on 48, and the size keeps that ratio: the text
+        // fills the taller bar exactly as it filled the old one.
+        assert_eq!(status_font_size(48.0), 16.0, "the old pair, exactly");
+        assert!(
+            (status_font_size(102.0) - 34.0).abs() < 0.01,
+            "a tenth of the 1020-tall window is a 102-tall bar with 34-point text, got {}",
+            status_font_size(102.0)
         );
     }
 

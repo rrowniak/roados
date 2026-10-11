@@ -12,7 +12,13 @@
 //! **Baked at size, and that is `TASK_UI_PRIM_39`'s rule.** There are no
 //! mipmaps and no DPI: `MIN_FILTER` is `GL_LINEAR`, 1 asset px is 1 window
 //! px, and "dynamic size" means baked at the exact on-screen pixel size and
-//! drawn 1:1. A widget never scales; a smaller cell crops.
+//! drawn 1:1. **Downscaling through the sampler is the one exception** (see
+//! [`destination`]): the operator's 2026-10-11 airbag call maps the whole 48
+//! master into a 0.85 node rather than baking a 41-pixel master for it, and a
+//! 0.85 minification is inside the window where `GL_LINEAR` downsampling is
+//! visually lossless. Anything much smaller wants its own master instead —
+//! no new bake per size was the point of the exception, and resampling the
+//! master offline every time a size moves is what it removes.
 //!
 //! **White master plus tint, and that is `TASK_UI_PRIM_44`'s pipeline.**
 //! One baked white master per size is loaded through
@@ -23,15 +29,20 @@
 //!
 //! **Drawn 1:1.** [`paint`] records one tinted-image command with
 //! [`ImageFit::Fill`](ui_core::widgets::image::ImageFit::Fill) on matching
-//! shapes — the identity — over the full texture, at the centred square
-//! intersected with the node's rect. An empty intersection records nothing.
+//! shapes — the identity — over the full texture, at the centred square the
+//! node's rect allows (see [`destination`]: the square is capped to the rect's
+//! smaller dimension so a non-square node can never stretch the glyph). An
+//! empty intersection records nothing.
 //!
-//! **Composed as a sibling in the status bar.** The icon is a sibling `Image`
-//! node in the airbag group beside its two-line text, painted through
-//! [`paint`] by its own arm. (2026-10-11: the operator moved it here from the
-//! dock — an airbag badge belongs to the status bar, not to a dock slot — so
-//! the task file's "beside a `Button`" no longer holds and this paragraph
-//! records the redirect.)
+//! **Composed inside the badge's button in the status bar.** The icon is an
+//! `Image` node **nested in the airbag badge's `Button`**, stacked at the
+//! button's content origin so the button's own background wraps it; it is
+//! painted through [`paint`] by its own arm, and the arm for a tap is the
+//! button's, since an `Image` has no handler of its own: the badge is one
+//! target to a finger. (2026-10-11: the operator moved it here from the dock —
+//! an airbag badge belongs to the status bar, not to a dock slot — and then
+//! asked for the button to wrap it, which is why it is a child rather than a
+//! sibling.)
 //!
 //! Where the task file names `paint(spec, rect)`, this module ships
 //! [`paint`] with the texture it names: a pure painter cannot borrow the
@@ -41,17 +52,34 @@
 //! command with the opacity the caller's image state holds.
 
 use ui_core::paint::{Color, DrawCommand, Painter, Rect, TextureId, UvRect};
-use ui_core::property::Property;
-use ui_core::theme::{Theme, ThemeToken};
 
 /// The sizes baked offline, in pixels per side: one white master each.
 ///
 /// Both dimensions equal, both within `1..=512` (`ATLAS_MAX_IMAGE`).
 pub const BAKED_SIZES: [u32; 2] = [24, 48];
 
-/// The size the demo draws, in pixels per side: the small master, so the
-/// glyph sits beside the airbag text inside the 48-pixel status bar.
-pub const ICON_SIZE_PX: u32 = 24;
+/// Returns the baked size that fits a status bar of `bar_height`.
+///
+/// The icon is drawn 1:1 — a widget never scales — so a taller bar cannot
+/// stretch the small master. It picks the nearest of [`BAKED_SIZES`] to half
+/// the bar's height, the share the 24-pixel master held of the old 48-pixel
+/// bar. Half of the new 102-pixel bar is 51, so it draws the 48 master; a tie
+/// resolves to the smaller file, like [`baked_file`].
+#[must_use]
+pub fn size_for_height(bar_height: f32) -> u32 {
+    let target = bar_height / 2.0;
+    let width = |size: u32| f32::from(u16::try_from(size).unwrap_or(u16::MAX));
+    let mut nearest = BAKED_SIZES[0];
+    let mut distance = (target - width(nearest)).abs();
+    for size in BAKED_SIZES {
+        let candidate = (target - width(size)).abs();
+        if candidate < distance {
+            nearest = size;
+            distance = candidate;
+        }
+    }
+    nearest
+}
 
 /// What the demo's icon is: how large it is drawn, and in what colour.
 ///
@@ -91,29 +119,24 @@ pub fn baked_file(size_px: u32) -> &'static str {
     }
 }
 
-/// Returns the tint the icon follows the theme with: the theme's ink.
-///
-/// Bound over `theme.property(Text)`, so a theme switch animates the tint
-/// with the theme's own clock and nothing here owns one. The fallback is
-/// opaque white — the neutral tint — so a token holding a number leaves the
-/// master unchanged rather than tinting it black.
-#[must_use]
-pub fn theme_tint(theme: &Theme) -> Property<Color> {
-    let ink = theme.property(ThemeToken::Text);
-    Property::bind(move || {
-        ink.get()
-            .as_color()
-            .unwrap_or(Color::new(255, 255, 255, 255))
-    })
-}
-
 /// Returns the `side`-pixel square centred in `rect`, intersected with it.
 ///
+/// **The drawn square is always square, whatever shape `rect` is.** The glyph
+/// is square, so mapping the whole master into a cell whose width and height
+/// differ would stretch it; `side` is therefore capped at the rect's *smaller*
+/// dimension before it is centred. A cell smaller than `side` does **not**
+/// crop the middle: the cap makes the whole master minify into the cell, so the
+/// sampler scales rather than the bake multiplying. That is what the airbag's
+/// tall containing node relies on — it is an `f32` cell the height of the
+/// badge's inner box, and the glyph is a centred square within it. It is a
+/// downscale-only licence: an upscale would magnify through `GL_LINEAR` with
+/// no mipmaps to hide behind.
+///
 /// [`Icon::destination`](ui_core::widgets::icon::Icon) is to a fixed-size
-/// widget what this is to a caller-chosen size: a smaller cell crops the
-/// middle rather than scaling the glyph.
+/// widget what this is to a caller-chosen size.
 #[must_use]
 fn destination(rect: Rect, side: f32) -> Rect {
+    let side = side.min(rect.width).min(rect.height);
     Rect::new(
         rect.x + (rect.width - side) / 2.0,
         rect.y + (rect.height - side) / 2.0,
@@ -166,7 +189,6 @@ pub fn paint_with_opacity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     fn spec(size_px: u32, color: Color) -> IconSpec {
         IconSpec { size_px, color }
@@ -226,6 +248,24 @@ mod tests {
     }
 
     #[test]
+    fn the_bar_height_picks_the_master_that_fits_it() {
+        // Half the bar's height, nearest baked: the old 48-pixel bar drew the
+        // 24 master, and the new 102-pixel bar draws the 48 one. A tie keeps
+        // the smaller file, like `baked_file`.
+        assert_eq!(size_for_height(48.0), 24, "the old bar, the small master");
+        assert_eq!(
+            size_for_height(102.0),
+            48,
+            "half of 102 is 51, nearest the large master"
+        );
+        assert_eq!(
+            size_for_height(72.0),
+            24,
+            "half of 72 is 36, a tie, and ties stay small"
+        );
+    }
+
+    #[test]
     fn icon_color_never_selects_a_file() {
         // Two specs differing only in colour resolve to the same bytes: the
         // colour becomes the shader tint at paint time, never a second file.
@@ -244,6 +284,31 @@ mod tests {
             Some(Rect::new(70.0, 102.0, 24.0, 24.0)),
             "a 24-pixel icon centred in a 100-pixel box at (32, 64)"
         );
+    }
+
+    #[test]
+    fn a_non_square_cell_never_stretches_the_icon() {
+        // The glyph is square, so the square it is drawn in must be too: a tall
+        // cell (the airbag badge's, whose node is the height of the button's
+        // inner box) keeps the cell's *smaller* dimension on both sides, centred.
+        // Without the cap the full master maps into a `width`-by-`side` rect and
+        // the glyph skews — which is the defect this pins.
+        let tall = Rect::new(32.0, 64.0, 40.0, 100.0);
+        let drawn = drawn_rect(&paint(&white(48), tall, fixture())).expect("an image");
+        assert_eq!(
+            drawn,
+            Rect::new(32.0, 94.0, 40.0, 40.0),
+            "a 40-wide square centred in the tall cell"
+        );
+        assert!(
+            (drawn.width - drawn.height).abs() < f32::EPSILON,
+            "and it is square: {drawn:?}"
+        );
+
+        // The wide case is the same rule the other way round.
+        let wide = Rect::new(10.0, 20.0, 100.0, 30.0);
+        let drawn = drawn_rect(&paint(&white(48), wide, fixture())).expect("an image");
+        assert_eq!(drawn, Rect::new(45.0, 20.0, 30.0, 30.0));
     }
 
     #[test]
@@ -316,36 +381,5 @@ mod tests {
         } else {
             assert_eq!("image", "other", "an icon paints an image");
         }
-    }
-
-    #[test]
-    fn a_theme_switch_reaches_the_icon() {
-        // The demo binds the icon's tint to the theme's ink: dark ink, then
-        // strictly between mid-transition, then exactly light ink — with no
-        // clock in this module.
-        let theme = Theme::dark();
-        let tint = theme_tint(&theme);
-        let dark_ink = Color::new(255, 255, 255, 255);
-        let light_ink = Color::new(0, 0, 0, 255);
-        assert_eq!(tint.get(), dark_ink, "the dark theme's ink");
-
-        theme.switch_to(Theme::light(), 300);
-        theme.tick(Duration::from_millis(150));
-        let between = tint.get();
-        assert_ne!(between, dark_ink, "it left where it was");
-        assert_ne!(between, light_ink, "and it has not arrived yet");
-        for (channel, name) in [
-            (between.r, "red"),
-            (between.g, "green"),
-            (between.b, "blue"),
-        ] {
-            assert!(
-                channel > 0 && channel < 255,
-                "the {name} channel is strictly between the two inks: {channel}"
-            );
-        }
-
-        theme.tick(Duration::from_millis(150));
-        assert_eq!(tint.get(), light_ink, "exactly the light theme's ink");
     }
 }

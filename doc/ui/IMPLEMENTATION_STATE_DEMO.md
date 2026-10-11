@@ -17,7 +17,7 @@ finished"*. Not reviewed (`task-sequence.md` step 2). Its file is still in
 `doc/ui/`, not `done/`.
 
 **`TASK_UI_DEMO_02.1` is done** (2026-10-11, unreviewed): the airbag icon —
-24 px white master, theme-tinted — sits in the status bar's airbag badge
+48 px white master, theme-tinted — sits in the status bar's airbag badge
 beside its two-line text (operator redirect from the task file's dock cell).
 Only the airbag exists. Built on task 44, landed the same day.
 

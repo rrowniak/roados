@@ -112,10 +112,9 @@ endorsed: it is a host tool like `curl`, not a workspace dependency.
 
 ## Reviewing a regenerated set
 
-A regenerated asset set is a diff nobody can read by eye. Three commands:
+A regenerated asset set is a diff nobody can read by eye. Two commands:
 
 ```sh
-python3 tools/asset-pipeline/check_assets.py --changed   # names what changed
 git diff --stat ui/src/ui_demo/assets/                   # one line per changed file
 magick montage ui/src/ui_demo/assets/icons/dark/*.png -tile 11x -geometry +2+2 -background '#ffffff' -type TrueColorAlpha /tmp/dark.png
 magick montage ui/src/ui_demo/assets/icons/light/*.png -tile 11x -geometry +2+2 -background '#121212' -type TrueColorAlpha /tmp/light.png
@@ -144,9 +143,7 @@ by running them rather than reading them:
   correctly — only `montage`'s all-gray fast path misreads them, and the
   flag forces the RGB canvas it should have built.
 
-`--changed` prints `changed / added / removed` by name against the
-committed `MANIFEST.sha256` (regenerated with `--write-manifest`); the
-contact sheet before and after makes the change visible — 66
+The contact sheet before and after makes the change visible — 66
 near-identical 24x24 files in a `git diff` is a diff nobody looks at, and
 one image whose differing region names the icon is one everybody does.
 
@@ -161,8 +158,7 @@ one image whose differing region names the icon is one everybody does.
   and the `unmapped` record.
 - `bake_icons.py` — the icon baker. Input guard, two `resvg`
   invocations per icon, value assertions, atomic move into place.
-- `check_assets.py` — the gate (`--all`), the review mechanism
-  (`--changed`), the manifest writer (`--write-manifest`).
+- `check_assets.py` — the gate (`--all`).
 
 The model artefacts (`sedan.glb`, `colormap.png`) have no script: they are
 copied from the extracted cache. `check_assets.py --all` is what makes that a

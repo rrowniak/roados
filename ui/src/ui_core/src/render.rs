@@ -443,11 +443,12 @@ const TEXT_UV_OFFSET: i32 = 8;
 /// Byte offset of `TextVertex::color` within the vertex.
 const TEXT_COLOR_OFFSET: i32 = 16;
 
-/// Stride of one [`ImageVertex`] in bytes: 10 `f32` fields, no padding.
+/// Stride of one [`ImageVertex`] in bytes: 14 `f32` fields, no padding.
 ///
 /// 2 for the position, 2 for the position within the quad, 2 for the UV, one
-/// each for the corner radius and the opacity and 2 for the quad size.
-const IMAGE_VERTEX_STRIDE: i32 = 40;
+/// each for the corner radius and the opacity, 2 for the quad size and 4 for
+/// the tint.
+const IMAGE_VERTEX_STRIDE: i32 = 56;
 /// Byte offset of `ImageVertex::local` within the vertex.
 const IMAGE_LOCAL_OFFSET: i32 = 8;
 /// Byte offset of `ImageVertex::uv` within the vertex.
@@ -458,6 +459,8 @@ const IMAGE_RADIUS_OFFSET: i32 = 24;
 const IMAGE_OPACITY_OFFSET: i32 = 28;
 /// Byte offset of `ImageVertex::size` within the vertex.
 const IMAGE_SIZE_OFFSET: i32 = 32;
+/// Byte offset of `ImageVertex::tint` within the vertex.
+const IMAGE_TINT_OFFSET: i32 = 40;
 
 /// Stride of one [`MeshVertex`] in bytes: 8 `f32` fields, no padding.
 const MESH_VERTEX_STRIDE: i32 = 32;
@@ -661,13 +664,15 @@ void main() {
 "#;
 
 /// The image vertex shader: window-space positions, the UV window the quad
-/// samples, and the two per-quad scalars the fragment shader needs.
+/// samples, the two per-quad scalars the fragment shader needs, and the tint.
 ///
 /// `a_local`, `a_size` and `a_radius` are the solid shader's three, carried for
 /// the same reason: the rounded corner is an SDF evaluated per fragment, and it
 /// has to know where in the quad the fragment is and how big the quad is. They
 /// ride along per *vertex* rather than per command so a batch still draws with
-/// no per-command uniforms.
+/// no per-command uniforms. `a_tint` rides the same way for the same reason:
+/// the tint is per-command state — thirty-three coloured glyphs off one
+/// texture — and a uniform per tint would be one draw call per colour.
 const IMAGE_VERTEX_SHADER_SRC: &str = r#"#version 300 es
 layout(location = 0) in vec2 a_pos;
 layout(location = 1) in vec2 a_local;
@@ -675,12 +680,14 @@ layout(location = 2) in vec2 a_uv;
 layout(location = 3) in float a_radius;
 layout(location = 4) in float a_opacity;
 layout(location = 5) in vec2 a_size;
+layout(location = 6) in vec4 a_tint;
 uniform vec2 u_resolution;
 out vec2 v_local;
 out vec2 v_uv;
 out float v_radius;
 out float v_opacity;
 out vec2 v_size;
+out vec4 v_tint;
 void main() {
     vec2 normalized = a_pos / u_resolution;
     vec2 clip = normalized * 2.0 - 1.0;
@@ -690,11 +697,12 @@ void main() {
     v_radius = a_radius;
     v_opacity = a_opacity;
     v_size = a_size;
+    v_tint = a_tint;
 }
 "#;
 
-/// The image fragment shader: one texture sample, scaled by the opacity, with
-/// the rounded corners cut away.
+/// The image fragment shader: one texture sample, tinted and scaled by the
+/// opacity, with the rounded corners cut away.
 ///
 /// Three things here are contracts rather than taste.
 ///
@@ -703,6 +711,12 @@ void main() {
 /// premultiplied: an alpha-only scale of a premultiplied colour is exactly
 /// `vec4(texel.rgb * opacity, texel.a * opacity)`, and anything else is a
 /// second conversion at every fragment.
+///
+/// The tint is a **premultiplied modulate, smooth and unclamped**: it arrives
+/// per vertex as `v_tint` — interpolated across the quad, not `flat`, because
+/// every corner of one quad carries the same tint and there is nothing to step —
+/// and the shader multiplies it raw, with no clamp. At opaque white it is the
+/// identity, which is the old line (`texel * opacity`) at the neutral tint.
 ///
 /// The opacity is clamped **here** as well as in the CPU that built the vertex.
 /// `DrawCommand::Image`'s docs say a value outside the range is clamped when the
@@ -728,6 +742,7 @@ in vec2 v_uv;
 in float v_radius;
 in float v_opacity;
 in vec2 v_size;
+in vec4 v_tint;
 uniform sampler2D u_image;
 out vec4 frag_color;
 void main() {
@@ -741,7 +756,7 @@ void main() {
     }
     float opacity = clamp(v_opacity, 0.0, 1.0);
     vec4 texel = texture(u_image, v_uv);
-    frag_color = vec4(texel.rgb * opacity, texel.a * opacity);
+    frag_color = vec4(texel.rgb * v_tint.rgb * opacity, texel.a * v_tint.a * opacity);
 }
 "#;
 
@@ -1250,8 +1265,8 @@ struct TextVertex {
 }
 
 /// One vertex of a textured quad: window position, position within the quad,
-/// the UV window it samples, and the two per-quad scalars the fragment shader
-/// needs.
+/// the UV window it samples, the two per-quad scalars the fragment shader
+/// needs, and the tint.
 ///
 /// The field order is the shader's attribute order, and the offsets the GL
 /// attribute pointers use are constants derived from it — see
@@ -1272,6 +1287,8 @@ struct ImageVertex {
     opacity: f32,
     /// Quad size in pixels.
     size: [f32; 2],
+    /// The premultiplied tint the fragment shader multiplies the texel by.
+    tint: [f32; 4],
 }
 
 /// Builds the four vertices of one glyph quad.
@@ -1345,8 +1362,10 @@ fn text_corner_color(ramp: Option<FadeRamp>, x: f32, color: Color) -> [f32; 4] {
 ///
 /// `(x, y)` is the quad's top-left corner in window coordinates and `(w, h)` its
 /// size, exactly as [`text_quad`] takes them; `uv` is the window into the
-/// texture, `opacity` how much of what is sampled reaches the screen and
-/// `radius` how many pixels of corner the shader clips away.
+/// texture, `opacity` how much of what is sampled reaches the screen,
+/// `radius` how many pixels of corner the shader clips away, and `tint` the
+/// premultiplied modulate the shader multiplies the texel by — the same value
+/// on all four corners, so the interpolation is the tint itself.
 ///
 /// The two clamps are the ones [`DrawCommand::Image`]'s docs promise, and they
 /// happen here rather than in the shader because here is where they can be
@@ -1359,10 +1378,14 @@ fn text_corner_color(ramp: Option<FadeRamp>, x: f32, color: Color) -> [f32; 4] {
 /// image sits in its texture, and the quad has no opinion about it: an image
 /// packed into the shared atlas samples its placement, and an image with a
 /// texture of its own samples the whole of it.
-fn image_quad(rect: Rect, uv: UvRect, opacity: f32, radius: f32) -> [ImageVertex; 4] {
+///
+/// The tint is **not** clamped and not premultiplied here: it arrives
+/// premultiplied by contract, and the shader multiplies it raw.
+fn image_quad(rect: Rect, uv: UvRect, opacity: f32, radius: f32, tint: Color) -> [ImageVertex; 4] {
     let size = [rect.width, rect.height];
     let radius = radius.min(rect.width / 2.0).min(rect.height / 2.0);
     let opacity = opacity.clamp(0.0, 1.0);
+    let tint = quad_color(tint);
     let left = [rect.x, rect.y];
     let right = [rect.x + rect.width, rect.y];
     let bottom_right = [rect.x + rect.width, rect.y + rect.height];
@@ -1383,6 +1406,7 @@ fn image_quad(rect: Rect, uv: UvRect, opacity: f32, radius: f32) -> [ImageVertex
             radius,
             opacity,
             size,
+            tint,
         },
         ImageVertex {
             pos: right,
@@ -1391,6 +1415,7 @@ fn image_quad(rect: Rect, uv: UvRect, opacity: f32, radius: f32) -> [ImageVertex
             radius,
             opacity,
             size,
+            tint,
         },
         ImageVertex {
             pos: bottom_right,
@@ -1399,6 +1424,7 @@ fn image_quad(rect: Rect, uv: UvRect, opacity: f32, radius: f32) -> [ImageVertex
             radius,
             opacity,
             size,
+            tint,
         },
         ImageVertex {
             pos: bottom_left,
@@ -1407,6 +1433,7 @@ fn image_quad(rect: Rect, uv: UvRect, opacity: f32, radius: f32) -> [ImageVertex
             radius,
             opacity,
             size,
+            tint,
         },
     ]
 }
@@ -2924,7 +2951,8 @@ impl Renderer {
             gl.bind_vertex_array(None);
         }
         // SAFETY: The GL context is current on this thread; the image VAO, VBO
-        // and IBO are valid objects created above.
+        // and IBO are valid objects created above. Attribute 6 is the tint:
+        // `ImageVertex::tint` at `IMAGE_TINT_OFFSET`, four floats.
         unsafe {
             let gl = renderer.context.gl();
             gl.bind_vertex_array(Some(renderer.image_vao));
@@ -2976,6 +3004,15 @@ impl Renderer {
                 false,
                 IMAGE_VERTEX_STRIDE,
                 IMAGE_SIZE_OFFSET,
+            );
+            gl.enable_vertex_attrib_array(6);
+            gl.vertex_attrib_pointer_f32(
+                6,
+                4,
+                GL_FLOAT,
+                false,
+                IMAGE_VERTEX_STRIDE,
+                IMAGE_TINT_OFFSET,
             );
             gl.bind_vertex_array(None);
         }
@@ -4166,12 +4203,13 @@ impl Renderer {
                 uv,
                 radius,
                 opacity,
+                tint,
                 ..
             } = command
             else {
                 continue;
             };
-            vertices.extend_from_slice(&image_quad(*rect, *uv, *opacity, *radius));
+            vertices.extend_from_slice(&image_quad(*rect, *uv, *opacity, *radius, *tint));
         }
         if vertices.is_empty() {
             self.image_vertices = vertices;
@@ -4189,7 +4227,7 @@ impl Renderer {
         let quads = vertices.len() / 4;
         self.ensure_image_index_capacity(quads)?;
         self.ensure_image_vertex_capacity(quads)?;
-        // SAFETY: `ImageVertex` is `repr(C)` with 10 `f32` fields and no
+        // SAFETY: `ImageVertex` is `repr(C)` with 14 `f32` fields and no
         // padding, so the slice is a valid `IMAGE_VERTEX_STRIDE`-strided vertex
         // array. The slice borrows `vertices`, which outlives the upload.
         let bytes = unsafe {
@@ -5796,6 +5834,7 @@ mod tests {
             uv: crate::paint::UvRect::full(),
             opacity: 1.0,
             radius: 0.0,
+            tint: crate::paint::untinted(),
         });
         assert!(image.is_empty());
     }
@@ -6114,8 +6153,8 @@ mod tests {
 
     #[test]
     fn image_vertex_layout_matches_the_offsets_the_attributes_are_bound_with() {
-        // 10 `f32` fields at 4 bytes: pos 0, local 8, uv 16, radius 24,
-        // opacity 28, size 32, total 40. `offset_of!` is what GL's attribute
+        // 14 `f32` fields at 4 bytes: pos 0, local 8, uv 16, radius 24,
+        // opacity 28, size 32, tint 40, total 56. `offset_of!` is what GL's attribute
         // pointers mean, so this is the one assertion that would catch a field
         // inserted without its constant moved — which is a skewed image, or a
         // UV read from the middle of a quad, and both only on screen.
@@ -6144,22 +6183,26 @@ mod tests {
             std::mem::offset_of!(ImageVertex, size),
             IMAGE_SIZE_OFFSET as usize
         );
+        assert_eq!(
+            std::mem::offset_of!(ImageVertex, tint),
+            IMAGE_TINT_OFFSET as usize
+        );
     }
 
     #[test]
     fn the_image_vertex_buffer_counts_four_vertices_per_quad() {
-        // 256 quads is four vertices each, so 1024 vertices, at 40 bytes each:
-        // 40960. The wrong number is 256 * 40 = 10240 —
+        // 256 quads is four vertices each, so 1024 vertices, at 56 bytes each:
+        // 57344. The wrong number is 256 * 56 = 14336 —
         // a quarter of it, which `glBufferSubData` rejects with
         // `GL_INVALID_VALUE` and the batch then vanishes with no error. So the
         // assertion is written against the full size and the wrong one is named
         // in the message.
         let per_quad = VERTS_PER_QUAD * std::mem::size_of::<ImageVertex>();
-        assert_eq!(per_quad, 4 * 40);
+        assert_eq!(per_quad, 4 * 56);
         assert_eq!(
             vertex_buffer_size(INITIAL_CAPACITY, std::mem::size_of::<ImageVertex>()).unwrap(),
-            40960,
-            "256 quads of four 40-byte vertices, not 256 vertices"
+            57344,
+            "256 quads of four 56-byte vertices, not 256 vertices"
         );
     }
 
@@ -6181,6 +6224,7 @@ mod tests {
             "layout(location = 3) in float a_radius;",
             "layout(location = 4) in float a_opacity;",
             "layout(location = 5) in vec2 a_size;",
+            "layout(location = 6) in vec4 a_tint;",
         ] {
             assert!(
                 IMAGE_VERTEX_SHADER_SRC.contains(declaration),
@@ -6194,6 +6238,7 @@ mod tests {
             "out float v_radius;",
             "out float v_opacity;",
             "out vec2 v_size;",
+            "out vec4 v_tint;",
         ] {
             assert!(
                 IMAGE_VERTEX_SHADER_SRC.contains(varying),
@@ -6206,6 +6251,7 @@ mod tests {
             "in float v_radius;",
             "in float v_opacity;",
             "in vec2 v_size;",
+            "in vec4 v_tint;",
         ] {
             assert!(
                 IMAGE_FRAGMENT_SHADER_SRC.contains(declaration),
@@ -6234,12 +6280,45 @@ mod tests {
             !IMAGE_FRAGMENT_SHADER_SRC.contains("frag_color = v_color"),
             "an image's colour is the texel's, not a colour of its own"
         );
-        // The premultiplied contract: the texel arrives already multiplied into
-        // its alpha, so scaling is `vec4(rgb * opacity, a * opacity)` — scaling
+        // The premultiplied contract, with the tint: the texel arrives already
+        // multiplied into its alpha, the tint arrives premultiplied by
+        // contract, and the shader scales both by the clamped opacity — scaling
         // only the alpha would leave the colour channels unbounded by it.
         assert!(IMAGE_FRAGMENT_SHADER_SRC.contains("clamp(v_opacity, 0.0, 1.0)"));
-        assert!(IMAGE_FRAGMENT_SHADER_SRC
-            .contains("frag_color = vec4(texel.rgb * opacity, texel.a * opacity);"));
+        assert!(IMAGE_FRAGMENT_SHADER_SRC.contains(
+            "frag_color = vec4(texel.rgb * v_tint.rgb * opacity, texel.a * v_tint.a * opacity);"
+        ));
+    }
+
+    #[test]
+    fn the_image_shader_multiplies_the_sampled_texel_by_the_tint() {
+        // The whole assignment, not a substring of it: the tint scales every
+        // channel of the texel — `rgb` by the tint's `rgb`, `a` by the tint's
+        // `a` — and then the clamped opacity scales the product. A shader that
+        // dropped `* v_tint.rgb` would draw every icon white; one that dropped
+        // the alpha half would draw a translucent tint opaque; one that read
+        // `v_color` instead of the texel would draw a flat quad. None of those
+        // is a substring away from this line, so the assertion is the line.
+        let assignment =
+            "frag_color = vec4(texel.rgb * v_tint.rgb * opacity, texel.a * v_tint.a * opacity);";
+        assert!(
+            IMAGE_FRAGMENT_SHADER_SRC.contains(assignment),
+            "the image shader's last line is the tinted modulate"
+        );
+        assert!(
+            !IMAGE_FRAGMENT_SHADER_SRC.contains("frag_color = v_color"),
+            "an image's colour is the tinted texel's, not a colour of its own"
+        );
+        // The tint is a smooth varying, not a flat one: every corner of one
+        // quad carries the same value, so interpolation is the tint itself.
+        assert!(
+            !IMAGE_VERTEX_SHADER_SRC.contains("flat out vec4 v_tint"),
+            "the tint interpolates rather than stepping"
+        );
+        assert!(
+            !IMAGE_FRAGMENT_SHADER_SRC.contains("flat in vec4 v_tint"),
+            "on both stages"
+        );
     }
 
     #[test]
@@ -6278,7 +6357,7 @@ mod tests {
             u1: 0.3,
             v1: 0.4,
         };
-        let quad = image_quad(fixture_rect(), uv, 0.5, 0.0);
+        let quad = image_quad(fixture_rect(), uv, 0.5, 0.0, crate::paint::untinted());
 
         assert_eq!(quad[0].pos, [10.0, 20.0], "the quad's own top left corner");
         assert_eq!(quad[1].pos, [110.0, 20.0]);
@@ -6311,16 +6390,34 @@ mod tests {
         // `DrawCommand::Image`'s docs: "a value outside the range is clamped
         // when the command is drawn, not when it is recorded". The command keeps
         // what it was handed; the vertex carries the nearest end of the range.
-        let over = image_quad(fixture_rect(), UvRect::full(), 1.5, 0.0);
+        let over = image_quad(
+            fixture_rect(),
+            UvRect::full(),
+            1.5,
+            0.0,
+            crate::paint::untinted(),
+        );
         assert_eq!(over[0].opacity, 1.0, "an opacity claiming more than 1 is 1");
 
-        let under = image_quad(fixture_rect(), UvRect::full(), -0.5, 0.0);
+        let under = image_quad(
+            fixture_rect(),
+            UvRect::full(),
+            -0.5,
+            0.0,
+            crate::paint::untinted(),
+        );
         assert_eq!(
             under[0].opacity, 0.0,
             "and one claiming less than 0 draws nothing"
         );
 
-        let inside = image_quad(fixture_rect(), UvRect::full(), 0.25, 0.0);
+        let inside = image_quad(
+            fixture_rect(),
+            UvRect::full(),
+            0.25,
+            0.0,
+            crate::paint::untinted(),
+        );
         assert_eq!(inside[0].opacity, 0.25, "a value in range is not touched");
     }
 
@@ -6329,14 +6426,56 @@ mod tests {
         // The same rule `RoundedRect` follows, and the same one its own docs
         // promise for `Image`: a radius too large to fit is a rounded pill and
         // not an inverted shape. 30 against a 10-wide side is 5.
-        let quad = image_quad(Rect::new(0.0, 0.0, 10.0, 40.0), UvRect::full(), 1.0, 30.0);
+        let quad = image_quad(
+            Rect::new(0.0, 0.0, 10.0, 40.0),
+            UvRect::full(),
+            1.0,
+            30.0,
+            crate::paint::untinted(),
+        );
         assert_eq!(quad[0].radius, 5.0);
 
-        let square = image_quad(Rect::new(0.0, 0.0, 8.0, 8.0), UvRect::full(), 1.0, 4.0);
+        let square = image_quad(
+            Rect::new(0.0, 0.0, 8.0, 8.0),
+            UvRect::full(),
+            1.0,
+            4.0,
+            crate::paint::untinted(),
+        );
         assert_eq!(
             square[0].radius, 4.0,
             "half of an 8-pixel side is 4, which is the same as the radius asked for"
         );
+    }
+
+    #[test]
+    fn a_tinted_image_quad_carries_the_tint_it_was_given() {
+        // The tint is per-vertex state, the same value on all four corners: the
+        // shader interpolates it, and the interpolation of four equal values
+        // is the value. `quad_color` is the production path, so the assertion
+        // is against it rather than a literal.
+        let tint = Color::new(255, 0, 0, 255);
+        let quad = image_quad(fixture_rect(), UvRect::full(), 1.0, 0.0, tint);
+        let expected = quad_color(tint);
+        for (index, vertex) in quad.iter().enumerate() {
+            assert_eq!(
+                vertex.tint, expected,
+                "corner {index} carries the tint, as premultiplied floats"
+            );
+        }
+        assert_eq!(quad[0].tint, [1.0, 0.0, 0.0, 1.0], "opaque red, by value");
+
+        // And the neutral tint is the identity the untinted path records.
+        let plain = image_quad(
+            fixture_rect(),
+            UvRect::full(),
+            1.0,
+            0.0,
+            crate::paint::untinted(),
+        );
+        for vertex in &plain {
+            assert_eq!(vertex.tint, [1.0, 1.0, 1.0, 1.0]);
+        }
     }
 
     #[test]

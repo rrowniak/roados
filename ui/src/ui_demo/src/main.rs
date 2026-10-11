@@ -216,6 +216,7 @@
 
 mod chrome;
 mod fps;
+mod icons;
 mod panel;
 
 use crate::chrome::Chrome;
@@ -2321,6 +2322,16 @@ const IMAGE_FIT_NAMES: [&str; 4] = ["Contain", "Cover", "Fill", "None"];
 /// The file name of the demo's image, under whichever directory is found.
 const ASSET_FILE: &str = "demo.png";
 
+/// Where the icon master is, relative to a directory in the workspace's own layout.
+///
+/// Beside the SVG it was baked from, under `assets/icons/` — not beside the
+/// gallery's `demo.png`, because it belongs to the icon bake rather than to
+/// the gallery. Its file name is the file [`icons::baked_file`] names for
+/// [`icons::ICON_SIZE_PX`]: one white master, tinted at draw time, so there
+/// is exactly one of it and no per-colour variant.
+/// `the_icon_asset_path_names_the_baked_size` holds the two together.
+const ICON_IMAGE_RELATIVE: &str = "src/ui_demo/assets/icons/airbag_24.png";
+
 /// The file name of the demo's car model, under whichever directory is found.
 const ASSET_MODEL_FILE: &str = "sedan.glb";
 
@@ -2473,6 +2484,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // gallery's image. A missing file is non-fatal: the page draws a transparent
     // stand-in of the image's own shape — see `stand_in_map_picture`.
     let map_picture = load_map_picture(&mut renderer);
+    // The status bar's icon master, loaded the same way: `None` leaves the
+    // stand-in `Demo::new` built, which draws nothing and moves nothing.
+    let icon_picture = load_icon_picture(&mut renderer);
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
     let mut demo = Demo::new(
@@ -2483,6 +2497,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         model,
         page,
     )?;
+    // The baked master beside the dock, swapped in over the stand-in `Demo::new`
+    // built: same node, same rect, so nothing moves when the bytes arrive.
+    if let Some(picture) = icon_picture {
+        demo.set_icon_picture(picture.texture, picture.source);
+    };
     let run_for = run_seconds();
 
     let mut last = Instant::now();
@@ -2888,6 +2907,80 @@ fn stand_in_picture() -> Option<Picture> {
     Some(Picture { texture, source })
 }
 
+/// Returns the paths the demo's icon master may be at, in the order it looks.
+///
+/// The same walk as [`asset_candidates`] with the icon's relative path: a
+/// second search-path walker would be a second answer to one question.
+fn icon_candidates() -> Vec<PathBuf> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    asset_candidates_from(
+        &exe,
+        std::env::var_os(ASSET_DIR_VAR).as_deref(),
+        ICON_IMAGE_RELATIVE,
+    )
+}
+
+/// Returns a transparent image the shape of the icon master, to stand in for
+/// it when it could not be loaded.
+///
+/// Beside [`stand_in_picture`] and in its shape: a throwaway cache and a
+/// handle rather than a texture of its own, dropped on the way out. The
+/// stand-in is the drawn size, so the node's rect is the rect on screen and
+/// swapping the master in later moves nothing.
+fn stand_in_icon_picture() -> Option<Picture> {
+    let mut cache = TextureCache::new();
+    let mut loader = |_: &Path| {
+        Ok(Pixels::transparent(
+            icons::ICON_SIZE_PX,
+            icons::ICON_SIZE_PX,
+        ))
+    };
+    let texture = cache.load(Path::new("stand-in-icon"), &mut loader).ok()?;
+    let source = ImageSource::of(&cache, texture)?;
+    Some(Picture { texture, source })
+}
+
+/// Loads the demo's icon master and returns it, or `None` after saying why.
+///
+/// Beside [`load_picture`] and in its shape — the candidate list from
+/// [`icon_candidates`], the first `is_file()` win, one `eprintln!` naming
+/// every path looked at — with one deliberate difference: the master is
+/// loaded with [`Renderer::load_standalone_texture`], so it gets a texture of
+/// its own. [`icons::paint`] records the full texture, and an atlas window is
+/// not one: the colormap takes the same route for the same reason, and the
+/// small master would otherwise pack into the atlas and sample the whole of
+/// it. A missing file is non-fatal, exactly as a missing gallery image is.
+fn load_icon_picture(renderer: &mut Renderer) -> Option<Picture> {
+    let candidates = icon_candidates();
+    let path = candidates.iter().find(|path| path.is_file());
+    let Some(path) = path else {
+        eprintln!(
+            "ui_demo: {} not found; looked in {}",
+            icons::baked_file(icons::ICON_SIZE_PX),
+            join_paths(&candidates)
+        );
+        return None;
+    };
+    let texture = match renderer.load_standalone_texture(path) {
+        Ok(texture) => texture,
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
+            return None;
+        }
+    };
+    match ImageSource::of(renderer.textures(), texture) {
+        Some(source) => Some(Picture { texture, source }),
+        None => {
+            eprintln!(
+                "ui_demo: {}: the cache could not place it; standing in",
+                path.display()
+            );
+            None
+        }
+    }
+}
 /// Returns the paths the demo's map image may be at, in the order it looks.
 ///
 /// The same walk as [`asset_candidates`] with a different relative path: a
@@ -3809,6 +3902,20 @@ struct Demo {
     chrome_drawn: Vec<Handle>,
     /// The pager's node, whose own paint arm records the three dots.
     chrome_pager: Handle,
+    /// The status bar's icon: an `Image` node for layout and paint dispatch, holding
+    /// the white master the tinted arm draws. A sibling of the airbag text in
+    /// the status bar's airbag group — the composition the operator chose over
+    /// the task file's dock cell.
+    icon_image: Image,
+    /// What the icon is drawn as: the baked size and the colour the tint
+    /// carries when nothing bound overrides it. The paint arm re-tints from
+    /// `icon_tint` every frame, so this is the size and the opening colour
+    /// rather than a live value.
+    icon_spec: icons::IconSpec,
+    /// The tint the icon follows the theme with, bound over the theme's ink
+    /// by [`icons::theme_tint`]. Read at paint time, so a theme switch
+    /// carries the icon with no clock beside the theme's own.
+    icon_tint: Property<Color>,
     /// The progress bar, at the foot of the band's left column.
     progress: Progress,
     /// Whether the progress bar is sliding rather than showing a value.
@@ -5539,6 +5646,33 @@ impl Demo {
             Color::new(158, 158, 158, 255),
         );
 
+        // The demo's one icon: a white airbag master for the status bar's
+        // airbag badge, tinted at draw time through `icons::paint`. An `Image`
+        // node for layout and paint dispatch, attached to the airbag group
+        // below — a sibling of the two-line text beside it. (2026-10-11: the
+        // operator moved it here from the dock; the task file's dock cell was
+        // the wrong panel for an airbag badge.)
+        let icon_spec = icons::IconSpec {
+            size_px: icons::ICON_SIZE_PX,
+            color: theme
+                .get(ThemeToken::Text)
+                .as_color()
+                .unwrap_or(Color::new(255, 255, 255, 255)),
+        };
+        let icon_tint = icons::theme_tint(&theme);
+        let icon_stand_in = stand_in_icon_picture().ok_or("ui_demo: no icon image to show")?;
+        let mut icon_image = Image::new(&mut nodes, icon_stand_in.texture, icon_stand_in.source);
+        icon_image.set_fit(ImageFit::Fill);
+        icon_image.snap_to_state();
+        {
+            let side = icons::drawn_side(icons::ICON_SIZE_PX);
+            nodes
+                .get_mut(icon_image.handle())
+                .ok_or("ui_demo: the icon node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(Size::new(side, side)));
+        }
+
         // The top status bar, as a panel object: a `row` with `SpaceBetween` and
         // three child groups, its widgets positioned relative to the panel.
         let (status_panel, status_bar) =
@@ -5586,21 +5720,31 @@ impl Demo {
             }
             chrome_labels.push((label, handle));
         }
+        // The airbag badge: the icon beside its text, which reads over two
+        // lines — `PASSENGER AIRBAG` over `OFF` — so the badge fits the bar's
+        // height with the 24-pixel master beside it.
         let status_airbag = Container::new(&mut nodes, LayoutMode::row());
         status_airbag.set_flex_config(
             &mut nodes,
-            FlexConfig::new().with_cross_axis_alignment(CrossAxisAlignment::Center),
+            FlexConfig::new()
+                .with_spacing(CHROME_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
         );
-        let (airbag_label, airbag_handle) = chrome_label(
-            &mut nodes,
-            &metrics,
-            "PASSENGER AIRBAG OFF",
-            muted_color.clone(),
-        )?;
-        if !status_airbag.add_child(&mut nodes, airbag_handle) {
-            return Err("ui_demo: the airbag label could not be attached");
+        if !status_airbag.add_child(&mut nodes, icon_image.handle()) {
+            return Err("ui_demo: the airbag icon could not be attached");
         }
-        chrome_labels.push((airbag_label, airbag_handle));
+        let airbag_text = Container::new(&mut nodes, LayoutMode::column());
+        for text in ["PASSENGER", "AIRBAG OFF"] {
+            let (airbag_label, airbag_handle) =
+                chrome_label(&mut nodes, &metrics, text, muted_color.clone())?;
+            if !airbag_text.add_child(&mut nodes, airbag_handle) {
+                return Err("ui_demo: an airbag line could not be attached");
+            }
+            chrome_labels.push((airbag_label, airbag_handle));
+        }
+        if !status_airbag.add_child(&mut nodes, airbag_text.handle()) {
+            return Err("ui_demo: the airbag text could not be attached");
+        }
         for group in [
             status_left.handle(),
             status_right.handle(),
@@ -5811,6 +5955,7 @@ impl Demo {
         chrome_drawn.extend(chrome_buttons.iter().map(Button::handle));
         chrome_drawn.extend(chrome_labels.iter().map(|(_, handle)| *handle));
         chrome_drawn.push(pager.handle());
+        chrome_drawn.push(icon_image.handle());
 
         // A stack: the background fills the window behind the row of pads, the
         // text panel and the controls layer, and all three are painted over it.
@@ -6214,6 +6359,12 @@ impl Demo {
         // subtree of an invisible node, and a chrome container on no page's list
         // would leave its children drawn on every page. A non-focusable row
         // contributes no `Tab` stop, so the five-focusable count does not move.
+        //
+        // The icon's row arrives by this same walk: the icon node is a leaf of
+        // the dock's subtree, so its `Page::Demo, focusable: false` row is the
+        // walk's, and a second row written out here would put the handle on two
+        // rows — which `every_page_lists_at_least_one_node_and_no_node_is_on_two_pages`
+        // refuses. One row, from the subtree it belongs to.
         for &handle in &chrome_all {
             on(Page::Demo, handle, false);
         }
@@ -6286,6 +6437,9 @@ impl Demo {
             chrome_all,
             chrome_drawn,
             chrome_pager: pager.handle(),
+            icon_image,
+            icon_spec,
+            icon_tint,
             progress,
             progress_indeterminate,
             progress_focused,
@@ -6452,6 +6606,15 @@ impl Demo {
         self.chrome_buttons
             .iter()
             .find(|button| button.handle() == handle)
+    }
+
+    /// Swaps the icon's stand-in for the baked master `main` loaded, on the
+    /// same node: the texture and the source change, the rect does not, so
+    /// nothing moves when the bytes arrive. A master that never arrives
+    /// leaves the transparent stand-in, which draws nothing.
+    pub fn set_icon_picture(&mut self, texture: TextureHandle, source: ImageSource) {
+        self.icon_image.set_texture(texture);
+        self.icon_image.set_source(source);
     }
 
     /// The four panel objects, in paint order.
@@ -8438,6 +8601,25 @@ impl Demo {
                     }
                     Some(rect) if handle == self.chart.handle() => self.chart.paint(rect.into()),
                     Some(rect) => self.keyboard.paint(rect.into()),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The status bar's icon, after the map arm above and with the chrome
+            // arms: one white-master command tinted with the theme-bound ink,
+            // through `icons::paint` rather than `Image::paint` — the widget's
+            // own paint records the neutral tint, and the icon is the coloured
+            // one. The icon sits over the map, so its arm follows the map's.
+            if handle == self.icon_image.handle() {
+                let commands = match node.layout().rect() {
+                    Some(rect) => {
+                        let spec = icons::IconSpec {
+                            color: self.icon_tint.get(),
+                            ..self.icon_spec
+                        };
+                        icons::paint(&spec, rect.into(), self.icon_image.texture().id())
+                    }
                     None => Vec::new(),
                 };
                 *node.paint_mut() = PaintState::from_commands(commands);
@@ -23385,6 +23567,78 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_icon_is_on_the_demo_page_and_on_no_other_page() {
+        // The composition's page row: the icon node in the status bar's
+        // airbag group, on the demo page and on no gallery page.
+        let demo = laid_out_on(Page::Demo);
+        assert!(
+            demo.shows(demo.icon_image.handle()),
+            "the icon is a demo-page node"
+        );
+        assert!(
+            demo.order.contains(&demo.icon_image.handle()),
+            "and it is in the paint order"
+        );
+        for page in [
+            Page::Pads,
+            Page::Text,
+            Page::Input,
+            Page::Controls,
+            Page::Data,
+            Page::Overlays,
+        ] {
+            let demo = laid_out_on(page);
+            assert!(
+                !demo.shows(demo.icon_image.handle()),
+                "{page:?}: the icon does not leak onto this page"
+            );
+        }
+    }
+
+    #[test]
+    fn the_demo_page_draws_the_icon_and_the_gallery_pages_do_not() {
+        // The paint gate's half of the same claim: one tinted-image command
+        // on the demo page, nothing anywhere else.
+        let demo = laid_out_on(Page::Demo);
+        let commands = demo.commands_at(demo.icon_image.handle());
+        assert_eq!(
+            commands.len(),
+            1,
+            "the icon records exactly one command on the demo page"
+        );
+        assert!(
+            matches!(commands[0], DrawCommand::Image { .. }),
+            "and that command is the tinted master"
+        );
+        for page in [
+            Page::Pads,
+            Page::Text,
+            Page::Input,
+            Page::Controls,
+            Page::Data,
+            Page::Overlays,
+        ] {
+            let demo = laid_out_on(page);
+            assert!(
+                demo.commands_at(demo.icon_image.handle()).is_empty(),
+                "{page:?}: the icon records nothing when the demo page is not showing"
+            );
+        }
+    }
+
+    #[test]
+    fn the_icon_asset_path_names_the_baked_size() {
+        // The asset path and the bake table agree: the demo loads the file
+        // `baked_file(ICON_SIZE_PX)` names, so a re-bake at another size
+        // cannot silently leave the demo pointing at the old master.
+        assert!(
+            ICON_IMAGE_RELATIVE.ends_with(icons::baked_file(icons::ICON_SIZE_PX)),
+            "the demo loads the baked size it draws: {ICON_IMAGE_RELATIVE}"
+        );
+        assert_eq!(icons::ICON_SIZE_PX, 24);
     }
 
     #[test]

@@ -604,6 +604,20 @@ pub enum DrawCommand {
         /// as it is for [`DrawCommand::RoundedRect`], so a radius too large to
         /// fit is a rounded pill rather than an inverted shape.
         radius: f32,
+        /// The colour the sampled texel is multiplied by, premultiplied.
+        ///
+        /// A **modulate, not an opacity**: every channel of the texel is scaled,
+        /// so opaque white leaves the image unchanged and any other colour
+        /// tints it. An icon is a white master tinted here at draw time, which
+        /// is what lets one texture serve every colour. It rides per-vertex
+        /// rather than in [`BatchKey`](crate::batch::BatchKey), so icons of
+        /// different colours off one texture stay one draw call.
+        ///
+        /// Premultiplied by contract, like every other colour on this enum:
+        /// [`Color::new`] does not premultiply, so the caller supplies the
+        /// channels already scaled by the alpha. Opaque tints are unaffected
+        /// either way, which is what makes [`untinted`] the neutral value.
+        tint: Color,
     },
     /// A thick line segment.
     Line {
@@ -804,6 +818,25 @@ pub enum DrawCommand {
         /// different colormap without re-uploading its geometry.
         texture: TextureId,
     },
+}
+
+/// Returns the tint that leaves a sampled texel unchanged: opaque white.
+///
+/// The neutral element of the image modulate: the shader multiplies the texel
+/// by this per fragment, so an image recorded with it draws exactly what its
+/// texture holds. [`Painter::image`] records it, and [`Icon`](crate::widgets::icon::Icon)
+/// starts there until a caller assigns a tint.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::paint::{Color, untinted};
+///
+/// assert_eq!(untinted(), Color::new(255, 255, 255, 255));
+/// ```
+#[must_use]
+pub fn untinted() -> Color {
+    Color::new(255, 255, 255, 255)
 }
 
 /// Everything [`Painter::text_run`] records, in one named struct.
@@ -1227,16 +1260,44 @@ impl Painter {
     /// `texture` through `uv`, drawn at `opacity`, with `radius` pixels of
     /// rounded corners clipped away.
     ///
-    /// The one way to record an image, so the two things a textured quad has to
+    /// The one way to record an untinted image, so the two things a textured quad has to
     /// say — which part of the texture, and how much of it — cannot be left to
-    /// a default that silently draws the wrong picture.
+    /// a default that silently draws the wrong picture. Records [`untinted`],
+    /// so the texel reaches the screen unchanged; [`Painter::tinted_image`] is
+    /// this method with a tint.
     pub fn image(&mut self, rect: Rect, texture: TextureId, uv: UvRect, opacity: f32, radius: f32) {
+        self.tinted_image(rect, texture, uv, opacity, radius, untinted());
+    }
+
+    /// Records a textured rectangle tinted by `tint`: every argument as
+    /// [`Painter::image`], one modulate more.
+    ///
+    /// The tint is a **premultiplied modulate** applied per fragment after the
+    /// opacity: the shader computes `texel.rgb * tint.rgb * opacity` and
+    /// `texel.a * tint.a * opacity`, with the texel already premultiplied by
+    /// [`crate::texture`]'s decode. An opaque-white tint is the identity, so
+    /// [`Painter::image`] is this method with [`untinted`]. A tint of alpha 0
+    /// draws nothing, whatever its channels; the batcher reads that off
+    /// `tint.a` the way it reads `opacity == 1.0` off the scalar.
+    ///
+    /// [`Color::new`] does not premultiply, so the caller supplies premultiplied
+    /// channels; opaque tints are unaffected either way.
+    pub fn tinted_image(
+        &mut self,
+        rect: Rect,
+        texture: TextureId,
+        uv: UvRect,
+        opacity: f32,
+        radius: f32,
+        tint: Color,
+    ) {
         self.commands.push(DrawCommand::Image {
             rect,
             texture,
             uv,
             opacity,
             radius,
+            tint,
         });
     }
 
@@ -1825,6 +1886,7 @@ mod tests {
             uv: recorded_uv,
             opacity,
             radius,
+            tint,
         } = &commands[0]
         else {
             panic!("the painter recorded something that is not an image");
@@ -1834,6 +1896,71 @@ mod tests {
         assert_eq!(*recorded_uv, uv);
         assert_eq!(*opacity, 0.25);
         assert_eq!(*radius, 6.0);
+        assert_eq!(
+            *tint,
+            untinted(),
+            "the five-argument recorder carries the neutral tint"
+        );
+    }
+
+    #[test]
+    fn painter_image_records_the_neutral_tint() {
+        // The five-argument recorder is the six-argument one with the identity:
+        // an image recorded without a tint draws exactly what its texture
+        // holds, which is what every existing image is.
+        let mut painter = Painter::new();
+        painter.image(
+            Rect::new(10.0, 20.0, 100.0, 50.0),
+            TextureId::new(3),
+            UvRect::full(),
+            1.0,
+            0.0,
+        );
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 1);
+        let DrawCommand::Image { tint, .. } = &commands[0] else {
+            panic!("the painter recorded something that is not an image");
+        };
+        assert_eq!(*tint, untinted(), "no tint asked, none recorded");
+        assert_eq!(*tint, Color::new(255, 255, 255, 255));
+    }
+
+    #[test]
+    fn painter_tinted_image_records_the_tint_it_was_given() {
+        // The tint rides the command untouched: the recorder stores what it was
+        // handed, and the shader does the multiplying.
+        let tint = Color::new(255, 0, 0, 255);
+        let mut painter = Painter::new();
+        painter.tinted_image(
+            Rect::new(10.0, 20.0, 100.0, 50.0),
+            TextureId::new(3),
+            UvRect::full(),
+            1.0,
+            0.0,
+            tint,
+        );
+
+        let commands = painter.finish();
+        assert_eq!(commands.len(), 1);
+        let DrawCommand::Image {
+            rect,
+            texture,
+            uv,
+            opacity,
+            radius,
+            tint: recorded,
+        } = &commands[0]
+        else {
+            panic!("the painter recorded something that is not an image");
+        };
+        assert_eq!(*rect, Rect::new(10.0, 20.0, 100.0, 50.0));
+        assert_eq!(*texture, TextureId::new(3));
+        assert!(uv.is_full());
+        assert_eq!(*opacity, 1.0);
+        assert_eq!(*radius, 0.0);
+        assert_eq!(*recorded, tint, "the tint reaches the command unmoved");
+        assert_ne!(*recorded, untinted(), "and it is not the neutral one");
     }
 
     #[test]

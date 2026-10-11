@@ -167,3 +167,41 @@ verifiable claim rather than a convention.
 No executable bit is required on any of these: every invocation is
 `bash ...` or `python3 ...`, so the command line in a reviewer's shell is
 the command line that ran.
+
+## The airbag master (TASK_UI_DEMO_02.1, 2026-10-11)
+
+One fill-based SVG outside the Lucide set —
+`ui/src/ui_demo/assets/icons/airbag-svgrepo-com.svg` — baked to two white
+masters beside it (`airbag_24.png`, `airbag_48.png`). The demo loads the 24 px
+one for the status bar's airbag badge and tints it at draw time (`TASK_UI_PRIM_44`'s shader tint), so there is one file
+per size and no per-colour variant. Exact commands, run from the repository
+root (`~/.cargo/bin` is not on `PATH`, so `resvg` is the absolute path):
+
+```sh
+printf 'svg{fill:#ffffff}*{fill:#ffffff}' > /tmp/airbag_white.css
+/home/dev/.cargo/bin/resvg --stylesheet /tmp/airbag_white.css \
+  --width 24 --height 24 --shape-rendering geometricPrecision \
+  ui/src/ui_demo/assets/icons/airbag-svgrepo-com.svg \
+  ui/src/ui_demo/assets/icons/airbag_24.png
+/home/dev/.cargo/bin/resvg --stylesheet /tmp/airbag_white.css \
+  --width 48 --height 48 --shape-rendering geometricPrecision \
+  ui/src/ui_demo/assets/icons/airbag-svgrepo-com.svg \
+  ui/src/ui_demo/assets/icons/airbag_48.png
+```
+
+Why `{fill:…}` and not the pipeline's `*{color:…}` rule: the root carries
+`fill="#000000"` and no stroke, so a `color` rule changes nothing and resvg
+exits 0 with a valid black PNG (measured coverage-weighted mean 0.0 on the
+24 px bake). The guard is the pixels, not the exit status: RGBA at the exact
+size, corner alpha 0 (the SVG holds no background element — three paths, no
+`<rect>`), coverage-weighted mean ≈ 255 on all channels (white, never 0),
+and at least one pixel with `0 < alpha < 255` (anti-aliasing survived; resvg
+stores straight RGBA and the bake must not threshold it). Measured on the
+committed masters: 24 px — 301/576 painted, mean 255.0, 177 edge pixels;
+48 px — 1031/2304 painted, mean 255.0, 356 edge pixels.
+
+`check_assets.py --all` does not cover these files: it reads
+`tools/asset-pipeline/icons.json`, which is absent from this tree, and stops
+at `check_licences` (missing `assets/icons/LICENSE`) before reaching any
+icon check — the same failure with and without the two PNGs. No manifest
+was amended because there is none covering them.

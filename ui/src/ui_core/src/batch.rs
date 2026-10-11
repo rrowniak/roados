@@ -526,13 +526,21 @@ impl DrawCommand {
                 texture,
                 uv,
                 opacity,
+                tint,
                 ..
             } => BatchKey {
                 texture: Some(*texture),
                 // Exactly `1.0`, not "at least": an opacity that claims to be
                 // more than the image has is clamped at draw time, so it draws
                 // the same as `1.0` and is batched as blending all the same.
-                blend_mode: if uv.is_full() && *opacity == 1.0 {
+                // And an opaque alpha on the tint: a tinted image at full
+                // opacity over the whole texture asks for no blending of its
+                // own, exactly as an untinted one does. Anything else blends —
+                // a reduced opacity, a translucent tint, or a window into a
+                // texture. The tint itself is **not** in the key: it rides
+                // per-vertex, so icons of different colours off one texture
+                // stay one draw call.
+                blend_mode: if uv.is_full() && *opacity == 1.0 && tint.a == u8::MAX {
                     BlendMode::Opaque
                 } else {
                     BlendMode::Transparent
@@ -611,7 +619,7 @@ mod tests {
     }
 
     /// An image of `texture` that asks for no blending of its own: the whole
-    /// texture at full opacity.
+    /// texture at full opacity, untinted.
     fn image(texture: u32) -> DrawCommand {
         DrawCommand::Image {
             rect: Rect::new(0.0, 0.0, 1.0, 1.0),
@@ -619,6 +627,7 @@ mod tests {
             uv: UvRect::full(),
             opacity: 1.0,
             radius: 0.0,
+            tint: crate::paint::untinted(),
         }
     }
 
@@ -771,6 +780,7 @@ mod tests {
             },
             opacity: 1.0,
             radius: 0.0,
+            tint: crate::paint::untinted(),
         };
 
         let mut batcher = Batcher::new();
@@ -850,6 +860,91 @@ mod tests {
         let batched = batcher.finish();
         assert_eq!(batched.opaque.len(), 1);
         assert_eq!(batched.opaque[0].commands.len(), 2);
+    }
+
+    /// A tinted image of `texture` at full opacity over the whole texture,
+    /// through a window `uv` into it: what an atlas-resident icon records.
+    fn tinted_icon(texture: u32, uv: UvRect, tint: Color) -> DrawCommand {
+        DrawCommand::Image {
+            rect: Rect::new(0.0, 0.0, 1.0, 1.0),
+            texture: TextureId::new(texture),
+            uv,
+            opacity: 1.0,
+            radius: 0.0,
+            tint,
+        }
+    }
+
+    #[test]
+    fn two_icons_of_different_tints_share_one_batch() {
+        // One texture, two colours, one draw call: the tint rides per-vertex
+        // and is not in the key. Atlas windows, because that is what icons
+        // record — two windows into the shared texture, each tinted opaque.
+        let first_window = UvRect {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 0.1,
+            v1: 0.1,
+        };
+        let second_window = UvRect {
+            u0: 0.9,
+            v0: 0.9,
+            u1: 1.0,
+            v1: 1.0,
+        };
+        let mut batcher = Batcher::new();
+        batcher.add(tinted_icon(1, first_window, Color::new(255, 0, 0, 255)));
+        batcher.add(tinted_icon(1, second_window, Color::new(0, 255, 0, 255)));
+
+        let batched = batcher.finish();
+        assert!(batched.opaque.is_empty(), "a window into a texture blends");
+        assert_eq!(batched.transparent.len(), 1, "one texture, one key");
+        assert_eq!(batched.transparent[0].commands.len(), 2);
+        assert_eq!(batched.transparent[0].key.texture, Some(TextureId::new(1)));
+    }
+
+    #[test]
+    fn a_tinted_image_with_a_translucent_tint_blends() {
+        // The whole texture at full opacity, but the tint asks for blending:
+        // the batcher reads `tint.a` the way it reads the opacity scalar.
+        let mut batcher = Batcher::new();
+        batcher.add(DrawCommand::Image {
+            rect: Rect::new(0.0, 0.0, 1.0, 1.0),
+            texture: TextureId::new(1),
+            uv: UvRect::full(),
+            opacity: 1.0,
+            radius: 0.0,
+            tint: Color::new(255, 0, 0, 128),
+        });
+
+        let batched = batcher.finish();
+        assert!(
+            batched.opaque.is_empty(),
+            "a translucent tint is not opaque"
+        );
+        assert_eq!(batched.transparent.len(), 1);
+        assert_eq!(
+            batched.transparent[0].key.blend_mode,
+            BlendMode::Transparent
+        );
+    }
+
+    #[test]
+    fn an_untinted_full_texture_image_still_batches_as_opaque() {
+        // The neutral tint is the identity: what `Painter::image` records
+        // batches exactly as it did before there was a tint.
+        let mut batcher = Batcher::new();
+        batcher.add(image(7));
+
+        let batched = batcher.finish();
+        assert_eq!(batched.opaque.len(), 1);
+        assert_eq!(batched.opaque[0].key.blend_mode, BlendMode::Opaque);
+        assert_eq!(batched.opaque[0].key.texture, Some(TextureId::new(7)));
+        assert_eq!(batched.opaque[0].key.shader, ShaderKind::Image);
+        assert!(
+            batched.transparent.is_empty(),
+            "and it is not also in the group that blends"
+        );
     }
 
     #[test]

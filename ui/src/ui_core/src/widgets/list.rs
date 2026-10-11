@@ -1440,7 +1440,7 @@ pub fn index_at(content_y: f32, item_count: usize, item_height: f32) -> Option<u
 /// | --- | --- | --- |
 /// | [`Rect`](DrawCommand::Rect), [`RoundedRect`](DrawCommand::RoundedRect) | the rect's `x` and `y` | its width and height, and its radius |
 /// | [`Text`](DrawCommand::Text) | the run's `x` and `y`, its ramp's `start_x` and `end_x`, and its clip rect | the text, its colour, its font size and its tracking |
-/// | [`Image`](DrawCommand::Image) | the quad's rect | `uv`, `opacity`, `radius` and the texture — a `uv` is in the **texture's** coordinates and has no window position to move |
+/// | [`Image`](DrawCommand::Image) | the quad's rect | `uv`, `opacity`, `radius`, `tint` and the texture — a `uv` is in the **texture's** coordinates and has no window position to move |
 /// | [`Line`](DrawCommand::Line) | both ends | its width |
 /// | [`Circle`](DrawCommand::Circle) | the centre | its radius |
 /// | [`Path`](DrawCommand::Path) | every point | its width and whether it is closed |
@@ -1544,6 +1544,7 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 uv,
                 opacity,
                 radius,
+                tint,
             } => DrawCommand::Image {
                 rect: moved_rect(*rect, by),
                 texture: *texture,
@@ -1553,6 +1554,9 @@ pub fn translate_commands(commands: &[DrawCommand], by: Offset) -> Vec<DrawComma
                 uv: *uv,
                 opacity: *opacity,
                 radius: *radius,
+                // The tint is a colour, not a position: moving it would be
+                // tinting a different colour.
+                tint: *tint,
             },
             DrawCommand::Line {
                 start,
@@ -2522,6 +2526,7 @@ mod tests {
             uv,
             opacity: 0.25,
             radius: 6.0,
+            tint: crate::paint::untinted(),
         };
         let moved = translate_commands(std::slice::from_ref(&command), Offset::new(664.0, 120.0));
         let DrawCommand::Image {
@@ -2530,6 +2535,7 @@ mod tests {
             uv: moved_uv,
             opacity,
             radius,
+            tint,
         } = &moved[0]
         else {
             panic!("an image translated into something that is not an image");
@@ -2539,6 +2545,7 @@ mod tests {
         assert_eq!(*texture, TextureId::new(11));
         assert_eq!(*opacity, 0.25);
         assert_eq!(*radius, 6.0);
+        assert_eq!(*tint, crate::paint::untinted(), "and neither does the tint");
     }
 
     #[test]

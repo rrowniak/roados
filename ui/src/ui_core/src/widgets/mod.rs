@@ -178,6 +178,7 @@ pub mod chart;
 pub mod container;
 pub mod dialog;
 pub mod gauge;
+pub mod icon;
 pub mod image;
 pub mod keyboard;
 pub mod label;

@@ -998,7 +998,7 @@ impl Image {
     /// let commands = image.paint(Rect::new(32.0, 64.0, 300.0, 300.0));
     ///
     /// assert_eq!(commands.len(), 1, "an image is one command and nothing else");
-    /// let DrawCommand::Image { rect, texture, uv, opacity, radius } = &commands[0] else {
+    /// let DrawCommand::Image { rect, texture, uv, opacity, radius, .. } = &commands[0] else {
     ///     panic!("an image paints an image");
     /// };
     /// assert_eq!(*rect, Rect::new(32.0, 139.0, 300.0, 150.0), "letterboxed");
@@ -1598,6 +1598,7 @@ mod tests {
             uv,
             opacity,
             radius,
+            tint,
         } = command
         else {
             panic!("an image paints an image");
@@ -1607,6 +1608,11 @@ mod tests {
         assert!(uv.is_full(), "an image with its own texture is all of it");
         assert_eq!(opacity, 1.0);
         assert_eq!(radius, 0.0);
+        assert_eq!(
+            tint,
+            crate::paint::untinted(),
+            "an image painted without a tint carries the neutral one"
+        );
     }
 
     #[test]

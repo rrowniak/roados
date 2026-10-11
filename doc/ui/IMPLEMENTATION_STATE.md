@@ -10,52 +10,47 @@ task file wins and this file is corrected.
 `IMPLEMENTATION_STATE_DEMO.md` (the `TASK_UI_DEMO_*` sequence) and
 `doc/platform/IMPLEMENTATION_STATE.md` (`TASK_CROSSPLATFORM_*`, deferred).
 
-**Updated:** 2026-10-10.
+**Updated:** 2026-10-11.
 
 ## Current position
 
-**Nothing in flight** — no task of this sequence is half-implemented. The
-`DEMO` sequence is the one with work open; see `IMPLEMENTATION_STATE_DEMO.md`.
+**Nothing in flight.** Task 44 (`Icon` + image tint) landed 2026-10-11, early:
+`TASK_UI_DEMO_02.1` needed it and it was self-contained.
 
 **Next: task 43** — `doc/ui/TASK_UI_PRIM_43.md`, `TabBar` + `Button::selected`,
-closing gap `#7`. Then 44–50 and 52 in order; **51 waits on the operator** (see
-*Left over*). Ten task files in `doc/ui/` are the queue.
+closing gap `#7`. Then 45–50 and 52 in order; **51 waits on the operator** (see
+*Left over*). Nine task files in `doc/ui/` are the queue.
 
-**Suite:** `2079 passing / 1 ignored` as measured 2026-10-10 for task 53
-(`cargo test --all-features`); the ignored one is `layout_walk_cost`. The delta
-from `2085` is the loader and fixture tests this task removed and the new
-`gltf` tests it added. Re-measure before quoting it.
+**Suite:** `2121 passing / 1 ignored` as measured 2026-10-11 for tasks 44 +
+DEMO-02.1 (`cargo test --all-features`); the ignored one is `layout_walk_cost`.
+Re-measure before quoting it.
 
 ## Left over
 
-- **Task 53's accepted limit and two spec deviations**, recorded 2026-10-10.
-  The limit: `gltf` 1.4.1's internal `unwrap`/`panic!` are reachable from
-  malformed input, and `render::gltf::load_from_bytes` is public, so it does
-  **not** claim `MeshError`'s no-panic guarantee; the demo's asset is committed
-  and trusted. The deviations: (a) `load_model` concatenates the loader's
-  per-node meshes into **one** uploaded `Mesh` with absolute indices, because
-  the mesh store is a single shared VBO/IBO and `upload_mesh` is single-mesh
-  only — requirement 4's "uploads each part's `Mesh`" is realised as one upload
-  with five ranges and five node transforms; (b) the integration test compares
-  each wheel's transformed box to the **body's own** transformed box, not the
-  whole-model bounds the task names, because the body's own box is what a wheel
-  can be outside of.
+- **Task 44's two spec deviations** (2026-10-11). (a) `list.rs`, `scroll.rs`
+  and two exhaustive `Image` destructures each gained a `tint` line: the
+  task's file list assumed only the doc-test destructured exhaustively, and
+  the compiler disagreed. (b) `u32::try_from(ICON_SIZE)` does not exist in
+  std, so the atlas-fit test asserts in the float domain through `u16`
+  (`as` is banned).
+- **Task 53's limit and deviations** (2026-10-10). Limit: `gltf`'s internal
+  `unwrap`/`panic!` are reachable, so `load_from_bytes` claims no no-panic
+  guarantee; the demo asset is trusted. Deviations: one uploaded `Mesh` with
+  five ranges/transforms (single shared VBO/IBO); wheels compare against the
+  body's own box, not whole-model bounds.
 - **Nine tasks never reviewed** — `task-sequence.md` step 2, in a session
   separate from the implementer's, was never run for **32, 34, 35, 36, 37, 38,
-  39, 40, 41**. All are implemented, verified and committed. This is the largest
+  39, 40, 41**. All are implemented, verified and committed. The largest
   unpaid debt in the sequence.
-- **Task 51 needs the operator.** Gap `L10` (concave fill): ear clipping and a
-  stencil pass were both declined on 2026-10-02. Task 51 ships
-  `paint::polygon_is_convex` and escalates the reversal with its cost already
-  specified, so that "yes" is an instruction rather than another round.
-  `DEMO_APPLICATION.md` § *Library gaps* row `L10` stays open until it is.
-- **Task 41 left two acceptance criteria open**, both demo-side and both chosen
-  against the operator's instruction not to touch the demo: the named negative
-  test `no_gallery_page_records_a_backdrop`, which does not exist in
-  `ui/src/ui_demo/src/main.rs` (the property it would have held is covered for
-  the chrome by `every_chrome_node_records_commands_on_the_demo_page_and_on_no_other_page`),
-  and requirement 21's one-shot capture instrument — **no capture has ever shown
-  a backdrop drawing.** Both are in `doc/ui/done/TASK_UI_PRIM_41.md`.
+- **Task 51 needs the operator.** Gap `L10` (concave fill) was declined on
+  2026-10-02. Task 51 ships `paint::polygon_is_convex` and escalates the
+  reversal with its cost specified. Row `L10` stays open until then.
+- **Task 41 left two criteria open**, both demo-side: the negative test
+  `no_gallery_page_records_a_backdrop` (property covered for the chrome by
+  another gate) and requirement 21's one-shot capture — **no capture has ever
+  shown a backdrop drawing.** Both are in `doc/ui/done/TASK_UI_PRIM_41.md`.
 - **Two `cargo doc` warnings** stand in `ui_core`, pre-existing and unfixed:
   `render.rs` links the private `IDENTITY_MAT3`, `render/mesh.rs` has a redundant
   explicit link target. Recorded 2026-10-09, not re-measured since.
+
+(End of file - total 61 lines)

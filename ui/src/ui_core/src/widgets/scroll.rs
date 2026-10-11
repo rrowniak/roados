@@ -3431,6 +3431,7 @@ mod tests {
                 uv: crate::paint::UvRect::full(),
                 opacity: 1.0,
                 radius: 0.0,
+                tint: crate::paint::untinted(),
             }),
             Some(Rect::new(5.0, 6.0, 7.0, 8.0))
         );

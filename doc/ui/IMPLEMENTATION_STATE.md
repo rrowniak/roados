@@ -21,11 +21,25 @@ task file wins and this file is corrected.
 closing gap `#7`. Then 44–50 and 52 in order; **51 waits on the operator** (see
 *Left over*). Ten task files in `doc/ui/` are the queue.
 
-**Suite:** `2085 passing / 1 ignored` as last measured at `cb5de91`; the ignored
-one is `layout_walk_cost`. Re-measure before quoting it.
+**Suite:** `2079 passing / 1 ignored` as measured 2026-10-10 for task 53
+(`cargo test --all-features`); the ignored one is `layout_walk_cost`. The delta
+from `2085` is the loader and fixture tests this task removed and the new
+`gltf` tests it added. Re-measure before quoting it.
 
 ## Left over
 
+- **Task 53's accepted limit and two spec deviations**, recorded 2026-10-10.
+  The limit: `gltf` 1.4.1's internal `unwrap`/`panic!` are reachable from
+  malformed input, and `render::gltf::load_from_bytes` is public, so it does
+  **not** claim `MeshError`'s no-panic guarantee; the demo's asset is committed
+  and trusted. The deviations: (a) `load_model` concatenates the loader's
+  per-node meshes into **one** uploaded `Mesh` with absolute indices, because
+  the mesh store is a single shared VBO/IBO and `upload_mesh` is single-mesh
+  only — requirement 4's "uploads each part's `Mesh`" is realised as one upload
+  with five ranges and five node transforms; (b) the integration test compares
+  each wheel's transformed box to the **body's own** transformed box, not the
+  whole-model bounds the task names, because the body's own box is what a wheel
+  can be outside of.
 - **Nine tasks never reviewed** — `task-sequence.md` step 2, in a session
   separate from the implementer's, was never run for **32, 34, 35, 36, 37, 38,
   39, 40, 41**. All are implemented, verified and committed. This is the largest

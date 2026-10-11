@@ -1,35 +1,38 @@
 # Asset pipeline
 
 Offline path from two pinned third-party sources to the committed bytes the
-demo loads: a converter that turns Kenney's `sedan.glb` into the `ROADOSMF`
-model file task 38 defines, and a baker that turns 33 Lucide SVGs into 66
+demo loads: the pipeline **byte-copies** Kenney's `sedan.glb` and its
+`colormap.png` into the demo's `assets/`, and bakes 33 Lucide SVGs into 66
 baked PNGs — one per theme, at the exact on-screen size.
+
+**There is no model converter.** `ui_core::render::gltf` reads the GLB directly
+(task 53), keeping each node's transform and applying it at draw time, so the
+committed model is the upstream file itself and the only thing the pipeline does
+to it is copy it. The old project-owned model format, its converter, its
+manifest and the `.roados` artefacts are gone.
 
 Nothing here runs inside `ui_demo`. There is no `build.rs`, no runtime
 generation, no code path from these files into a frame. This directory
 produces bytes and is not a runtime dependency of anything.
 
-## The four commands, in order
+## The three commands, in order
 
 Paths are relative to the repository root:
 
 ```sh
 bash tools/asset-pipeline/fetch_upstream.sh
-python3 tools/asset-pipeline/glb_to_model.py --manifest tools/asset-pipeline/model.json
 python3 tools/asset-pipeline/bake_icons.py --manifest tools/asset-pipeline/icons.json
 python3 tools/asset-pipeline/check_assets.py --all
 ```
 
 `fetch_upstream.sh` downloads the two archives into `.asset-cache/` (skipping
 what is already there with the right hash, so the second run is offline) and
-extracts them. `glb_to_model.py` writes `ui/src/ui_demo/assets/sedan.roados`
-and byte-copies the colormap beside it. `bake_icons.py` writes the 66 PNGs
-under `ui/src/ui_demo/assets/icons/`. `check_assets.py --all` re-derives
-every claim from the committed bytes and stops at the first failure naming it.
-
-`python3 tools/asset-pipeline/glb_to_model.py --manifest <manifest> --print-layout`
-prints task 38's table as `model.json` records it, for diffing against
-`render/meshio.rs`'s module doc rather than comparing prose by eye.
+extracts them. `bake_icons.py` writes the 66 PNGs under
+`ui/src/ui_demo/assets/icons/`. `check_assets.py --all` re-derives every claim
+from the committed bytes and the cache, and stops at the first failure naming
+it. The model and the colormap are copied from the cache by hand (or by the
+same `fetch_upstream.sh` plus a `cp`); `check_assets.py --all` verifies the
+committed copies are byte-identical to the cached upstream files.
 
 ## Host tools: what must be installed, and why
 
@@ -42,8 +45,8 @@ line in a manifest, because there is none.
 
 | Tool | Pinned / seen version | Why it is needed | How to install | What breaks without it |
 |---|---|---|---|---|
-| `python3` | 3.13 (any 3.10+ works; scripts use stdlib + two packages only) | The pipeline's language: GLB parsing, PNG assertions, the gate | System package | Nothing runs |
-| `numpy` | 2.x (`pip install --user numpy`) | The GLB float arrays and the pixel means; the whole-file translation is elementwise, which is what makes the model output byte-stable | `python3 -m pip install --user numpy` | `glb_to_model.py` and both checkers refuse with a message naming it |
+| `python3` | 3.13 (any 3.10+ works; scripts use stdlib + two packages only) | The pipeline's language: PNG assertions and the gate | System package | Nothing runs |
+| `numpy` | 2.x (`pip install --user numpy`) | The pixel means behind the icon colour assertions | `python3 -m pip install --user numpy` | `bake_icons.py` and `check_assets.py` refuse with a message naming it |
 | `Pillow` | 12.x (`pip install --user pillow`) | The PNG writer behind the value assertions and the committed-file re-checks; the colormap is deliberately *not* round-tripped through it (byte copy) | `python3 -m pip install --user pillow` | `bake_icons.py` and `check_assets.py` refuse with a message naming it |
 | `resvg` | **0.48.1** | Rasterises **and tints** the SVGs. Without a stylesheet its output is valid, black, exit-0 — which is why the colour-mean assertion exists | `cargo install resvg --version 0.48.1`; the binary lands at `~/.cargo/bin/resvg`, outside this repository | `bake_icons.py` exits non-zero naming every path it tried (`$RESVG`, `PATH`, `$HOME/.cargo/bin/resvg`) |
 | `curl` | any | The fetcher (`-sSfL --retry 3`) | System package | `fetch_upstream.sh` cannot download; with a warm cache it is never called |
@@ -65,12 +68,17 @@ endorsed: it is a host tool like `curl`, not a workspace dependency.
 ## Decisions, where the next agent finds them
 
 - **Vendoring: not vendored, fetched on demand, verified by hash.**
-  4.8 MB + 7.3 MB of upstream against ~183 KB of committed output
-  (126,425 B model + 12,371 B colormap + ~45 KB icons). A hash is a
+  4.8 MB + 7.3 MB of upstream against ~230 KB of committed output
+  (172,216 B model + 12,371 B colormap + ~45 KB icons). A hash is a
   stronger guarantee than a blob (a vendored archive can be re-zipped
   silently); git keeps deleted blobs forever, so dropping archives later
   would not reclaim the cost. The build never needs the network — only
   *regenerating* does — and `.asset-cache/` makes the second run offline.
+- **The model is the upstream GLB, byte for byte.** `ui_core::render::gltf`
+  reads it at runtime and the demo applies each node's translation at draw
+  time, so no offline translation exists to be wrong. `check_assets.py`
+  verifies the committed `sedan.glb` and `colormap.png` are byte-identical to
+  their cached upstream files.
 - **One PNG per theme, baked, because tinting at draw time is unreachable.**
   `IMAGE_FRAGMENT_SHADER_SRC` ends `texel.rgb * opacity` — a scalar, never
   a colour — and `DrawCommand::Image`'s `opacity` doc says `0.5` is *the
@@ -101,20 +109,6 @@ endorsed: it is a host tool like `curl`, not a workspace dependency.
   archive's `LICENSE` carries an MIT section for Feather-derived icons,
   several of which are baked here. Both halves are quoted in
   `LICENSES.md` and both travel in `icons/LICENSE` (a verbatim copy).
-- **Weld at 1e-3, winding at >= 0.0 — both stated, both measured.**
-  Rounding positions to a millimetre gives the body's 358 distinct
-  positions with every welded edge at valence exactly 2; rounding to 1e-6
-  splits two near-coincident pairs, which is why the tolerance is in
-  `model.json` and not left to whoever re-measures. Winding agreement
-  treats a zero-area triangle as vacuously agreeing (it emits no
-  fragments); the single near-degenerate sliver (body tri 588, area
-  4.5e-9, dots exactly 0.0) passes `>= 0.0` and would fail strict `> 0.0`.
-- **No welding, no tangent, no recompute, no smoothing, no re-indexing,
-  no degenerate removal, no winding normalisation, no compression, no
-  sixth glass sub-mesh, no placement matrix.** Each is a named `# NO`
-  comment at the site in `glb_to_model.py` with its measured reason; the
-  sharpest is degenerate removal (6 zero-area tris cost 0.3 % of indices;
-  removing them opens 14 holes in a back-face-culled shell).
 
 ## Reviewing a regenerated set
 
@@ -158,21 +152,21 @@ one image whose differing region names the icon is one everybody does.
 
 ## Files
 
-- `README.md` — this file: the four commands and the decisions.
+- `README.md` — this file: the three commands and the decisions.
 - `fetch_upstream.sh` — pinning, fetching, the offline path, the
   two-URL allow-list (the trademark guard at the network edge).
 - `upstream.sha256` — the two recorded hashes; a mismatch is a stop
   condition, not a warning.
-- `model.json` — the model manifest: paths, merge order, origin
-  convention, and the `measured` block that is a guard, not documentation.
 - `icons.json` — the icon manifest: 33 mappings, one size, two hexes,
   and the `unmapped` record.
-- `glb_to_model.py` — the 3D converter. Reads the GLB subset and refuses
-  everything else; bakes node translations; merges in `merge_order`.
 - `bake_icons.py` — the icon baker. Input guard, two `resvg`
   invocations per icon, value assertions, atomic move into place.
 - `check_assets.py` — the gate (`--all`), the review mechanism
   (`--changed`), the manifest writer (`--write-manifest`).
+
+The model artefacts (`sedan.glb`, `colormap.png`) have no script: they are
+copied from the extracted cache. `check_assets.py --all` is what makes that a
+verifiable claim rather than a convention.
 
 No executable bit is required on any of these: every invocation is
 `bash ...` or `python3 ...`, so the command line in a reviewer's shell is

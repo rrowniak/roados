@@ -67,7 +67,7 @@ Requirements **11–12** (state-file record-keeping) are dropped and **13** is f
 - [ ] **Kills are reported per `.ai/agents/developer.md` § *Phase 3*;** task-specific: deleting `* v_tint.rgb`, keying the tint, dropping the `tint.a` clause, moving `IMAGE_TINT_OFFSET` to 32, and returning an un-intersected or top-left-anchored destination each fail a named test.
 - [ ] **Six pages `AE = 0` outside `y ≥ 680`**, `main.rs` diff empty, the `data` image traversing the changed vertex, stride, `location = 6` attribute and shader; no `gl.get_error()` on that frame; **no changed doc comment claims an icon is on screen.**
 - [ ] **Row `#4` is amended, dated and narrowed, not closed**, Blocks column kept and `L10` unamended.
-- [ ] **Nothing leaked:** only `widgets/mod.rs`, `paint.rs`, `render.rs`, `batch.rs`, `widgets/image.rs`, `icon.rs` and `DEMO_APPLICATION.md` change; no `bezier`/`cubic`/`quadratic`/`curve_to`/`glyph_outline`; `theme.rs` unchanged (`TOKEN_COUNT` **33**); no `render/matrix.rs`, `render/mesh.rs`, `render/meshio.rs`.
+- [ ] **Nothing leaked:** only `widgets/mod.rs`, `paint.rs`, `render.rs`, `batch.rs`, `widgets/image.rs`, `icon.rs` and `DEMO_APPLICATION.md` change; no `bezier`/`cubic`/`quadratic`/`curve_to`/`glyph_outline`;   `theme.rs` unchanged (`TOKEN_COUNT` **33**); no `render/matrix.rs`, `render/mesh.rs`, `render/gltf.rs`.
 
 ## Out of Scope
 

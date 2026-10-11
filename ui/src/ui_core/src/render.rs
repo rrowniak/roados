@@ -269,9 +269,9 @@
 
 pub mod blur;
 pub mod context;
+pub mod gltf;
 pub mod matrix;
 pub mod mesh;
-pub mod meshio;
 pub mod target;
 
 use std::collections::HashMap;
@@ -1124,12 +1124,12 @@ pub enum RenderError {
     /// renderer's, and that is [`RenderError::Gl`].
     Texture(String),
     /// A model file could not be loaded; carries the message from
-    /// [`meshio::MeshError`].
+    /// [`gltf::GltfError`].
     ///
-    /// The parse and the validation are `crate::render::meshio`'s decisions,
-    /// and its error carries the specifics — a magic that was not `ROADOSMF`,
-    /// a version this build does not read, a field name, a shortfall. The
-    /// upload half of a mesh is the renderer's, and that is
+    /// The parse and the subset validation are `crate::render::gltf`'s
+    /// decisions, and its error carries the specifics — a GLB container that
+    /// was not found, a `.gltf` JSON file, a field name, an unsupported node
+    /// transform. The upload half of a mesh is the renderer's, and that is
     /// [`RenderError::Gl`]. Folding the mesh fault into [`RenderError::Texture`]
     /// would put a mesh's message into a variant whose doc says it carries an
     /// image's.
@@ -1142,8 +1142,8 @@ impl From<TextureError> for RenderError {
     }
 }
 
-impl From<meshio::MeshError> for RenderError {
-    fn from(error: meshio::MeshError) -> Self {
+impl From<gltf::GltfError> for RenderError {
+    fn from(error: gltf::GltfError) -> Self {
         RenderError::Mesh(error.to_string())
     }
 }

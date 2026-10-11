@@ -233,7 +233,7 @@ what is specific to this task is that **no page is expected to move**.
   empty. **No multi-subpath, no holes, no `DrawCommand` change** — the nine variants
   stay nine.
 - **No mesh or GLB triangulation and nothing from tasks 34–40:** no
-  `render/mesh.rs`, `render/matrix.rs` or `render/meshio.rs`, no `MeshVertex`, no
+  `render/mesh.rs`, `render/matrix.rs` or `render/gltf.rs`, no `MeshVertex`, no
   `DrawCommand::Mesh`, and no change to the depth, culling, shader, loader or
   byte-format policy. **No `Icon`, no icon asset, no SVG, and no edit to task 39's
   or task 44's files** — task 44's § *Out of Scope* already names `L10` as a

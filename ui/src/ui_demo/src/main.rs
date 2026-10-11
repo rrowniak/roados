@@ -245,9 +245,9 @@ use ui_core::paint::UvRect;
 use ui_core::paint::{Color, DrawCommand, PaintState, Painter, Rect, TextureId};
 use ui_core::property::Property;
 use ui_core::render::context::Context;
+use ui_core::render::gltf;
 use ui_core::render::matrix::Mat4;
-use ui_core::render::mesh::{MeshId, SubMeshRange};
-use ui_core::render::meshio;
+use ui_core::render::mesh::{Mesh, MeshId, SubMesh, SubMeshRange};
 use ui_core::render::Renderer;
 use ui_core::texture::{Pixels, TextureCache, TextureHandle};
 use ui_core::theme::{PropertyValue, Theme, ThemeToken};
@@ -1523,8 +1523,8 @@ const CAR_DISTANCE: f32 = 7.0;
 /// the off-centre projection an asymmetric frustum would build, written as
 /// the translation matrix it is. A translation after the projection shifts
 /// NDC without touching `w`, so the divide still divides by the true depth.
-/// `the_car_records_five_mesh_commands_each_with_a_range_and_one_mvp` pins
-/// the arrival: the recorded matrix maps the orbit target to the rect's
+/// `the_car_records_one_command_per_part_with_its_own_mvp` pins
+/// the arrival: the recorded body matrix maps the orbit target to the rect's
 /// centre within a pixel.
 const CAR_SHIFT_X: f32 = 2.0 * (CAR_RECT.x + CAR_RECT.width * 0.5) / 1280.0 - 1.0;
 /// See [`CAR_SHIFT_X`]: the y half of the recentre.
@@ -2276,19 +2276,30 @@ struct Picture {
     source: ImageSource,
 }
 
-/// The uploaded car model: a mesh, its sub-mesh ranges, and its colormap.
+/// The uploaded car model: one command per node instance, and its colormap.
 ///
-/// The colormap is `renderer.load_texture` on the same search, and `ranges`
-/// carries **all** the file's sub-meshes **in file order**, with no field
-/// selecting one: the draw command's `range` is what selects one, and this
-/// struct must not pre-empt it.
+/// The colormap is `renderer.load_texture` on the same search. Each
+/// [`ModelPart`] carries **its node's placement** — a translation-only `Mat4`
+/// read from the GLB by `render::gltf` — so the car assembles from geometry
+/// authored at the origin and the four wheels land where the file's nodes put
+/// them. The geometry itself is uploaded once: all parts share one [`MeshId`]
+/// and index buffer, exactly as the mesh store's shared-buffer design intends.
 struct Model {
-    /// The uploaded mesh's handle.
-    mesh: MeshId,
-    /// Every sub-mesh range in the file, in file order.
-    ranges: Vec<SubMeshRange>,
+    /// One part per node instance the loader returned, in node order.
+    parts: Vec<ModelPart>,
     /// The colormap's texture.
     texture: TextureId,
+}
+
+/// One node instance's draw data: where in the shared mesh it draws, and where
+/// its node places it.
+struct ModelPart {
+    /// The shared uploaded mesh's handle.
+    mesh: MeshId,
+    /// This part's range in the shared index buffer.
+    range: SubMeshRange,
+    /// The node's placement, applied per command at draw time.
+    transform: Mat4,
 }
 
 /// The fits the demo's image cycles through, in the order `F` walks them.
@@ -2311,14 +2322,16 @@ const IMAGE_FIT_NAMES: [&str; 4] = ["Contain", "Cover", "Fill", "None"];
 const ASSET_FILE: &str = "demo.png";
 
 /// The file name of the demo's car model, under whichever directory is found.
-const ASSET_MODEL_FILE: &str = "sedan.roados";
+const ASSET_MODEL_FILE: &str = "sedan.glb";
 
 /// The file name of the demo's car model, under whichever directory is found.
 ///
-/// Beside the image in the same `assets/` directory, and the model file does
-/// not name it: the `ROADOSMF` format carries no texture reference, so the
-/// demo names the colormap, which is the arrangement the format's third reason
-/// argues for.
+/// Beside the image in the same `assets/` directory. The model is Kenney's GLB
+/// **copied byte for byte** — not a converted form — and it names its texture
+/// only by a relative URI (`Textures/colormap.png`) that the loader does not
+/// follow, so the demo names [`COLORMAP_FILE`] beside it and the draw command
+/// carries it. That is the same split the old project format argued for, now
+/// with the upstream file itself as the committed artefact.
 const COLORMAP_FILE: &str = "colormap.png";
 
 /// Where the image is, relative to a directory in the workspace's own layout.
@@ -2330,13 +2343,11 @@ const ASSET_RELATIVE: &str = "src/ui_demo/assets/demo.png";
 
 /// Where the car model is, relative to a directory in the workspace's own layout.
 ///
-/// `sedan.roados` is the `ROADOSMF` file task 39's converter writes from
-/// Kenney's `sedan.glb`. **It is not in this repository in this task** — the
-/// asset is 39's — so the demo's search finds nothing, `load_model` returns
-/// `None`, and the demo says so on stderr and in the model-status line. That is
-/// the expected state, and the reason the six pages are pixel-identical outside
-/// the frame-rate band. `ROADOS_ASSET_DIR` is how a caller supplies one.
-const ASSET_MODEL_RELATIVE: &str = "src/ui_demo/assets/sedan.roados";
+/// `sedan.glb` is Kenney's GLB **copied byte for byte** from the asset cache,
+/// not a converted form; `render::gltf` reads it directly. The loader keeps each
+/// node's transform, so the four wheels land where the file's nodes put them.
+/// `ROADOS_ASSET_DIR` is how a caller supplies a different file.
+const ASSET_MODEL_RELATIVE: &str = "src/ui_demo/assets/sedan.glb";
 
 /// The environment variable that overrides where the image is looked for.
 ///
@@ -2673,7 +2684,7 @@ fn load_picture(renderer: &mut Renderer) -> Option<Picture> {
 /// on stderr here, and one line in the model-status label
 /// ([`MODEL_STATUS_TEXT`]) saying so. A wireframe box is a shape a defect
 /// looks like, and a car-shaped `Mesh` built in Rust is an asset pipeline in
-/// `ui_demo`, which is task 39's and not this task's.
+/// `ui_demo`, which the asset pipeline does not do.
 fn load_model(renderer: &mut Renderer) -> Option<Model> {
     let candidates = model_candidates();
     let path = candidates.iter().find(|path| path.is_file());
@@ -2685,27 +2696,86 @@ fn load_model(renderer: &mut Renderer) -> Option<Model> {
         );
         return None;
     };
-    let mesh = match meshio::load_from_path(path) {
+    let loaded = match gltf::load_from_path(path) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
+            return None;
+        }
+    };
+    if loaded.is_empty() {
+        eprintln!(
+            "ui_demo: {}: the GLB holds no mesh node; standing in for it",
+            path.display()
+        );
+        return None;
+    }
+    // **One uploaded mesh, many placements.** The mesh store is a single shared
+    // vertex and index buffer (tasks 35 and 37), so the parts are concatenated
+    // into one `Mesh` with absolute indices and one absolute range each; every
+    // part keeps its node transform and is drawn through its own matrix. The
+    // geometry stays authored at the origin — nothing is baked — so the wheel
+    // matrices are what place the car.
+    let mut geometry = Mesh {
+        vertices: Vec::new(),
+        indices: Vec::new(),
+        sub_meshes: Vec::new(),
+    };
+    let mut placements = Vec::with_capacity(loaded.len());
+    for part in loaded {
+        let Ok(vertex_base) = u32::try_from(geometry.vertices.len()) else {
+            eprintln!("ui_demo: the car has more vertices than a MeshId can address");
+            return None;
+        };
+        let Ok(index_base) = u32::try_from(geometry.indices.len()) else {
+            eprintln!("ui_demo: the car has more indices than a MeshId can address");
+            return None;
+        };
+        let Ok(index_count) = u32::try_from(part.mesh.indices.len()) else {
+            eprintln!("ui_demo: a part of the car has more indices than a range can hold");
+            return None;
+        };
+        geometry.vertices.extend(part.mesh.vertices);
+        geometry.indices.extend(
+            part.mesh
+                .indices
+                .into_iter()
+                .map(|index| index + vertex_base),
+        );
+        geometry.sub_meshes.push(SubMesh {
+            name: part.name,
+            first_index: index_base,
+            index_count,
+        });
+        placements.push((
+            SubMeshRange {
+                first_index: index_base,
+                index_count,
+            },
+            part.transform,
+        ));
+    }
+    let mesh = match renderer.upload_mesh(geometry) {
         Ok(mesh) => mesh,
         Err(error) => {
             eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
             return None;
         }
     };
-    let ranges: Vec<SubMeshRange> = mesh.sub_meshes.iter().map(|sub| sub.range()).collect();
-    let mesh = match renderer.upload_mesh(mesh) {
-        Ok(mesh) => mesh,
-        Err(error) => {
-            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
-            return None;
-        }
-    };
-    // The colormap sits beside the model, and the model file does not name
-    // it: the format carries no texture reference, so the demo names it.
-    // Standalone rather than atlas-resident, because the mesh pass samples it
-    // by the model's own UVs: an atlas would pack it beside other images and
-    // the same UVs would land on somebody else's pixels, which is the black
-    // car the atlas path draws.
+    let parts = placements
+        .into_iter()
+        .map(|(range, transform)| ModelPart {
+            mesh,
+            range,
+            transform,
+        })
+        .collect();
+    // The colormap sits beside the model, and the GLB names it only by a
+    // relative URI the loader does not follow: the draw command carries the
+    // texture, so the demo names it. Standalone rather than atlas-resident,
+    // because the mesh pass samples it by the model's own UVs: an atlas would
+    // pack it beside other images and the same UVs would land on somebody
+    // else's pixels, which is the black car the atlas path draws.
     let colormap = path.parent().unwrap_or(Path::new("")).join(COLORMAP_FILE);
     let texture = match renderer.load_standalone_texture(&colormap) {
         Ok(texture) => texture.id(),
@@ -2717,11 +2787,7 @@ fn load_model(renderer: &mut Renderer) -> Option<Model> {
             return None;
         }
     };
-    Some(Model {
-        mesh,
-        ranges,
-        texture,
-    })
+    Some(Model { parts, texture })
 }
 
 /// Returns `paths` as one comma-separated string, for a message about where
@@ -8899,22 +8965,22 @@ impl Demo {
             .translated([-eye_x, -eye_y, -eye_z])
     }
 
-    /// Returns the matrix the car is drawn through, or `None` after saying
-    /// why.
+    /// Returns the matrix the car is drawn through before its own placement, or
+    /// `None` after saying why.
     ///
     /// `projection` is `Mat4::perspective` at `fov_y = π/4` with task 36's
     /// `near = 0.1` and `far = 20.0` unchanged, which is the promise 36's
     /// module docs made to this task by name. The aspect is the **window's**,
     /// not the rect's: the viewport is the window — task 37's
     /// `draw_mesh_batch` sets the scissor and never the viewport — so a rect
-    /// aspect would draw every wheel as an ellipse 12 % too tall. The model
-    /// matrix is the identity: the camera orbits and the car never moves, so
-    /// no per-sub-mesh transform is applied and there is no wheel spin.
+    /// aspect would draw every wheel as an ellipse 12 % too tall.
     ///
     /// The `shift` recentres the orbit into the rect — see [`CAR_SHIFT_X`] —
     /// because the perspective centres it on the window instead. The order is
-    /// `shift · projection · view · model`, the recentre outermost, so it
-    /// moves NDC without touching the depth the divide reads.
+    /// `shift · projection · view`, the recentre outermost, so it moves NDC
+    /// without touching the depth the divide reads. Each part then multiplies
+    /// its node transform on the right of this in [`Demo::car_commands`], so
+    /// the camera orbits and the wheels stay where the GLB's nodes put them.
     ///
     /// The `Option` is handled, not unwrapped: 36 returns `None` on every
     /// violated precondition, so this returns `None` with a printed reason
@@ -8932,41 +8998,42 @@ impl Demo {
         };
         let shift = Mat4::identity().translated([CAR_SHIFT_X, CAR_SHIFT_Y, 0.0]);
         let view = Self::orbit_view(self.car.widget.yaw.get(), self.car.widget.pitch.get());
-        let model = Mat4::identity();
-        Some(shift.multiply(&projection).multiply(&view).multiply(&model))
+        Some(shift.multiply(&projection).multiply(&view))
     }
 
-    /// Returns the five mesh commands that draw the car, or nothing.
+    /// Returns one mesh command per node instance, or nothing.
     ///
-    /// One command per sub-mesh in [`Model::ranges`]' file order, because
-    /// task 35's ranges are what selects a part and `DrawCommand::Mesh`
-    /// carries one range per command. All five carry the same `mvp` — the
-    /// model's own placement is task 39's baked node transforms, so no
-    /// per-sub-mesh transform is applied. `tint` is the premultiplied white
-    /// the colormap needs and `opacity` is `1.0`, so the mesh batches
-    /// `Opaque` and writes depth per task 37's table. With no model there is
-    /// no stand-in — `load_model`'s doc gives the four values a stand-in
-    /// would have to lie about — so this records nothing.
+    /// One command per [`ModelPart`], because each carries **its own node
+    /// transform**: `base` is `car_mvp`'s `shift · projection · view` and each
+    /// command's matrix is `base · part.transform`, so the car assembles from
+    /// geometry authored at the origin and the four wheels land where the GLB's
+    /// nodes put them. The five parts no longer share one matrix. `tint` is the
+    /// premultiplied white the colormap needs and `opacity` is `1.0`, so the
+    /// mesh batches `Opaque` and writes depth per task 37's table. With no
+    /// model there is no stand-in — `load_model`'s doc gives the four values a
+    /// stand-in would have to lie about — so this records nothing.
     ///
     /// `u_normal_matrix` is the identity 3×3, uploaded by the renderer itself:
-    /// the model matrix **is** the identity and the view is a rigid rotation
-    /// plus a translation, so the model→world 3×3 is the identity. The honest
-    /// limit rides along: if a later task rotates the *car* rather than
-    /// orbiting the camera, the normal matrix stops being the identity and
-    /// needs a real inverse transpose, which `Mat4` does not have.
+    /// every part's transform is a **translation**, which does not touch the
+    /// 3×3, and the view is a rigid rotation plus a translation, so the
+    /// model→world 3×3 is the identity. The honest limit rides along: if a
+    /// later task rotates the *car* rather than orbiting the camera, the normal
+    /// matrix stops being the identity and needs a real inverse transpose,
+    /// which `Mat4` does not have — and the loader refuses a rotating node
+    /// rather than shading it wrong.
     fn car_commands(&self) -> Vec<DrawCommand> {
         let Some(model) = &self.model else {
             return Vec::new();
         };
-        let Some(mvp) = self.car_mvp() else {
+        let Some(base) = self.car_mvp() else {
             return Vec::new();
         };
         let mut painter = Painter::new();
-        for range in &model.ranges {
+        for part in &model.parts {
             painter.mesh(
-                model.mesh,
-                *range,
-                mvp,
+                part.mesh,
+                part.range,
+                base.multiply(&part.transform),
                 Color::new(255, 255, 255, 255),
                 1.0,
                 model.texture,
@@ -15955,32 +16022,27 @@ mod tests {
     /// test that reads mesh commands builds the `Model` by hand instead. The
     /// handles are names a recording needs rather than promises, which is
     /// what `MeshId::new`'s own doc says: an unknown id draws nothing, and a
-    /// recording is what these tests read. Five ranges in file order, the way
-    /// `load_model` collects them out of the file.
+    /// recording is what these tests read. Five parts in node order, the shape
+    /// `load_model` builds: the body at the identity (so the first recorded
+    /// matrix is `car_mvp` itself) and the four wheels at four distinct
+    /// translations, so the per-part matrices differ.
     fn demo_with_model_on(page: Page) -> Demo {
+        let mesh = MeshId::new(3);
+        let part = |first_index: u32, index_count: u32, translation: [f32; 3]| ModelPart {
+            mesh,
+            range: SubMeshRange {
+                first_index,
+                index_count,
+            },
+            transform: Mat4::identity().translated(translation),
+        };
         let model = Model {
-            mesh: MeshId::new(3),
-            ranges: vec![
-                SubMeshRange {
-                    first_index: 0,
-                    index_count: 3,
-                },
-                SubMeshRange {
-                    first_index: 3,
-                    index_count: 6,
-                },
-                SubMeshRange {
-                    first_index: 9,
-                    index_count: 9,
-                },
-                SubMeshRange {
-                    first_index: 18,
-                    index_count: 12,
-                },
-                SubMeshRange {
-                    first_index: 30,
-                    index_count: 15,
-                },
+            parts: vec![
+                part(0, 3, [0.0, 0.0, 0.0]),
+                part(3, 6, [0.3, 0.3, 0.66]),
+                part(9, 9, [-0.3, 0.3, 0.66]),
+                part(18, 12, [0.3, 0.3, -0.66]),
+                part(30, 15, [-0.3, 0.3, -0.66]),
             ],
             texture: TextureId::new(7),
         };
@@ -16239,26 +16301,23 @@ mod tests {
     }
 
     #[test]
-    fn the_car_records_five_mesh_commands_each_with_a_range_and_one_mvp() {
+    fn the_car_records_one_command_per_part_with_its_own_mvp() {
         // The command-level half, matching task 34's rect-level half for the
-        // 2D pages: five commands, one per range of `Model::ranges` in file
-        // order, all through one matrix — which is the honest statement that
-        // no wheel spin exists.
+        // 2D pages: five commands, one per `Model::parts` entry in node order.
+        // **The former single-matrix claim is deliberately inverted**: each
+        // part carries its node transform, so the four wheels no longer share
+        // the body's matrix and no two wheels share one either.
         let demo = demo_with_model_on(Page::Data);
         let commands = demo.commands_at(demo.car.node());
         assert_eq!(
             commands.len(),
             5,
-            "one command per sub-mesh, and the model holds five ranges"
+            "one command per part, and the model holds five parts"
         );
-        let mut mvp = None;
-        for (command, range) in commands.iter().zip(
-            demo.model
-                .as_ref()
-                .expect("a model the fixture built")
-                .ranges
-                .iter(),
-        ) {
+        let model = demo.model.as_ref().expect("a model the fixture built");
+        let mut body_mvp = None;
+        let mut wheel_mvps: Vec<Mat4> = Vec::new();
+        for (command, part) in commands.iter().zip(model.parts.iter()) {
             let DrawCommand::Mesh {
                 mesh,
                 range: recorded,
@@ -16270,9 +16329,8 @@ mod tests {
             else {
                 panic!("the car records nothing but mesh commands, not {command:?}");
             };
-            let model = demo.model.as_ref().expect("a model the fixture built");
-            assert_eq!(*mesh, model.mesh, "the command draws the model's mesh");
-            assert_eq!(*recorded, *range, "through the range's own file order");
+            assert_eq!(*mesh, part.mesh, "the command draws the part's mesh");
+            assert_eq!(*recorded, part.range, "through the part's own range");
             assert_eq!(
                 *tint,
                 Color::new(255, 255, 255, 255),
@@ -16280,20 +16338,37 @@ mod tests {
             );
             assert_eq!(*opacity, 1.0, "opaque, so the mesh batches `Opaque`");
             assert_eq!(*texture, model.texture, "with the model's colormap");
-            match mvp {
-                None => mvp = Some(*command_mvp),
-                Some(first) => assert_eq!(
-                    *command_mvp, first,
-                    "and every sub-mesh shares the one matrix"
-                ),
+            // The base `car_mvp` is applied on the left of every part; the body
+            // is the identity part, so its command is the base and the wheels
+            // must each differ from it and from one another.
+            let base = demo
+                .car_mvp()
+                .expect("the car projection is never degenerate");
+            assert_eq!(base.multiply(&part.transform), *command_mvp);
+            if body_mvp.is_none() {
+                assert_eq!(
+                    part.transform,
+                    Mat4::identity(),
+                    "the body is the identity part"
+                );
+                body_mvp = Some(*command_mvp);
+            } else {
+                wheel_mvps.push(*command_mvp);
             }
         }
-        // The recorded matrix centres the orbit in the rect: the viewport is
-        // the window, so without the recentre the target would land on the
-        // window's own centre, outside the rect. Read off the first recorded
-        // command rather than a helper, so this pins what is drawn.
-        let first = mvp.expect("five commands recorded one matrix");
-        let centred = first
+        let body_mvp = body_mvp.expect("five commands recorded a body matrix");
+        for (i, a) in wheel_mvps.iter().enumerate() {
+            assert_ne!(*a, body_mvp, "wheel {i} shares the body's matrix");
+            for b in &wheel_mvps[i + 1..] {
+                assert_ne!(*a, *b, "two wheels share a matrix");
+            }
+        }
+        // The recorded body matrix centres the orbit in the rect: the viewport
+        // is the window, so without the recentre the target would land on the
+        // window's own centre, outside the rect. The body part is the identity,
+        // so its command is `car_mvp` read off a recorded command rather than a
+        // helper, which pins what is drawn.
+        let centred = body_mvp
             .transform_point([0.0, CAR_TARGET_Y, 0.0])
             .expect("the target is never on the camera plane");
         let (px, py) = (
@@ -16565,13 +16640,13 @@ mod tests {
         );
         assert_eq!(
             candidates[0],
-            PathBuf::from("/somewhere/else/sedan.roados"),
+            PathBuf::from("/somewhere/else/sedan.glb"),
             "the override directory names the model, not the image"
         );
         assert!(
             candidates
                 .iter()
-                .any(|path| path == Path::new("/w/ui/src/ui_demo/assets/sedan.roados")),
+                .any(|path| path == Path::new("/w/ui/src/ui_demo/assets/sedan.glb")),
             "and the workspace root is in there: {candidates:?}"
         );
         assert_eq!(

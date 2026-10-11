@@ -15,6 +15,16 @@ change.** The deliverable is a directory of committed bytes, the tooling that
 reproduces them, and — for one run after this task lands — the disappearance of
 the line *"car model not loaded"* that task 38 put there on purpose.
 
+**2026-10-10 — the model half of this task is removed by `TASK_UI_PRIM_53`.**
+`glb_to_model.py`, `model.json`, the `.roados` files and the model-measured
+check in `check_assets.py` are gone. The committed model is now Kenney's
+`sedan.glb` **copied byte for byte**, and `ui_core::render::gltf` reads it at
+runtime, keeping each node's translation for draw-time placement — so there is
+no offline translation left to be wrong. The icon half of this task (the baker,
+the two upstreams, the licences, the denylist) is unaffected. The reasoning
+above is kept, not overwritten; see the dated note in `TASK_UI_PRIM_38.md` for
+the reversal of the project format itself.
+
 ## Context
 
 This is the sixth of seven tasks (34–40) in the sequence that bring real-time 3D

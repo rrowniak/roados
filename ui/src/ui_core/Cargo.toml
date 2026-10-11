@@ -75,3 +75,12 @@ sdl3 = { version = "0.20", features = [
 ] }
 glow = "0.18"
 freetype-rs = { version = "0.38", features = ["bundled"] }
+# The glTF 2.0 / GLB reader: `render/gltf.rs` reads Kenney's `sedan.glb` bytes
+# directly, so node placement stays a runtime concern. `default-features = false`
+# drops `import`, which is `base64`, `image` and `urlencoding` — this reads a
+# GLB with one embedded buffer and no external files. `utils` is
+# `Primitive::reader` and the `read_*` helpers; `names` is `Mesh::name()` and
+# `Node::name()`. The operator approved `gltf` 2026-10-10; the justification and
+# alternatives are in `doc/ui/TASK_UI_PRIM_53.md` and
+# `doc/ui/PRIMITIVES_ARCHITECTURE.md` § Dependencies.
+gltf = { version = "1.4.1", default-features = false, features = ["utils", "names"] }

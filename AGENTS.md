@@ -40,9 +40,14 @@ exception it names the rule it excepts.
 
 - **Edition 2021, `rust-version = "1.85"`** — the floor `sdl3-sys` declares.
 - **No new dependency** without the operator, per `.ai/agents/developer.md`.
-  The approved **direct** dependencies are `sdl3 0.20`, `glow 0.18` and
-  `freetype-rs 0.38` (`bundled`); the resolved graph is larger and is not
-  gated. The font crate was approved by the operator 2026-09-30 for the
+  The approved **direct** dependencies are `sdl3 0.20`, `glow 0.18`,
+  `freetype-rs 0.38` (`bundled`) and `gltf 1.4.1`
+  (`default-features = false`, features `["utils", "names"]`, in `ui_core`
+  only); the resolved graph is larger and is not gated. The `gltf` reader
+  was approved by the operator 2026-10-10 for task 53's direct GLB read; it
+  replaces the project-owned `ROADOSMF` format and its offline converter, and
+  its justification and accepted panic limit are in `doc/ui/TASK_UI_PRIM_53.md`.
+  The font crate was approved by the operator 2026-09-30 for the
   task 11 text rendering pipeline; it builds its vendored C from source and
   statically links, like SDL3. HarfBuzz was approved then dropped the same
   day: its safe binding exposes no shaping API (only `unsafe` C calls), and

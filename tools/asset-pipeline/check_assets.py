@@ -2,12 +2,13 @@
 """The gate: every claim the asset pipeline makes, checked from committed bytes.
 
 What it is: one command that runs every check in order and stops at the
-first failure with the failing check named. It reads what the other two
-tools wrote and re-derives it — through their own readers, not copies —
-so a hand-edited artefact is caught, not just a bad run.
+first failure with the failing check named. It reads what the other tools
+wrote and re-derives it — through their own readers, not copies — so a
+hand-edited artefact is caught, not just a bad run.
 
-What it reads: tools/asset-pipeline/model.json and icons.json, the
-committed tree ui/src/ui_demo/assets/, LICENSES.md, and MANIFEST.sha256.
+What it reads: tools/asset-pipeline/icons.json, the committed tree
+ui/src/ui_demo/assets/, LICENSES.md, MANIFEST.sha256, and the cached
+upstream tree under .asset-cache/ (for the sedan GLB and its colormap).
 
 What it writes: nothing, except with --write-manifest (which regenerates
 ui/src/ui_demo/assets/MANIFEST.sha256) — and --changed only prints.
@@ -16,8 +17,8 @@ What it must not be used for: asserting PNG reproducibility by hash. The
 IDAT stream is zlib output and zlib is pinned by nothing here, so a PNG
 hash verifies this host's encoder, not the pipeline. PNGs are checked by
 pixels (size, mode, non-emptiness, coverage-weighted colour mean); only the
-byte-stable artefacts (sedan.roados, colormap.png) are checked by hash,
-and the output says which is which.
+byte-stable artefacts (sedan.glb, colormap.png) are checked by hash, and
+the output says which is which.
 
 Usage:
   check_assets.py --all             run checks 1-6, stop at the first failure
@@ -34,11 +35,21 @@ import sys
 TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS_DIR)
 import bake_icons
-import glb_to_model
 
 ROOT = os.path.dirname(os.path.dirname(TOOLS_DIR))
 ASSETS = os.path.join(ROOT, "ui", "src", "ui_demo", "assets")
 MANIFEST_PATH = os.path.join(ASSETS, "MANIFEST.sha256")
+# The byte-stable model artefacts and the cached upstream files they are
+# byte-for-byte copies of. The committed model is Kenney's GLB itself; there is
+# no converter between the two, so the check is a comparison of two files.
+CACHE = os.path.join(ROOT, ".asset-cache", "kenney_car-kit", "Models", "GLB format")
+STABLE_ASSETS = [
+    ("ui/src/ui_demo/assets/sedan.glb", os.path.join(CACHE, "sedan.glb")),
+    (
+        "ui/src/ui_demo/assets/colormap.png",
+        os.path.join(CACHE, "Textures", "colormap.png"),
+    ),
+]
 ATLAS_MAX_IMAGE = 512
 
 DENYLIST = ["tesla", "simple-icons", "brandfetch", "worldvectorlogo", "svglogo", "wikimedia"]
@@ -61,14 +72,28 @@ def load_json(name):
         return json.load(handle)
 
 
-def check_measured():
-    """1. model.json's measured block against what glb_to_model.py reads."""
-    manifest = load_json("model.json")
-    per_mesh, _whole, document = glb_to_model.read_model(ROOT, manifest)
-    failures = glb_to_model.measure_against_manifest(manifest, per_mesh, document)
-    if failures:
-        fail("measured", "; ".join(failures))
-    ok("measured", "model.json agrees with the GLB on every field")
+def check_upstream_bytes():
+    """1. The committed model artefacts are byte copies of the cached upstream.
+
+    The runtime reads Kenney's GLB directly (there is no offline converter), so
+    the guarantee this check enforces is that the committed `sedan.glb` and
+    `colormap.png` are byte-identical to the files under `.asset-cache/` that
+    `fetch_upstream.sh` pinned. A hand-edited committed model is caught here; a
+    moved upstream is caught by `upstream.sha256` at fetch time.
+    """
+    for committed, upstream in STABLE_ASSETS:
+        committed_path = os.path.join(ROOT, committed)
+        if not os.path.isfile(upstream):
+            fail("upstream", "cached upstream %s is absent; run fetch_upstream.sh"
+                 % os.path.relpath(upstream, ROOT))
+        with open(committed_path, "rb") as handle:
+            committed_bytes = handle.read()
+        with open(upstream, "rb") as handle:
+            upstream_bytes = handle.read()
+        if committed_bytes != upstream_bytes:
+            fail("upstream", "committed %s is not byte-identical to %s"
+                 % (committed, os.path.relpath(upstream, ROOT)))
+        ok("upstream", "committed %s is the cached upstream's bytes" % committed)
 
 
 def read_manifest_file():
@@ -86,14 +111,14 @@ def read_manifest_file():
 def check_hashes():
     """2. Byte-stable artefacts by hash, encoder-dependent ones by pixels.
 
-    sedan.roados and colormap.png are byte-stable (raw struct output, byte
-    copy): their hashes must match. icons/** are encoder-dependent (zlib):
-    their manifest lines must exist but their hashes are NOT compared here —
-    check_icons and check_pixels verify them instead. A gate that quietly
-    treated a PNG hash as a reproducibility claim would be worse than none.
+    sedan.glb and colormap.png are byte-stable (byte copies): their hashes must
+    match. icons/** are encoder-dependent (zlib): their manifest lines must
+    exist but their hashes are NOT compared here — check_icons and check_pixels
+    verify them instead. A gate that quietly treated a PNG hash as a
+    reproducibility claim would be worse than none.
     """
     entries = read_manifest_file()
-    stable = ["ui/src/ui_demo/assets/sedan.roados", "ui/src/ui_demo/assets/colormap.png"]
+    stable = [committed for committed, _upstream in STABLE_ASSETS]
     for path in stable:
         if path not in entries:
             fail("hashes", "MANIFEST.sha256 has no line for byte-stable %s" % path)
@@ -138,7 +163,7 @@ def check_licences():
 def denylist_hits():
     """4. The trademark denylist, with the one documented exemption.
 
-    The exemption is the unmapped record: model.json's and icons.json's
+    The exemption is the unmapped record: icons.json's
     unmapped[].reason and LICENSES.md's marked refusal section name the
     refused CC0 set and its car-maker mark to record the refusal, and a
     denylist that forbade the record of the refusal would forbid the
@@ -162,20 +187,20 @@ def denylist_hits():
                     found.append(entry["reason"])
         return found
 
-    for manifest_name in ("model.json", "icons.json"):
-        parsed = load_json(manifest_name)
-        reasons = unmapped_reasons(parsed)
-        with open(os.path.join(TOOLS_DIR, manifest_name), "r", encoding="utf-8") as handle:
-            for line in handle.read().splitlines():
-                lowered = line.lower()
-                if any(r.lower() in lowered for r in reasons):
-                    for term in DENYLIST:
-                        if term in lowered:
-                            exempted.append("%s unmapped reason: %s" % (manifest_name, term))
-                else:
-                    for term in DENYLIST:
-                        if term in lowered:
-                            hits.append("%s: %s" % (manifest_name, term))
+    manifest_name = "icons.json"
+    parsed = load_json(manifest_name)
+    reasons = unmapped_reasons(parsed)
+    with open(os.path.join(TOOLS_DIR, manifest_name), "r", encoding="utf-8") as handle:
+        for line in handle.read().splitlines():
+            lowered = line.lower()
+            if any(r.lower() in lowered for r in reasons):
+                for term in DENYLIST:
+                    if term in lowered:
+                        exempted.append("%s unmapped reason: %s" % (manifest_name, term))
+            else:
+                for term in DENYLIST:
+                    if term in lowered:
+                        hits.append("%s: %s" % (manifest_name, term))
 
     with open(os.path.join(ROOT, "LICENSES.md"), "r", encoding="utf-8") as handle:
         in_exempt = False
@@ -273,10 +298,10 @@ def generated_artefacts():
     """Exactly the pipeline's outputs: the model, the colormap, the icons.
 
     demo.png is a pre-existing committed asset and is not listed: the
-    manifest describes what the tools produce, so a reviewer can confirm
-    that everything else did not change.
+    manifest describes what the pipeline puts in the tree, so a reviewer can
+    confirm that everything else did not change.
     """
-    paths = ["ui/src/ui_demo/assets/sedan.roados", "ui/src/ui_demo/assets/colormap.png"]
+    paths = [committed for committed, _upstream in STABLE_ASSETS]
     for theme in ("dark", "light"):
         directory = os.path.join(ASSETS, "icons", theme)
         for name in sorted(os.listdir(directory)):
@@ -327,7 +352,7 @@ def main(argv):
         return cmd_changed()
     if arguments.write_manifest:
         return cmd_write_manifest()
-    for step in (check_measured, check_hashes, check_licences,
+    for step in (check_upstream_bytes, check_hashes, check_licences,
                  check_denylist, check_icons, check_pixels):
         step()
     print("check_assets: --all green")

@@ -29,6 +29,7 @@ sdl3 = { version = "0.20", features = [
 ] }
 glow = "0.18"
 freetype-rs = { version = "0.38", features = ["bundled"] }
+gltf = { version = "1.4.1", default-features = false, features = ["utils", "names"] }
 ```
 
 This is `ui_core`'s list, and `ui_demo` carries the same one minus `image`.
@@ -43,6 +44,7 @@ available, which is exactly the aarch64 configuration — see `CROSSBUILD.md`
 - `sdl3` with `image` pulls in `sdl3-image-sys`, which builds **SDL_image 3.4.6** from vendored C source and statically links it. Justified in *SDL_image* below; the operator approved it 2026-09-30.
 - `glow` loads GLES 3.1 function pointers via `SDL_GL_GetProcAddress` — compatible with SDL3-created contexts.
 - `freetype-rs` with `bundled` builds FreeType 2.13.2 from vendored C source (via `freetype-sys` + `cc`) and statically links it — glyph rasterisation, no system FreeType needed.
+- `gltf` is the glTF 2.0 / GLB reader behind `render/gltf.rs` (task 53): it reads Kenney's `sedan.glb` directly and keeps each node's transform for draw-time placement, replacing the project-owned model format and its offline converter. `default-features = false` drops `import`, which is `base64`, `image` and `urlencoding`; `utils` is `Primitive::reader` and the `read_*` helpers, `names` is `Mesh::name()`/`Node::name()`. MIT OR Apache-2.0, no C, no `unsafe` in the library; the operator approved it 2026-10-10, and the justification, alternatives and accepted panic limit are in `TASK_UI_PRIM_53.md`.
 - Text *shaping* (ligatures, complex scripts, bidirectional text) would need HarfBuzz. Its safe Rust binding exposes no shaping API — only `unsafe` C calls — so the operator declined `unsafe` and dropped the dependency 2026-09-30; FreeType alone renders Latin text. Revisit when a complex-script or bidi requirement lands.
 - **SDL3 subsystems are left at SDL's defaults. None is disabled.** `sdl3`
   0.20.0 re-exports no subsystem feature at all, so the manifest cannot express

@@ -192,6 +192,18 @@ reversible — **the format's own header carries a magic and a version precisely
 that a future GLB reader, or a `v2` with tangents, is a detectable change rather
 than a silent misparse.** Requirement 4 specifies that.
 
+**2026-10-10 — this decision is reversed by `TASK_UI_PRIM_53`.** The project
+format, its loader `render/meshio.rs`, its byte table, its tests, and the offline
+converter that produced the `.roados` files are removed: the demo now reads
+Kenney's `sedan.glb` directly through the `gltf` crate and applies each node's
+translation at draw time through the `Mat4` that `DrawCommand::Mesh` already
+carried. The reversal is the **detectable change the paragraph above
+anticipated** — the format's magic and version are what made it a deliberate,
+greppable edit rather than a silent misparse. The reasoning above is kept, not
+overwritten, because a done task's file is its record and the next reader needs
+the reasons this was once chosen. `TASK_UI_PRIM_39`'s converter is removed with
+it; see the note there.
+
 ### `MeshStore` compatibility, and what "returns a `Mesh`" means
 
 Task 35's split is the one this task must not blur: **`MeshStore` holds the CPU

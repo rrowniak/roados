@@ -157,7 +157,7 @@ impl SubMeshRange {
 /// buffer. `first_index` is an **index position**, not a byte offset.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SubMesh {
-    /// The sub-mesh's name, read from the model file (task 38).
+    /// The sub-mesh's name, from the GLB's node (task 53).
     pub name: String,
     /// The first index in the shared index buffer.
     pub first_index: u32,
@@ -303,7 +303,7 @@ pub fn sub_mesh_byte_offset(sub: &SubMesh) -> Result<i32, RenderError> {
 
 /// Validates that all indices in `mesh` fall within the slot's vertex range
 /// `[vertex_base, vertex_base + mesh.vertices.len())`. This is a pure
-/// function so it can be tested without a display. The loader produces
+/// function so it can be tested without a display. The caller produces
 /// indices already offset by the concatenation order; this check ensures
 /// the offsetting agrees with the store's layout.
 pub fn validate_mesh_indices_against_base(

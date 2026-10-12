@@ -1,6 +1,6 @@
-//! The demo's one icon: a white airbag master tinted at draw time.
+//! The demo's icons: white masters tinted at draw time.
 //!
-//! **Fill-based source, and its `{fill}` rule.** The source,
+//! The airbag source,
 //! `assets/icons/airbag-svgrepo-com.svg`, carries `fill="#000000"` on its
 //! root and no stroke: it is a filled silhouette, not a Lucide-style outline.
 //! The bake's stylesheet is therefore `svg{fill:#ffffff}*{fill:#ffffff}` —
@@ -21,11 +21,17 @@
 //! master offline every time a size moves is what it removes.
 //!
 //! **White master plus tint, and that is `TASK_UI_PRIM_44`'s pipeline.**
-//! One baked white master per size is loaded through
+//! One baked white master per size per glyph is loaded through
 //! `Renderer::load_texture`, and the caller-chosen colour arrives as the
 //! shader tint (`DrawCommand::Image::tint`): switching colour re-tints the
 //! same texture, and no per-colour PNG variant exists. The neutral tint is
 //! opaque white, which leaves non-icon images unchanged.
+//!
+//! The lock sources, `locked-svgrepo-com.svg` and `unlocked-svgrepo-com.svg`,
+//! carry the fill in an inline `style` rather than a presentation attribute,
+//! so their bake's stylesheet needs `!important`
+//! (`svg{fill:#ffffff !important}*{fill:#ffffff !important}`) to win over it;
+//! without it the bake exits 0 with a valid dark-grey PNG.
 //!
 //! **Drawn 1:1.** [`paint`] records one tinted-image command with
 //! [`ImageFit::Fill`](ui_core::widgets::image::ImageFit::Fill) on matching
@@ -116,6 +122,22 @@ pub fn baked_file(size_px: u32) -> &'static str {
         "airbag_24.png"
     } else {
         "airbag_48.png"
+    }
+}
+
+/// Returns the baked lock file for `locked`: the single 48 master.
+///
+/// One size only, unlike [`baked_file`]: the drawn side still follows the bar
+/// through [`drawn_side`], and a shorter bar minifies the master through the
+/// sampler ([`destination`]'s downscale-only licence) rather than taking a
+/// second bake. Keyed by state only — never by colour, which becomes the
+/// shader tint at paint time like every other icon here.
+#[must_use]
+pub fn lock_baked_file(locked: bool) -> &'static str {
+    if locked {
+        "locked_48.png"
+    } else {
+        "unlocked_48.png"
     }
 }
 
@@ -273,6 +295,12 @@ mod tests {
         let green = spec(48, Color::new(0, 255, 0, 255));
         assert_eq!(baked_file(red.size_px), baked_file(green.size_px));
         assert_eq!(baked_file(24), "airbag_24.png");
+    }
+
+    #[test]
+    fn lock_baked_file_resolves_both_states() {
+        assert_eq!(lock_baked_file(true), "locked_48.png");
+        assert_eq!(lock_baked_file(false), "unlocked_48.png");
     }
 
     #[test]

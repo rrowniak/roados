@@ -2374,6 +2374,20 @@ fn icon_image_relative() -> String {
     )
 }
 
+/// Where the lock master for `locked` is, relative to a directory in the
+/// workspace's own layout.
+///
+/// Beside the SVGs it was baked from, under `assets/icons/` like the airbag
+/// master: one white master per state, tinted at draw time, so the colour
+/// never touches the filesystem. One size only — the drawn side follows the
+/// bar and a shorter bar minifies through the sampler.
+fn lock_icon_relative(locked: bool) -> String {
+    format!(
+        "src/ui_demo/assets/icons/{}",
+        icons::lock_baked_file(locked)
+    )
+}
+
 /// The file name of the demo's car model, under whichever directory is found.
 const ASSET_MODEL_FILE: &str = "sedan.glb";
 
@@ -2529,6 +2543,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The status bar's icon master, loaded the same way: `None` leaves the
     // stand-in `Demo::new` built, which draws nothing and moves nothing.
     let icon_picture = load_icon_picture(&mut renderer);
+    // The lock's two masters, loaded the same way: a `None` leaves the
+    // transparent stand-in, which draws nothing and moves nothing.
+    let lock_locked_picture = load_lock_picture(&mut renderer, true);
+    let lock_unlocked_picture = load_lock_picture(&mut renderer, false);
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
     let mut demo = Demo::new(
@@ -2543,6 +2561,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // built: same node, same rect, so nothing moves when the bytes arrive.
     if let Some(picture) = icon_picture {
         demo.set_icon_picture(picture.texture, picture.source);
+    };
+    if let Some(picture) = lock_locked_picture {
+        demo.set_lock_locked_picture(picture.texture, picture.source);
+    };
+    if let Some(picture) = lock_unlocked_picture {
+        demo.set_lock_unlocked_picture(picture.texture, picture.source);
     };
     let run_for = run_seconds();
 
@@ -2993,6 +3017,55 @@ fn load_icon_picture(renderer: &mut Renderer) -> Option<Picture> {
         eprintln!(
             "ui_demo: {} not found; looked in {}",
             icons::baked_file(chrome_icon_size()),
+            join_paths(&candidates)
+        );
+        return None;
+    };
+    let texture = match renderer.load_standalone_texture(path) {
+        Ok(texture) => texture,
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
+            return None;
+        }
+    };
+    match ImageSource::of(renderer.textures(), texture) {
+        Some(source) => Some(Picture { texture, source }),
+        None => {
+            eprintln!(
+                "ui_demo: {}: the cache could not place it; standing in",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+/// Returns the paths the lock master for `locked` may be at, in the order it
+/// looks.
+///
+/// The same walk as [`icon_candidates`] with the lock's relative path.
+fn lock_candidates(locked: bool) -> Vec<PathBuf> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    let relative = lock_icon_relative(locked);
+    asset_candidates_from(&exe, std::env::var_os(ASSET_DIR_VAR).as_deref(), &relative)
+}
+
+/// Loads the lock master for `locked` and returns it, or `None` after saying
+/// why.
+///
+/// Beside [`load_icon_picture`] and in its shape — a standalone texture, so
+/// [`icons::paint`] samples the whole master rather than an atlas window —
+/// with the candidate list from [`lock_candidates`]. A missing file is
+/// non-fatal, exactly as a missing airbag master is.
+fn load_lock_picture(renderer: &mut Renderer, locked: bool) -> Option<Picture> {
+    let candidates = lock_candidates(locked);
+    let path = candidates.iter().find(|path| path.is_file());
+    let Some(path) = path else {
+        eprintln!(
+            "ui_demo: {} not found; looked in {}",
+            icons::lock_baked_file(locked),
             join_paths(&candidates)
         );
         return None;
@@ -3976,6 +4049,35 @@ struct Demo {
     /// has no handler of its own — flips [`Demo::airbag_on`], and the label
     /// and the foreground follow, orange for off and green for on.
     airbag_button: Button,
+    /// The lock toggle in the status bar's left group: an `Image` node for
+    /// layout and paint dispatch, holding the white master the tinted arm
+    /// draws. **A child of the lock button**, stacked at its content origin,
+    /// so the button's own background wraps it — the composition the airbag
+    /// badge uses. The paint arm picks the texture by [`Demo::locked`].
+    lock_image: Image,
+    /// What the lock icon is drawn as: the baked size and the opening colour.
+    /// The paint arm re-tints from [`Demo::lock_tint`] every frame, so this
+    /// is the size and the opening colour rather than a live value.
+    lock_spec: icons::IconSpec,
+    /// The tint the lock icon is drawn with: the theme's text ink, so the
+    /// glyph follows a theme switch with no clock of its own. Read at paint
+    /// time.
+    lock_tint: Property<Color>,
+    /// Whether the vehicle is locked, flipped by tapping the lock button.
+    /// Opens unlocked, matching the old `Unlocked` label it replaces.
+    locked: Property<bool>,
+    /// The lock button as a real button: a tap on it — or on its icon, which
+    /// has no handler of its own — flips [`Demo::locked`], and the paint arm
+    /// follows with the locked/unlocked master. Like the dock's buttons it is
+    /// not in the `Tab` order and carries no hover or press arms.
+    lock_button: Button,
+    /// The lock's two masters: standalone textures sampled whole by the paint
+    /// arm, selected by [`Demo::locked`]. Plain fields behind setters — see
+    /// [`Image::set_texture`] — so the callback flips only the bool and the
+    /// paint arm picks the texture.
+    lock_locked_texture: TextureHandle,
+    /// The unlocked master; see [`Demo::lock_locked_texture`].
+    lock_unlocked_texture: TextureHandle,
     /// The progress bar, at the foot of the band's left column.
     progress: Progress,
     /// Whether the progress bar is sliding rather than showing a value.
@@ -5754,7 +5856,7 @@ impl Demo {
                 .with_cross_axis_alignment(CrossAxisAlignment::Center),
         );
         status_bar.set_padding(&mut nodes, Padding::all(DOCK_PADDING));
-        // The four groups: the padlock, profile and sentry on the left; the
+        // The four groups: the lock toggle on the left; the
         // clock next; the ambient temperature between the clock and the
         // airbag badge; the badge alone at the end. **No `PRND` and no
         // battery here** — the photograph puts them in the car-status
@@ -5771,16 +5873,68 @@ impl Demo {
                 .with_spacing(CHROME_GROUP_SPACING)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center),
         );
-        for (text, color) in [
-            ("Unlocked", text_color.clone()),
-            ("Guest", text_color.clone()),
-            ("Sentry", muted_color.clone()),
-        ] {
-            let (label, handle) = chrome_label(&mut nodes, &metrics, text, color)?;
-            if !status_left.add_child(&mut nodes, handle) {
-                return Err("ui_demo: a status-bar label could not be attached");
+        // The lock toggle: **one icon button** where the `Unlocked`, `Guest`
+        // and `Sentry` labels were. A tap on it — or on its icon, which has
+        // no handler of its own — flips `locked`, and the paint arm follows
+        // with the locked/unlocked master. The glyph, not a colour, carries
+        // the state, so the tint is the theme's text ink and follows a theme
+        // switch with no clock of its own. Opens unlocked, matching the old
+        // `Unlocked` label.
+        let locked = Property::new(false);
+        let lock_spec = icons::IconSpec {
+            size_px: chrome_icon_size(),
+            color: theme
+                .get(ThemeToken::Text)
+                .as_color()
+                .unwrap_or(Color::new(255, 255, 255, 255)),
+        };
+        let lock_tint = text_color.clone();
+        let lock_stand_in = stand_in_icon_picture().ok_or("ui_demo: no lock image to show")?;
+        let lock_locked_texture = lock_stand_in.texture;
+        let lock_unlocked_texture = lock_stand_in.texture;
+        let mut lock_image = Image::new(&mut nodes, lock_stand_in.texture, lock_stand_in.source);
+        lock_image.set_fit(ImageFit::Fill);
+        lock_image.snap_to_state();
+        let mut lock_button = Button::new(&mut nodes, "");
+        lock_button.font_size.set(chrome_font());
+        lock_button.padding_h.set(AIRBAG_PADDING);
+        lock_button.padding_v.set(AIRBAG_PADDING);
+        lock_button.border_radius.set(chrome::CHROME_RADIUS);
+        let lock_side = icons::drawn_side(chrome_icon_size());
+        let lock_square = lock_side + AIRBAG_PADDING * 2.0;
+        let lock_square = lock_square.max(44.0);
+        {
+            let node = nodes
+                .get_mut(lock_button.handle())
+                .ok_or("ui_demo: the lock button's node is missing")?;
+            node.layout_mut()
+                .set_constraints(Constraints::tight(Size::new(lock_square, lock_square)));
+            node.layout_mut().set_padding(Padding::all(AIRBAG_PADDING));
+        }
+        lock_button.snap_to_state();
+        // **The bind goes after the snap**, on the airbag badge's argument:
+        // `snap_to_state` writes the foreground toward the button's style,
+        // and nothing ever calls `animate_to_state` on this button, so the
+        // binding survives.
+        lock_button.foreground = lock_tint.clone();
+        {
+            let flip = locked.clone();
+            lock_button.on_click = Callback::new(move || {
+                flip.set(!flip.get());
+            });
+        }
+        {
+            nodes
+                .get_mut(lock_image.handle())
+                .ok_or("ui_demo: the lock icon node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(Size::new(lock_side, lock_side)));
+            if !node::attach(&mut nodes, lock_button.handle(), lock_image.handle()) {
+                return Err("ui_demo: the lock icon could not be nested in its button");
             }
-            chrome_labels.push((label, handle));
+        }
+        if !status_left.add_child(&mut nodes, lock_button.handle()) {
+            return Err("ui_demo: the lock button could not be attached");
         }
         // The clock, alone: the temperature it used to share this group with
         // now stands between it and the badge.
@@ -6113,8 +6267,10 @@ impl Demo {
         chrome_drawn.extend(chrome_buttons.iter().map(Button::handle));
         chrome_drawn.extend(chrome_labels.iter().map(|(_, handle)| *handle));
         chrome_drawn.push(airbag_button.handle());
+        chrome_drawn.push(lock_button.handle());
         chrome_drawn.push(pager.handle());
         chrome_drawn.push(icon_image.handle());
+        chrome_drawn.push(lock_image.handle());
 
         // A stack: the background fills the window behind the row of pads, the
         // text panel and the controls layer, and all three are painted over it.
@@ -6601,6 +6757,13 @@ impl Demo {
             icon_tint,
             airbag_on,
             airbag_button,
+            lock_image,
+            lock_spec,
+            lock_tint,
+            locked,
+            lock_button,
+            lock_locked_texture,
+            lock_unlocked_texture,
             progress,
             progress_indeterminate,
             progress_focused,
@@ -6776,6 +6939,20 @@ impl Demo {
     pub fn set_icon_picture(&mut self, texture: TextureHandle, source: ImageSource) {
         self.icon_image.set_texture(texture);
         self.icon_image.set_source(source);
+    }
+
+    /// Swaps the lock's locked stand-in for the baked master `main` loaded.
+    /// The paint arm selects by [`Demo::locked`], so this only records the
+    /// texture; the rect never moves. A master that never arrives leaves the
+    /// transparent stand-in, which draws nothing.
+    pub fn set_lock_locked_picture(&mut self, texture: TextureHandle, _source: ImageSource) {
+        self.lock_locked_texture = texture;
+    }
+
+    /// Swaps the lock's unlocked stand-in for the baked master `main` loaded;
+    /// see [`Demo::set_lock_locked_picture`].
+    pub fn set_lock_unlocked_picture(&mut self, texture: TextureHandle, _source: ImageSource) {
+        self.lock_unlocked_texture = texture;
     }
 
     /// The four panel objects, in paint order.
@@ -8037,6 +8214,12 @@ impl Demo {
         if handle == self.airbag_button.handle() || handle == self.icon_image.handle() {
             return self.airbag_button.on_event(event);
         }
+        // The lock toggle: a real button, so a tap on it toggles the locked
+        // state — and a tap on its icon does too, because an `Image` has no
+        // handler of its own and the toggle is one widget to a finger.
+        if handle == self.lock_button.handle() || handle == self.lock_image.handle() {
+            return self.lock_button.on_event(event);
+        }
         // The dialog, and each of its actions, in the one place that turns a
         // handle into a widget. **The three numbers handed to `on_event` are the
         // three `paint` is handed, through the same three accessors** — that is
@@ -8756,6 +8939,22 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
+            // The lock toggle, keyed apart because its empty label is measured
+            // at the chrome size: `Button::paint` must see the same advance
+            // and line height the demo sized it with.
+            if handle == self.lock_button.handle() {
+                let advance = chrome_advance(&self.metrics);
+                let commands = match node.layout().rect() {
+                    Some(rect) => self.lock_button.paint(
+                        rect.into(),
+                        &advance,
+                        chrome_line_height(&self.metrics),
+                    ),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
             // The six widget nodes that paint themselves with nothing but a rect.
             // Each is the widget's **own** node, which is the whole of what it
             // takes to put one of them on the screen: `order` reaches it, the
@@ -8805,6 +9004,30 @@ impl Demo {
                             ..self.icon_spec
                         };
                         icons::paint(&spec, rect.into(), self.icon_image.texture().id())
+                    }
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The lock's icon, after the airbag's arm and in its shape: one
+            // white-master command tinted with the theme's text ink, through
+            // `icons::paint` rather than `Image::paint`. The state, not a
+            // second node, selects the master — the callback flips only the
+            // bool, so the glyph and the state cannot disagree.
+            if handle == self.lock_image.handle() {
+                let commands = match node.layout().rect() {
+                    Some(rect) => {
+                        let spec = icons::IconSpec {
+                            color: self.lock_tint.get(),
+                            ..self.lock_spec
+                        };
+                        let texture = if self.locked.get() {
+                            self.lock_locked_texture
+                        } else {
+                            self.lock_unlocked_texture
+                        };
+                        icons::paint(&spec, rect.into(), texture.id())
                     }
                     None => Vec::new(),
                 };
@@ -23830,6 +24053,76 @@ mod tests {
             48,
             "a tenth of the 1020-tall window is a 102-tall bar, whose half (51) \
              is nearest the large master"
+        );
+    }
+
+    #[test]
+    fn the_lock_asset_paths_name_the_baked_masters() {
+        // The asset paths and the bake table agree: the demo loads the file
+        // `lock_baked_file` names for each state, so a re-bake cannot
+        // silently leave the demo pointing at an old master.
+        for locked in [true, false] {
+            assert!(
+                lock_icon_relative(locked).ends_with(icons::lock_baked_file(locked)),
+                "the demo loads the baked master it draws: {}",
+                lock_icon_relative(locked)
+            );
+        }
+    }
+
+    #[test]
+    fn tapping_the_lock_toggles_between_unlocked_and_locked() {
+        // Through `Demo::offer_to`, the demo's own dispatcher, so the event
+        // travels the crate's route rather than a test's: a tap on the button
+        // — or on its icon, which borrows the button's handler — flips the
+        // state, and the paint arm follows with the other master.
+        let demo = laid_out_on(Page::Demo);
+        let tap = || InputEvent::new(InputEventKind::Tap, None);
+        assert!(!demo.locked.get(), "it opens unlocked");
+        assert_eq!(
+            demo.commands_at(demo.lock_image.handle()).len(),
+            1,
+            "the lock records exactly one command"
+        );
+
+        let mut first = tap();
+        assert!(
+            demo.offer_to(demo.lock_button.handle(), &mut first),
+            "the button takes the tap"
+        );
+        assert!(first.consumed());
+        assert!(demo.locked.get(), "and the state flipped to locked");
+
+        // A tap on the icon toggles back: the toggle is one widget to a finger.
+        let mut second = tap();
+        assert!(
+            demo.offer_to(demo.lock_image.handle(), &mut second),
+            "the icon borrows the button's handler"
+        );
+        assert!(second.consumed());
+        assert!(!demo.locked.get(), "and the state flipped back to unlocked");
+    }
+
+    #[test]
+    fn the_lock_replaces_the_three_status_labels() {
+        // The operator's call: the left group holds the lock toggle and no
+        // text — no `Unlocked`, no `Guest`, no `Sentry`.
+        let demo = laid_out_on(Page::Demo);
+        for text in ["Unlocked", "Guest", "Sentry"] {
+            assert!(
+                demo.chrome_labels
+                    .iter()
+                    .all(|(label, _)| label.label.text.get() != text),
+                "no chrome label reads {text:?}"
+            );
+        }
+        assert!(
+            demo.node_rect(demo.lock_button.handle()).is_some(),
+            "the lock button is laid out"
+        );
+        assert!(
+            demo.node_rect(demo.lock_image.handle()).is_some(),
+            "and its icon is laid out"
         );
     }
 

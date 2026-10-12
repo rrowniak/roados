@@ -205,3 +205,32 @@ committed masters: 24 px — 301/576 painted, mean 255.0, 177 edge pixels;
 at `check_licences` (missing `assets/icons/LICENSE`) before reaching any
 icon check — the same failure with and without the two PNGs. No manifest
 was amended because there is none covering them.
+
+## The lock masters (2026-10-12)
+
+Two fill-based SVGs beside the airbag source —
+`ui/src/ui_demo/assets/icons/locked-svgrepo-com.svg` and
+`unlocked-svgrepo-com.svg` — baked to one white master each
+(`locked_48.png`, `unlocked_48.png`). The demo loads the pair for the status
+bar's lock toggle and tints at draw time, so there is one file per state and
+no per-colour variant. One size only: the drawn side follows the bar and a
+shorter bar minifies through the sampler (the airbag's 0.85 exception,
+generalised). Exact commands, run from the repository root:
+
+```sh
+printf 'svg{fill:#ffffff !important}*{fill:#ffffff !important}' > /tmp/lock_white.css
+for stem in locked unlocked; do
+  /home/dev/.cargo/bin/resvg --stylesheet /tmp/lock_white.css \
+    --width 48 --height 48 --shape-rendering geometricPrecision \
+    ui/src/ui_demo/assets/icons/$stem-svgrepo-com.svg \
+    ui/src/ui_demo/assets/icons/${stem}_48.png
+done
+```
+
+Why `!important` here and not in the airbag bake: the lock paths carry the
+fill in an inline `style` (`fill:#373737`), which beats a stylesheet without
+it — the bake exits 0 with a valid dark-grey PNG (coverage-weighted mean
+≈ 55). Same pixel guard as the airbag: RGBA at the exact size, corner alpha
+0, coverage-weighted mean 255.0 on all channels, at least one pixel with
+`0 < alpha < 255`. Measured on the committed masters: locked 48 px —
+1158/2304 painted, 76 edge; unlocked 48 px — 1011/2304, 39 edge.

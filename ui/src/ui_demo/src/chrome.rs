@@ -27,13 +27,14 @@
 //!    translucent surface is `(c · a) / 255` per channel, done in `u16` so the
 //!    product is not truncated before the divide.
 //!
-//! Everything here is a pure function of a rect and a palette: no arena is
+//! Everything here is a pure function of a rect and a colour: no arena is
 //! touched, which is what lets the arithmetic be verified before `main` builds a
 //! node.
 
 use ui_core::arena::Handle;
 use ui_core::layout::Size;
 use ui_core::paint::{BackdropMode, Color, DrawCommand, Painter, Rect};
+use ui_core::property::Property;
 use ui_core::theme::{Theme, ThemeToken};
 
 /// The alpha of the bar and pane surfaces: translucent, and not 255.
@@ -126,13 +127,10 @@ pub const DOCK_GLYPHS: [&str; DOCK_SLOTS] = ["C", "T", "A", "L", "V"];
 
 /// The chrome's colours, read from the theme and never invented.
 ///
-/// **`premultiplied` on `surface`, and nothing else.** Every other field is
-/// opaque: `Color` is documented in `ui/src/ui_core/src/property.rs` as
-/// premultiplied, and a translucent colour is a premultiplication the caller
-/// performs. A panel at `Surface` with `a = 200` written straight into `Color`
-/// composites as `245 * 200 = 49 000` per channel under
-/// `GL_ONE, GL_ONE_MINUS_SRC_ALPHA` — far too bright — and no assertion on a
-/// `Color` field catches it.
+/// Test-only: production panels bind their surface through [`bound_surface`]
+/// instead of copying a palette, so this struct exists to name the expected
+/// values those bindings arrive at.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChromePalette {
     /// The bar and pane surface, translucent. Premultiplied.
@@ -150,9 +148,9 @@ pub struct ChromePalette {
 
 /// Returns the chrome's palette, read from `theme`.
 ///
-/// Reads `theme.get(token).as_color().unwrap_or(fallback)` — the `fn themed_color`
-/// precedent in `main.rs` — and **`surface` is the only [`premultiplied`] call
-/// site in the module**.
+/// Test-only expected values for [`bound_surface`]: reads
+/// `theme.get(token).as_color().unwrap_or(fallback)`.
+#[cfg(test)]
 #[must_use]
 pub fn chrome_palette(theme: &Theme) -> ChromePalette {
     let read = |token: ThemeToken, fallback: Color| theme.get(token).as_color().unwrap_or(fallback);
@@ -164,6 +162,26 @@ pub fn chrome_palette(theme: &Theme) -> ChromePalette {
         active: read(ThemeToken::Primary, Color::new(187, 134, 252, 255)),
         inactive: read(ThemeToken::Border, Color::new(51, 51, 51, 255)),
     }
+}
+
+/// Returns the chrome surface colour bound to the theme's `Surface` token.
+///
+/// Premultiplied with [`CHROME_ALPHA`] on every recompute, so a theme switch
+/// reaches the panels through the property graph — the same link the card of
+/// pads and the tab bar use — rather than as an instant assignment. `Color`
+/// is premultiplied alpha, so a translucent surface is `(c · a) / 255` per
+/// channel: a panel at `Surface` with `a = 200` written straight into `Color`
+/// would composite far too bright under `GL_ONE, GL_ONE_MINUS_SRC_ALPHA`.
+#[must_use]
+pub fn bound_surface(theme: &Theme) -> Property<Color> {
+    let surface = theme.property(ThemeToken::Surface);
+    Property::bind(move || {
+        let color = surface
+            .get()
+            .as_color()
+            .unwrap_or(Color::new(30, 30, 30, 255));
+        premultiplied(color, CHROME_ALPHA)
+    })
 }
 
 /// Returns `color`'s channels multiplied by `alpha / 255`, in `u16`.
@@ -183,14 +201,18 @@ fn premultiplied(color: Color, alpha: u8) -> Color {
     Color::new(channel(color.r), channel(color.g), channel(color.b), alpha)
 }
 
-/// A chrome surface: its node, the radius it is drawn with, and its palette.
+/// A chrome surface: its node, the radius it is drawn with, and its colour.
+///
+/// The surface is bound to the theme's `Surface` token (see [`bound_surface`]),
+/// so a theme switch crossfades the panels over the theme's own transition
+/// with nothing told — the card of pads and the tab bar follow the same link.
 pub struct Chrome {
     /// The node the surface is drawn on.
     pub node: Handle,
     /// The corner radius the fill is rounded to.
     pub radius: f32,
-    /// The surface's colours.
-    pub palette: ChromePalette,
+    /// The translucent surface colour. Premultiplied.
+    pub surface: Property<Color>,
 }
 
 /// Returns the commands that paint a chrome surface within `rect`.
@@ -205,14 +227,15 @@ pub struct Chrome {
 /// would read as black over the map.
 #[must_use]
 pub fn chrome_surface_commands(rect: Rect, chrome: &Chrome) -> Vec<DrawCommand> {
+    let surface = chrome.surface.get();
     let mut painter = Painter::new();
     painter.backdrop(
         rect,
         BackdropMode::Blur(BACKDROP_SIGMA),
-        chrome.palette.surface,
+        surface,
         chrome.radius,
     );
-    painter.rounded_rect(rect, chrome.radius, chrome.palette.surface);
+    painter.rounded_rect(rect, chrome.radius, surface);
     painter.finish()
 }
 
@@ -248,21 +271,21 @@ mod tests {
     use ui_core::node::{self, WidgetNode};
     use ui_core::theme::PropertyValue;
 
-    /// Builds a `Chrome` whose palette is `palette`. The node is a real arena
+    /// Builds a `Chrome` whose surface is `surface`. The node is a real arena
     /// handle so the struct is the production one, but nothing in
     /// [`chrome_surface_commands`] reads it.
-    fn chrome_with(palette: ChromePalette) -> Chrome {
+    fn chrome_with(surface: Property<Color>) -> Chrome {
         let mut nodes: Arena<WidgetNode> = Arena::new();
         let node = node::create(&mut nodes, LayoutState::new());
         Chrome {
             node,
             radius: CHROME_RADIUS,
-            palette,
+            surface,
         }
     }
 
     fn dark_chrome() -> Chrome {
-        chrome_with(chrome_palette(&Theme::dark()))
+        chrome_with(bound_surface(&Theme::dark()))
     }
 
     #[test]
@@ -337,6 +360,22 @@ mod tests {
     }
 
     #[test]
+    fn a_bound_surface_follows_a_theme_switch() {
+        let theme = Theme::dark();
+        let surface = bound_surface(&theme);
+        let dark = chrome_palette(&Theme::dark()).surface;
+        let light = chrome_palette(&Theme::light()).surface;
+        assert_eq!(surface.get(), dark, "it starts on the dark surface");
+        theme.switch_to(Theme::light(), 100);
+        theme.tick(std::time::Duration::from_millis(50));
+        let middle = surface.get();
+        assert_ne!(middle, dark, "half way through, it has moved");
+        assert_ne!(middle, light, "and has not arrived yet");
+        theme.tick(std::time::Duration::from_millis(50));
+        assert_eq!(surface.get(), light, "at the end it is the light surface");
+    }
+
+    #[test]
     fn a_chrome_surface_records_a_rounded_backdrop_before_its_rounded_fill() {
         let chrome = dark_chrome();
         let rect = Rect::new(10.0, 20.0, 300.0, 48.0);
@@ -364,8 +403,8 @@ mod tests {
         assert_eq!(*backdrop_rect, rect);
         assert_eq!(*fill_rect, rect);
         assert_eq!(*mode, BackdropMode::Blur(BACKDROP_SIGMA));
-        assert_eq!(*tint, chrome.palette.surface);
-        assert_eq!(*color, chrome.palette.surface);
+        assert_eq!(*tint, chrome.surface.get());
+        assert_eq!(*color, chrome.surface.get());
         // **The radius is on both, and that is the whole point**: the composite
         // must be masked to the same rounded shape the fill draws, or the four
         // empty corners get tinted black over the map.

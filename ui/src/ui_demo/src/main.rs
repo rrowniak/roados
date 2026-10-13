@@ -5847,7 +5847,6 @@ impl Demo {
         // [`crate::chrome`]. The two surfaces are `Chrome` values the paint
         // walk records through `chrome_surface_commands`; their children are
         // ordinary `Container`s and widgets.
-        let chrome_palette_now = chrome::chrome_palette(&theme);
         // **Nicely rounded corners on every panel**, in both themes, and the map
         // background follows with the chrome: the radius is a shape rather than
         // an appearance, so it does not move with the theme.
@@ -6242,17 +6241,17 @@ impl Demo {
             Chrome {
                 node: status_panel.handle(),
                 radius: chrome_radius,
-                palette: chrome_palette_now,
+                surface: chrome::bound_surface(&theme),
             },
             Chrome {
                 node: pane_panel.handle(),
                 radius: chrome_radius,
-                palette: chrome_palette_now,
+                surface: chrome::bound_surface(&theme),
             },
             Chrome {
                 node: dock_panel.handle(),
                 radius: chrome_radius,
-                palette: chrome_palette_now,
+                surface: chrome::bound_surface(&theme),
             },
         ];
         // Every node in the chrome's subtrees, in paint order. The three surfaces
@@ -9897,16 +9896,10 @@ impl Demo {
         // "the dark theme if `dark`" in one file is the pair of lists
         // `GALLERY_SHORTCUTS` exists to prevent.
         let new_theme = self.target_theme();
-        // The chrome's three palettes are re-read here for the same reason every
-        // other palette in this function is: `ChromePalette` is a plain value, so
-        // a theme switch has to announce the new one. The chrome's *labels* are
-        // bound to the property graph and need no line.
-        let chrome_palette = chrome::chrome_palette(&new_theme);
-        // **The corners do not move with the theme** — every panel is rounded in
-        // both — so only the palette is re-read here.
-        for chrome in &mut self.chrome_nodes {
-            chrome.palette = chrome_palette;
-        }
+        // The chrome's three surfaces need no line here: each is bound to the
+        // theme's `Surface` token (see `chrome::bound_surface`), so the property
+        // graph carries the switch to them with nothing told — the card of pads
+        // and the tab bar follow the same link.
         // Read every palette from `new_theme`, **before** `switch_to` consumes it.
         // The switch animates the theme's own tokens, so a palette read after it
         // is the palette the theme is leaving, which re-aims every widget at what
@@ -24597,17 +24590,37 @@ mod tests {
     #[test]
     fn a_theme_switch_reaches_every_chrome_surface() {
         let mut demo = laid_out_on(Page::Demo);
-        let before: Vec<chrome::ChromePalette> = demo
-            .chrome_nodes
-            .iter()
-            .map(|chrome| chrome.palette)
-            .collect();
-        assert_eq!(before.len(), 3, "three chrome surfaces");
+        let dark = chrome::chrome_palette(&Theme::dark()).surface;
+        let light = chrome::chrome_palette(&Theme::light()).surface;
+        assert_eq!(demo.chrome_nodes.len(), 3, "three chrome surfaces");
+        for chrome in &demo.chrome_nodes {
+            assert_eq!(
+                chrome.surface.get(),
+                dark,
+                "every panel starts on the dark surface"
+            );
+        }
         demo.toggle_theme();
+        // Half way through the 300 ms switch the panels are mid-crossfade,
+        // neither on the old theme nor on the new one.
+        demo.frame(WINDOW, Duration::from_millis(150));
         for (index, chrome) in demo.chrome_nodes.iter().enumerate() {
+            let middle = chrome.surface.get();
             assert_ne!(
-                chrome.palette.surface, before[index].surface,
+                middle, dark,
                 "the theme switch reached chrome surface {index}"
+            );
+            assert_ne!(
+                middle, light,
+                "chrome surface {index} crossfades instead of jumping"
+            );
+        }
+        demo.frame(WINDOW, Duration::from_millis(150));
+        for (index, chrome) in demo.chrome_nodes.iter().enumerate() {
+            assert_eq!(
+                chrome.surface.get(),
+                light,
+                "chrome surface {index} arrived at the light surface"
             );
         }
     }

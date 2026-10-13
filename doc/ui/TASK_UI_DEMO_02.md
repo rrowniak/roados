@@ -6,6 +6,20 @@
 > no per-task record section, no task-table row, no deviations list, no history.
 > Where this file asks for one, put the durable fact in the code's doc, in this
 > file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+>
+> **2026-10-12 — the car-status pane's contents are removed on the operator's
+> direction, down to the bare surface: its PRND row, drive-mode strip,
+> indicator column, card hosts' labels (hosts stay), pager, and their chrome
+> labels, page rows and paint arms are gone, with the pager/indicator helpers
+> and their tests in `chrome.rs`. The surface itself stands, empty — the
+> operator expects to see the panel surface with nothing in it — with the
+> status bar and the dock untouched. This file stays the spec for the chrome
+> that remains and for the pane's rebuild.
+>
+> **2026-10-12 — the rebuild starts: the pane's header row.** `PRND` with Park
+> green on the left (bold was tried first; the recorded weight never reached
+> the pixels, so selection is a colour), battery percent (`70%`, mocked) and
+> a procedural level icon on the right. No other contents yet.**
 
 ## Goal
 

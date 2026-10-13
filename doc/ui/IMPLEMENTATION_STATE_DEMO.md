@@ -7,28 +7,31 @@ task file wins.
 
 **Sequence:** `doc/ui/TASK_UI_DEMO_01..05.md`, designed by
 `doc/ui/DEMO_APPLICATION.md`. The library sequence beside it is
-`doc/ui/IMPLEMENTATION_STATE.md`. **Updated:** 2026-10-11.
+`doc/ui/IMPLEMENTATION_STATE.md`. **Updated:** 2026-10-12.
 
 ## Current position
 
 **`TASK_UI_DEMO_02` is in progress** — the three chrome regions are drawn over
-the map and committed as `cb5de91`, *"partially implemented, layout not
-finished"*. Not reviewed (`task-sequence.md` step 2). Its file is still in
-`doc/ui/`, not `done/`.
+the map, *"partially implemented, layout not finished"*. Not reviewed. Its
+file is still in `doc/ui/`, not `done/`.
 
-**`TASK_UI_DEMO_02.1` is done** (2026-10-11, unreviewed): the airbag icon —
-48 px white master, theme-tinted — sits in the status bar's airbag badge
-beside its two-line text (operator redirect from the task file's dock cell).
-Only the airbag exists. Built on task 44, landed the same day.
+**`TASK_UI_DEMO_03` was built and then removed** (2026-10-12): the pane, its
+three states and its 3-D car landed uncommitted, the operator rejected the
+looks, and then the rest of the left panel's contents followed — task 02's
+chrome pane subtree (PRND row, drive strip, indicators, card labels, pager)
+is gone too. What stands: the pane's bare translucent surface (empty, as the
+operator expects), the `DATA_*` rename, the status bar, the dock, and the
+map. The task files stay in `doc/ui/` as the rebuild spec. Not reviewed.
 
-**Next: DEMO-03** — the car-status pane's three states, then 04 and 05. It
-builds on DEMO-02's `panel.rs` page object model and `chrome.rs`.
+**Next: DEMO-03 rebuilt** — the car-status pane from scratch on the clean
+base (map + translucent chrome), then 04 and 05. First row landed 2026-10-12:
+`PRND` with Park green, `70%` + level icon, three tests green.
 
 ## Left over
 
-- **DEMO-02's layout is unfinished.** The pane does not resize, the carousel
-  does not page, the dock's five slots open nothing, and the drive-mode
-  strip's four targets have no gesture.
+- **DEMO-02's chrome is now bar, bare pane surface, and dock.** The pane's
+  contents are gone (see *Current position*): no PRND row, drive-mode strip,
+  indicator column, cards or pager. The dock's five slots open nothing.
 - **Four dock glyphs are still placeholders**, against the operator's
   2026-09-30 *"real icons"* decision. The 33-glyph inventory is a later task's.
 - **Captures taken 2026-10-11** (release, `/tmp`, uncommitted): icon white at
@@ -44,7 +47,7 @@ builds on DEMO-02's `panel.rs` page object model and `chrome.rs`.
   on 2026-10-09 and is void if the image is ever committed or shipped.
 - **Gap `#1` is not closed.** The map is a picture: no camera, no pan, no zoom,
   no route, no marker, no POI.
-- **For DEMO-03:** `Page::Demo` is `--tab=demo`; the map is its full-bleed
+- **For the DEMO-03 rebuild:** `Page::Demo` is `--tab=demo`; the map is its full-bleed
   base, every chrome node a non-focusable `page_members` row hidden off-page
   by the three gates. Surfaces in `Demo::chrome_nodes`, buttons in
   `Demo::chrome_buttons`, labels in `Demo::chrome_labels`, pager in

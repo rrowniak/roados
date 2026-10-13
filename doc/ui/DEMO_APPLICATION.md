@@ -682,6 +682,19 @@ behaviour is **not documented** — see *Could not verify*.
 > targets carry no gesture, the indicator column is not the ~20 conditions and has
 > no blink and no latch, and the carousel does not page or swipe** — the `[C]`
 > gesture model and § *Open questions* item 8 both stay open.
+>
+> **Amended 2026-10-12, then cut back the same day on the operator's
+> direction.** First the whole pane content went ("remove everything from
+> left (car) panel"), then the correction: the pane's translucent surface
+> should stand, empty — no PRND row, drive-mode strip, indicator column,
+> cards or pager. The demo page's left side is that bare surface over the
+> map, with the full-width status bar above and the dock below. That is the
+> clean base the rebuild starts from. The mirrored image was never
+> drawn (**L12**).
+>
+> **2026-10-12 — the rebuild's first row stands on that base:** `PRND` with
+> Park green left (bold tried, never reached the pixels), `70%` and a level
+> icon right (mocked charge, one source for both). Nothing else yet.
 
 Left ~40% in photo `02`, resizable: *"You can expand/condense the
 visualization by dragging the car status area from side to side. Expanding the
@@ -905,6 +918,7 @@ one row removed and one added.
 | L8 | **No offscreen text measurement on the draw command.** `DrawCommand::Text` carries no width, so a half-visible row cannot be clipped. **The previous row's field list was also incomplete** — there are seven fields, not six: `weight: FontWeight` is the seventh and the single place a weight lives. | Medium | Card content that overflows, the carousel's page edges | `paint.rs:203-238`, `weight` at `:237` |
 | L9 | **No theme scoping or inheritance.** One flat global token map; no tokens for focus, hover, pressed, shadow or z-order — focus rings and hover/pressed are per-widget properties instead. | Medium | Any subtree that needs to differ from the global theme | `ThemeToken` at `theme.rs:78-148` (`TOKEN_COUNT` = 33 at `:148`), `Theme` at `theme.rs:356-359`; the per-widget states at `button.rs:346`, `:355-357` |
 | L10 | **`Polygon` is convex-only** — triangle fan, no ear-clipping, no stencil; the source names both rejected alternatives in as many words. No bezier, no fill rules — zero hits for `fill_rule`/`nonzero`/`even_odd` anywhere. **Note also that `DrawCommand::Path` is a *stroked* polyline with an explicit width**, so it cannot serve as a filled icon outline either. | Medium | Any concave silhouette; the proximity ramp; instrument arcs | the fan is `render.rs:960-980` (`// A fan from the first point… the alternative — ear clipping, or a stencil pass — is a rasteriser`); `paint.rs:249`; `Path` at `paint.rs:303-312` |
+| L12 | **No winding flag or cull toggle on `DrawCommand::Mesh`, so no mirrored or foreshortened copy of any mesh.** `draw_mesh_batch` brackets with `GL_CULL_FACE`/`GL_BACK` and leaves the front face at `GL_CCW` (window-space), so an orientation-reversing transform culls visible faces. **Recorded 2026-10-12 by `TASK_UI_DEMO_03`.** Blocks a mirrored or foreshortened copy of any mesh — a car reflected on a floor, a contact shadow that tracks the yaw. The pane draws two convex `Rect`s and the rest pose's `Shadow` instead; the reversal is not attempted and no `front_face` call, winding flag or cull toggle is added. | Low | A mirrored or foreshortened copy of any mesh — a car reflected on a floor, a contact shadow that tracks the yaw | `DrawCommand::Mesh` in `ui/src/ui_core/src/paint.rs`, `draw_mesh_batch` in `ui/src/ui_core/src/render.rs`, `TASK_UI_PRIM_34` § *Face culling: off*. No line numbers, per the repository's rule. |
 
 ### Corrections to the second gap table
 

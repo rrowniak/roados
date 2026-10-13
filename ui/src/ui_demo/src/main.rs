@@ -489,6 +489,36 @@ const DOCK_BUTTON_PADDING_H: f32 = 12.0;
 /// The padding inside the dock's own box.
 const DOCK_PADDING: f32 = 8.0;
 
+/// The mocked traction-battery charge, in percent.
+///
+/// One source for the percent label and the icon's fill: the two cannot
+/// disagree about the level. Mocked vehicle data — no bus, no key drives it.
+const BATTERY_PCT: f32 = 70.0;
+
+/// The drive-mode letters in order. Park is selected, so it draws green.
+const PRND: [char; 4] = ['P', 'R', 'N', 'D'];
+
+/// The gap between two drive-mode letters, in pixels.
+///
+/// **A proposal**: 10 px at a 34 px font separates four single letters without
+/// spreading the group past the battery's.
+const PRND_GAP: f32 = 10.0;
+
+/// The battery icon's box, in pixels: outline, fill and nub.
+///
+/// Square corners throughout: the outline is bars rather than a stroked
+/// rounded rect, so the square fill behind them never pokes past a radius.
+const BATTERY_ICON_WIDTH: f32 = 60.0;
+const BATTERY_ICON_HEIGHT: f32 = 28.0;
+
+/// The outline bars' thickness and the nub's size, in pixels.
+const BATTERY_BAR: f32 = 3.0;
+const BATTERY_NUB_WIDTH: f32 = 4.0;
+const BATTERY_NUB_HEIGHT: f32 = 12.0;
+
+/// The gap between the percent label and the icon, in pixels.
+const BATTERY_GROUP_SPACING: f32 = 10.0;
+
 /// How long one frame is budgeted to take: **60 Hz**, the rate
 /// `doc/ui/DEMO_APPLICATION.md` lists as *"Smooth animations and transitions —
 /// 60 FPS"*.
@@ -1492,20 +1522,25 @@ const MODEL_STATUS_WIDTH: f32 = 400.0;
 /// [`CAR_RECT`]. `no_two_placed_rects_overlap` over `page_rects` is what pins
 /// the choice, and `the_car_rect_overlaps_nothing_the_gallery_placed` pins the
 /// premise the press chain's position rests on.
-const CAR_ORIGIN: (f32, f32) = (60.0, 240.0);
+///
+/// Named `DATA_*` to leave the plain names for the car-status pane's own pair
+/// when it is rebuilt (2026-10-12: the pane was removed and will start over).
+const DATA_CAR_ORIGIN: (f32, f32) = (60.0, 240.0);
 
 /// The box the demo's car is given.
 ///
 /// 560 by 400: the aspect [`Demo::car_mvp`] divides by, so the rect and the
 /// frustum agree about the frame's shape. A content size, so the window rect
 /// adds [`CONTENT_TOP`] to the y.
-const CAR_SIZE: Size = Size {
+///
+/// Named `DATA_*`; see [`DATA_CAR_ORIGIN`].
+const DATA_CAR_SIZE: Size = Size {
     width: 560.0,
     height: 400.0,
 };
 
-/// The car's rect in window coordinates: [`CAR_SIZE`] at [`CAR_ORIGIN`] plus
-/// [`CONTENT_TOP`].
+/// The car's rect in window coordinates: [`DATA_CAR_SIZE`] at [`DATA_CAR_ORIGIN`]
+/// plus [`CONTENT_TOP`].
 ///
 /// The one rect the capture criterion names beside the fps band, the clip
 /// [`Demo::frame_clips`] confines the mesh to, and the box the strip tests
@@ -1514,8 +1549,8 @@ const CAR_SIZE: Size = Size {
 /// spelling of the origin and the size, so the three readers cannot disagree
 /// about the box.
 const CAR_RECT: Rect = Rect {
-    x: CAR_ORIGIN.0,
-    y: CAR_ORIGIN.1 + CONTENT_TOP,
+    x: DATA_CAR_ORIGIN.0,
+    y: DATA_CAR_ORIGIN.1 + CONTENT_TOP,
     width: 560.0,
     height: 400.0,
 };
@@ -3810,6 +3845,20 @@ impl DemoCar {
     }
 }
 
+/// The pane's header row: the two nodes the frame walk paints by hand.
+///
+/// `Label` records `Regular` always and has no weight property, so `PRND`
+/// cannot be labels — and the battery icon is geometry, not text. Both nodes
+/// live in the header row inside the pane panel, ride the chrome page rows,
+/// and are painted by arms of their own. The percent label beside them is an
+/// ordinary chrome label.
+struct PaneHeader {
+    /// The node the four drive-mode letters are painted on, Park green.
+    prnd: Handle,
+    /// The node the battery icon — outline bars, level fill, nub — is painted on.
+    battery: Handle,
+}
+
 /// The demo's widget tree, the pads that press, the labels that show what text
 /// rendering does, the theme every colour comes from, and the clock that drives
 /// the pads.
@@ -3988,19 +4037,24 @@ struct Demo {
     /// The top status bar as a panel object.
     #[allow(dead_code)]
     status_panel: Panel,
-    /// The car-status pane as a panel object.
+    /// The car-status pane's bare surface as a panel object. Empty until the
+    /// rebuild; see the construction comment.
     #[allow(dead_code)]
     pane_panel: Panel,
     /// The bottom dock as a panel object.
     #[allow(dead_code)]
     dock_panel: Panel,
     /// The chrome's three translucent surfaces: the status bar, the car-status
-    /// pane and the bottom dock. See [`crate::chrome`].
+    /// pane's bare surface and the bottom dock. See [`crate::chrome`].
     chrome_nodes: Vec<Chrome>,
     /// The bottom dock's five buttons. They carry no `set_palette`, because the
     /// dock has no active-state highlight — see `chrome.rs` and
     /// `DEMO_APPLICATION.md` § *The persistent chrome* § *Bottom dock*.
     chrome_buttons: Vec<Button>,
+    /// The pane's header row, painted by hand: `PRND` with Park green, and the
+    /// battery icon. The percent label beside them is an ordinary entry of
+    /// [`Demo::chrome_labels`].
+    pane_header: PaneHeader,
     /// Every chrome label, painted through [`record_label`] rather than through
     /// the walk, on the same argument the text panel's labels are: the walk is
     /// for widgets with their own `paint`, and a label is measured by the demo.
@@ -4017,12 +4071,10 @@ struct Demo {
     #[allow(dead_code)]
     chrome_all: Vec<Handle>,
     /// The chrome nodes that record a command: the three surfaces, the five dock
-    /// buttons, every chrome label and the pager. The sub-containers draw nothing
+    /// buttons and every chrome label. The sub-containers draw nothing
     /// and are deliberately absent.
     #[allow(dead_code)]
     chrome_drawn: Vec<Handle>,
-    /// The pager's node, whose own paint arm records the three dots.
-    chrome_pager: Handle,
     /// The status bar's icon: an `Image` node for layout and paint dispatch, holding
     /// the white master the tinted arm draws. **A child of the airbag badge's
     /// button**, stacked at its content origin, so the button's own background
@@ -4923,7 +4975,7 @@ impl Demo {
                 .get_mut(rotator.handle())
                 .ok_or("ui_demo: the car node is missing")?
                 .layout_mut()
-                .set_constraints(Constraints::tight(CAR_SIZE));
+                .set_constraints(Constraints::tight(DATA_CAR_SIZE));
         }
         let car = DemoCar {
             widget: rotator,
@@ -5661,14 +5713,17 @@ impl Demo {
                 SLIDER_ORIGIN.0,
                 SLIDER_ORIGIN.1 + CONTENT_TOP,
             )));
-        // The car, at [`CAR_ORIGIN`] like every other `*_ORIGIN` here: a
+        // The car, at [`DATA_CAR_ORIGIN`] like every other `*_ORIGIN` here: a
         // content coordinate with [`CONTENT_TOP`] added at the position, so
         // the laid-out node is [`CAR_RECT`].
         nodes
             .get_mut(car.widget.handle())
             .ok_or("ui_demo: the car is missing")?
             .layout_mut()
-            .set_position(Some(Offset::new(CAR_ORIGIN.0, CAR_ORIGIN.1 + CONTENT_TOP)));
+            .set_position(Some(Offset::new(
+                DATA_CAR_ORIGIN.0,
+                DATA_CAR_ORIGIN.1 + CONTENT_TOP,
+            )));
         nodes
             .get_mut(slider_readout.label.handle())
             .ok_or("ui_demo: the slider readout is missing")?
@@ -5785,10 +5840,11 @@ impl Demo {
 
         // ----------------------------------------------- TASK_UI_DEMO_02: the chrome
         //
-        // Three persistent regions drawn over the map: a status bar across the
-        // top, a car-status pane down the left, and a dock across the bottom.
-        // They are a region of the demo page and not panels over it — see
-        // [`crate::chrome`]. The three surfaces are `Chrome` values the paint
+        // Two persistent regions drawn over the map: a status bar across the
+        // top and a dock across the bottom. (The car-status pane down the left
+        // was removed 2026-10-12; the rebuild starts from scratch.) They are a
+        // region of the demo page and not panels over it — see
+        // [`crate::chrome`]. The two surfaces are `Chrome` values the paint
         // walk records through `chrome_surface_commands`; their children are
         // ordinary `Container`s and widgets.
         let chrome_palette_now = chrome::chrome_palette(&theme);
@@ -5802,10 +5858,6 @@ impl Demo {
         let text_color = themed_color(
             &theme.property(ThemeToken::Text),
             Color::new(255, 255, 255, 255),
-        );
-        let muted_color = themed_color(
-            &theme.property(ThemeToken::TextMuted),
-            Color::new(158, 158, 158, 255),
         );
 
         // The demo's one icon: a white airbag master for the status bar's
@@ -6067,11 +6119,12 @@ impl Demo {
             }
         }
 
-        // The car-status pane, as a panel object: a `column` with the
-        // `PRND`/battery readout, the drive-mode strip, the indicator column, the
-        // card carousel and the pager. **`Stretch` so its children fill the
-        // panel's width**: that is what makes the pane resizable — widen the
-        // panel and the card row and pager widen with it.
+        // The car-status pane's bare surface, and its header row. Emptied
+        // 2026-10-12 down to the panel on the operator's direction; the header
+        // — `PRND` with Park green left, battery percent and level icon right —
+        // is the first contents since. The letters are painted by hand in the
+        // frame walk from one node, and the icon is painted by hand on another.
+        // No assets, no new dependency.
         let (pane_panel, pane) = Panel::container(&mut nodes, pane_rect, LayoutMode::column());
         pane.set_flex_config(
             &mut nodes,
@@ -6080,124 +6133,69 @@ impl Demo {
                 .with_cross_axis_alignment(CrossAxisAlignment::Stretch),
         );
         pane.set_padding(&mut nodes, Padding::all(chrome::PANE_INSET));
-        // The `PRND` and battery readouts, at the pane's top.
-        let prnd_row = Container::new(&mut nodes, LayoutMode::row());
-        prnd_row.set_flex_config(
+        let header = Container::new(&mut nodes, LayoutMode::row());
+        header.set_flex_config(
             &mut nodes,
             FlexConfig::new()
-                .with_spacing(CHROME_GROUP_SPACING)
+                .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center),
         );
-        for text in ["PRND", "70%"] {
-            let (label, handle) = chrome_label(&mut nodes, &metrics, text, text_color.clone())?;
-            if !prnd_row.add_child(&mut nodes, handle) {
-                return Err("ui_demo: a PRND readout could not be attached");
-            }
-            chrome_labels.push((label, handle));
+        // Measured here, painted in the walk: the node is exactly the four
+        // advances plus three gaps wide, so the battery group lands against
+        // the pane's right padding. All four draw regular, so the measured
+        // and painted advances are the same ones.
+        let prnd_width = PRND
+            .iter()
+            .map(|ch| metrics.advance(*ch, chrome_font()))
+            .sum::<f32>()
+            + PRND_GAP * 3.0;
+        let prnd_node = node::create(
+            &mut nodes,
+            LayoutState::new().with_constraints(Constraints::tight(Size::new(
+                prnd_width,
+                metrics.line_height(chrome_font()),
+            ))),
+        );
+        if !header.add_child(&mut nodes, prnd_node) {
+            return Err("ui_demo: the drive-mode letters could not be attached");
         }
-        // The drive-mode strip: four read-outs and no gesture. The `[C]` tag on
-        // its gesture model is repeated in `chrome.rs` so a later task does not
-        // inherit it as a specification.
-        let drive_strip = Container::new(&mut nodes, LayoutMode::column());
-        drive_strip.set_flex_config(
+        let battery_group = Container::new(&mut nodes, LayoutMode::row());
+        battery_group.set_flex_config(
             &mut nodes,
             FlexConfig::new()
-                .with_spacing(CHROME_GROUP_SPACING)
-                .with_cross_axis_alignment(CrossAxisAlignment::Start),
+                .with_spacing(BATTERY_GROUP_SPACING)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
         );
-        for text in ["\u{2191}", "P", "\u{2193}", "HOLD"] {
-            let (label, handle) = chrome_label(&mut nodes, &metrics, text, muted_color.clone())?;
-            if !drive_strip.add_child(&mut nodes, handle) {
-                return Err("ui_demo: a drive-mode readout could not be attached");
-            }
-            chrome_labels.push((label, handle));
-        }
-        // The indicator column: five rows, one per colour class, in the section's
-        // own order. It is not the ~20 conditions, and it has no blink and no
-        // latch.
-        let indicator = Container::new(&mut nodes, LayoutMode::column());
-        indicator.set_flex_config(
+        let (pct_label, pct_handle) = chrome_label(
             &mut nodes,
-            FlexConfig::new()
-                .with_spacing(CHROME_GROUP_SPACING)
-                .with_cross_axis_alignment(CrossAxisAlignment::Start),
-        );
-        for (token, text) in chrome::INDICATOR_TOKENS
-            .into_iter()
-            .zip(["Error", "Warning", "OK", "Info", "Muted"])
-        {
-            let color = themed_color(&theme.property(token), Color::new(255, 255, 255, 255));
-            let (label, handle) = chrome_label(&mut nodes, &metrics, text, color)?;
-            if !indicator.add_child(&mut nodes, handle) {
-                return Err("ui_demo: an indicator row could not be attached");
-            }
-            chrome_labels.push((label, handle));
+            &metrics,
+            &format!("{BATTERY_PCT:.0}%"),
+            text_color.clone(),
+        )?;
+        if !battery_group.add_child(&mut nodes, pct_handle) {
+            return Err("ui_demo: the battery percent could not be attached");
         }
-        // The card carousel: three static cards and no paging. § *Open questions*
-        // item 8 stays open; see `DEMO_APPLICATION.md`.
-        let card_row = Container::new(&mut nodes, LayoutMode::row());
-        card_row.set_flex_config(
+        let icon_node = node::create(
             &mut nodes,
-            FlexConfig::new()
-                .with_spacing(CHROME_GROUP_SPACING)
-                .with_cross_axis_alignment(CrossAxisAlignment::Start),
+            LayoutState::new().with_constraints(Constraints::tight(Size::new(
+                BATTERY_ICON_WIDTH,
+                BATTERY_ICON_HEIGHT,
+            ))),
         );
-        {
-            // **A fixed height, free width.** The width comes from the pane's
-            // `Stretch`, so the carousel fills whatever width the panel is given;
-            // only the height is declared here.
-            let node = nodes
-                .get_mut(card_row.handle())
-                .ok_or("ui_demo: the card row is missing")?;
-            node.layout_mut().set_constraints(Constraints::new(
-                0.0,
-                f32::INFINITY,
-                chrome::CARDS_HEIGHT,
-                f32::INFINITY,
-            ));
+        if !battery_group.add_child(&mut nodes, icon_node) {
+            return Err("ui_demo: the battery icon could not be attached");
         }
-        for text in ["Card 1", "Card 2", "Card 3"] {
-            let card = Container::new(&mut nodes, LayoutMode::column());
-            card.set_flex_config(
-                &mut nodes,
-                FlexConfig::new().with_cross_axis_alignment(CrossAxisAlignment::Start),
-            );
-            let (label, handle) = chrome_label(&mut nodes, &metrics, text, text_color.clone())?;
-            if !card.add_child(&mut nodes, handle) {
-                return Err("ui_demo: a card label could not be attached");
-            }
-            chrome_labels.push((label, handle));
-            if !card_row.add_child(&mut nodes, card.handle()) {
-                return Err("ui_demo: a card could not be attached");
-            }
+        if !header.add_child(&mut nodes, battery_group.handle()) {
+            return Err("ui_demo: the battery group could not be attached");
         }
-        // The pager: one container whose paint arm records three dots, below the
-        // card row. It is not a label, so it has an arm of its own.
-        let pager = Container::new(&mut nodes, LayoutMode::row());
-        {
-            // The width comes from the pane's `Stretch`; only the height is
-            // declared.
-            let node = nodes
-                .get_mut(pager.handle())
-                .ok_or("ui_demo: the pager is missing")?;
-            node.layout_mut().set_constraints(Constraints::new(
-                0.0,
-                f32::INFINITY,
-                chrome::PAGER_DOT_RADIUS * 4.0,
-                chrome::PAGER_DOT_RADIUS * 4.0,
-            ));
+        if !pane_panel.add_child(&mut nodes, header.handle()) {
+            return Err("ui_demo: the pane header could not be attached");
         }
-        for child in [
-            prnd_row.handle(),
-            drive_strip.handle(),
-            indicator.handle(),
-            card_row.handle(),
-            pager.handle(),
-        ] {
-            if !pane_panel.add_child(&mut nodes, child) {
-                return Err("ui_demo: a pane child could not be attached");
-            }
-        }
+        let pane_header = PaneHeader {
+            prnd: prnd_node,
+            battery: icon_node,
+        };
+        chrome_labels.push((pct_label, pct_handle));
 
         // The bottom dock: a `row` of five `Button`s and no active-state
         // highlight. **No `set_palette` on any of them** — the photograph reads
@@ -6268,7 +6266,8 @@ impl Demo {
         chrome_drawn.extend(chrome_labels.iter().map(|(_, handle)| *handle));
         chrome_drawn.push(airbag_button.handle());
         chrome_drawn.push(lock_button.handle());
-        chrome_drawn.push(pager.handle());
+        chrome_drawn.push(pane_header.prnd);
+        chrome_drawn.push(pane_header.battery);
         chrome_drawn.push(icon_image.handle());
         chrome_drawn.push(lock_image.handle());
 
@@ -6748,10 +6747,10 @@ impl Demo {
             dock_panel,
             chrome_nodes,
             chrome_buttons,
+            pane_header,
             chrome_labels,
             chrome_all,
             chrome_drawn,
-            chrome_pager: pager.handle(),
             icon_image,
             icon_spec,
             icon_tint,
@@ -8793,15 +8792,104 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
-            // The pager's three dots. A dot is not a label, a button or a
-            // container, so the pager has an arm of its own; it records three
-            // `Circle`s and nothing else.
-            if handle == self.chrome_pager {
-                let commands = match (node.layout().rect(), self.chrome_nodes.first()) {
-                    (Some(rect), Some(chrome)) => {
-                        chrome::pager_commands(rect.into(), &chrome.palette)
+            // The pane's header row, seventh page only. The four letters are
+            // painted by hand here — Park green, the rest in the chrome ink —
+            // and the battery icon is six rects: three outline bars, the level
+            // fill and the nub, then the right bar the nub hangs off. (Bold
+            // was tried first for the selection: the recorded weight never
+            // reached the pixels, so selection is a colour now, not a weight.)
+            // The percent beside them is an ordinary chrome label. The paint
+            // gate below empties all three nodes on the six other pages.
+            if handle == self.pane_header.prnd {
+                let ink = self
+                    .theme
+                    .get(ThemeToken::Text)
+                    .as_color()
+                    .unwrap_or(Color::new(255, 255, 255, 255));
+                let selected = self
+                    .theme
+                    .get(ThemeToken::Success)
+                    .as_color()
+                    .unwrap_or(Color::new(0, 200, 0, 255));
+                let size = chrome_font();
+                let advance = |ch: char| self.metrics.advance(ch, size);
+                let commands = match node.layout().rect() {
+                    Some(rect) => {
+                        let rect: Rect = rect.into();
+                        let mut painter = Painter::new();
+                        let mut x = rect.x;
+                        for (index, ch) in PRND.iter().enumerate() {
+                            let mut text = [0u8; 4];
+                            let text = ch.encode_utf8(&mut text);
+                            if index == 0 {
+                                painter.text(x, rect.y, text, selected, size, 0.0);
+                            } else {
+                                painter.text(x, rect.y, text, ink, size, 0.0);
+                            }
+                            x += advance(*ch) + PRND_GAP;
+                        }
+                        painter.finish()
                     }
-                    _ => Vec::new(),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            if handle == self.pane_header.battery {
+                let ink = self
+                    .theme
+                    .get(ThemeToken::Text)
+                    .as_color()
+                    .unwrap_or(Color::new(255, 255, 255, 255));
+                let commands = match node.layout().rect() {
+                    Some(rect) => {
+                        let rect: Rect = rect.into();
+                        let mut painter = Painter::new();
+                        let body_w = BATTERY_ICON_WIDTH - BATTERY_NUB_WIDTH;
+                        painter.rect(Rect::new(rect.x, rect.y, body_w, BATTERY_BAR), ink);
+                        painter.rect(
+                            Rect::new(
+                                rect.x,
+                                rect.y + BATTERY_ICON_HEIGHT - BATTERY_BAR,
+                                body_w,
+                                BATTERY_BAR,
+                            ),
+                            ink,
+                        );
+                        painter.rect(
+                            Rect::new(rect.x, rect.y, BATTERY_BAR, BATTERY_ICON_HEIGHT),
+                            ink,
+                        );
+                        painter.rect(
+                            Rect::new(
+                                rect.x + body_w - BATTERY_BAR,
+                                rect.y,
+                                BATTERY_BAR,
+                                BATTERY_ICON_HEIGHT,
+                            ),
+                            ink,
+                        );
+                        painter.rect(
+                            Rect::new(
+                                rect.x + BATTERY_BAR,
+                                rect.y + BATTERY_BAR,
+                                (body_w - BATTERY_BAR * 2.0) * BATTERY_PCT / 100.0,
+                                BATTERY_ICON_HEIGHT - BATTERY_BAR * 2.0,
+                            ),
+                            ink,
+                        );
+                        painter.rect(
+                            Rect::new(
+                                rect.x + body_w,
+                                rect.y + (BATTERY_ICON_HEIGHT - BATTERY_NUB_HEIGHT) / 2.0,
+                                BATTERY_NUB_WIDTH,
+                                BATTERY_NUB_HEIGHT,
+                            ),
+                            ink,
+                        );
+                        painter.finish()
+                    }
+                    None => Vec::new(),
                 };
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
@@ -10357,7 +10445,7 @@ impl Demo {
     /// the one column the list just vacated is exactly the kind of claim only a
     /// reader looking at the arithmetic can check. **The car is in it for the
     /// same reason**, and `the_car_rect_overlaps_nothing_the_gallery_placed`
-    /// is what says the 560 by 400 box at [`CAR_ORIGIN`] touches nothing.
+    /// is what says the 560 by 400 box at [`DATA_CAR_ORIGIN`] touches nothing.
     ///
     /// **The dialog is deliberately not in it**, and that is the whole of the
     /// omission: an overlay is *meant* to be drawn on top of the gallery, so
@@ -16811,12 +16899,12 @@ mod tests {
         assert_eq!(
             (car.x, car.y, car.width, car.height),
             (
-                CAR_ORIGIN.0,
-                CAR_ORIGIN.1 + CONTENT_TOP,
-                CAR_SIZE.width,
-                CAR_SIZE.height
+                DATA_CAR_ORIGIN.0,
+                DATA_CAR_ORIGIN.1 + CONTENT_TOP,
+                DATA_CAR_SIZE.width,
+                DATA_CAR_SIZE.height
             ),
-            "the node is where `CAR_ORIGIN` and `CAR_SIZE` say it is"
+            "the node is where `DATA_CAR_ORIGIN` and `DATA_CAR_SIZE` say it is"
         );
         // Every other leaf on the car's own page, by name rather than by
         // count: a new neighbour would fail here rather than hide behind one.
@@ -24289,8 +24377,9 @@ mod tests {
     fn panels_are_separate_objects_that_can_be_resized_and_repositioned() {
         let mut demo = laid_out_on(Page::Demo);
 
-        // **The four panel objects, and the regions they own.** Each is a rect
-        // relative to its parent, and the map is a panel too.
+        // **The three panel objects, and the regions they own.** Each is a rect
+        // relative to its parent, and the map is a panel too. (The car-status
+        // pane stands empty since 2026-10-12; the rebuild fills it.)
         let status = demo.status_panel.rect();
         let pane = demo.pane_panel.rect();
         let dock = demo.dock_panel.rect();
@@ -24309,43 +24398,178 @@ mod tests {
         );
         assert_eq!(map.y, CONTENT_TOP, "the map is the full-bleed background");
 
-        // **A widget's position is relative to its panel.** Move the pane and a
-        // widget inside it moves by the same delta — no window coordinate is
-        // touched.
-        let pager_before = demo
-            .node_rect(demo.chrome_pager)
-            .expect("the pager is laid out");
+        // **A widget's position is relative to its panel.** Move the status bar
+        // and the clock label inside it moves by the same delta — no window
+        // coordinate is touched.
+        let clock = demo
+            .chrome_labels
+            .iter()
+            .find(|(label, _)| label.label.text.get() == "2:37 pm")
+            .map(|(_, handle)| *handle)
+            .expect("the clock label exists");
+        let clock_before = demo.node_rect(clock).expect("the clock is laid out");
+        assert!(demo.move_panel(demo.status_panel.handle(), 20.0, 30.0));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let clock_after = demo.node_rect(clock).expect("the clock is laid out");
+        assert_eq!(clock_after.x, clock_before.x + 20.0);
+        assert_eq!(clock_after.y, clock_before.y + 30.0);
+        assert_eq!(
+            demo.status_panel.rect().x,
+            status.x + 20.0,
+            "the object moved"
+        );
+
+        // The empty pane moves the same way, pinned on its own rect: it has
+        // no widget inside it to follow yet.
         assert!(demo.move_panel(demo.pane_panel.handle(), 20.0, 30.0));
         demo.frame(WINDOW, Duration::from_millis(16));
-        let pager_after = demo
-            .node_rect(demo.chrome_pager)
-            .expect("the pager is laid out");
-        assert_eq!(pager_after.x, pager_before.x + 20.0);
-        assert_eq!(pager_after.y, pager_before.y + 30.0);
         assert_eq!(demo.pane_panel.rect().x, pane.x + 20.0, "the object moved");
+        assert_eq!(demo.pane_panel.rect().y, pane.y + 30.0, "and down");
 
-        // **Resizing a panel resizes the widgets that fill it.** The pager
-        // stretches to the pane's width, so narrowing the pane narrows it.
+        // **Resizing a panel resizes the widgets that fill it.** The map image
+        // fills the map panel, so narrowing the panel narrows it.
         let width_before = demo
-            .node_rect(demo.chrome_pager)
-            .expect("the pager is laid out")
+            .node_rect(demo.map.handle())
+            .expect("the map is laid out")
             .width;
         assert!(demo.resize_panel(
-            demo.pane_panel.handle(),
-            Size::new(pane.width - 100.0, pane.height)
+            demo.map_panel.handle(),
+            Size::new(map.width - 100.0, map.height)
         ));
         demo.frame(WINDOW, Duration::from_millis(16));
         let width_after = demo
-            .node_rect(demo.chrome_pager)
-            .expect("the pager is laid out")
+            .node_rect(demo.map.handle())
+            .expect("the map is laid out")
             .width;
         assert!(
             width_after < width_before,
-            "the pager filled the narrower pane: {width_after} against {width_before}"
+            "the map filled the narrower panel: {width_after} against {width_before}"
         );
 
         // A handle that is not a panel reports so rather than moving anything.
-        assert!(!demo.move_panel(demo.chrome_pager, 1.0, 1.0));
+        // The background fills the window but is no `Panel`.
+        assert!(!demo.move_panel(demo.background, 1.0, 1.0));
+    }
+
+    #[test]
+    fn the_pane_header_marks_park_green_and_regulars_the_rest() {
+        // The letters are painted by hand: one run per letter, all regular at
+        // one size, left to right — and Park green, the rest in the chrome
+        // ink. (Bold was tried first: the recorded weight never reached the
+        // pixels, so selection is a colour now, not a weight.)
+        let demo = laid_out_on(Page::Demo);
+        let runs: Vec<(String, ui_core::paint::FontWeight, f32, f32, Color)> = demo
+            .commands_at(demo.pane_header.prnd)
+            .into_iter()
+            .filter_map(|command| match command {
+                DrawCommand::Text {
+                    text,
+                    weight,
+                    font_size,
+                    color,
+                    x,
+                    ..
+                } => Some((text, weight, font_size, x, color)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(runs.len(), PRND.len(), "one run per letter: {runs:?}");
+        let ink = demo
+            .theme
+            .get(ThemeToken::Text)
+            .as_color()
+            .expect("Text is a colour");
+        let selected = demo
+            .theme
+            .get(ThemeToken::Success)
+            .as_color()
+            .expect("Success is a colour");
+        for (index, (text, weight, size, _, color)) in runs.iter().enumerate() {
+            assert_eq!(text, &PRND[index].to_string(), "in order");
+            assert_eq!(*size, chrome_font(), "at the chrome size");
+            assert_eq!(*weight, ui_core::paint::FontWeight::Regular, "all regular");
+            if index == 0 {
+                assert_eq!(*color, selected, "Park is selected, so it draws green");
+            } else {
+                assert_eq!(*color, ink, "the rest draw in the chrome ink");
+            }
+        }
+        let xs: Vec<f32> = runs.iter().map(|(_, _, _, x, _)| *x).collect();
+        assert!(
+            xs.windows(2).all(|pair| pair[1] > pair[0]),
+            "left to right: {xs:?}"
+        );
+    }
+
+    #[test]
+    fn the_battery_pairs_a_percent_with_its_level() {
+        let demo = laid_out_on(Page::Demo);
+        // The percent label reads the mocked level: one source for both.
+        assert!(
+            demo.chrome_labels
+                .iter()
+                .any(|(label, _)| label.label.text.get() == format!("{BATTERY_PCT:.0}%")),
+            "a chrome label reads the battery percent"
+        );
+        // The icon is six rects and nothing else: four outline bars, the level
+        // fill and the nub.
+        let commands = demo.commands_at(demo.pane_header.battery);
+        assert_eq!(commands.len(), 6, "bars, fill and nub: {commands:?}");
+        let rects: Vec<Rect> = commands
+            .iter()
+            .map(|command| match command {
+                DrawCommand::Rect { rect, .. } => *rect,
+                _ => panic!("the icon is rects and nothing else, got {command:?}"),
+            })
+            .collect();
+        let body_w = BATTERY_ICON_WIDTH - BATTERY_NUB_WIDTH;
+        let fill = rects[4];
+        assert!(
+            (fill.width - (body_w - BATTERY_BAR * 2.0) * BATTERY_PCT / 100.0).abs() < 0.01,
+            "the fill is the inner width at the mocked level: {fill:?}"
+        );
+        assert_eq!(
+            fill.x,
+            rects[0].x + BATTERY_BAR,
+            "starting inside the left bar"
+        );
+        assert_eq!(
+            fill.height,
+            BATTERY_ICON_HEIGHT - BATTERY_BAR * 2.0,
+            "filling the inner height"
+        );
+    }
+
+    #[test]
+    fn the_header_sits_at_the_panes_top() {
+        let demo = laid_out_on(Page::Demo);
+        let pane = demo
+            .node_rect(
+                demo.chrome_nodes
+                    .iter()
+                    .find(|chrome| chrome.node == demo.pane_panel.handle())
+                    .expect("the pane surface")
+                    .node,
+            )
+            .expect("the pane is laid out");
+        let prnd = demo
+            .node_rect(demo.pane_header.prnd)
+            .expect("the letters are laid out");
+        assert!(
+            (prnd.x - (pane.x + chrome::PANE_INSET)).abs() < 0.01,
+            "the letters open at the pane's left padding: {prnd:?} in {pane:?}"
+        );
+        assert!(
+            (prnd.y - (pane.y + chrome::PANE_INSET)).abs() < 0.01,
+            "at the pane's top padding"
+        );
+        let icon = demo
+            .node_rect(demo.pane_header.battery)
+            .expect("the icon is laid out");
+        assert!(
+            (icon.x + icon.width - (pane.x + pane.width - chrome::PANE_INSET)).abs() < 0.01,
+            "the icon closes at the pane's right padding: {icon:?} in {pane:?}"
+        );
     }
 
     #[test]

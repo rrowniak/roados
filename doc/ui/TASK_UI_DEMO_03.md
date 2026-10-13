@@ -6,6 +6,16 @@
 > no per-task record section, no task-table row, no deviations list, no history.
 > Where this file asks for one, put the durable fact in the code's doc, in this
 > file, or on *Left over* — and move the file to `doc/ui/done/` when it is done.
+>
+> **2026-10-12 — the pane implementation is removed on the operator's
+> direction ("remove everything from left (car) panel, we will start from
+> scratch"), with its states, readouts, lamp, shortcuts, geometry and tests.
+> The 3-D car went first ("doesn't look nice"), then the whole pane followed
+> (opaque black box, cryptic readouts, sliced card placeholders). This file is
+> kept as the rebuild spec: its geometry, state table and paint order stand for
+> the next attempt. What stays in the tree: the `DATA_*` rename (leaving the
+> plain names free) and the `"Card 1/2/3"` placeholder removal (hosts stay for
+> task 05). The chrome's translucent pane (task 02) is untouched.**
 
 ## Goal
 
@@ -28,6 +38,15 @@ _Numbering is the source's; its requirement 13 (the `IMPLEMENTATION_STATE.md` re
 1. **Rename `CAR_ORIGIN`→`DATA_CAR_ORIGIN` and `CAR_SIZE`→`DATA_CAR_SIZE` in `ui/src/ui_demo/src/main.rs`, and every site naming them**; this task's pair takes the plain names. `CAR_DISTANCE`, `CAR_TARGET_Y`, `CAR_REST_YAW`, `CAR_REST_PITCH`, `AMBIENT_YAW_RATE`, `CAR_RECT` stay.
 
 2. **Constants in `ui/src/ui_demo/src/main.rs`, each `const`, doc-commented with its derivation and the sentence that it is a proposal where it is one:**
+
+    > **Amended 2026-10-12 on the operator's report ("left panel is not aligned
+    > with top panel").** `PANE_TOP` as written (`CONTENT_TOP`) opened the pane
+    > 102 px too high: the status bar occupies `CONTENT_TOP..CONTENT_TOP +
+    > status_bar_height` (64..166), and the opaque pane surface painted over the
+    > bar's whole left cluster. `PANE_TOP` is now `CONTENT_TOP +
+    > chrome::status_bar_height(WINDOW)` (166, edge-to-edge with the bar);
+    > `PANE_HEIGHT`, `BODY_HEIGHT`, `CAR_ORIGIN` and everything derived follow.
+    > `status_bar_height` became a `const fn` so the constant can call it.
 
    ```rust
    const PANE_WIDTH: f32 = WINDOW.width * 0.40;

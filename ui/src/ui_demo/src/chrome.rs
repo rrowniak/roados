@@ -1,14 +1,13 @@
-//! The Tesla surface's persistent chrome: a top status bar, a bottom dock and
-//! the car-status pane.
+//! The Tesla surface's persistent chrome: a top status bar and a bottom dock.
 //!
 //! **Five facts a reader would otherwise have to derive from `ui_core`:**
 //!
-//! 1. **What the three regions are.** A status bar across the top, [`status_bar_height`]
+//! 1. **What the regions are.** A status bar across the top, [`status_bar_height`]
 //!    tall — always [`STATUS_BAR_FRACTION`] of the window's height, never a
 //!    fixed pixel count — a car-status pane down the left at
-//!    [`CAR_STATUS_PANE_FRACTION`] of the window's width, and a
-//!    [`DOCK_HEIGHT`]-tall dock across the bottom. [`chrome_regions`] is the one
-//!    place their rectangles are computed.
+//!    [`CAR_STATUS_PANE_FRACTION`] of the window's width, standing empty since
+//!    2026-10-12, and a [`DOCK_HEIGHT`]-tall dock across the bottom.
+//!    [`chrome_regions`] is the one place their rectangles are computed.
 //! 2. **They are drawn over the map, and are a region of the demo page rather
 //!    than a panel over it.** The car-status pane in particular has no
 //!    open/closed state and no dismissal: `DEMO_APPLICATION.md` § *Screens*
@@ -50,7 +49,7 @@ pub const CHROME_ALPHA: u8 = 200;
 ///
 /// **First-principles**, like [`CHROME_ALPHA`]. A 5-tap kernel: `blur::taps_for`
 /// caps at `min(ceil(2σ), 4)` taps either side, so σ = 2.5 would be the 9-tap
-/// blur. The tighter kernel is chosen because the three surfaces each cost a
+/// blur. The tighter kernel is chosen because each surface costs a
 /// window-sized capture and two blur passes and this keeps the `demo` page above
 /// the 55 fps floor.
 pub const BACKDROP_SIGMA: f32 = 1.0;
@@ -91,29 +90,18 @@ pub const DOCK_HEIGHT: f32 = 96.0;
 ///
 /// **The one number in this module that is not first-principles**: it is the
 /// photograph's *"Left ~40% in photo `02`"*, cited in `DEMO_APPLICATION.md`
-/// § *The car-status pane*.
+/// § *The car-status pane*. Nothing draws in the region since 2026-10-12;
+/// the fraction stays for the rebuild.
+///
+/// Removed 2026-10-12 with the pane's contents: `CARDS_HEIGHT`, the pager
+/// (`PAGER_DOT_RADIUS`, `PAGER_DOT_GAP`, `PAGER_DOTS`, `pager_centre`,
+/// `pager_commands`) and `INDICATOR_TOKENS` with their tests. What stays is
+/// what the bar, the dock and the bare pane surface still read.
 pub const CAR_STATUS_PANE_FRACTION: f32 = 0.40;
 
-/// The inset between the pane's edge and its own content.
+/// The inset between the pane's edge and its own content. Read by the bare
+/// panel's padding; the contents it insets arrive with the rebuild.
 pub const PANE_INSET: f32 = 12.0;
-
-/// How tall the card carousel at the pane's foot is.
-pub const CARDS_HEIGHT: f32 = 96.0;
-
-/// The radius of one pager dot, in pixels.
-pub const PAGER_DOT_RADIUS: f32 = 6.0;
-
-/// The gap between two pager dots' centres, in pixels.
-pub const PAGER_DOT_GAP: f32 = 20.0;
-
-/// How many dots the pager draws.
-pub const PAGER_DOTS: usize = 3;
-
-/// The centre offsets of the pager's dots from the first one, in pixels.
-///
-/// Written out rather than multiplied by `index`, because `usize` to `f32` is a
-/// conversion this module forbids (`as` appears nowhere in it).
-const PAGER_OFFSETS: [f32; PAGER_DOTS] = [0.0, PAGER_DOT_GAP, PAGER_DOT_GAP * 2.0];
 
 /// The corner radius a chrome surface is rounded to.
 pub const CHROME_RADIUS: f32 = 12.0;
@@ -135,20 +123,6 @@ pub const DOCK_SLOTS: usize = 5;
 /// reason `Page::ALL` is `[Page; 7]`: a fixed-size array, so the type carries
 /// the count.
 pub const DOCK_GLYPHS: [&str; DOCK_SLOTS] = ["C", "T", "A", "L", "V"];
-
-/// The theme tokens the five indicator rows read, in the section's own order:
-/// red, amber, green, blue, grey.
-///
-/// `DEMO_APPLICATION.md` § *The car-status pane* enumerates ~20 conditions across
-/// five colours. **This task builds one row per colour class and not the ~20
-/// conditions**, and none of the blink semantics or the latch.
-pub const INDICATOR_TOKENS: [ThemeToken; 5] = [
-    ThemeToken::Error,
-    ThemeToken::Warning,
-    ThemeToken::Success,
-    ThemeToken::Primary,
-    ThemeToken::TextMuted,
-];
 
 /// The chrome's colours, read from the theme and never invented.
 ///
@@ -242,44 +216,13 @@ pub fn chrome_surface_commands(rect: Rect, chrome: &Chrome) -> Vec<DrawCommand> 
     painter.finish()
 }
 
-/// Returns the centre of pager dot `index` when the dots are centred in `row`.
-///
-/// **Arithmetic rather than a literal `x` per dot**, because three literals are
-/// three numbers a resize could not move together.
-#[must_use]
-pub fn pager_centre(index: usize, row: Rect) -> (f32, f32) {
-    let span = PAGER_OFFSETS[PAGER_DOTS - 1];
-    let start = row.x + (row.width - span) / 2.0;
-    let y = row.y + row.height / 2.0;
-    let offset = PAGER_OFFSETS.get(index).copied().unwrap_or(0.0);
-    (start + offset, y)
-}
-
-/// Returns the commands that paint the pager's dots within `row`.
-///
-/// The first dot is [`ChromePalette::active`] and the rest
-/// [`ChromePalette::inactive`].
-#[must_use]
-pub fn pager_commands(row: Rect, palette: &ChromePalette) -> Vec<DrawCommand> {
-    let mut painter = Painter::new();
-    for index in 0..PAGER_DOTS {
-        let color = if index == 0 {
-            palette.active
-        } else {
-            palette.inactive
-        };
-        painter.circle(pager_centre(index, row), PAGER_DOT_RADIUS, color);
-    }
-    painter.finish()
-}
-
 /// Returns the three chrome regions' rectangles for a window of `window` whose
 /// content starts at `content_top`.
 ///
-/// The order is status bar, car-status pane, bottom dock. The bar is
-/// [`status_bar_height`] tall, and the pane starts where the bar ends and runs
-/// to the dock — so growing the bar shrinks the pane by the same amount, and
-/// no second number names the pane's top. They are pairwise
+/// The order is status bar, car-status pane region, bottom dock. The bar is
+/// [`status_bar_height`] tall, and the pane region starts where the bar ends
+/// and runs to the dock. The pane's surface stands there empty since
+/// 2026-10-12; its contents arrive with the rebuild. They are pairwise
 /// non-overlapping; `the_chrome_nodes_do_not_overlap_each_other` is the test.
 #[must_use]
 pub fn chrome_regions(window: Size, content_top: f32) -> [Rect; 3] {
@@ -450,55 +393,6 @@ mod tests {
                 "an empty label draws nothing and cannot be seen"
             );
         }
-    }
-
-    #[test]
-    fn a_pager_paint_arm_records_three_circles_and_nothing_else() {
-        let chrome = dark_chrome();
-        let commands = pager_commands(Rect::new(0.0, 0.0, 120.0, 16.0), &chrome.palette);
-        assert_eq!(commands.len(), PAGER_DOTS);
-        assert!(
-            commands
-                .iter()
-                .all(|command| matches!(command, DrawCommand::Circle { .. })),
-            "the pager records circles and nothing else: {commands:?}"
-        );
-    }
-
-    #[test]
-    fn the_pager_places_three_dots_pager_dot_gap_apart_and_centred() {
-        let row = Rect::new(10.0, 20.0, 100.0, 20.0);
-        let centres: Vec<(f32, f32)> = (0..PAGER_DOTS).map(|i| pager_centre(i, row)).collect();
-        let span = PAGER_OFFSETS[PAGER_DOTS - 1];
-        let start = row.x + (row.width - span) / 2.0;
-        let y = row.y + row.height / 2.0;
-        assert_eq!(
-            centres,
-            vec![
-                (start, y),
-                (start + PAGER_DOT_GAP, y),
-                (start + PAGER_DOT_GAP * 2.0, y),
-            ]
-        );
-        assert!(
-            (centres[1].0 - (row.x + row.width / 2.0)).abs() < f32::EPSILON,
-            "the middle dot is the row's own midpoint"
-        );
-    }
-
-    #[test]
-    fn the_indicator_column_is_five_rows_in_red_amber_green_blue_grey_order() {
-        assert_eq!(INDICATOR_TOKENS.len(), 5);
-        assert_eq!(
-            INDICATOR_TOKENS,
-            [
-                ThemeToken::Error,
-                ThemeToken::Warning,
-                ThemeToken::Success,
-                ThemeToken::Primary,
-                ThemeToken::TextMuted,
-            ]
-        );
     }
 
     #[test]

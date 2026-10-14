@@ -519,6 +519,30 @@ const BATTERY_NUB_HEIGHT: f32 = 12.0;
 /// The gap between the percent label and the icon, in pixels.
 const BATTERY_GROUP_SPACING: f32 = 10.0;
 
+/// The car-pane telltales: the baked master's file name and the colour it is
+/// tinted with, in the order the row draws them — unfastened seat belt, then
+/// the lights, then the high beam.
+///
+/// **White masters tinted at draw time**, the pipeline `TASK_UI_PRIM_44` set and
+/// the airbag and lock icons follow: one file per telltale and no per-colour
+/// variant. The colours are the ones a real cluster uses — red for the belt,
+/// green for the lights, blue for the high beam. A master's file name is baked
+/// at [`TELLTALE_ICON`] and holds no colour; changing a colour re-tints the
+/// same texture.
+type TelltaleDef = (&'static str, (u8, u8, u8, u8));
+const TELLTALES: [TelltaleDef; 3] = [
+    ("telltale_belt_32.png", (230, 0, 5, 255)),
+    ("telltale_lowbeam_32.png", (0, 160, 0, 255)),
+    ("telltale_highbeam_32.png", (0, 90, 255, 255)),
+];
+
+/// The drawn side of one car-pane telltale, in pixels, and the gap between two.
+///
+/// Baked at the drawn size: there are no mipmaps and no DPI (`TASK_UI_PRIM_39`),
+/// so a `32` master is 32 window pixels and the row never scales one.
+const TELLTALE_ICON: u32 = 32;
+const TELLTALE_GAP: f32 = 16.0;
+
 /// How long one frame is budgeted to take: **60 Hz**, the rate
 /// `doc/ui/DEMO_APPLICATION.md` lists as *"Smooth animations and transitions —
 /// 60 FPS"*.
@@ -2646,6 +2670,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // transparent stand-in, which draws nothing and moves nothing.
     let lock_locked_picture = load_lock_picture(&mut renderer, true);
     let lock_unlocked_picture = load_lock_picture(&mut renderer, false);
+    // The car-pane telltale masters, loaded the same way: one per entry of
+    // [`TELLTALES`], in order, so [`Demo::set_telltale_picture`] swaps each
+    // stand-in by index. A `None` leaves that telltale's transparent stand-in,
+    // which draws nothing and moves nothing.
+    let telltale_pictures: Vec<Option<Picture>> = TELLTALES
+        .iter()
+        .map(|(file, _)| load_telltale_picture(&mut renderer, file))
+        .collect();
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
     let mut demo = Demo::new(
@@ -2667,6 +2699,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(picture) = lock_unlocked_picture {
         demo.set_lock_unlocked_picture(picture.texture, picture.source);
     };
+    for (index, picture) in telltale_pictures.into_iter().enumerate() {
+        if let Some(picture) = picture {
+            demo.set_telltale_picture(index, picture.texture, picture.source);
+        }
+    }
     let run_for = run_seconds();
 
     let mut last = Instant::now();
@@ -3222,8 +3259,17 @@ fn icon_candidates() -> Vec<PathBuf> {
 /// stand-in is the drawn size, so the node's rect is the rect on screen and
 /// swapping the master in later moves nothing.
 fn stand_in_icon_picture() -> Option<Picture> {
+    stand_in_icon_picture_of(chrome_icon_size())
+}
+
+/// [`stand_in_icon_picture`] at an arbitrary square side.
+///
+/// The car-pane telltale masters are baked at [`TELLTALE_ICON`] rather than the
+/// bar's size, so their stand-in has to be that square; the drawn rect is the
+/// side either way, so nothing moves when the bytes arrive.
+fn stand_in_icon_picture_of(side: u32) -> Option<Picture> {
     let mut cache = TextureCache::new();
-    let mut loader = |_: &Path| Ok(Pixels::transparent(chrome_icon_size(), chrome_icon_size()));
+    let mut loader = |_: &Path| Ok(Pixels::transparent(side, side));
     let texture = cache.load(Path::new("stand-in-icon"), &mut loader).ok()?;
     let source = ImageSource::of(&cache, texture)?;
     Some(Picture { texture, source })
@@ -3317,6 +3363,65 @@ fn load_lock_picture(renderer: &mut Renderer, locked: bool) -> Option<Picture> {
         }
     }
 }
+/// Where a car-pane telltale master is, relative to a directory in the
+/// workspace's own layout.
+///
+/// Beside the SVGs it was baked from, under `assets/icons/` like the airbag and
+/// lock masters: one white master per telltale, tinted at draw time, so the
+/// colour never touches the filesystem.
+fn telltale_icon_relative(file: &str) -> String {
+    format!("src/ui_demo/assets/icons/{file}")
+}
+
+/// Returns the paths the telltale master `file` may be at, in the order it looks.
+///
+/// The same walk as [`icon_candidates`] with the telltale's relative path.
+fn telltale_candidates(file: &str) -> Vec<PathBuf> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    asset_candidates_from(
+        &exe,
+        std::env::var_os(ASSET_DIR_VAR).as_deref(),
+        &telltale_icon_relative(file),
+    )
+}
+
+/// Loads the telltale master `file` and returns it, or `None` after saying why.
+///
+/// Beside [`load_icon_picture`] and in its shape — a standalone texture, so
+/// [`icons::paint`] samples the whole master rather than an atlas window — with
+/// the candidate list from [`telltale_candidates`]. A missing file is
+/// non-fatal, exactly as a missing airbag master is.
+fn load_telltale_picture(renderer: &mut Renderer, file: &str) -> Option<Picture> {
+    let candidates = telltale_candidates(file);
+    let path = candidates.iter().find(|path| path.is_file());
+    let Some(path) = path else {
+        eprintln!(
+            "ui_demo: {file} not found; looked in {}",
+            join_paths(&candidates)
+        );
+        return None;
+    };
+    let texture = match renderer.load_standalone_texture(path) {
+        Ok(texture) => texture,
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
+            return None;
+        }
+    };
+    match ImageSource::of(renderer.textures(), texture) {
+        Some(source) => Some(Picture { texture, source }),
+        None => {
+            eprintln!(
+                "ui_demo: {}: the cache could not place it; standing in",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
 /// Returns the paths the demo's map image may be at, in the order it looks.
 ///
 /// The same walk as [`asset_candidates`] with a different relative path: a
@@ -4058,6 +4163,17 @@ struct PaneHeader {
     battery: Handle,
 }
 
+/// One car-pane telltale: an `Image` node for layout and paint dispatch, and the
+/// size and colour [`icons::paint`] draws it with.
+///
+/// The image carries the white master (a stand-in until `main` swaps the baked
+/// bytes in); the colour is the fixed car colour a cluster uses and does not
+/// follow the theme, so it lives on the spec rather than in a bound property.
+struct Telltale {
+    image: Image,
+    spec: icons::IconSpec,
+}
+
 /// The demo's widget tree, the pads that press, the labels that show what text
 /// rendering does, the theme every colour comes from, and the clock that drives
 /// the pads.
@@ -4263,6 +4379,11 @@ struct Demo {
     /// battery icon. The percent label beside them is an ordinary entry of
     /// [`Demo::chrome_labels`].
     pane_header: PaneHeader,
+    /// The car-pane telltale row, between the `PRND`/battery header and the
+    /// model: one [`Telltale`] per entry of [`TELLTALES`], in draw order. Each
+    /// image is a row child painted through [`icons::paint`] by its own arm, and
+    /// each is shown only on the demo page by the chrome's `PageMember` rows.
+    telltales: Vec<Telltale>,
     /// Every chrome label, painted through [`record_label`] rather than through
     /// the walk, on the same argument the text panel's labels are: the walk is
     /// for widgets with their own `paint`, and a label is measured by the demo.
@@ -6416,6 +6537,49 @@ impl Demo {
         if !pane_panel.add_child(&mut nodes, header.handle()) {
             return Err("ui_demo: the pane header could not be attached");
         }
+        // The telltale row, between the header and the model: the car's status
+        // icons — unfastened belt, lights, high beam. A `row` child of the
+        // pane's column, so the whole object moves with the panel. Each icon is
+        // an `Image` node for layout and paint dispatch, drawn through
+        // [`icons::paint`] by its own arm: one white master tinted the fixed car
+        // colour its [`Telltale`] carries. The masters are stand-ins until
+        // `main` swaps the baked bytes in; the row itself draws nothing.
+        let telltale_row = Container::new(&mut nodes, LayoutMode::row());
+        telltale_row.set_flex_config(
+            &mut nodes,
+            FlexConfig::new()
+                .with_spacing(TELLTALE_GAP)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+        );
+        let mut telltales: Vec<Telltale> = Vec::with_capacity(TELLTALES.len());
+        for (_, (r, g, b, a)) in TELLTALES {
+            let stand_in = stand_in_icon_picture_of(TELLTALE_ICON)
+                .ok_or("ui_demo: no telltale image to show")?;
+            let mut image = Image::new(&mut nodes, stand_in.texture, stand_in.source);
+            image.set_fit(ImageFit::Fill);
+            image.snap_to_state();
+            {
+                let side = icons::drawn_side(TELLTALE_ICON);
+                nodes
+                    .get_mut(image.handle())
+                    .ok_or("ui_demo: a telltale icon node is missing")?
+                    .layout_mut()
+                    .set_constraints(Constraints::tight(Size::new(side, side)));
+            }
+            if !telltale_row.add_child(&mut nodes, image.handle()) {
+                return Err("ui_demo: a telltale icon could not be attached");
+            }
+            telltales.push(Telltale {
+                image,
+                spec: icons::IconSpec {
+                    size_px: TELLTALE_ICON,
+                    color: Color::new(r, g, b, a),
+                },
+            });
+        }
+        if !pane_panel.add_child(&mut nodes, telltale_row.handle()) {
+            return Err("ui_demo: the telltale row could not be attached");
+        }
         // The pane car, below the header: the rotator built beside the data
         // car's, stacked in the pane's column so the whole object moves with
         // the panel. A second mesh node over the same model — no new asset.
@@ -6501,6 +6665,7 @@ impl Demo {
         chrome_drawn.push(pane_header.battery);
         chrome_drawn.push(icon_image.handle());
         chrome_drawn.push(lock_image.handle());
+        chrome_drawn.extend(telltales.iter().map(|telltale| telltale.image.handle()));
 
         // A stack: the background fills the window behind the row of pads, the
         // text panel and the controls layer, and all three are painted over it.
@@ -6981,6 +7146,7 @@ impl Demo {
             chrome_nodes,
             chrome_buttons,
             pane_header,
+            telltales,
             chrome_labels,
             chrome_all,
             chrome_drawn,
@@ -7185,6 +7351,23 @@ impl Demo {
     /// see [`Demo::set_lock_locked_picture`].
     pub fn set_lock_unlocked_picture(&mut self, texture: TextureHandle, _source: ImageSource) {
         self.lock_unlocked_texture = texture;
+    }
+
+    /// Swaps telltale `index`'s stand-in for the baked master `main` loaded, on
+    /// the same node: the texture changes, the rect does not, so nothing moves
+    /// when the bytes arrive. The colour is a fixed field of the telltale's
+    /// spec and does not follow a theme, so only the texture is recorded. An
+    /// out-of-range index is ignored, and a master that never arrives leaves
+    /// the transparent stand-in, which draws nothing.
+    pub fn set_telltale_picture(
+        &mut self,
+        index: usize,
+        texture: TextureHandle,
+        _source: ImageSource,
+    ) {
+        if let Some(telltale) = self.telltales.get_mut(index) {
+            telltale.image.set_texture(texture);
+        }
     }
 
     /// The four panel objects, in paint order.
@@ -9406,6 +9589,24 @@ impl Demo {
                             self.lock_unlocked_texture
                         };
                         icons::paint(&spec, rect.into(), texture.id())
+                    }
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The car-pane telltales: one white-master command each, tinted the
+            // fixed car colour its spec carries, through `icons::paint` like the
+            // airbag and lock icons. The pane's paint gate empties them on the
+            // six other pages, so the arm only ever sees the demo page.
+            if let Some(telltale) = self
+                .telltales
+                .iter()
+                .find(|telltale| telltale.image.handle() == handle)
+            {
+                let commands = match node.layout().rect() {
+                    Some(rect) => {
+                        icons::paint(&telltale.spec, rect.into(), telltale.image.texture().id())
                     }
                     None => Vec::new(),
                 };
@@ -25287,6 +25488,59 @@ mod tests {
             (icon.x + icon.width - (pane.x + pane.width - chrome::PANE_INSET)).abs() < 0.01,
             "the icon closes at the pane's right padding: {icon:?} in {pane:?}"
         );
+    }
+
+    #[test]
+    fn the_telltales_draw_between_the_header_and_the_car() {
+        let demo = laid_out_on(Page::Demo);
+        assert_eq!(
+            demo.telltales.len(),
+            TELLTALES.len(),
+            "one icon per telltale definition"
+        );
+        // Each telltale records exactly one tinted image, in its own car colour:
+        // the belt red, the lights green, the high beam blue. **The colours are
+        // written out here rather than read from [`TELLTALES`]**, or the check
+        // would compare the table with itself and pass whatever it held.
+        let wanted = [
+            Color::new(230, 0, 5, 255),
+            Color::new(0, 160, 0, 255),
+            Color::new(0, 90, 255, 255),
+        ];
+        for (telltale, want) in demo.telltales.iter().zip(wanted) {
+            let commands = demo.commands_at(telltale.image.handle());
+            assert_eq!(commands.len(), 1, "one command per telltale");
+            match &commands[0] {
+                DrawCommand::Image { tint, .. } => {
+                    assert_eq!(*tint, want, "tinted the car colour its spec carries");
+                }
+                other => panic!("a telltale paints an image, got {other:?}"),
+            }
+        }
+        // The row sits between the `PRND` header above it and the model below —
+        // the placement the operator asked for.
+        let prnd = demo
+            .node_rect(demo.pane_header.prnd)
+            .expect("the header is laid out");
+        let car = demo
+            .node_rect(demo.pane_car.node())
+            .expect("the car is laid out");
+        let mut previous_right = f32::NEG_INFINITY;
+        for telltale in &demo.telltales {
+            let rect = demo
+                .node_rect(telltale.image.handle())
+                .expect("a telltale is laid out");
+            assert!(
+                rect.y >= prnd.y + prnd.height,
+                "below the header: {rect:?} against {prnd:?}"
+            );
+            assert!(
+                rect.y + rect.height <= car.y,
+                "above the model: {rect:?} against {car:?}"
+            );
+            assert!(rect.x > previous_right, "left to right: {rect:?}");
+            previous_right = rect.x + rect.width;
+        }
     }
 
     #[test]

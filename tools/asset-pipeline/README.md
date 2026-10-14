@@ -234,3 +234,47 @@ it — the bake exits 0 with a valid dark-grey PNG (coverage-weighted mean
 0, coverage-weighted mean 255.0 on all channels, at least one pixel with
 `0 < alpha < 255`. Measured on the committed masters: locked 48 px —
 1158/2304 painted, 76 edge; unlocked 48 px — 1011/2304, 39 edge.
+
+## The car-pane telltales (2026-10-14)
+
+Three fill-based SVGs the operator downloaded from svgrepo.com —
+`seat-belt-svgrepo-com.svg` and the two `car-lights-car-svgrepo-com*.svg`
+variants (`(1)` is the straight-rayed high beam, the other the downward-rayed
+low beam used as the auto-lights telltale) — baked to one white master each
+(`telltale_belt_32.png`, `telltale_lowbeam_32.png`, `telltale_highbeam_32.png`).
+The demo loads them into the car-status pane's telltale row and tints at draw
+time (`230,0,5` red belt, `0,160,0` lights, `0,90,255` high beam), so there is
+one file per telltale and no per-colour variant. **32 px, the drawn size**: the
+row draws them 1:1 and there are no mipmaps (`TASK_UI_PRIM_39`), so the masters
+are baked at exactly 32. Exact commands, run from the repository root:
+
+```sh
+cd ui/src/ui_demo/assets/icons
+printf 'svg{fill:#ffffff !important}*{fill:#ffffff !important}' > /tmp/telltale_white.css
+/home/dev/.cargo/bin/resvg --stylesheet /tmp/telltale_white.css \
+  --width 32 --height 32 --shape-rendering geometricPrecision \
+  seat-belt-svgrepo-com.svg telltale_belt_32.png
+/home/dev/.cargo/bin/resvg --stylesheet /tmp/telltale_white.css \
+  --width 32 --height 32 --shape-rendering geometricPrecision \
+  car-lights-car-svgrepo-com.svg telltale_lowbeam_32.png
+/home/dev/.cargo/bin/resvg --stylesheet /tmp/telltale_white.css \
+  --width 32 --height 32 --shape-rendering geometricPrecision \
+  'car-lights-car-svgrepo-com(1).svg' telltale_highbeam_32.png
+```
+
+`!important` for the same reason the lock bake needs it: the seat-belt source
+carries its fill in a `<style>` class (`.st0{fill:#000000}`), which beats a bare
+`*` rule, and the two car-light roots carry `fill="#000000"` as a presentation
+attribute. The uniform `!important` stylesheet wins over both. Same pixel guard
+as the airbag and lock masters: RGBA at the exact size, corner alpha 0,
+coverage-weighted mean 255.0 on all channels, at least one pixel with
+`0 < alpha < 255`. Measured on the committed masters: belt 32 px — 316/1024
+painted, 155 edge; low beam 32 px — 203/1024, 186 edge; high beam 32 px —
+223/1024, 208 edge.
+
+**Licence: owed.** The three sources came from svgrepo.com, whose per-icon
+licence is not recorded with the downloaded files and is not recoverable
+offline (the site sits behind a bot checkpoint on this host, and its JSON API
+returns metadata without a licence for these). `LICENSES.md` has no row for
+them. Recording the three licences is an open item, the same gap the airbag and
+lock masters carry.

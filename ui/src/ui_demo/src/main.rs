@@ -127,8 +127,8 @@
 //! onto a tab button would put focus somewhere the scrim covers. The bar is
 //! reachable the moment the dialog closes.
 //!
-//! **The gallery is grouped into six pages, and one page is on show at a time.**
-//! `--tab=<name>` picks which, `pads` is the default, and `--help` lists the six.
+//! **The gallery is grouped into seven pages, and one page is on show at a time.**
+//! `--tab=<name>` picks which, `demo` is the default, and `--help` lists the seven.
 //! A page is a **named set of handles and nothing else**: switching pages does not
 //! move a rect, re-lay anything or resize the window — the tree below is still laid
 //! out from the same absolute constants — so what a page decides is *which* of those
@@ -165,7 +165,7 @@
 //! run opened on `overlays`**, because a modal dialog on a page that does not show it
 //! is a window where every tap and every key is swallowed by a scrim nobody can see:
 //! the scrim is not painted, the panel is not painted, and `dialog_is_modal` does not
-//! read whether the page is on show. With `pads` as the default page that would have
+//! read whether the page is on show. With `demo` as the default page that would have
 //! been the launch state of `ui_demo` with no argument at all, which is the shape
 //! three reviews mistook for a tooling problem — a window that looks right and
 //! answers nothing.
@@ -1557,35 +1557,34 @@ const CAR_RECT: Rect = Rect {
 
 /// The model's centre in y, in metres.
 ///
-/// From task 39's `bounds_min.y = 0.0` and `bounds_max.y = 1.3`: the orbit
-/// aims the camera at the middle of the car's height rather than at the
+/// From the Passat's measured bounds (`min.y = -0.89`, `max.y = 1.75`): the
+/// orbit aims the camera at the middle of the car's height rather than at the
 /// ground plane it sits on.
-const CAR_TARGET_Y: f32 = 0.65;
+const CAR_TARGET_Y: f32 = 0.43;
 
 /// How far the orbit holds the camera from its target, in metres.
 ///
-/// **7.0, and not the 2.6 the task file derives.** The file's derivation —
-/// 2.15 m of visible height at 2.6 m holding the 1.30 m car at 60 % — assumes
-/// the car rect is the viewport, and it is not: task 37's `draw_mesh_batch`
-/// sets the scissor and never the viewport, so the viewport is the window
-/// and the file's composition centres the orbit on the *window* (640, 510),
-/// outside the rect. Captured at 2.6 the rect shows a cropped fender. The
-/// number here is fitted instead, vertex by vertex: all 3 184 of the model's
-/// positions projected through the production composition below (replicated
-/// exactly and checked to seven decimals against it), over every ambient yaw
-/// at the resting pitch, asking that each land inside the rect with margin.
-/// Worst fraction of the rect's half-size: 1.654 at 4.0, 1.249 at 5.0, 1.028
-/// at 6.0, **0.874 at 7.0**, 0.761 at 8.0 — the worst vertex is always a
-/// front-bumper corner at (±0.55, 0.7, −1.25) swinging across the rect's
-/// edge. At 7.0 the whole car stays in frame with about 13 % of margin at
-/// every yaw the ambient turn reaches.
+/// **13.0, fitted the way 7.0 was for the Kenney sedan this model replaces.**
+/// A closed-form derivation assumes the car rect is the viewport, and it is
+/// not: task 37's `draw_mesh_batch` sets the scissor and never the viewport,
+/// so the viewport is the window and the composition centres the orbit on the
+/// *window* (640, 510), outside the rect. The number here is fitted instead,
+/// vertex by vertex: all 64 559 of the model's positions projected through
+/// the production composition (`car_mvp` over `orbit_view`, called rather
+/// than copied by the fit test below), over every ambient yaw at the resting
+/// pitch, asking that each land inside the rect with margin. Worst fraction
+/// of the rect's half-size: 1.106 at 10.0, 1.000 at 11.0, 0.913 at 12.0,
+/// **0.840 at 13.0**, 0.778 at 14.0 — the worst vertex is always a tail-ring
+/// vert near (0.0, 0.44, −2.44) swinging across the rect's edge. At 13.0 the
+/// whole car stays in frame with about 16 % of margin at every yaw the
+/// ambient turn reaches.
 ///
 /// Task 36's `near = 0.1` and `far = 20.0` are used unchanged, which is the
 /// promise 36's module docs made to this task by name. What would reverse the
 /// distance is a smaller model, a wider rect, or a target the orbit no
 /// longer centres on — any of which moves the worst vertex back inside at a
 /// shorter throw.
-const CAR_DISTANCE: f32 = 7.0;
+const CAR_DISTANCE: f32 = 13.0;
 
 /// The NDC shift that recentres the orbit target into the car rect.
 ///
@@ -2110,33 +2109,32 @@ impl Page {
     /// [`Demo::tabs`] pairs the buttons with their pages in**, so a button and the
     /// page it asks for cannot be a pair two lists disagree about.
     ///
-    /// **`Demo` is last**, after `Overlays`. The order is load-bearing three times
+    /// **`Demo` is first**, before `Pads`. The order is load-bearing three times
     /// (`--help`, the unknown-name message, the tab bar's button order) and this
-    /// doc says so. Amended 2026-10-09 by `TASK_UI_DEMO_01`.
+    /// doc says so. `Demo` is the most widely used page, so it leads.
+    /// Amended 2026-10-09 by `TASK_UI_DEMO_01`; moved first 2026-10-13.
     const ALL: [Page; 7] = [
+        Page::Demo,
         Page::Pads,
         Page::Text,
         Page::Input,
         Page::Controls,
         Page::Data,
         Page::Overlays,
-        Page::Demo,
     ];
 
     /// The page a run with no `--tab=` opens on.
     ///
     /// **Named rather than left to the enum's first variant**, so that a variant
     /// inserted at the top cannot silently change which page a capture with no
-    /// flag photographs. `pads` is the parent's requirement 3's choice and its
-    /// reason: it is the one page every capture taken for tasks 11 to 22
-    /// contains, so a capture that used to need no argument is still
-    /// reproducible.
+    /// flag photographs. `demo` is the most widely used page, so a run with no
+    /// argument opens there.
     ///
-    /// **The seventh page does not become the default.** `Page::DEFAULT` is the
-    /// page every capture taken for tasks 11 to 22 contains, so a capture that
-    /// used to need no argument is still reproducible. `TASK_UI_DEMO_01`,
-    /// 2026-10-09.
-    const DEFAULT: Page = Page::Pads;
+    /// **`Demo` is the default.** `TASK_UI_DEMO_01`,
+    /// 2026-10-09, added the seventh page without making it the default so that
+    /// a capture that used to need no argument was still reproducible; the
+    /// operator moved the default to `demo` on 2026-10-13.
+    const DEFAULT: Page = Page::Demo;
 
     /// Returns the page's lowercase name: the `--tab=` value, and the word the
     /// unknown-name message names the others beside.
@@ -2330,9 +2328,11 @@ fn usage() -> String {
          \x20 --tab=<page>   open on that page; one of: {}\n\
          \x20 --help         print this and exit\n\
          \n\
-         ROADOS_RUN_SECONDS  run for this many seconds and stop, or run until the\n\
-         \x20                   window is closed\n\
-         ROADOS_ASSET_DIR    the directory assets/demo.png is looked for in\n",
+          ROADOS_RUN_SECONDS  run for this many seconds and stop, or run until the\n\
+          \x20                   window is closed\n\
+          ROADOS_ASSET_DIR    the directory assets/demo.png is looked for in\n\
+          ROADOS_CAR_COLOR    six hex digits repainting the car's paint;\n\
+          \x20                   silver when unset or malformed\n",
         page_names()
     )
 }
@@ -2349,23 +2349,22 @@ struct Picture {
     source: ImageSource,
 }
 
-/// The uploaded car model: one command per node instance, and its colormap.
+/// The uploaded car model: one command per node instance, each with its own
+/// texture, tint and opacity.
 ///
-/// The colormap is `renderer.load_texture` on the same search. Each
-/// [`ModelPart`] carries **its node's placement** — a translation-only `Mat4`
-/// read from the GLB by `render::gltf` — so the car assembles from geometry
-/// authored at the origin and the four wheels land where the file's nodes put
-/// them. The geometry itself is uploaded once: all parts share one [`MeshId`]
-/// and index buffer, exactly as the mesh store's shared-buffer design intends.
+/// Each [`ModelPart`] carries **its node's placement** — a translation at most,
+/// read from the model by `render::gltf` — its base-color texture resolved
+/// beside the model file, and its factor as tint and opacity, so the car
+/// assembles from the placements the file gave it. The geometry itself is
+/// uploaded once: all parts share one [`MeshId`] and index buffer, exactly as
+/// the mesh store's shared-buffer design intends.
 struct Model {
     /// One part per node instance the loader returned, in node order.
     parts: Vec<ModelPart>,
-    /// The colormap's texture.
-    texture: TextureId,
 }
 
-/// One node instance's draw data: where in the shared mesh it draws, and where
-/// its node places it.
+/// One node instance's draw data: where in the shared mesh it draws, where
+/// its node places it, and what its material says.
 struct ModelPart {
     /// The shared uploaded mesh's handle.
     mesh: MeshId,
@@ -2373,6 +2372,12 @@ struct ModelPart {
     range: SubMeshRange,
     /// The node's placement, applied per command at draw time.
     transform: Mat4,
+    /// This part's base-color texture: its own file, or the sibling white.
+    texture: TextureId,
+    /// The factor's rgb as bytes; alpha rides [`ModelPart::opacity`].
+    tint: Color,
+    /// The factor's alpha: glass rides the Transparent derivation on this.
+    opacity: f32,
 }
 
 /// The fits the demo's image cycles through, in the order `F` walks them.
@@ -2423,10 +2428,16 @@ fn lock_icon_relative(locked: bool) -> String {
     )
 }
 
-/// The file name of the demo's car model, under whichever directory is found.
+/// The file name of the demo's previous car model, under whichever directory
+/// is found.
+///
+/// Kept for the record: the demo loads [`ASSET_MODEL_RELATIVE`] now, and
+/// `ui_core`'s tests still read this file as a fixture. Unused by the demo.
+#[allow(dead_code)]
 const ASSET_MODEL_FILE: &str = "sedan.glb";
 
-/// The file name of the demo's car model, under whichever directory is found.
+/// The file name of the demo's previous car texture, under whichever
+/// directory is found.
 ///
 /// Beside the image in the same `assets/` directory. The model is Kenney's GLB
 /// **copied byte for byte** — not a converted form — and it names its texture
@@ -2434,6 +2445,9 @@ const ASSET_MODEL_FILE: &str = "sedan.glb";
 /// follow, so the demo names [`COLORMAP_FILE`] beside it and the draw command
 /// carries it. That is the same split the old project format argued for, now
 /// with the upstream file itself as the committed artefact.
+///
+/// Unused since the Passat widening: each part carries its own texture now.
+#[allow(dead_code)]
 const COLORMAP_FILE: &str = "colormap.png";
 
 /// Where the image is, relative to a directory in the workspace's own layout.
@@ -2445,17 +2459,51 @@ const ASSET_RELATIVE: &str = "src/ui_demo/assets/demo.png";
 
 /// Where the car model is, relative to a directory in the workspace's own layout.
 ///
-/// `sedan.glb` is Kenney's GLB **copied byte for byte** from the asset cache,
-/// not a converted form; `render::gltf` reads it directly. The loader keeps each
-/// node's transform, so the four wheels land where the file's nodes put them.
-/// `ROADOS_ASSET_DIR` is how a caller supplies a different file.
-const ASSET_MODEL_RELATIVE: &str = "src/ui_demo/assets/sedan.glb";
+/// The 2000 Volkswagen Passat Variant (B5 FL, LP/MP) by KrStolorz, from
+/// <https://sketchfab.com/3d-models/2000-volkswagen-passat-variant-b5-fl-lpmp-7d552961613347118410a98ae9083a6e>
+/// under the Sketchfab Standard licence (full text in
+/// `assets/passat/license.txt`). A `.gltf` document with its sibling
+/// `scene.bin` and `textures/` directory; `render::gltf` reads it directly.
+/// The loader keeps each node's transform, so every part draws through the
+/// placement the file gave it. `ROADOS_ASSET_DIR` is how a caller supplies a
+/// different file.
+const ASSET_MODEL_RELATIVE: &str = "src/ui_demo/assets/passat/scene.gltf";
+
+/// The file name of the fallback texture beside the car model: what a
+/// factor-only part (no base-color texture) samples, tinted by its factor.
+const WHITE_FILE: &str = "white.png";
+
+/// The directory beside the car model holding its textures: the loader
+/// reports a file name rather than the URI's directory, so this is where the
+/// demo looks when the name sits in no file beside the model.
+const MODEL_TEXTURE_DIR: &str = "textures";
 
 /// The environment variable that overrides where the image is looked for.
 ///
 /// A path to the **directory** holding the image rather than to the image, so
 /// the file's name is written down once in [`ASSET_FILE`].
 const ASSET_DIR_VAR: &str = "ROADOS_ASSET_DIR";
+
+/// The environment variable that recolours the car's paint.
+///
+/// Six hex digits (`ff0000`), with one optional leading `#`. It replaces the
+/// rgb of the file's `Paint` material and nothing else — textured panels keep
+/// their factor, lights and glass keep theirs — so a typo cannot turn the
+/// wheels red. Unset is [`CAR_DEFAULT_PAINT`]; malformed says so on stderr
+/// and is ignored, for the reason [`run_seconds_from`] refuses loudly.
+const CAR_COLOR_VAR: &str = "ROADOS_CAR_COLOR";
+
+/// The paint an unset [`CAR_COLOR_VAR`] means: a neutral silver.
+///
+/// The file's own paint is a dark blue its first owner chose; the demo shows
+/// silver, the colour a buyer picks when the paint is not the point. Light
+/// enough to read under the mesh pass's ambient, neutral enough to take no
+/// side in the theme's violet.
+const CAR_DEFAULT_PAINT: [u8; 3] = [192, 192, 192];
+
+/// The material the paint override recolours: the untextured body paint. The
+/// name is the file's own, read by `render::gltf` into the part's material.
+const CAR_PAINT_MATERIAL: &str = "Paint";
 
 /// The size `assets/demo.png` is, which the stand-in is built at.
 ///
@@ -2805,13 +2853,22 @@ fn load_picture(renderer: &mut Renderer) -> Option<Picture> {
 /// ([`MODEL_STATUS_TEXT`]) saying so. A wireframe box is a shape a defect
 /// looks like, and a car-shaped `Mesh` built in Rust is an asset pipeline in
 /// `ui_demo`, which the asset pipeline does not do.
+///
+/// Each part resolves its own texture from its material — the loader's file
+/// name joined onto the model file's parent directory, the sibling
+/// [`WHITE_FILE`] for a factor-only part — and carries its factor as tint and
+/// opacity, so glass rides the existing Transparent derivation with no
+/// renderer change.
 fn load_model(renderer: &mut Renderer) -> Option<Model> {
     let candidates = model_candidates();
     let path = candidates.iter().find(|path| path.is_file());
     let Some(path) = path else {
         eprintln!(
             "ui_demo: {} not found; looked in {}",
-            ASSET_MODEL_FILE,
+            Path::new(ASSET_MODEL_RELATIVE)
+                .file_name()
+                .unwrap_or(OsStr::new(""))
+                .to_string_lossy(),
             join_paths(&candidates)
         );
         return None;
@@ -2825,7 +2882,7 @@ fn load_model(renderer: &mut Renderer) -> Option<Model> {
     };
     if loaded.is_empty() {
         eprintln!(
-            "ui_demo: {}: the GLB holds no mesh node; standing in for it",
+            "ui_demo: {}: the model holds no mesh node; standing in for it",
             path.display()
         );
         return None;
@@ -2833,9 +2890,15 @@ fn load_model(renderer: &mut Renderer) -> Option<Model> {
     // **One uploaded mesh, many placements.** The mesh store is a single shared
     // vertex and index buffer (tasks 35 and 37), so the parts are concatenated
     // into one `Mesh` with absolute indices and one absolute range each; every
-    // part keeps its node transform and is drawn through its own matrix. The
-    // geometry stays authored at the origin — nothing is baked — so the wheel
-    // matrices are what place the car.
+    // part keeps the placement the loader returned — a translation at most —
+    // and is drawn through its own matrix.
+    let parent: &Path = path.parent().unwrap_or(Path::new(""));
+    let white = parent.join(WHITE_FILE);
+    // Read once, not per part: the process's environment is one value and
+    // every part is painted under the same override. An unset variable is the
+    // default silver, not the file's blue.
+    let paint = Some(car_paint().unwrap_or(CAR_DEFAULT_PAINT));
+    let mut textures: Vec<(PathBuf, TextureId)> = Vec::new();
     let mut geometry = Mesh {
         vertices: Vec::new(),
         indices: Vec::new(),
@@ -2855,6 +2918,28 @@ fn load_model(renderer: &mut Renderer) -> Option<Model> {
             eprintln!("ui_demo: a part of the car has more indices than a range can hold");
             return None;
         };
+        // Alpha rides `opacity` alone — the batch derives its blend from it
+        // rather than from the tint — so the tint stays opaque and the
+        // factor's rgb shows full strength through it. A paint override
+        // recolours only the paint material; see [`part_tint`].
+        let factor = part.material.base_color_factor;
+        let (tint, opacity) = part_tint(&part.material.name, factor, paint);
+        let preferred = match &part.material.base_color_texture {
+            Some(name) => texture_path(parent, name),
+            None => white.clone(),
+        };
+        let texture = match part_texture(renderer, &mut textures, &preferred) {
+            Some(id) => id,
+            None if preferred == white => return None,
+            None => {
+                eprintln!(
+                    "ui_demo: {}: falling back to {}",
+                    preferred.display(),
+                    white.display()
+                );
+                part_texture(renderer, &mut textures, &white)?
+            }
+        };
         geometry.vertices.extend(part.mesh.vertices);
         geometry.indices.extend(
             part.mesh
@@ -2873,6 +2958,9 @@ fn load_model(renderer: &mut Renderer) -> Option<Model> {
                 index_count,
             },
             part.transform,
+            texture,
+            tint,
+            opacity,
         ));
     }
     let mesh = match renderer.upload_mesh(geometry) {
@@ -2884,30 +2972,120 @@ fn load_model(renderer: &mut Renderer) -> Option<Model> {
     };
     let parts = placements
         .into_iter()
-        .map(|(range, transform)| ModelPart {
+        .map(|(range, transform, texture, tint, opacity)| ModelPart {
             mesh,
             range,
             transform,
+            texture,
+            tint,
+            opacity,
         })
         .collect();
-    // The colormap sits beside the model, and the GLB names it only by a
-    // relative URI the loader does not follow: the draw command carries the
-    // texture, so the demo names it. Standalone rather than atlas-resident,
-    // because the mesh pass samples it by the model's own UVs: an atlas would
-    // pack it beside other images and the same UVs would land on somebody
-    // else's pixels, which is the black car the atlas path draws.
-    let colormap = path.parent().unwrap_or(Path::new("")).join(COLORMAP_FILE);
-    let texture = match renderer.load_standalone_texture(&colormap) {
-        Ok(texture) => texture.id(),
-        Err(error) => {
-            eprintln!(
-                "ui_demo: {}: {error}; standing in for it",
-                colormap.display()
-            );
-            return None;
+    Some(Model { parts })
+}
+
+/// Returns where a part's texture is: `name` beside the model, or in the
+/// model's texture directory when no such file sits beside it.
+///
+/// `render::gltf` reports the image's file name rather than its URI, so
+/// `textures/Body_baseColor.png` arrives as `Body_baseColor.png` and the
+/// direct join misses: the second look is where the file actually is.
+fn texture_path(parent: &Path, name: &str) -> PathBuf {
+    let beside = parent.join(name);
+    if beside.is_file() {
+        beside
+    } else {
+        parent.join(MODEL_TEXTURE_DIR).join(name)
+    }
+}
+
+/// Loads `path` as a standalone texture, once per path: many parts share one
+/// material, and one upload per part would upload the same file ten times
+/// over. Standalone rather than atlas-resident, because the mesh pass samples
+/// it by the model's own UVs: an atlas would pack it beside other images and
+/// the same UVs would land on somebody else's pixels.
+fn part_texture(
+    renderer: &mut Renderer,
+    cache: &mut Vec<(PathBuf, TextureId)>,
+    path: &Path,
+) -> Option<TextureId> {
+    if let Some((_, id)) = cache.iter().find(|(known, _)| known.as_path() == path) {
+        return Some(*id);
+    }
+    match renderer.load_standalone_texture(path) {
+        Ok(handle) => {
+            let id = handle.id();
+            cache.push((path.to_path_buf(), id));
+            Some(id)
         }
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}", path.display());
+            None
+        }
+    }
+}
+
+/// Maps one base-color factor channel to a byte: clamped, scaled, rounded.
+///
+/// The map is linear — no sRGB transfer — so a mid factor draws brighter than
+/// its colorimetry; the capture blesses the approximation.
+fn factor_channel(value: f32) -> u8 {
+    u8::try_from(f32_to_u32((value.clamp(0.0, 1.0) * 255.0).round())).unwrap_or(u8::MAX)
+}
+
+/// Returns the override for the car's paint, or `None`.
+///
+/// Unset is silent and means [`CAR_DEFAULT_PAINT`], applied by the caller: there
+/// is nothing to refuse. A set value that is not a colour says so once on
+/// stderr and is ignored, because a car in the wrong colour is a typo made
+/// visible and a missing car would be a second defect. The parse itself is
+/// [`car_color_from`], for the reason [`run_seconds_from`] is a free function
+/// over its argument.
+fn car_paint() -> Option<[u8; 3]> {
+    let raw = std::env::var(CAR_COLOR_VAR).ok()?;
+    let paint = car_color_from(Some(raw.clone()));
+    if paint.is_none() {
+        eprintln!("ui_demo: {CAR_COLOR_VAR}={raw:?} is not six hex digits; painting it silver");
+    }
+    paint
+}
+
+/// Returns the paint `raw` names, or `None`.
+///
+/// Six hex digits after one optional leading `#`, trimmed, case-insensitive —
+/// the shape a colour picker copies. Anything else is `None`: the caller says
+/// so on stderr, because a silently kept blue would read as the variable
+/// doing nothing.
+#[must_use]
+fn car_color_from(raw: Option<String>) -> Option<[u8; 3]> {
+    let raw = raw?;
+    let trimmed = raw.trim();
+    let hex = trimmed.strip_prefix('#').unwrap_or(trimmed);
+    // `is_ascii` first: byte-slicing a non-ASCII string panics, and this is
+    // text off the environment, where a panic is not what a typo earns.
+    if hex.len() != 6 || !hex.is_ascii() {
+        return None;
+    }
+    let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).ok();
+    Some([channel(0)?, channel(2)?, channel(4)?])
+}
+
+/// Returns a part's tint and opacity under a paint override.
+///
+/// Only [`CAR_PAINT_MATERIAL`] takes the override — the one untextured body
+/// paint — so lights, glass and textured panels keep the factors the file gave
+/// them. Alpha always rides opacity alone: the batch derives its blend from
+/// it rather than from the tint.
+fn part_tint(material: &str, factor: [f32; 4], paint: Option<[u8; 3]>) -> (Color, f32) {
+    let [r, g, b] = match paint {
+        Some(painted) if material == CAR_PAINT_MATERIAL => painted,
+        _ => [
+            factor_channel(factor[0]),
+            factor_channel(factor[1]),
+            factor_channel(factor[2]),
+        ],
     };
-    Some(Model { parts, texture })
+    (Color::new(r, g, b, 255), factor[3])
 }
 
 /// Returns `paths` as one comma-separated string, for a message about where
@@ -3042,9 +3220,9 @@ fn stand_in_icon_picture() -> Option<Picture> {
 /// every path looked at — with one deliberate difference: the master is
 /// loaded with [`Renderer::load_standalone_texture`], so it gets a texture of
 /// its own. [`icons::paint`] records the full texture, and an atlas window is
-/// not one: the colormap takes the same route for the same reason, and the
-/// small master would otherwise pack into the atlas and sample the whole of
-/// it. A missing file is non-fatal, exactly as a missing gallery image is.
+/// not one: the car's textures take the same route for the same reason, and
+/// the small master would otherwise pack into the atlas and sample the whole
+/// of it. A missing file is non-fatal, exactly as a missing gallery image is.
 fn load_icon_picture(renderer: &mut Renderer) -> Option<Picture> {
     let candidates = icon_candidates();
     let path = candidates.iter().find(|path| path.is_file());
@@ -5510,13 +5688,13 @@ impl Demo {
         //   where **every tap and every key is swallowed by a scrim nobody can
         //   see**. That is not a hypothetical degradation: it is the launch state
         //   of `ui_demo` with no argument at all, once the default page is
-        //   `pads`, and it is the state *a still screenshot of a 4 fps
+        //   `demo`, and it is the state *a still screenshot of a 4 fps
         //   application* spent three reviews mistaking for something else. `D`
         //   is the way to bring it up from any page, and it activates
         //   `overlays` as it does.
         //
         // What would reverse it: nothing in this task, and the operator's decision
-        // that `pads` is the default page is what makes the condition necessary.
+        // that `demo` is the default page is what makes the condition necessary.
         let presented = page == Page::Overlays;
         if presented {
             let _ = dialog.present();
@@ -9611,7 +9789,7 @@ impl Demo {
     /// yaw sign the convention it is rather than an accident. [`CAR_TARGET_Y`]
     /// is the target's own y and is *added* to `distance · sin(pitch)`, so a
     /// helper that returned a world-space eye by forgetting the target would
-    /// sit 0.65 m low and show the car from below the beltline.
+    /// sit 0.43 m low and show the car from below the beltline.
     ///
     /// Free of GL and of `Mat4`, so the geometry is unit-testable — and
     /// `the_view_puts_the_orbit_target_on_the_camera_axis` is what holds it.
@@ -9658,7 +9836,7 @@ impl Demo {
     /// `shift · projection · view`, the recentre outermost, so it moves NDC
     /// without touching the depth the divide reads. Each part then multiplies
     /// its node transform on the right of this in [`Demo::car_commands`], so
-    /// the camera orbits and the wheels stay where the GLB's nodes put them.
+    /// the camera orbits and the parts stay where the model's nodes put them.
     ///
     /// The `Option` is handled, not unwrapped: 36 returns `None` on every
     /// violated precondition, so this returns `None` with a printed reason
@@ -9684,21 +9862,22 @@ impl Demo {
     /// One command per [`ModelPart`], because each carries **its own node
     /// transform**: `base` is `car_mvp`'s `shift · projection · view` and each
     /// command's matrix is `base · part.transform`, so the car assembles from
-    /// geometry authored at the origin and the four wheels land where the GLB's
-    /// nodes put them. The five parts no longer share one matrix. `tint` is the
-    /// premultiplied white the colormap needs and `opacity` is `1.0`, so the
-    /// mesh batches `Opaque` and writes depth per task 37's table. With no
+    /// the placements the file gave it and no two placed parts share a matrix.
+    /// Each command also carries its part's own texture, tint and opacity — a
+    /// glass part's 0.05 rides the existing Transparent derivation on
+    /// `opacity`, with no renderer change — so opaque parts batch `Opaque`
+    /// and glass batches `Transparent` per task 37's table. With no
     /// model there is no stand-in — `load_model`'s doc gives the four values a
     /// stand-in would have to lie about — so this records nothing.
     ///
     /// `u_normal_matrix` is the identity 3×3, uploaded by the renderer itself:
-    /// every part's transform is a **translation**, which does not touch the
-    /// 3×3, and the view is a rigid rotation plus a translation, so the
+    /// every part's transform is a **translation at most**, which does not touch
+    /// the 3×3, and the view is a rigid rotation plus a translation, so the
     /// model→world 3×3 is the identity. The honest limit rides along: if a
     /// later task rotates the *car* rather than orbiting the camera, the normal
     /// matrix stops being the identity and needs a real inverse transpose,
-    /// which `Mat4` does not have — and the loader refuses a rotating node
-    /// rather than shading it wrong.
+    /// which `Mat4` does not have — and a rotated node is baked into its
+    /// vertices at load, so what the renderer sees stays a translation.
     fn car_commands(&self) -> Vec<DrawCommand> {
         let Some(model) = &self.model else {
             return Vec::new();
@@ -9712,9 +9891,9 @@ impl Demo {
                 part.mesh,
                 part.range,
                 base.multiply(&part.transform),
-                Color::new(255, 255, 255, 255),
-                1.0,
-                model.texture,
+                part.tint,
+                part.opacity,
+                part.texture,
             );
         }
         painter.finish()
@@ -11033,7 +11212,7 @@ mod tests {
     /// a test that reads a recorded command would find an empty list — which reads
     /// as "the widget draws nothing" and is the opposite of the truth.
     ///
-    /// **`Page::DEFAULT` is `pads`,** so the tests whose subject really is on the
+    /// **`Page::DEFAULT` is `demo`,** so the tests whose subject really is on the
     /// default page are unchanged and the ones that are not name theirs.
     fn demo_on(page: Page) -> Demo {
         Demo::new(mono_metrics(), demo_fonts(), None, None, None, page).unwrap()
@@ -11326,7 +11505,7 @@ mod tests {
 
     #[test]
     fn pressing_the_mouse_presses_the_pad_under_the_cursor() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Pads);
         let rect = {
             let nodes = demo.nodes.borrow();
             nodes
@@ -12886,7 +13065,7 @@ mod tests {
 
     #[test]
     fn the_card_paints_the_themes_surface_behind_the_pads() {
-        let demo = laid_out();
+        let demo = laid_out_on(Page::Pads);
         let surface = demo
             .theme
             .get(ThemeToken::Surface)
@@ -12927,7 +13106,7 @@ mod tests {
 
     #[test]
     fn the_card_follows_a_theme_switch() {
-        let mut demo = dialog_closed();
+        let mut demo = dialog_closed_on(Page::Pads);
         let before = card_rects(&demo).first().map(|(_, color)| *color);
 
         demo.handle_event(toggle_theme_event());
@@ -16032,7 +16211,7 @@ mod tests {
     }
 
     #[test]
-    fn the_highest_ink_on_any_page_is_the_card_of_pads_at_the_tab_bar() {
+    fn the_highest_ink_on_any_gallery_page_is_the_card_of_pads_at_the_tab_bar() {
         // **The second witness for the strip, and it exists because the first one
         // was deletable.** The review of this task removed the per-command ink loop
         // from `the_tab_bars_strip_holds_the_background_and_nothing_else` and
@@ -16046,13 +16225,15 @@ mod tests {
         // one keeping the property alive; pinning the *owner* as well is what says
         // the card is the thing at the top rather than "something is".
         //
-        // **Six pages, because the highest thing is not on all of them**, and the
-        // claim is over the union of the six, which is the only way to say "nothing
-        // is above this anywhere". **Measured 2026-10-04**, the minimum ink `y`
-        // over each page's unexcused commands:
+        // **Six gallery pages plus the demo page, because the highest thing is
+        // not on all of them**, and the claim is over the union of the seven,
+        // which is the only way to say "nothing is above this anywhere".
+        // **Measured 2026-10-04**, the minimum ink `y` over each page's
+        // unexcused commands:
         //
         // | page | minimum | on |
         // |---|---|---|
+        // | `demo` | 64.0 | the map image |
         // | `pads` | 64.0 | the card of pads |
         // | `text` | 234.0 | the first text-panel label |
         // | `input` | 748.0 | **the frame-rate readout** |
@@ -16096,14 +16277,25 @@ mod tests {
         // three different numbers here and be right about none of the three
         // questions being asked.**
         //
-        // **The winning command per page**, measured the same way, in the same
-        // order: a `RoundedRect` (the card's surface), a `Text`, a `Text`, a
-        // `Circle`, an `Image`, a `Text`. Written as a plain comment and not a doc
-        // comment because it sits on a statement — the third round's clippy gate
-        // caught `unused_doc_comments` here, which is the only thing these four
-        // prose edits broke.
+        // **The winning command per gallery page**, measured the same way, in the
+        // same order: a `RoundedRect` (the card's surface), a `Text`, a `Text`, a
+        // `Circle`, an `Image`, a `Text`. The demo page's own winner is an `Image`
+        // too — the map, full-bleed below the bar — and it ties the card at 64.0
+        // rather than beating it, which is why the loop below tracks the gallery
+        // winner and the demo page is asserted beside it. Written as a plain
+        // comment and not a doc comment because it sits on a statement — the
+        // third round's clippy gate caught `unused_doc_comments` here, which is
+        // the only thing these four prose edits broke.
         let mut highest: Option<(Page, Handle, &'static str, f32)> = None;
         for page in Page::ALL {
+            // **The demo page is asserted beside the loop, not in it.** Its map
+            // is full-bleed below the tab bar, so its minimum ink ties the card
+            // of pads at [`CONTENT_TOP`]; tracking it here would make the owner
+            // below whichever of the two `Page::ALL` names first rather than the
+            // card the strip was measured against.
+            if page == Page::Demo {
+                continue;
+            }
             let demo = laid_out_on(page);
             let excused = strip_excused(&demo);
             let names = demo.placed_handles();
@@ -16139,7 +16331,7 @@ mod tests {
         let (page, handle, what, top) = highest.expect("every page records some command");
         assert_eq!(
             top, CONTENT_TOP,
-            "{page:?}: the highest ink on any page is at {top}, and it is the {what}, \
+            "{page:?}: the highest ink on any gallery page is at {top}, and it is the {what}, \
              so the tab bar's {CONTENT_TOP} pixels are exactly as tall as the \
              reservation needs and not a pixel more"
         );
@@ -16149,6 +16341,21 @@ mod tests {
             "and the node at the top is the card of pads — the one node whose origin \
              was implicit until this task gave it one. If this fails, something was \
              moved up into the strip rather than the strip growing"
+        );
+        // **And the demo page ties it, on the map.** The map node is full-bleed
+        // below the tab bar, so its ink starts where the strip ends rather than
+        // in it — the same number from the page the loop skips.
+        let demo_page = laid_out_on(Page::Demo);
+        let map_commands = demo_page.commands_at(demo_page.map.handle());
+        assert_eq!(
+            map_commands.len(),
+            1,
+            "the demo page records exactly one command for the map"
+        );
+        assert_eq!(
+            inked_box(&map_commands[0]).y,
+            CONTENT_TOP,
+            "and the map's ink starts where the tab bar's strip ends"
         );
     }
 
@@ -16694,30 +16901,48 @@ mod tests {
     /// test that reads mesh commands builds the `Model` by hand instead. The
     /// handles are names a recording needs rather than promises, which is
     /// what `MeshId::new`'s own doc says: an unknown id draws nothing, and a
-    /// recording is what these tests read. Five parts in node order, the shape
-    /// `load_model` builds: the body at the identity (so the first recorded
-    /// matrix is `car_mvp` itself) and the four wheels at four distinct
-    /// translations, so the per-part matrices differ.
+    /// recording is what these tests read. Thirty-four parts in node order,
+    /// the shape `load_model` builds for the Passat: the body at the identity
+    /// (so the first recorded matrix is `car_mvp` itself) and 33 placed parts
+    /// at distinct translations, so no two share a matrix. Textures, tints
+    /// and opacities vary per part the way the file's materials do — including
+    /// one glass part at 0.05 — so the command test pins that each command
+    /// carries its own part's look.
     fn demo_with_model_on(page: Page) -> Demo {
         let mesh = MeshId::new(3);
-        let part = |first_index: u32, index_count: u32, translation: [f32; 3]| ModelPart {
+        let white = TextureId::new(7);
+        let painted = TextureId::new(9);
+        let mut parts = vec![ModelPart {
             mesh,
             range: SubMeshRange {
-                first_index,
-                index_count,
+                first_index: 0,
+                index_count: 3,
             },
-            transform: Mat4::identity().translated(translation),
-        };
-        let model = Model {
-            parts: vec![
-                part(0, 3, [0.0, 0.0, 0.0]),
-                part(3, 6, [0.3, 0.3, 0.66]),
-                part(9, 9, [-0.3, 0.3, 0.66]),
-                part(18, 12, [0.3, 0.3, -0.66]),
-                part(30, 15, [-0.3, 0.3, -0.66]),
-            ],
-            texture: TextureId::new(7),
-        };
+            transform: Mat4::identity(),
+            texture: white,
+            tint: Color::new(255, 255, 255, 255),
+            opacity: 1.0,
+        }];
+        let mut shift = 0.1f32;
+        for index in 1u32..34u32 {
+            parts.push(ModelPart {
+                mesh,
+                range: SubMeshRange {
+                    first_index: index * 3,
+                    index_count: 3,
+                },
+                transform: Mat4::identity().translated([shift, 0.0, 0.0]),
+                texture: if index % 2 == 0 { white } else { painted },
+                tint: if index % 3 == 0 {
+                    Color::new(204, 204, 204, 255)
+                } else {
+                    Color::new(255, 255, 255, 255)
+                },
+                opacity: if index == 7 { 0.05 } else { 1.0 },
+            });
+            shift += 0.1;
+        }
+        let model = Model { parts };
         let mut demo = Demo::new(mono_metrics(), demo_fonts(), None, None, Some(model), page)
             .expect("a demo holding a model");
         demo.frame(WINDOW, Duration::from_millis(16));
@@ -16973,22 +17198,76 @@ mod tests {
     }
 
     #[test]
+    fn the_passat_stays_in_frame_over_the_ambient_turn() {
+        // The camera refit, pinned: the Passat is 4.78 m long where the sedan
+        // was 1.3 m tall, so the old 7.0 m crops it and 13.0 m holds it. These
+        // are measured silhouette extremes off the committed asset — mirrors,
+        // sill, roof, nose and tail rings — projected through the production
+        // composition (`car_mvp`, not a copy of it) over every ambient yaw at
+        // the resting pitch. Each must land inside the car rect with margin
+        // (0.90 against the 0.84 the fit measured), or the distance wants
+        // refitting rather than the threshold widening.
+        let silhouette: [[f32; 3]; 9] = [
+            [-0.8885, 0.6104, 1.0732],
+            [0.8885, 0.6104, 1.0732],
+            [0.3319, -0.8925, -0.4814],
+            [0.0, 1.7548, -1.8951],
+            [0.0, 0.4351, -2.4420],
+            [0.0, 0.5133, 2.3357],
+            [-0.0254, 0.4351, -2.4166],
+            [0.0254, 0.4351, -2.4166],
+            [0.0, 0.4166, -2.4312],
+        ];
+        let demo = demo_with_model_on(Page::Data);
+        demo.car.widget.pitch.set(CAR_REST_PITCH);
+        let (centre_x, centre_y) = (
+            CAR_RECT.x + CAR_RECT.width / 2.0,
+            CAR_RECT.y + CAR_RECT.height / 2.0,
+        );
+        for step in 0u16..360u16 {
+            let yaw = f32::from(step) * std::f32::consts::PI / 180.0;
+            demo.car.widget.yaw.set(yaw);
+            let base = demo
+                .car_mvp()
+                .expect("the car projection is never degenerate");
+            for point in silhouette {
+                let centred = base
+                    .transform_point(point)
+                    .expect("at this distance no vertex is on the camera plane");
+                let (px, py) = (
+                    (centred[0] + 1.0) / 2.0 * WINDOW.width,
+                    (1.0 - centred[1]) / 2.0 * WINDOW.height,
+                );
+                let fraction = f32::max(
+                    (px - centre_x).abs() / (CAR_RECT.width / 2.0),
+                    (py - centre_y).abs() / (CAR_RECT.height / 2.0),
+                );
+                assert!(
+                    fraction < 0.90,
+                    "at yaw {step}° {point:?} lands at ({px:.1}, {py:.1}), \
+                     fraction {fraction:.3} of the car rect's half-size"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_car_records_one_command_per_part_with_its_own_mvp() {
         // The command-level half, matching task 34's rect-level half for the
-        // 2D pages: five commands, one per `Model::parts` entry in node order.
-        // **The former single-matrix claim is deliberately inverted**: each
-        // part carries its node transform, so the four wheels no longer share
-        // the body's matrix and no two wheels share one either.
+        // 2D pages: thirty-four commands, one per `Model::parts` entry in node
+        // order. **The former single-matrix claim is deliberately inverted**:
+        // each part carries its node transform, so no placed part shares the
+        // body's matrix and no two placed parts share one either.
         let demo = demo_with_model_on(Page::Data);
         let commands = demo.commands_at(demo.car.node());
         assert_eq!(
             commands.len(),
-            5,
-            "one command per part, and the model holds five parts"
+            34,
+            "one command per part, and the model holds thirty-four parts"
         );
         let model = demo.model.as_ref().expect("a model the fixture built");
         let mut body_mvp = None;
-        let mut wheel_mvps: Vec<Mat4> = Vec::new();
+        let mut part_mvps: Vec<Mat4> = Vec::new();
         for (command, part) in commands.iter().zip(model.parts.iter()) {
             let DrawCommand::Mesh {
                 mesh,
@@ -17003,16 +17282,12 @@ mod tests {
             };
             assert_eq!(*mesh, part.mesh, "the command draws the part's mesh");
             assert_eq!(*recorded, part.range, "through the part's own range");
-            assert_eq!(
-                *tint,
-                Color::new(255, 255, 255, 255),
-                "in the premultiplied white the colormap needs"
-            );
-            assert_eq!(*opacity, 1.0, "opaque, so the mesh batches `Opaque`");
-            assert_eq!(*texture, model.texture, "with the model's colormap");
+            assert_eq!(*tint, part.tint, "with the part's own tint");
+            assert_eq!(*opacity, part.opacity, "and the part's own opacity");
+            assert_eq!(*texture, part.texture, "through the part's own texture");
             // The base `car_mvp` is applied on the left of every part; the body
-            // is the identity part, so its command is the base and the wheels
-            // must each differ from it and from one another.
+            // is the identity part, so its command is the base and the placed
+            // parts must each differ from it and from one another.
             let base = demo
                 .car_mvp()
                 .expect("the car projection is never degenerate");
@@ -17025,14 +17300,14 @@ mod tests {
                 );
                 body_mvp = Some(*command_mvp);
             } else {
-                wheel_mvps.push(*command_mvp);
+                part_mvps.push(*command_mvp);
             }
         }
-        let body_mvp = body_mvp.expect("five commands recorded a body matrix");
-        for (i, a) in wheel_mvps.iter().enumerate() {
-            assert_ne!(*a, body_mvp, "wheel {i} shares the body's matrix");
-            for b in &wheel_mvps[i + 1..] {
-                assert_ne!(*a, *b, "two wheels share a matrix");
+        let body_mvp = body_mvp.expect("thirty-four commands recorded a body matrix");
+        for (i, a) in part_mvps.iter().enumerate() {
+            assert_ne!(*a, body_mvp, "part {i} shares the body's matrix");
+            for b in &part_mvps[i + 1..] {
+                assert_ne!(*a, *b, "two parts share a matrix");
             }
         }
         // The recorded body matrix centres the orbit in the rect: the viewport
@@ -17072,7 +17347,7 @@ mod tests {
                 "the car walks before the {what}, so the chrome is over it"
             );
         }
-        // And on the five pages that do not show it, the gate empties the
+        // And on the six pages that do not show it, the gate empties the
         // node: no other page records one, so the capture criterion below is
         // demanding rather than merely met.
         for page in Page::ALL {
@@ -17085,6 +17360,65 @@ mod tests {
                 "{page:?} records no mesh command"
             );
         }
+    }
+
+    #[test]
+    fn car_color_from_reads_six_hex_digits() {
+        // Unset keeps the file's own paint, silently: there is nothing to
+        // refuse. Anything else is six hex digits with one optional hash, or
+        // it says so on stderr and is ignored like any other bad variable.
+        assert_eq!(car_color_from(None), None, "unset names no override");
+        assert_eq!(
+            car_color_from(Some("ff0000".to_string())),
+            Some([255, 0, 0]),
+            "lowercase red"
+        );
+        assert_eq!(
+            car_color_from(Some("00FF00".to_string())),
+            Some([0, 255, 0]),
+            "uppercase green"
+        );
+        assert_eq!(
+            car_color_from(Some("#0000ff".to_string())),
+            Some([0, 0, 255]),
+            "one leading hash is tolerated"
+        );
+        for refused in ["", "red", "fff", "fffffff", "gggggg", "#ff00", "ff 00 00"] {
+            assert_eq!(
+                car_color_from(Some(refused.to_string())),
+                None,
+                "{refused:?} is not six hex digits"
+            );
+        }
+    }
+
+    #[test]
+    fn part_tint_paints_only_the_paint_material() {
+        // The override recolours the paint and nothing else: a textured panel
+        // keeps its factor, and the alpha still rides opacity alone — the
+        // batch derives its blend from it rather than from the tint.
+        let blue = [0.0, 0.022, 0.286, 1.0];
+        let (tint, opacity) = part_tint("Paint", blue, Some([255, 0, 0]));
+        assert_eq!(tint, Color::new(255, 0, 0, 255), "paint takes the override");
+        assert_eq!(opacity, 1.0, "and keeps the factor's alpha");
+        let (tint, _) = part_tint("Body", blue, Some([255, 0, 0]));
+        assert_eq!(
+            tint,
+            Color::new(0, 6, 73, 255),
+            "a textured panel keeps its factor"
+        );
+        let (tint, opacity) = part_tint("Paint", blue, None);
+        assert_eq!(
+            tint,
+            Color::new(0, 6, 73, 255),
+            "no override keeps the file's factor"
+        );
+        assert_eq!(opacity, 1.0, "with the factor's alpha on opacity");
+        let (_, opacity) = part_tint("Shades_wht", [1.0, 1.0, 1.0, 0.05], Some([255, 0, 0]));
+        assert_eq!(
+            opacity, 0.05,
+            "glass stays glass under an override: alpha is opacity, not tint"
+        );
     }
 
     /// Returns the box every pixel `command` covers, or `None` for a
@@ -17312,13 +17646,13 @@ mod tests {
         );
         assert_eq!(
             candidates[0],
-            PathBuf::from("/somewhere/else/sedan.glb"),
+            PathBuf::from("/somewhere/else/scene.gltf"),
             "the override directory names the model, not the image"
         );
         assert!(
             candidates
                 .iter()
-                .any(|path| path == Path::new("/w/ui/src/ui_demo/assets/sedan.glb")),
+                .any(|path| path == Path::new("/w/ui/src/ui_demo/assets/passat/scene.gltf")),
             "and the workspace root is in there: {candidates:?}"
         );
         assert_eq!(
@@ -17923,6 +18257,18 @@ mod tests {
             || panic!("no tab button for {page:?}"),
             |tab| tab.button.handle(),
         )
+    }
+
+    /// Returns the index of `page`'s button in [`Demo::tabs`].
+    ///
+    /// **Derived from [`Page::ALL`] rather than written**, so the reorder that
+    /// moved `demo` first moved every assertion with it: a literal index is a
+    /// second copy of the order, and the order already lives in one place.
+    fn tab_index(page: Page) -> usize {
+        Page::ALL
+            .iter()
+            .position(|candidate| *candidate == page)
+            .expect("every page has a button")
     }
 
     /// Returns the active page's own `Tab` stops, after the six buttons.
@@ -19745,7 +20091,7 @@ mod tests {
         // "its own page" is not tidiness: the three are on `pads`, `controls` and
         // `input`, and a press on a control whose page is not showing does nothing
         // whatever the dialog is doing.
-        let mut pads = dialog_closed();
+        let mut pads = dialog_closed_on(Page::Pads);
         let pad = pads.node_rect(pads.pads[0].node).expect("a laid-out pad");
         pads.handle_event(mouse_down_at(
             pad.x + pad.width / 2.0,
@@ -21049,9 +21395,9 @@ mod tests {
         assert_eq!(
             request_from(&args(&[])),
             Request::Open(Page::DEFAULT),
-            "no argument is the default page, and `pads` is what requirement 3 names"
+            "no argument is the default page, and `demo` is the most widely used one"
         );
-        assert_eq!(Page::DEFAULT, Page::Pads, "which is `pads`");
+        assert_eq!(Page::DEFAULT, Page::Demo, "which is `demo`");
         for page in Page::ALL {
             assert_eq!(
                 request_from(&args(&[&format!("--tab={}", page.name())])),
@@ -21132,9 +21478,11 @@ mod tests {
             );
         }
         assert!(
-            usage().contains(RUN_SECONDS_VAR) && usage().contains(ASSET_DIR_VAR),
-            "and it names the two environment variables, because they are the demo's \
-             other two settings and `--tab=` is not a replacement for them"
+            usage().contains(RUN_SECONDS_VAR)
+                && usage().contains(ASSET_DIR_VAR)
+                && usage().contains(CAR_COLOR_VAR),
+            "and it names the three environment variables, because they are the \
+             demo's other three settings and `--tab=` is not a replacement for them"
         );
     }
 
@@ -21412,7 +21760,7 @@ mod tests {
         // `keyboard_at` without routing at all, and this is the path a real press
         // takes.
 
-        // **The pad.** `pads` is the default page, so the hidden half is any other.
+        // **The pad.** The hidden half is any page but its own.
         let mut demo = laid_out_on(Page::Text);
         let pad = demo.node_rect(demo.pads[0].node).expect("a laid-out pad");
         let (px, py) = (pad.x + pad.width / 2.0, pad.y + pad.height / 2.0);
@@ -21429,7 +21777,7 @@ mod tests {
         assert_eq!(demo.mouse_pressed, None, "and arms nothing for a release");
         demo.handle_event(mouse_up_at(px, py, 40_000_000));
 
-        let mut own = laid_out();
+        let mut own = laid_out_on(Page::Pads);
         let pad = own.node_rect(own.pads[0].node).expect("a laid-out pad");
         own.handle_event(mouse_down_at(
             pad.x + pad.width / 2.0,
@@ -22714,19 +23062,25 @@ mod tests {
 
         demo.show_page(Page::Data);
 
+        let pads_at = tab_index(Page::Pads);
+        let data_at = tab_index(Page::Data);
         assert!(
-            demo.tabs[0].button.is_animating(),
+            demo.tabs[pads_at].button.is_animating(),
             "the button that *was* selected is animating away from the active pair"
         );
         assert!(
-            demo.tabs[4].button.is_animating(),
+            demo.tabs[data_at].button.is_animating(),
             "and the one that now is is animating into it"
         );
         assert!(
-            demo.tabs[1..4].iter().all(|tab| !tab.button.is_animating()),
-            "**and the other four are not**, which is what says the aim is written \
-             for the two that changed rather than for all six: a bar where every \
-             button restarts its clock on every switch is six clocks restarted for \
+            demo.tabs
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != pads_at && *index != data_at)
+                .all(|(_, tab)| !tab.button.is_animating()),
+            "**and the other five are not**, which is what says the aim is written \
+             for the two that changed rather than for all seven: a bar where every \
+             button restarts its clock on every switch is seven clocks restarted for \
              nothing, and a mutation dropping the `changed` filter would pass \
              without it"
         );
@@ -22736,13 +23090,13 @@ mod tests {
         // write the target. A property that read its target here would be a write,
         // and the assertion above that `is_animating` is what tells the two apart.
         assert_eq!(
-            demo.tabs[0].button.background.get(),
+            demo.tabs[pads_at].button.background.get(),
             ButtonPalette::from_theme(&Theme::dark()).background,
             "the button that left still reads the *active* colour, and is animating \
              toward the rest pair"
         );
         assert_eq!(
-            demo.tabs[4].button.background.get(),
+            demo.tabs[data_at].button.background.get(),
             tab_palette(&Theme::dark(), false).background,
             "and the one that arrived still reads the *rest* colour, and is \
              animating toward the active pair"
@@ -22813,7 +23167,7 @@ mod tests {
         let mut demo = laid_out_on(Page::Pads);
         demo.show_page(Page::Data);
         demo.frame(WINDOW, fast / 2);
-        let midway = demo.tabs[4].button.background.get();
+        let midway = demo.tabs[tab_index(Page::Data)].button.background.get();
         assert_ne!(
             midway,
             ButtonPalette::from_theme(&Theme::dark()).background,
@@ -23196,30 +23550,35 @@ mod tests {
     fn a_tab_button_presses_under_a_pointer_and_releases_again() {
         let mut demo = laid_out_on(Page::Controls);
         let target = Page::Data;
+        let at = tab_index(target);
         let (x, y) = tab_center(&demo, target);
         let rest = demo
             .node_rect(tab_handle(&demo, target))
             .expect("a laid-out button");
-        assert_eq!(demo.tabs[4].button.scale.get(), 1.0, "at rest it is at 1.0");
+        assert_eq!(
+            demo.tabs[at].button.scale.get(),
+            1.0,
+            "at rest it is at 1.0"
+        );
 
         demo.handle_event(mouse_down_at(x, y, 0));
         assert!(
-            demo.tabs[4].button.pressed.get(),
+            demo.tabs[at].button.pressed.get(),
             "the press arm writes the button's own `pressed`"
         );
         assert!(
-            demo.tabs[4].button.is_animating(),
+            demo.tabs[at].button.is_animating(),
             "and aims it, so the press is a transition rather than a write"
         );
         for _ in 0..20 {
             demo.frame(WINDOW, Duration::from_millis(16));
         }
         assert!(
-            !demo.tabs[4].button.is_animating(),
+            !demo.tabs[at].button.is_animating(),
             "the press arrives rather than being restarted every frame"
         );
         assert_eq!(
-            demo.tabs[4].button.scale.get(),
+            demo.tabs[at].button.scale.get(),
             0.95,
             "and it is drawn smaller, which is `Button`'s own pressed scale"
         );
@@ -23241,9 +23600,9 @@ mod tests {
         for _ in 0..20 {
             demo.frame(WINDOW, Duration::from_millis(16));
         }
-        assert!(!demo.tabs[4].button.pressed.get(), "the release clears it");
+        assert!(!demo.tabs[at].button.pressed.get(), "the release clears it");
         assert_eq!(
-            demo.tabs[4].button.scale.get(),
+            demo.tabs[at].button.scale.get(),
             1.0,
             "and the scale comes back"
         );
@@ -23494,16 +23853,17 @@ mod tests {
     fn a_finger_presses_a_tab_button_the_same_way_a_mouse_does() {
         let mut demo = laid_out_on(Page::Controls);
         let target = Page::Data;
+        let at = tab_index(target);
         let (x, y) = tab_center(&demo, target);
 
         demo.handle_event(finger_down_at(x, y, 0));
         assert!(
-            demo.tabs[4].button.pressed.get(),
+            demo.tabs[at].button.pressed.get(),
             "a finger down on the button presses it"
         );
         demo.handle_event(finger_up_at(x, y, 40_000_000));
         assert!(
-            !demo.tabs[4].button.pressed.get(),
+            !demo.tabs[at].button.pressed.get(),
             "and the finger's release lets it go"
         );
         // **And the release's tap switched the page**, which is the half that is
@@ -23517,7 +23877,7 @@ mod tests {
              the button's page"
         );
         assert!(
-            demo.tabs[4].button.is_animating(),
+            demo.tabs[at].button.is_animating(),
             "and animates the selection, because the click reached the same drain"
         );
     }
@@ -23614,21 +23974,22 @@ mod tests {
         );
 
         let (x, y) = tab_center(&demo, Page::Text);
+        let text_at = tab_index(Page::Text);
         demo.handle_event(mouse_motion_at(x, y));
         assert!(
-            demo.tabs[1].button.hovered.get(),
-            "a pointer over the second button hovers it"
+            demo.tabs[text_at].button.hovered.get(),
+            "a pointer over the text button hovers it"
         );
         assert!(
             demo.tabs
                 .iter()
                 .enumerate()
-                .all(|(i, tab)| tab.button.hovered.get() == (i == 1)),
-            "and no other: the six are told apart by their own boxes, not by a \
+                .all(|(i, tab)| tab.button.hovered.get() == (i == text_at)),
+            "and no other: the seven are told apart by their own boxes, not by a \
              single shared flag"
         );
         assert!(
-            demo.tabs[1].button.is_animating(),
+            demo.tabs[text_at].button.is_animating(),
             "and the tint is a transition, not a write"
         );
         // **Past the transition before the pixels are read**, for the same reason
@@ -23661,7 +24022,7 @@ mod tests {
             "a pointer below the bar hovers nothing"
         );
         assert!(
-            demo.tabs[1].button.is_animating(),
+            demo.tabs[text_at].button.is_animating(),
             "and the button that was hovered is animating back to its rest colour"
         );
     }
@@ -23828,10 +24189,10 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
-    fn the_seventh_page_is_named_demo_and_the_default_did_not_move() {
-        assert_eq!(Page::DEFAULT, Page::Pads);
+    fn the_demo_page_is_first_and_is_the_default() {
+        assert_eq!(Page::DEFAULT, Page::Demo);
         assert_eq!(Page::ALL.len(), 7);
-        assert_eq!(Page::ALL[6], Page::Demo);
+        assert_eq!(Page::ALL[0], Page::Demo);
         assert_eq!(Page::Demo.name(), "demo");
     }
 
@@ -23959,8 +24320,8 @@ mod tests {
         assert_eq!(Page::Demo.name(), "demo");
         assert_eq!(
             Page::DEFAULT,
-            Page::Pads,
-            "a capture with no argument must still open on pads"
+            Page::Demo,
+            "a capture with no argument opens on demo, the most widely used page"
         );
         assert_eq!(Page::from_name("demo"), Some(Page::Demo));
         assert_eq!(Page::from_name("dta"), None);

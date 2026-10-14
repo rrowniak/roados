@@ -160,6 +160,95 @@ impl Mat4 {
         &self.cols
     }
 
+    /// Builds a matrix from sixteen floats in column-major order.
+    ///
+    /// The inverse of [`Mat4::as_slice`]: `cols[c * 4 + r]` is column `c`,
+    /// row `r`. This is the constructor the glTF bake uses: the crate's
+    /// `Transform::matrix` reports its 4x4 in the same column-major order, so
+    /// its sixteen floats land here verbatim, with no transpose flag to get
+    /// wrong and no decomposition to drift.
+    #[must_use]
+    pub fn from_cols(cols: [f32; 16]) -> Mat4 {
+        Mat4 { cols }
+    }
+
+    /// Reports the translation this matrix carries, if it carries only one.
+    ///
+    /// `Some(offset)` when the upper-left 3x3 is exactly the identity and
+    /// the bottom row is exactly `[0, 0, 0, 1]`; `None` otherwise. The
+    /// comparison is bit-exact on purpose: matrices here flow from the
+    /// builder ops above and the glTF bake, not from measured data, so a
+    /// near-translation is a rotation the bake must not silently drop, and
+    /// the loader's translation fast path stays byte-identical for the
+    /// translation-only models it already reads.
+    #[must_use]
+    pub fn as_translation(&self) -> Option<[f32; 3]> {
+        let one = 1.0f32.to_bits();
+        let zero = 0.0f32.to_bits();
+        let rotation_is_identity = self.cols[0].to_bits() == one
+            && self.cols[5].to_bits() == one
+            && self.cols[10].to_bits() == one
+            && self.cols[1].to_bits() == zero
+            && self.cols[2].to_bits() == zero
+            && self.cols[4].to_bits() == zero
+            && self.cols[6].to_bits() == zero
+            && self.cols[8].to_bits() == zero
+            && self.cols[9].to_bits() == zero;
+        let bottom_row_is_affine = self.cols[3].to_bits() == zero
+            && self.cols[7].to_bits() == zero
+            && self.cols[11].to_bits() == zero
+            && self.cols[15].to_bits() == one;
+        if rotation_is_identity && bottom_row_is_affine {
+            Some([self.cols[12], self.cols[13], self.cols[14]])
+        } else {
+            None
+        }
+    }
+
+    /// Transforms a normal by the inverse-transpose of the upper-left 3x3.
+    ///
+    /// Positions go through the whole matrix; normals go through the
+    /// cofactor matrix over the determinant, which is the inverse-transpose
+    /// without dividing twice. A rotation comes back as itself, a uniform
+    /// scale as a shorter same-direction vector, a non-uniform scale
+    /// untilted. `None` when the determinant is zero or non-finite, or the
+    /// result is — a collapsed axis has no direction to preserve, and the
+    /// bake keeps the file's normal then. The result is **not** normalised:
+    /// [`MeshVertex::new`](crate::render::mesh::MeshVertex::new) does that at
+    /// the bake, so the uniform-scale shortening above costs nothing.
+    #[must_use]
+    pub fn transform_normal(&self, normal: [f32; 3]) -> Option<[f32; 3]> {
+        let (a, b, c) = (self.cols[0], self.cols[1], self.cols[2]);
+        let (d, e, f) = (self.cols[4], self.cols[5], self.cols[6]);
+        let (g, h, i) = (self.cols[8], self.cols[9], self.cols[10]);
+        let cofactor_00 = e * i - f * h;
+        let cofactor_01 = c * h - b * i;
+        let cofactor_02 = b * f - c * e;
+        let cofactor_10 = f * g - d * i;
+        let cofactor_11 = a * i - c * g;
+        let cofactor_12 = c * d - a * f;
+        let cofactor_20 = d * h - e * g;
+        let cofactor_21 = b * g - a * h;
+        let cofactor_22 = a * e - b * d;
+        let determinant = a * cofactor_00 + b * cofactor_10 + c * cofactor_20;
+        if determinant == 0.0 || !determinant.is_finite() {
+            return None;
+        }
+        let mapped = [
+            (cofactor_00 * normal[0] + cofactor_01 * normal[1] + cofactor_02 * normal[2])
+                / determinant,
+            (cofactor_10 * normal[0] + cofactor_11 * normal[1] + cofactor_12 * normal[2])
+                / determinant,
+            (cofactor_20 * normal[0] + cofactor_21 * normal[1] + cofactor_22 * normal[2])
+                / determinant,
+        ];
+        if mapped[0].is_finite() && mapped[1].is_finite() && mapped[2].is_finite() {
+            Some(mapped)
+        } else {
+            None
+        }
+    }
+
     /// The matrix product `self * rhs`.
     ///
     /// Post-multiplying: `projection.multiply(&view).multiply(&model)` is
@@ -860,5 +949,106 @@ mod tests {
                 1.0, 2.0, 3.0, 1.0,
             ],
         );
+    }
+
+    #[test]
+    fn from_cols_round_trips_the_column_major_layout() {
+        // The constructor is the inverse of `as_slice`: the translation the
+        // builder writes into `cols[12..15]` reads back out of the same
+        // slots. A row-major read would put it in `cols[3]`, `cols[7]`,
+        // `cols[11]` and both this test and the point mapping fail.
+        let moved = Mat4::from_cols([
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            4.0, 5.0, 6.0, 1.0,
+        ]);
+        assert_matrix_eq(
+            &moved,
+            [
+                1.0, 0.0, 0.0, 0.0, //
+                0.0, 1.0, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0, //
+                4.0, 5.0, 6.0, 1.0,
+            ],
+        );
+        assert_eq!(moved, Mat4::identity().translated([4.0, 5.0, 6.0]));
+        let point = moved.transform_point([0.0, 0.0, 0.0]);
+        let Some(mapped) = point else {
+            assert_eq!("from_cols", "returned None for a finite point");
+            return;
+        };
+        assert_point_eq(mapped, [4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn as_translation_reports_the_offset_only_for_a_pure_translation() {
+        // `translated` round-trips bit-exactly; any rotation or scale, and a
+        // bare projection-style bottom row, report `None`. The comparison is
+        // bit-exact on purpose: matrices here flow from the builder ops, not
+        // from measured data, and a near-translation is a rotation the bake
+        // must not silently drop.
+        let moved = Mat4::identity().translated([1.0, 2.0, 3.0]);
+        assert_eq!(moved.as_translation(), Some([1.0, 2.0, 3.0]));
+        assert_eq!(Mat4::identity().as_translation(), Some([0.0, 0.0, 0.0]));
+        assert_eq!(Mat4::identity().rotated_z(FRAC_PI_2).as_translation(), None);
+        assert_eq!(
+            Mat4::identity().scaled([2.0, 1.0, 1.0]).as_translation(),
+            None
+        );
+        let projective = Mat4::from_cols([
+            1.0, 0.0, 0.0, 1.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ]);
+        assert_eq!(projective.as_translation(), None);
+    }
+
+    #[test]
+    fn transform_normal_is_the_direction_through_a_quarter_turn() {
+        // A quarter turn about z takes the x axis onto y, normals included:
+        // the inverse-transpose of a rotation is the rotation. Hand-written
+        // literal, through `close`, like every other expectation here.
+        let turned = Mat4::identity().rotated_z(FRAC_PI_2);
+        let Some(mapped) = turned.transform_normal([1.0, 0.0, 0.0]) else {
+            assert_eq!("transform_normal", "returned None for a rotation");
+            return;
+        };
+        assert_point_eq(mapped, [0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn transform_normal_survives_uniform_scale_and_corrects_non_uniform() {
+        // A uniform scale only changes the length, which `MeshVertex::new`
+        // renormalises away; a non-uniform scale tilts the direction, and the
+        // cofactor over the determinant is what untilts it. `[1, 0, 0]`
+        // through `diag(2, 1, 1)` is `[0.5, 0, 0]`: same direction, and the
+        // halved length is the inverse-transpose showing its work.
+        let scaled = Mat4::identity().scaled([2.0, 2.0, 2.0]);
+        let Some(uniform) = scaled.transform_normal([0.0, 0.0, 1.0]) else {
+            assert_eq!("transform_normal", "returned None for a uniform scale");
+            return;
+        };
+        assert_point_eq(uniform, [0.0, 0.0, 0.5]);
+        let stretched = Mat4::identity().scaled([2.0, 1.0, 1.0]);
+        let Some(corrected) = stretched.transform_normal([1.0, 0.0, 0.0]) else {
+            assert_eq!("transform_normal", "returned None for a non-uniform scale");
+            return;
+        };
+        assert_point_eq(corrected, [0.5, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn transform_normal_is_none_for_a_collapsed_axis() {
+        // A zero scale collapses its axis and the upper 3x3 has no inverse:
+        // `None`, and the bake keeps the file's normal rather than inventing
+        // one. The translation beside the collapse changes nothing about that.
+        let collapsed = Mat4::identity().scaled([0.0, 2.0, 3.0]);
+        assert_eq!(collapsed.transform_normal([0.0, 0.0, 1.0]), None);
+        let moved_collapse = Mat4::identity()
+            .translated([1.0, 2.0, 3.0])
+            .scaled([1.0, 0.0, 1.0]);
+        assert_eq!(moved_collapse.transform_normal([1.0, 0.0, 0.0]), None);
     }
 }

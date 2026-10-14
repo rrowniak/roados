@@ -19,3 +19,5 @@
 # assets path the demo searches by default, so a `git add -A` cannot stage it.
 /img/
 /ui/src/ui_demo/assets/img/
+/ui/src/ui_demo/assets/passat/
+/ui/src/ui_demo/assets/*.zip

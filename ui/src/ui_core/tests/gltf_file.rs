@@ -171,3 +171,66 @@ fn the_loader_reports_the_sedans_minimum_length_byte_form() {
     assert_eq!(total, 2032);
     let _: Mesh = mesh.into_iter().next().expect("at least one part").mesh;
 }
+
+/// The sedan loads byte-identically after the hierarchy widening.
+///
+/// One FNV-1a hash over the whole load — names, transforms, vertices,
+/// indices in order — pinned to the value the translation-only loader
+/// produced. Translation-only worlds keep the old representation (local
+/// vertices under a translation matrix), so any byte that moved fails here
+/// rather than in a rendering diff. Baked (rotated/scaled/matrix) worlds are
+/// covered by the loader's own unit tests.
+#[test]
+fn the_sedan_loads_byte_identically() {
+    let parts = sedan();
+    let mut hash: u64 = 14695981039346656037;
+    let mut mix = |bytes: &[u8]| {
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(1099511628211);
+        }
+    };
+    for part in &parts {
+        mix(part.name.as_bytes());
+        for value in part.transform.as_slice() {
+            mix(&value.to_le_bytes());
+        }
+        for vertex in &part.mesh.vertices {
+            for value in vertex
+                .position
+                .iter()
+                .chain(vertex.normal.iter())
+                .chain(vertex.uv.iter())
+            {
+                mix(&value.to_le_bytes());
+            }
+        }
+        for index in &part.mesh.indices {
+            mix(&index.to_le_bytes());
+        }
+    }
+    assert_eq!(
+        hash, 502188356119884179,
+        "the sedan load moved; the translation fast path must stay byte-identical"
+    );
+}
+
+/// The sedan's one material comes through on every part: the colormap file
+/// beside the model, opaque white factor (the document sets none).
+#[test]
+fn the_sedan_parts_carry_the_colormap_material() {
+    for part in sedan() {
+        assert_eq!(
+            part.material.base_color_texture.as_deref(),
+            Some("colormap.png"),
+            "{}: texture file name",
+            part.name
+        );
+        assert_eq!(
+            part.material.base_color_factor,
+            [1.0, 1.0, 1.0, 1.0],
+            "{}: default factor",
+            part.name
+        );
+    }
+}

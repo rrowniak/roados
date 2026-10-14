@@ -1639,6 +1639,18 @@ const AMBIENT_YAW_RATE: f32 = 0.35;
 /// capture shows washout, lower it.
 const CAR_AMBIENT: f32 = 0.65;
 
+/// The box the demo page's pane car is given, inside the car-status pane.
+///
+/// The pane is `0.40` of the 1280 window wide (512) less twice
+/// [`PANE_INSET`](crate::chrome::PANE_INSET) (12), so 488 fills its inner
+/// width; 420 of the pane's ~734 inner height leaves the header row, the
+/// spacing and the padding clear. A content size for the pane's column
+/// layout, which stacks it below the `PRND`/battery header.
+const PANE_CAR_SIZE: Size = Size {
+    width: 488.0,
+    height: 420.0,
+};
+
 // ------------------------------------------------------------------ task 19
 
 /// The y at which the text-entry band begins: the bottom of the window less
@@ -2464,7 +2476,11 @@ const ASSET_RELATIVE: &str = "src/ui_demo/assets/demo.png";
 /// under the Sketchfab Standard licence (full text in
 /// `assets/passat/license.txt`). A `.gltf` document with its sibling
 /// `scene.bin` and `textures/` directory; `render::gltf` reads it directly.
-/// The loader keeps each node's transform, so every part draws through the
+/// The five base-color textures in `textures/` are resized to 1024 from the
+/// file's 2048 — PNG decode of the full set cost ~370 ms of boot, a quarter
+/// of the pixels costs ~100 — and the untouched originals sit in
+/// `textures-full/`: to go back, copy them over `textures/`. The loader keeps
+/// each node's transform, so every part draws through the
 /// placement the file gave it. `ROADOS_ASSET_DIR` is how a caller supplies a
 /// different file.
 const ASSET_MODEL_RELATIVE: &str = "src/ui_demo/assets/passat/scene.gltf";
@@ -4009,6 +4025,11 @@ impl DemoSlider {
 /// `slider_dragging` is beside the slider; this record is what the frame
 /// synced to the property, so a write marks the node dirty only when the state
 /// has actually moved.
+///
+/// **Two of these now, over the one uploaded model**: [`Demo::car`] on the
+/// `data` page and [`Demo::pane_car`] in the demo page's left pane. The type
+/// is the same because the widget and the record are; only the rect, the
+/// orbit and the dragging flag beside each differ.
 struct DemoCar {
     /// The rotator widget, with its node in the arena.
     widget: Rotator,
@@ -4178,6 +4199,15 @@ struct Demo {
     /// the gesture recogniser reports a tap on the *release* and a drag only
     /// once the pointer has moved.
     car_dragging: bool,
+    /// The car in the demo page's left pane, below the `PRND`/battery header:
+    /// a second rotator over the same uploaded model, aimed once at the same
+    /// rest pose. A plain field like [`Demo::car`], and for the same reason.
+    pane_car: DemoCar,
+    /// Whether a pointer is holding the pane car down.
+    ///
+    /// Beside [`Demo::car_dragging`]: the pane car is dragged the same way,
+    /// through its own flag, so the two orbits never share a press.
+    pane_car_dragging: bool,
     /// The toggle, under the slider's readout.
     toggle: Toggle,
     /// The state the toggle was last aimed at.
@@ -5157,6 +5187,24 @@ impl Demo {
         }
         let car = DemoCar {
             widget: rotator,
+            written: false,
+        };
+        // The car in the demo page's left pane, below the `PRND`/battery
+        // header: a second rotator over the same model, aimed once at the same
+        // rest pose through the single write path. Attached to the pane panel
+        // where the header is built, so it rides the chrome's `Page::Demo`
+        // rows; sized here so the node exists before the layout pass.
+        let pane_rotator = Rotator::new(&mut nodes);
+        let _ = pane_rotator.rotate_by(CAR_REST_YAW, CAR_REST_PITCH);
+        {
+            nodes
+                .get_mut(pane_rotator.handle())
+                .ok_or("ui_demo: the pane car node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(PANE_CAR_SIZE));
+        }
+        let pane_car = DemoCar {
+            widget: pane_rotator,
             written: false,
         };
 
@@ -6368,6 +6416,12 @@ impl Demo {
         if !pane_panel.add_child(&mut nodes, header.handle()) {
             return Err("ui_demo: the pane header could not be attached");
         }
+        // The pane car, below the header: the rotator built beside the data
+        // car's, stacked in the pane's column so the whole object moves with
+        // the panel. A second mesh node over the same model — no new asset.
+        if !pane_panel.add_child(&mut nodes, pane_car.widget.handle()) {
+            return Err("ui_demo: the pane car could not be attached");
+        }
         let pane_header = PaneHeader {
             prnd: prnd_node,
             battery: icon_node,
@@ -6906,6 +6960,8 @@ impl Demo {
             slider_dragging: false,
             car,
             car_dragging: false,
+            pane_car,
+            pane_car_dragging: false,
             toggle,
             toggle_aimed: ToggleState {
                 checked: toggle_state,
@@ -7807,6 +7863,12 @@ impl Demo {
                     // which pins the premise the tab bar's fallback guard rests
                     // on rather than the guard.
                     self.press_car();
+                } else if self.pane_car_at(x, y).is_some() {
+                    // The pane car, after the data car's: the two live on
+                    // different pages, so `on_show` leaves at most one
+                    // reachable and the order between them is not
+                    // load-bearing.
+                    self.press_pane_car();
                 }
                 // **Nothing is offered to the chart**, and that is the same
                 // decision `the_chart_is_not_in_the_focus_order` records: a chart
@@ -7823,6 +7885,7 @@ impl Demo {
                 }
                 self.slider_dragging = false;
                 self.release_car();
+                self.release_pane_car();
                 self.release_key();
                 // **Unguarded, like every release here**, on the argument the pads'
                 // release gives: a release has no effect on anything a guarded press
@@ -7853,11 +7916,16 @@ impl Demo {
                     // The car on a finger, on the mouse arm's argument: a car
                     // has no mouse, so this is the route a hand actually takes.
                     self.press_car();
+                } else if self.pane_car_at(x, y).is_some() {
+                    // The pane car on a finger, beside the data car's: the
+                    // page gate leaves at most one reachable.
+                    self.press_pane_car();
                 }
             }
             Event::FingerUp { .. } | Event::FingerCanceled { .. } => {
                 self.slider_dragging = false;
                 self.release_car();
+                self.release_pane_car();
                 // A canceled touch releases the key too, for the same reason: a
                 // finger that is gone must not leave a key lit — and it releases
                 // the tab button for the same reason.
@@ -8020,6 +8088,18 @@ impl Demo {
         if self.car_dragging && matches!(event.kind(), InputEventKind::Drag { .. }) {
             if let Some(rect) = self.car_rect() {
                 self.car.widget.on_event(event, rect);
+                if event.consumed() {
+                    return;
+                }
+            }
+        }
+        // A drag goes to the pane rotator being dragged first, beside the
+        // data car's: the flag is the pane's own, the rect is the pane car's
+        // laid-out box, and there is no ambient turn to hand over to — the
+        // gesture is the orbit's only producer.
+        if self.pane_car_dragging && matches!(event.kind(), InputEventKind::Drag { .. }) {
+            if let Some(rect) = self.pane_car_rect() {
+                self.pane_car.widget.on_event(event, rect);
                 if event.consumed() {
                     return;
                 }
@@ -8333,6 +8413,14 @@ impl Demo {
         if handle == self.car.node() {
             return match self.car_rect() {
                 Some(rect) => self.car.widget.on_event(event, rect),
+                None => false,
+            };
+        }
+        // The pane car beside the data car's: a drag offered to the pane
+        // node's box reaches the pane rotator, and anything else travels on.
+        if handle == self.pane_car.node() {
+            return match self.pane_car_rect() {
+                Some(rect) => self.pane_car.widget.on_event(event, rect),
                 None => false,
             };
         }
@@ -8875,6 +8963,10 @@ impl Demo {
                 .widget
                 .rotate_by(AMBIENT_YAW_RATE * delta.as_secs_f32(), 0.0);
         }
+        // The pane car's drag state, synced and left alone: no ambient turn
+        // here — the pane orbit holds the rest pose until a drag moves it, so
+        // of its two values both have exactly one producer, the gesture.
+        self.sync_pane_car_state();
         // The one number the readout below the chart names that the demo has to
         // write rather than bind, for the reason `Demo::chart_moving` gives:
         // `Chart::is_animating` is a method over the widget's own clock. Guarded
@@ -8920,6 +9012,14 @@ impl Demo {
         // what the borrow allows — a second lookup of the arena under a `&mut` to
         // a node is not.
         let toast_screen = self.toasts_rect();
+
+        // **The pane car's matrix, read before the walk borrows the arena
+        // mutably**, for the same one-number reason the toast box above is:
+        // `pane_car_mvp` reads the node's own laid-out rect through
+        // `pane_car_rect`, and a second arena lookup under the `&mut` the loop
+        // holds would be a `RefCell` double borrow. The data car needs no
+        // equivalent — its rect is the constant [`CAR_RECT`].
+        let pane_car_base = self.pane_car_mvp();
 
         let mut nodes = self.nodes.borrow_mut();
 
@@ -9089,6 +9189,19 @@ impl Demo {
             // it records nothing: there is no stand-in mesh.
             if handle == self.car.node() {
                 let commands = self.car_commands();
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The pane car, on the `demo` page and emptied everywhere else by
+            // the paint gate below. The node lives in the pane panel, so its
+            // position in `order` is the chrome's; this arm only decides
+            // *what* is recorded. With no model it records nothing, for the
+            // data car's reason.
+            if handle == self.pane_car.node() {
+                let commands = match pane_car_base {
+                    Some(base) => self.mesh_commands(&base),
+                    None => Vec::new(),
+                };
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
@@ -9778,6 +9891,21 @@ impl Demo {
         }
     }
 
+    /// Writes the pane press arms' dragging record to the pane rotator, when
+    /// it moved.
+    ///
+    /// Beside [`Demo::sync_car_state`] and for its reason: a property write
+    /// marks the node dirty, so it is done only when the state moved. There
+    /// is no ambient turn beside it — the pane orbit holds still until a drag
+    /// moves it, which is the whole of "not auto-rotated".
+    fn sync_pane_car_state(&mut self) {
+        let wanted = self.pane_car_dragging;
+        if self.pane_car.widget.dragging.get() != wanted {
+            self.pane_car.widget.dragging.set(wanted);
+            self.pane_car.written = wanted;
+        }
+    }
+
     /// Returns the camera's world-space eye for an orbit of `yaw` about y and
     /// `pitch` about x at `distance` from the target.
     ///
@@ -9879,10 +10007,56 @@ impl Demo {
     /// which `Mat4` does not have — and a rotated node is baked into its
     /// vertices at load, so what the renderer sees stays a translation.
     fn car_commands(&self) -> Vec<DrawCommand> {
-        let Some(model) = &self.model else {
+        let Some(base) = self.car_mvp() else {
             return Vec::new();
         };
-        let Some(base) = self.car_mvp() else {
+        self.mesh_commands(&base)
+    }
+
+    /// Returns the matrix the pane car is drawn through, or `None`.
+    ///
+    /// Beside [`Demo::car_mvp`] and in its shape — same perspective, same
+    /// window aspect, same `shift · projection · view` order — with two
+    /// differences the pane owns: the orbit is the pane rotator's, and the
+    /// shift recentres into the pane car's own laid-out rect rather than
+    /// [`CAR_RECT`]. The rect is read from the node the layout pass placed,
+    /// because the pane's column lays it out below the header and no constant
+    /// can name that y. `None` before the first layout, or with no model the
+    /// caller never asks.
+    fn pane_car_mvp(&self) -> Option<Mat4> {
+        let rect = self.pane_car_rect()?;
+        let aspect = WINDOW.width / WINDOW.height;
+        let Some(projection) = Mat4::perspective(std::f32::consts::FRAC_PI_4, aspect, 0.1, 20.0)
+        else {
+            eprintln!(
+                "ui_demo: the pane car projection is degenerate for fov π/4, aspect \
+                 {aspect}, near 0.1, far 20.0; drawing no car"
+            );
+            return None;
+        };
+        let centre_x = rect.x + rect.width * 0.5;
+        let centre_y = rect.y + rect.height * 0.5;
+        let shift = Mat4::identity().translated([
+            2.0 * centre_x / WINDOW.width - 1.0,
+            1.0 - 2.0 * centre_y / WINDOW.height,
+            0.0,
+        ]);
+        let view = Self::orbit_view(
+            self.pane_car.widget.yaw.get(),
+            self.pane_car.widget.pitch.get(),
+        );
+        Some(shift.multiply(&projection).multiply(&view))
+    }
+
+    /// Returns one mesh command per [`ModelPart`] through `base`, or nothing
+    /// with no model.
+    ///
+    /// The loop [`Demo::car_commands`] and the frame's pane-car arm share:
+    /// one command per part, each with its own node transform, texture, tint
+    /// and opacity. One function rather than two copies, so the two orbits
+    /// cannot disagree about what a part carries.
+    fn mesh_commands(&self, base: &Mat4) -> Vec<DrawCommand> {
+        let Some(model) = &self.model else {
             return Vec::new();
         };
         let mut painter = Painter::new();
@@ -9982,18 +10156,18 @@ impl Demo {
 
     /// Hands the recorded commands to the renderer, in paint order.
     ///
-    /// The mesh pass reads [`CAR_AMBIENT`] while the `data` page shows a
-    /// model, and the default everywhere else: the car's lee side needs the
-    /// lift and no other page draws a mesh to spend it on. Scoped here rather
-    /// than in the frame because it is a renderer state, not a widget one —
-    /// and [`Renderer::begin_frame`] resets it every frame, so a value set
-    /// here never leaks into the next.
+    /// The mesh pass reads [`CAR_AMBIENT`] while the `data` or the `demo`
+    /// page shows a model, and the default everywhere else: both cars' lee
+    /// sides need the lift and no other page draws a mesh to spend it on.
+    /// Scoped here rather than in the frame because it is a renderer state,
+    /// not a widget one — and [`Renderer::begin_frame`] resets it every
+    /// frame, so a value set here never leaks into the next.
     fn draw(&mut self, renderer: &mut Renderer) {
-        if self.page == Page::Data && self.model.is_some() {
+        if (self.page == Page::Data || self.page == Page::Demo) && self.model.is_some() {
             renderer.set_mesh_ambient(CAR_AMBIENT);
         }
-        let mut nodes = self.nodes.borrow_mut();
         let clips = self.frame_clips();
+        let mut nodes = self.nodes.borrow_mut();
         for (handle, clip) in self.order.iter().copied().zip(clips) {
             renderer.draw_node_clipped(handle, &mut nodes, clip);
         }
@@ -10002,8 +10176,9 @@ impl Demo {
     /// Returns the clip for every node in paint order, positionally matching
     /// [`Demo::order`].
     ///
-    /// **The car is clipped to [`CAR_RECT`] and nothing else is clipped.**
-    /// Task 37's `draw_mesh_batch` calls `apply_clip(batch.clip)` — a clip
+    /// **The data car is clipped to [`CAR_RECT`] and the pane car to its own
+    /// laid-out rect, and nothing else is clipped.** Task 37's
+    /// `draw_mesh_batch` calls `apply_clip(batch.clip)` — a clip
     /// that does not exist is no clip — and an unclipped car would draw across
     /// the tab bar and the chrome, which is both a visible defect and a
     /// violation of the recording-order contract task 37 recorded. This is the
@@ -10026,12 +10201,21 @@ impl Demo {
     /// the honest consequence — there is nothing left to read from the arena, and
     /// a parameter kept only so a caller could pass it would be a second thing to
     /// keep in step.
+    ///
+    /// **The pane car's clip is its laid-out rect**, read from the node the
+    /// pane's column placed below the header — unlike the data car's
+    /// [`CAR_RECT`], no constant can name it. [`Demo::draw`] computes the
+    /// clips before borrowing the arena mutably, so this read never races
+    /// that borrow.
     fn frame_clips(&self) -> Vec<Option<Rect>> {
+        let pane_clip = self.pane_car_rect();
         self.order
             .iter()
             .map(|handle| {
                 if *handle == self.car.node() {
                     Some(CAR_RECT)
+                } else if *handle == self.pane_car.node() {
+                    pane_clip
                 } else {
                     None
                 }
@@ -10411,6 +10595,26 @@ impl Demo {
         self.car_dragging = false;
     }
 
+    /// Starts a drag on the pane car.
+    ///
+    /// Beside [`Demo::press_car`]: records the pane flag the frame's
+    /// [`Demo::sync_pane_car_state`] writes to the pane rotator. Called from
+    /// the guarded press arms, so a press under a modal scrim never starts
+    /// one. There is deliberately no ambient turn on this orbit — the car
+    /// holds the rest pose until a drag moves it, and stops where the finger
+    /// stopped.
+    fn press_pane_car(&mut self) {
+        self.pane_car_dragging = true;
+    }
+
+    /// Ends a drag on the pane car.
+    ///
+    /// Unguarded, on [`Demo::release_car`]'s argument: a release tidies up
+    /// whatever a guarded press started, wherever the pointer is now.
+    fn release_pane_car(&mut self) {
+        self.pane_car_dragging = false;
+    }
+
     /// Returns the index of the pad whose laid-out rect contains `(x, y)`.
     ///
     /// **The page guard is the first line of the body, and it is here because this
@@ -10505,6 +10709,33 @@ impl Demo {
     /// the constant and the node together.
     fn car_rect(&self) -> Option<Rect> {
         self.node_rect(self.car.node())
+    }
+
+    /// Returns `Some(())` when the point is over the pane car, and `None`
+    /// when it is not.
+    ///
+    /// In [`Demo::car_at`]'s exact shape — `on_show` first, then the rect —
+    /// because this is the fifth helper that bypasses
+    /// [`Demo::route_input_event`]: the press arms call it straight from
+    /// `MouseButtonDown` and `FingerDown`. The page gate is what keeps the
+    /// pane car unreachable from every page but the demo page.
+    fn pane_car_at(&self, x: f32, y: f32) -> Option<()> {
+        if !self.on_show(self.pane_car.node()) {
+            return None;
+        }
+        self.pane_car_rect()
+            .is_some_and(|rect| over_rect(rect, x, y))
+            .then_some(())
+    }
+
+    /// Returns the pane car's rect in window coordinates, or `None` if it has
+    /// not been laid out. See [`Demo::slider_rect`].
+    ///
+    /// The laid-out node, which the pane's column places below the header —
+    /// so unlike [`CAR_RECT`] no constant can name it, and the orbit's shift
+    /// and the frame's clip both read this.
+    fn pane_car_rect(&self) -> Option<Rect> {
+        self.node_rect(self.pane_car.node())
     }
 
     /// Returns the toggle's rect in window coordinates, or `None` if it has not
@@ -16759,14 +16990,23 @@ mod tests {
             .zip(clips.iter())
             .filter_map(|(handle, clip)| clip.map(|rect| (*handle, rect)))
             .collect();
-        // **The car's row, added rather than the old set loosened**: the car
-        // is the one node the frame clips, to its own rect, and everything
-        // else keeps the `None` the old assertion named.
+        // **Both cars' rows, added rather than the old set loosened**: each
+        // mesh node is clipped to its own laid-out rect, and everything else
+        // keeps the `None` the old assertion named. The data car's rect is the
+        // constant [`CAR_RECT`]; the pane car's is the node's own, read from
+        // the layout pass because the pane's column places it below the
+        // header.
+        let pane_rect = demo
+            .pane_car_rect()
+            .expect("the pane car's node is placed by the layout pass");
         assert_eq!(
             clipped,
-            vec![(demo.car.node(), CAR_RECT)],
-            "the car is clipped to its own rect and no other node is offered \
-             a clip — but these are: {clipped:?}"
+            vec![
+                (demo.car.node(), CAR_RECT),
+                (demo.pane_car.node(), pane_rect)
+            ],
+            "the two cars are each clipped to their own rect and no other node \
+             is offered a clip — but these are: {clipped:?}"
         );
 
         for (shape, name) in CHART_TYPE_NAMES.iter().enumerate() {
@@ -17077,6 +17317,129 @@ mod tests {
             demo.car.widget.pitch.get(),
             pitch_before,
             "ten frames of ambient turn never move the pitch"
+        );
+    }
+
+    /// The pane car does **not** auto-rotate, and that is the one behavioural
+    /// difference from the data car: its yaw has exactly one producer, the
+    /// gesture. Ten frames with no drag leave both angles bit-identical.
+    #[test]
+    fn the_pane_car_never_turns_on_its_own() {
+        let mut demo = demo_on(Page::Demo);
+        let yaw_before = demo.pane_car.widget.yaw.get();
+        let pitch_before = demo.pane_car.widget.pitch.get();
+        assert_eq!(
+            yaw_before, CAR_REST_YAW,
+            "the demo aims at its resting yaw once, at construction"
+        );
+        assert_eq!(pitch_before, CAR_REST_PITCH);
+        frames(&mut demo, 10, Duration::from_millis(16));
+        assert_eq!(
+            demo.pane_car.widget.yaw.get(),
+            yaw_before,
+            "ten frames leave the pane yaw bit-identical: there is no ambient turn"
+        );
+        assert_eq!(
+            demo.pane_car.widget.pitch.get(),
+            pitch_before,
+            "and the pitch too"
+        );
+    }
+
+    /// A press on the pane car starts its drag, a drag through the demo's own
+    /// dispatcher turns it, and the release ends it — the data car's gesture
+    /// path, over the pane's own flag and rect.
+    #[test]
+    fn a_drag_over_the_pane_car_turns_it_and_touches_nothing_else() {
+        let mut demo = laid_out_on(Page::Demo);
+        let before = demo.placed_rects();
+        let rect = demo.pane_car_rect().expect("the pane car is placed");
+        let (x, y) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+        demo.handle_event(mouse_down_at(x, y, 0));
+        assert!(
+            demo.pane_car_dragging,
+            "the press over the pane car starts its drag"
+        );
+        assert!(
+            !demo.car_dragging,
+            "and not the data car's, which is on another page"
+        );
+        let yaw_before = demo.pane_car.widget.yaw.get();
+        let mut drag = InputEvent::new(
+            InputEventKind::Drag {
+                delta: Offset::new(60.0, 0.0),
+            },
+            Some(Offset::new(x, y)),
+        );
+        assert!(
+            demo.offer_to(demo.pane_car.node(), &mut drag),
+            "the pane car's own node takes the drag"
+        );
+        assert!(drag.consumed());
+        assert_eq!(
+            demo.pane_car.widget.yaw.get(),
+            yaw_before + (-60.0 * ROTOR_SENSITIVITY),
+            "and the yaw moved by exactly the drag times the sensitivity"
+        );
+        demo.handle_event(Event::MouseButtonUp {
+            timestamp: 1_000_000,
+            window_id: 0,
+            which: 0,
+            mouse_btn: MouseButton::Left,
+            clicks: 1,
+            x,
+            y,
+        });
+        assert!(!demo.pane_car_dragging, "the release ends the drag");
+        assert_eq!(
+            demo.placed_rects(),
+            before,
+            "and nothing the gallery placed moved"
+        );
+    }
+
+    /// The pane car is on the demo page and on no other, beside its siblings
+    /// in the chrome: the paint gate and the hit-test gate both read the page
+    /// table, so a second row would draw it twice and a missing one nowhere.
+    #[test]
+    fn the_pane_car_is_on_the_demo_page_and_on_no_other() {
+        for page in Page::ALL {
+            let demo = demo_on(page);
+            assert_eq!(
+                demo.on_show(demo.pane_car.node()),
+                page == Page::Demo,
+                "{page:?}: the pane car shows on `demo` and only there"
+            );
+        }
+    }
+
+    /// With a model, the pane car records one mesh command per part — the
+    /// same model as the data car, from its own orbit — and nothing without
+    /// one.
+    #[test]
+    fn the_pane_car_draws_the_model_on_the_demo_page() {
+        let demo = demo_with_model_on(Page::Demo);
+        let base = demo
+            .pane_car_mvp()
+            .expect("the pane car's matrix is available");
+        let commands = demo.mesh_commands(&base);
+        assert_eq!(
+            commands.len(),
+            34,
+            "one mesh command per part, the `load_model` shape"
+        );
+        for command in &commands {
+            assert!(
+                matches!(command, DrawCommand::Mesh { .. }),
+                "every part is a mesh command, got {command:?}"
+            );
+        }
+        // The pane orbit is its own and distinct from the data car's, so the
+        // same part draws through a different matrix on the two pages.
+        assert_ne!(
+            demo.pane_car_mvp().expect("placed"),
+            demo.car_mvp().expect("available"),
+            "the pane car's composition is its own, not the data car's"
         );
     }
 

@@ -215,6 +215,7 @@
 //! dialog.
 
 mod chrome;
+mod dock;
 mod fps;
 mod icons;
 mod panel;
@@ -485,6 +486,14 @@ const DOCK_BUTTON_TALL: f32 = 56.0;
 
 /// The gap between a dock button's glyph and its left and right edges.
 const DOCK_BUTTON_PADDING_H: f32 = 12.0;
+
+/// The drawn side of a dock icon master, in pixels per side.
+///
+/// The five masters (`car_48.png`, `debug_48.png`, `sound_48.png`,
+/// `seat_heater_48.png`, `defrost_48.png`) are baked at the drawn size: no
+/// mipmaps and no DPI, so the row never scales one — the one exception is the
+/// airbag badge's 0.85 minification, which the dock does not take.
+const DOCK_ICON: u32 = 48;
 
 /// The padding inside the dock's own box.
 const DOCK_PADDING: f32 = 8.0;
@@ -2678,6 +2687,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .map(|(file, _)| load_telltale_picture(&mut renderer, file))
         .collect();
+    // The dock's five icon masters, loaded the same way: one per
+    // [`dock::DockIcon`], so [`Demo::set_dock_picture`] swaps each stand-in
+    // by glyph. A `None` leaves that icon's transparent stand-in, which
+    // draws nothing and moves nothing.
+    let dock_pictures: Vec<(dock::DockIcon, Option<Picture>)> = [
+        dock::DockIcon::Car,
+        dock::DockIcon::Debug,
+        dock::DockIcon::Sound,
+        dock::DockIcon::SeatHeater,
+        dock::DockIcon::Defrost,
+    ]
+    .into_iter()
+    .map(|icon| (icon, load_dock_picture(&mut renderer, icon)))
+    .collect();
     let sdl = renderer.sdl();
     let mut events = sdl.event_pump()?;
     let mut demo = Demo::new(
@@ -2702,6 +2725,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (index, picture) in telltale_pictures.into_iter().enumerate() {
         if let Some(picture) = picture {
             demo.set_telltale_picture(index, picture.texture, picture.source);
+        }
+    }
+    for (icon, picture) in dock_pictures {
+        if let Some(picture) = picture {
+            demo.set_dock_picture(icon, picture.texture, picture.source);
         }
     }
     let run_for = run_seconds();
@@ -3422,6 +3450,68 @@ fn load_telltale_picture(renderer: &mut Renderer, file: &str) -> Option<Picture>
     }
 }
 
+/// Where a dock icon master is, relative to a directory in the workspace's
+/// own layout.
+///
+/// Beside the SVGs three of them were baked from, under `assets/icons/` like
+/// the airbag and lock masters: one 48-pixel white master per glyph (the two
+/// `icons8` PNGs were inverted offline — black times any tint stays black),
+/// tinted at draw time, so the colour never touches the filesystem.
+fn dock_icon_relative(icon: dock::DockIcon) -> String {
+    format!("src/ui_demo/assets/icons/{}", dock::dock_baked_file(icon))
+}
+
+/// Returns the paths the dock icon master for `icon` may be at, in the order
+/// it looks.
+///
+/// The same walk as [`icon_candidates`] with the dock icon's relative path.
+fn dock_candidates(icon: dock::DockIcon) -> Vec<PathBuf> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    asset_candidates_from(
+        &exe,
+        std::env::var_os(ASSET_DIR_VAR).as_deref(),
+        &dock_icon_relative(icon),
+    )
+}
+
+/// Loads the dock icon master for `icon` and returns it, or `None` after
+/// saying why.
+///
+/// Beside [`load_icon_picture`] and in its shape — a standalone texture, so
+/// [`icons::paint`] samples the whole master rather than an atlas window.
+/// A missing file is non-fatal, exactly as a missing airbag master is.
+fn load_dock_picture(renderer: &mut Renderer, icon: dock::DockIcon) -> Option<Picture> {
+    let candidates = dock_candidates(icon);
+    let path = candidates.iter().find(|path| path.is_file());
+    let Some(path) = path else {
+        eprintln!(
+            "ui_demo: {} not found; looked in {}",
+            dock::dock_baked_file(icon),
+            join_paths(&candidates)
+        );
+        return None;
+    };
+    let texture = match renderer.load_standalone_texture(path) {
+        Ok(texture) => texture,
+        Err(error) => {
+            eprintln!("ui_demo: {}: {error}; standing in for it", path.display());
+            return None;
+        }
+    };
+    match ImageSource::of(renderer.textures(), texture) {
+        Some(source) => Some(Picture { texture, source }),
+        None => {
+            eprintln!(
+                "ui_demo: {}: the cache could not place it; standing in",
+                path.display()
+            );
+            None
+        }
+    }
+}
+///
 /// Returns the paths the demo's map image may be at, in the order it looks.
 ///
 /// The same walk as [`asset_candidates`] with a different relative path: a
@@ -3989,6 +4079,200 @@ fn chrome_advance(metrics: &TextMetrics) -> impl Fn(char) -> f32 + '_ {
     move |ch: char| metrics.advance(ch, DOCK_FONT)
 }
 
+/// Toggles `kind`'s overlay panel through [`dock::toggle_open`]: the click
+/// handler every opener shares.
+fn opener(open: &Property<Option<dock::DockPanel>>, kind: dock::DockPanel) -> Callback<()> {
+    let open = open.clone();
+    Callback::new(move || {
+        open.set(dock::toggle_open(open.get(), kind));
+    })
+}
+
+/// A heater's tint from its level: theme ink off (**not** literal white, so
+/// the glyph stays legible on the light theme), `Warning` orange at 1,
+/// `Error` red at 2. Read at paint time, so the glyph and the level cannot
+/// disagree.
+fn heater_tint(theme: &Theme, level: &Property<u8>) -> Property<Color> {
+    let level = level.clone();
+    let off = theme.property(ThemeToken::Text);
+    let warm = theme.property(ThemeToken::Warning);
+    let hot = theme.property(ThemeToken::Error);
+    Property::bind(move || {
+        let token = match level.get() {
+            0 => off.get(),
+            1 => warm.get(),
+            _ => hot.get(),
+        };
+        token.as_color().unwrap_or(Color::new(255, 255, 255, 255))
+    })
+}
+
+/// Puts `button` in `group`: attaches it and registers it for the paint arm.
+/// Every dock button travels this one road.
+fn place_dock_button(
+    nodes: &mut Arena<WidgetNode>,
+    buttons: &mut Vec<Button>,
+    group: Handle,
+    button: Button,
+) -> Result<(), &'static str> {
+    let handle = button.handle();
+    if !node::attach(nodes, group, handle) {
+        return Err("ui_demo: a dock button could not be attached");
+    }
+    buttons.push(button);
+    Ok(())
+}
+
+/// An icon button with its glyph in `group`: builds it, nests the image,
+/// wires the click, registers both where they belong.
+#[allow(clippy::too_many_arguments)]
+fn place_dock_icon(
+    nodes: &mut Arena<WidgetNode>,
+    buttons: &mut Vec<Button>,
+    images: &mut Vec<DockImage>,
+    group: Handle,
+    icon: dock::DockIcon,
+    tint: Property<Color>,
+    on_click: Callback<()>,
+) -> Result<(), &'static str> {
+    let (mut button, image) = dock_icon_button(nodes)?;
+    button.on_click = on_click;
+    place_dock_button(nodes, buttons, group, button)?;
+    images.push(DockImage { icon, image, tint });
+    Ok(())
+}
+
+/// One climatronic stepper in `group`: `<`, value, `>`. The arrows step
+/// `state` and rewrite the value button's label; the value opens `panel`.
+/// Returns the value button's handle: the suite reads the setpoint and clicks
+/// the arrows through the table around it.
+#[allow(clippy::too_many_arguments)]
+fn place_temp_stepper(
+    nodes: &mut Arena<WidgetNode>,
+    metrics: &TextMetrics,
+    buttons: &mut Vec<Button>,
+    open_panel: &Property<Option<dock::DockPanel>>,
+    group: Handle,
+    state: &Property<f32>,
+    value_button: Button,
+    panel: dock::DockPanel,
+) -> Result<Handle, &'static str> {
+    let down_state = state.clone();
+    let down_text = value_button.label.clone();
+    let mut down = dock_text_button(nodes, metrics, "<")?;
+    down.on_click = Callback::new(move || {
+        let next = dock::step_temp_down(down_state.get());
+        down_state.set(next);
+        down_text.set(dock::format_temp(next));
+    });
+    place_dock_button(nodes, buttons, group, down)?;
+    // Cloned before the value button moves into the table: the arrows write
+    // the same property the button paints.
+    let up_text = value_button.label.clone();
+    let value_handle = value_button.handle();
+    let mut value = value_button;
+    value.on_click = opener(open_panel, panel);
+    place_dock_button(nodes, buttons, group, value)?;
+    let up_state = state.clone();
+    let mut up = dock_text_button(nodes, metrics, ">")?;
+    up.on_click = Callback::new(move || {
+        let next = dock::step_temp_up(up_state.get());
+        up_state.set(next);
+        up_text.set(dock::format_temp(next));
+    });
+    place_dock_button(nodes, buttons, group, up)?;
+    Ok(value_handle)
+}
+
+/// One seat-heater button in `group`: a tap cycles off → 1 → 2, the tint
+/// from [`heater_tint`] follows.
+fn place_heater(
+    nodes: &mut Arena<WidgetNode>,
+    buttons: &mut Vec<Button>,
+    images: &mut Vec<DockImage>,
+    theme: &Theme,
+    group: Handle,
+    level: &Property<u8>,
+) -> Result<(), &'static str> {
+    let step = level.clone();
+    place_dock_icon(
+        nodes,
+        buttons,
+        images,
+        group,
+        dock::DockIcon::SeatHeater,
+        heater_tint(theme, level),
+        Callback::new(move || {
+            step.set(dock::cycle_heater(step.get()));
+        }),
+    )
+}
+
+/// Builds one dock text button: an arrow or a stepper value, sized from its
+/// label like the old five-slot buttons were.
+fn dock_text_button(
+    nodes: &mut Arena<WidgetNode>,
+    metrics: &TextMetrics,
+    text: &str,
+) -> Result<Button, &'static str> {
+    let button = Button::new(nodes, text);
+    // The geometry before the measurement: `Button::content_size` reads
+    // `font_size`, `padding_h` and the label.
+    button.font_size.set(DOCK_FONT);
+    button.padding_h.set(DOCK_BUTTON_PADDING_H);
+    button.border_radius.set(chrome::CHROME_RADIUS);
+    {
+        let content = button.content_size(&chrome_advance(metrics), chrome_line_height(metrics));
+        let size = Size::new(content.width.max(DOCK_BUTTON_TALL), DOCK_BUTTON_TALL);
+        nodes
+            .get_mut(button.handle())
+            .ok_or("ui_demo: a dock button's node is missing")?
+            .layout_mut()
+            .set_constraints(Constraints::tight(size));
+    }
+    button.snap_to_state();
+    Ok(button)
+}
+
+/// Builds one dock icon button: an empty label with a 48-pixel `Image` nested
+/// in it, in the lock button's shape — the button's own background wraps the
+/// glyph, and the glyph has no handler of its own, so the button is one target
+/// to a finger.
+fn dock_icon_button(nodes: &mut Arena<WidgetNode>) -> Result<(Button, Image), &'static str> {
+    let button = Button::new(nodes, "");
+    button.font_size.set(DOCK_FONT);
+    button.padding_h.set(DOCK_BUTTON_PADDING_H);
+    button.border_radius.set(chrome::CHROME_RADIUS);
+    {
+        nodes
+            .get_mut(button.handle())
+            .ok_or("ui_demo: a dock icon button's node is missing")?
+            .layout_mut()
+            .set_constraints(Constraints::tight(Size::new(
+                DOCK_BUTTON_TALL,
+                DOCK_BUTTON_TALL,
+            )));
+    }
+    button.snap_to_state();
+    let stand_in =
+        stand_in_icon_picture_of(DOCK_ICON).ok_or("ui_demo: no dock icon image to show")?;
+    let mut image = Image::new(nodes, stand_in.texture, stand_in.source);
+    image.set_fit(ImageFit::Fill);
+    image.snap_to_state();
+    {
+        let side = icons::drawn_side(DOCK_ICON);
+        nodes
+            .get_mut(image.handle())
+            .ok_or("ui_demo: a dock icon node is missing")?
+            .layout_mut()
+            .set_constraints(Constraints::tight(Size::new(side, side)));
+        if !node::attach(nodes, button.handle(), image.handle()) {
+            return Err("ui_demo: a dock icon could not be nested in its button");
+        }
+    }
+    Ok((button, image))
+}
+
 /// Returns the advance the airbag badge's label is measured with, at the
 /// badge scale: the same [`AIRBAG_SCALE`] of [`chrome_font`] the button is
 /// sized and painted with, so the three agree by construction.
@@ -4172,6 +4456,35 @@ struct PaneHeader {
 struct Telltale {
     image: Image,
     spec: icons::IconSpec,
+}
+
+/// One dock icon: an `Image` node for layout and paint dispatch, and the tint
+/// [`icons::paint`] draws its white master with.
+///
+/// The image carries the baked master (a transparent stand-in until `main`
+/// swaps the bytes in); the tint is read at paint time from the bound state
+/// colour, so a heater at level 2 and one at level 0 share the file and never
+/// the pixels.
+struct DockImage {
+    /// Which master the node draws: the file never depends on the state.
+    icon: dock::DockIcon,
+    /// The node: nested in its button, like the lock icon in its own.
+    image: Image,
+    /// The colour the master is tinted with, read at paint time.
+    tint: Property<Color>,
+}
+
+/// One overlay panel: which opener owns it, and the empty surface it shows.
+///
+/// The panel is a bare translucent surface over the right map area — see
+/// [`dock::overlay_rect`] — with no children yet. Each of the five openers
+/// owns one, exactly one is ever open, and a tap outside closes it.
+struct OverlayPanel {
+    /// The opener that toggles this panel.
+    kind: dock::DockPanel,
+    /// The panel object: its node is a [`Chrome`] surface in
+    /// [`Demo::chrome_nodes`].
+    panel: Panel,
 }
 
 /// The demo's widget tree, the pads that press, the labels that show what text
@@ -4371,10 +4684,71 @@ struct Demo {
     /// The chrome's three translucent surfaces: the status bar, the car-status
     /// pane's bare surface and the bottom dock. See [`crate::chrome`].
     chrome_nodes: Vec<Chrome>,
-    /// The bottom dock's five buttons. They carry no `set_palette`, because the
-    /// dock has no active-state highlight — see `chrome.rs` and
+    /// The bottom dock's buttons: every clickable in both groups — the car and
+    /// debug icons, the two steppers' six arrow/value buttons, the two heaters,
+    /// the defrost and the sound stepper's three. They carry no `set_palette`,
+    /// because the dock has no active-state highlight — see `chrome.rs` and
     /// `DEMO_APPLICATION.md` § *The persistent chrome* § *Bottom dock*.
     chrome_buttons: Vec<Button>,
+    /// The dock's icon images, one [`DockImage`] per nested node: the car and
+    /// debug buttons' glyphs, the sound button's, both heaters' (one shared
+    /// master on two nodes) and the defrost's. Keyed by node in the paint walk;
+    /// swapped from stand-ins by [`Demo::set_dock_picture`].
+    dock_images: Vec<DockImage>,
+    /// What a dock icon is drawn as: the baked 48-pixel size and the opening
+    /// colour. The paint arm re-tints from each entry's own tint every frame,
+    /// so this is the size and a fallback rather than a live value.
+    dock_spec: icons::IconSpec,
+    /// The driver and passenger climatronic setpoints, in °C. Mocked vehicle
+    /// data — no bus drives them. Written by the stepper arrows; read by the
+    /// value buttons' labels and, later, by the overlay panels. Read only by
+    /// tests, hence the allow: the callbacks own the clones that move them.
+    #[allow(dead_code)]
+    driver_temp: Property<f32>,
+    /// The passenger setpoint; see [`Demo::driver_temp`].
+    #[allow(dead_code)]
+    pass_temp: Property<f32>,
+    /// The two stepper value buttons' handles: `<` and `>` flank them, a tap
+    /// on the number toggles its overlay panel instead of stepping. The suite
+    /// clicks the arrows and reads the setpoint through the table around
+    /// these handles. Read only by tests, hence the allow.
+    #[allow(dead_code)]
+    driver_value: Handle,
+    /// The passenger value button's handle; see [`Demo::driver_value`].
+    #[allow(dead_code)]
+    pass_value: Handle,
+    /// The seat-heater levels, `0` off through [`dock::HEATER_MAX`]. A tap
+    /// cycles; the tint follows through a bound property, so the glyph and
+    /// the level cannot disagree. Read only by tests, hence the allow.
+    #[allow(dead_code)]
+    heat_driver: Property<u8>,
+    /// The passenger heater level; see [`Demo::heat_driver`].
+    #[allow(dead_code)]
+    heat_pass: Property<u8>,
+    /// Whether the windscreen defrost is on. A tap flips it; the tint
+    /// follows. Read only by tests, hence the allow.
+    #[allow(dead_code)]
+    defrost_on: Property<bool>,
+    /// The sound volume in percent. The arrows step it; the button's number
+    /// follows, and a tap on the button toggles its panel. Read only by
+    /// tests, hence the allow.
+    #[allow(dead_code)]
+    volume: Property<u8>,
+    /// The sound button's handle: the volume number with the sound glyph
+    /// nested in it, after the airbag badge's pattern. Sized for `"100%"` so
+    /// the node never moves as the number changes. Read only by tests, hence
+    /// the allow.
+    #[allow(dead_code)]
+    sound_handle: Handle,
+    /// Which overlay panel is open, if any. Written by the five openers'
+    /// `on_click` callbacks through [`dock::toggle_open`] and by the
+    /// outside-tap arms through [`dock::close_all`]; [`Demo::frame`] paints
+    /// the open one and empties the rest.
+    open_panel: Property<Option<dock::DockPanel>>,
+    /// The five overlay panels, one per opener, in [`dock::DockPanel`]
+    /// declaration order. Empty surfaces over the right map area until their
+    /// contents land.
+    overlay_panels: Vec<OverlayPanel>,
     /// The pane's header row, painted by hand: `PRND` with Park green, and the
     /// battery icon. The percent label beside them is an ordinary entry of
     /// [`Demo::chrome_labels`].
@@ -6592,48 +6966,248 @@ impl Demo {
         };
         chrome_labels.push((pct_label, pct_handle));
 
-        // The bottom dock: a `row` of five `Button`s and no active-state
-        // highlight. **No `set_palette` on any of them** — the photograph reads
-        // *"no active-state highlight"*, and a `TabBar` that owns "which one is
-        // selected" has nothing to own over a dock whose items open panels.
-        let (dock_panel, dock) = Panel::container(&mut nodes, dock_rect, LayoutMode::row());
-        dock.set_flex_config(
+        // The bottom dock: two groups in a `row` with `SpaceBetween` — six
+        // control groups left, two right, the spacer between them — and no
+        // active-state highlight. **No `set_palette` on any button** — the
+        // photograph reads *"no active-state highlight"*, and a `TabBar` that
+        // owns "which one is selected" has nothing to own over a dock whose
+        // items open panels.
+        //
+        // Left, in order: the car icon (opens its panel), the debug icon
+        // (opens its panel), the driver stepper (`<`, value, `>` — the arrows
+        // step, the number opens the panel), the driver seat heat (cycles
+        // off → 1 → 2), the defrost (toggles), the sound stepper (`<`, number
+        // with glyph, `>`). Right: the passenger seat heat, the passenger
+        // stepper. A bi-state icon is coloured while on; a heater's colour
+        // names its level — white off, orange 1, red 2.
+        let (dock_panel, dock_bar) = Panel::container(&mut nodes, dock_rect, LayoutMode::row());
+        dock_bar.set_flex_config(
             &mut nodes,
             FlexConfig::new()
-                .with_spacing(CHROME_GROUP_SPACING)
-                .with_main_axis_alignment(MainAxisAlignment::SpaceAround)
+                .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center),
         );
-        dock.set_padding(&mut nodes, Padding::all(DOCK_PADDING));
-        let mut chrome_buttons: Vec<Button> = Vec::with_capacity(chrome::DOCK_SLOTS);
-        for glyph in chrome::DOCK_GLYPHS {
-            let button = Button::new(&mut nodes, glyph);
-            // The geometry before the measurement, on the tab bar's own argument:
-            // `Button::content_size` reads `font_size`, `padding_h` and the label.
-            button.font_size.set(DOCK_FONT);
-            button.padding_h.set(DOCK_BUTTON_PADDING_H);
-            button.border_radius.set(chrome::CHROME_RADIUS);
-            {
-                let content =
-                    button.content_size(&chrome_advance(&metrics), chrome_line_height(&metrics));
-                let size = Size::new(content.width.max(DOCK_BUTTON_TALL), DOCK_BUTTON_TALL);
-                nodes
-                    .get_mut(button.handle())
-                    .ok_or("ui_demo: a dock button's node is missing")?
-                    .layout_mut()
-                    .set_constraints(Constraints::tight(size));
+        dock_bar.set_padding(&mut nodes, Padding::all(DOCK_PADDING));
+        let dock_group = |nodes: &mut Arena<WidgetNode>| {
+            let group = Container::new(nodes, LayoutMode::row());
+            group.set_flex_config(
+                nodes,
+                FlexConfig::new()
+                    .with_spacing(CHROME_GROUP_SPACING)
+                    .with_cross_axis_alignment(CrossAxisAlignment::Center),
+            );
+            group
+        };
+        let left_group = dock_group(&mut nodes);
+        let right_group = dock_group(&mut nodes);
+        // The dock's state. Mocked vehicle data — no bus drives any of it —
+        // written by the buttons' callbacks, read at paint time.
+        let open_panel = Property::<Option<dock::DockPanel>>::new(None);
+        let driver_temp = Property::new(dock::TEMP_INIT);
+        let pass_temp = Property::new(dock::TEMP_INIT);
+        let heat_driver = Property::new(0u8);
+        let heat_pass = Property::new(0u8);
+        let defrost_on = Property::new(false);
+        let volume = Property::new(dock::VOLUME_INIT);
+        let dock_ink = themed_color(
+            &theme.property(ThemeToken::Text),
+            Color::new(255, 255, 255, 255),
+        );
+        let dock_spec = icons::IconSpec {
+            size_px: DOCK_ICON,
+            color: Color::new(255, 255, 255, 255),
+        };
+        let mut chrome_buttons: Vec<Button> =
+            Vec::with_capacity(dock::DOCK_BUTTONS[0] + dock::DOCK_BUTTONS[1]);
+        let mut dock_images: Vec<DockImage> = Vec::with_capacity(6);
+        // The defrost's tint: ink off, `Warning` orange on — the heater's
+        // level-1 colour, proposed rather than specified.
+        let defrost_tint = {
+            let on = defrost_on.clone();
+            let ink = theme.property(ThemeToken::Text);
+            let lit = theme.property(ThemeToken::Warning);
+            Property::bind(move || {
+                let token = if on.get() { lit.get() } else { ink.get() };
+                token.as_color().unwrap_or(Color::new(255, 255, 255, 255))
+            })
+        };
+        let left = left_group.handle();
+        let right = right_group.handle();
+        place_dock_icon(
+            &mut nodes,
+            &mut chrome_buttons,
+            &mut dock_images,
+            left,
+            dock::DockIcon::Car,
+            dock_ink.clone(),
+            opener(&open_panel, dock::DockPanel::Car),
+        )?;
+        place_dock_icon(
+            &mut nodes,
+            &mut chrome_buttons,
+            &mut dock_images,
+            left,
+            dock::DockIcon::Debug,
+            dock_ink.clone(),
+            opener(&open_panel, dock::DockPanel::Debug),
+        )?;
+        let driver_temp_button =
+            dock_text_button(&mut nodes, &metrics, &dock::format_temp(dock::TEMP_INIT))?;
+        // The driver value button's handle: the suite reads the setpoint and
+        // clicks the arrows through the table around it.
+        let driver_value = place_temp_stepper(
+            &mut nodes,
+            &metrics,
+            &mut chrome_buttons,
+            &open_panel,
+            left,
+            &driver_temp,
+            driver_temp_button,
+            dock::DockPanel::DriverTemp,
+        )?;
+        place_heater(
+            &mut nodes,
+            &mut chrome_buttons,
+            &mut dock_images,
+            &theme,
+            left,
+            &heat_driver,
+        )?;
+        {
+            let state = defrost_on.clone();
+            place_dock_icon(
+                &mut nodes,
+                &mut chrome_buttons,
+                &mut dock_images,
+                left,
+                dock::DockIcon::Defrost,
+                defrost_tint,
+                Callback::new(move || {
+                    state.set(!state.get());
+                }),
+            )?;
+        }
+        // The sound stepper: `<`, number-with-glyph, `>`. The number button
+        // is measured for `"100%"` and then set to the opening volume, so its
+        // node never moves as the number changes; the glyph nests in it after
+        // the airbag badge's pattern, with the icon's block reserved on both
+        // sides so the text sits right of the glyph rather than over it. The
+        // arrows step the volume, the number opens the panel.
+        let sound_side = icons::drawn_side(DOCK_ICON);
+        let mut sound_button = Button::new(&mut nodes, "100%");
+        sound_button.font_size.set(DOCK_FONT);
+        sound_button.padding_h.set(DOCK_BUTTON_PADDING_H);
+        sound_button.border_radius.set(chrome::CHROME_RADIUS);
+        {
+            let measured =
+                sound_button.content_size(&chrome_advance(&metrics), chrome_line_height(&metrics));
+            let reservation = 2.0 * (sound_side + CHROME_GROUP_SPACING);
+            let size = Size::new(measured.width + reservation, DOCK_BUTTON_TALL);
+            nodes
+                .get_mut(sound_button.handle())
+                .ok_or("ui_demo: the sound button's node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(size));
+            nodes
+                .get_mut(sound_button.handle())
+                .ok_or("ui_demo: the sound button's node is missing")?
+                .layout_mut()
+                .set_padding(Padding::all(DOCK_PADDING));
+        }
+        sound_button.snap_to_state();
+        sound_button
+            .label
+            .set(dock::format_volume(dock::VOLUME_INIT));
+        {
+            let stand_in = stand_in_icon_picture_of(DOCK_ICON)
+                .ok_or("ui_demo: no sound icon image to show")?;
+            let mut image = Image::new(&mut nodes, stand_in.texture, stand_in.source);
+            image.set_fit(ImageFit::Fill);
+            image.snap_to_state();
+            nodes
+                .get_mut(image.handle())
+                .ok_or("ui_demo: the sound icon node is missing")?
+                .layout_mut()
+                .set_constraints(Constraints::tight(Size::new(sound_side, sound_side)));
+            if !node::attach(&mut nodes, sound_button.handle(), image.handle()) {
+                return Err("ui_demo: the sound icon could not be nested in its button");
             }
-            button.snap_to_state();
-            // **The dock's buttons open nothing**, and that is stated rather than
-            // left to be discovered: no Controls panel, no climate popup, no app
-            // tray, no launcher grid, no volume overlay, and no gesture.
-            if !dock_panel.add_child(&mut nodes, button.handle()) {
-                return Err("ui_demo: a dock button could not be attached");
+            dock_images.push(DockImage {
+                icon: dock::DockIcon::Sound,
+                image,
+                tint: dock_ink.clone(),
+            });
+        }
+        // Cloned before the sound button moves: the arrows write the same
+        // property the button paints.
+        let sound_text = sound_button.label.clone();
+        let sound_handle = sound_button.handle();
+        {
+            let down_level = volume.clone();
+            let down_text = sound_text.clone();
+            let mut down = dock_text_button(&mut nodes, &metrics, "<")?;
+            down.on_click = Callback::new(move || {
+                let next = dock::step_volume_down(down_level.get());
+                down_level.set(next);
+                down_text.set(dock::format_volume(next));
+            });
+            place_dock_button(&mut nodes, &mut chrome_buttons, left, down)?;
+        }
+        sound_button.on_click = opener(&open_panel, dock::DockPanel::Sound);
+        place_dock_button(&mut nodes, &mut chrome_buttons, left, sound_button)?;
+        {
+            let up_level = volume.clone();
+            let mut up = dock_text_button(&mut nodes, &metrics, ">")?;
+            up.on_click = Callback::new(move || {
+                let next = dock::step_volume_up(up_level.get());
+                up_level.set(next);
+                sound_text.set(dock::format_volume(next));
+            });
+            place_dock_button(&mut nodes, &mut chrome_buttons, left, up)?;
+        }
+        place_heater(
+            &mut nodes,
+            &mut chrome_buttons,
+            &mut dock_images,
+            &theme,
+            right,
+            &heat_pass,
+        )?;
+        let pass_temp_button =
+            dock_text_button(&mut nodes, &metrics, &dock::format_temp(dock::TEMP_INIT))?;
+        let pass_value = place_temp_stepper(
+            &mut nodes,
+            &metrics,
+            &mut chrome_buttons,
+            &open_panel,
+            right,
+            &pass_temp,
+            pass_temp_button,
+            dock::DockPanel::PassengerTemp,
+        )?;
+        for group in [left, right] {
+            if !dock_panel.add_child(&mut nodes, group) {
+                return Err("ui_demo: a dock group could not be attached");
             }
-            chrome_buttons.push(button);
+        }
+        // The five overlay panels, one per opener, over the right map area.
+        // Empty surfaces until their contents land; exactly one ever reads
+        // open. Their containers carry no background and no children, so they
+        // join the chrome's surfaces rather than its widgets.
+        let overlay_rect = dock::overlay_rect(WINDOW, CONTENT_TOP);
+        let mut overlay_panels: Vec<OverlayPanel> = Vec::with_capacity(5);
+        for kind in [
+            dock::DockPanel::Car,
+            dock::DockPanel::Debug,
+            dock::DockPanel::DriverTemp,
+            dock::DockPanel::Sound,
+            dock::DockPanel::PassengerTemp,
+        ] {
+            let (panel, _) = Panel::container(&mut nodes, overlay_rect, LayoutMode::column());
+            overlay_panels.push(OverlayPanel { kind, panel });
         }
 
-        let chrome_nodes = vec![
+        let mut chrome_nodes = vec![
             Chrome {
                 node: status_panel.handle(),
                 radius: chrome_radius,
@@ -6650,6 +7224,15 @@ impl Demo {
                 surface: chrome::bound_surface(&theme),
             },
         ];
+        // The overlays' surfaces join the chrome's: the same frosted panel
+        // over the map, painted by the same arm, gated by the open panel.
+        for overlay in &overlay_panels {
+            chrome_nodes.push(Chrome {
+                node: overlay.panel.handle(),
+                radius: chrome_radius,
+                surface: chrome::bound_surface(&theme),
+            });
+        }
         // Every node in the chrome's subtrees, in paint order. The three surfaces
         // are siblings, so their walks concatenate in the order they are drawn.
         let mut chrome_all: Vec<Handle> = Vec::new();
@@ -6657,6 +7240,15 @@ impl Demo {
             chrome_all.extend(paint_order(&nodes, surface.node));
         }
         let mut chrome_drawn: Vec<Handle> = chrome_nodes.iter().map(|chrome| chrome.node).collect();
+        // The overlays draw nothing while closed, so they stay out of the
+        // drawn set: `every_chrome_node_records_commands_on_the_demo_page`
+        // asserts every entry records a command, and a closed panel records
+        // none. Their page rows still come from the walk above.
+        chrome_drawn.retain(|handle| {
+            !overlay_panels
+                .iter()
+                .any(|overlay| overlay.panel.is(*handle))
+        });
         chrome_drawn.extend(chrome_buttons.iter().map(Button::handle));
         chrome_drawn.extend(chrome_labels.iter().map(|(_, handle)| *handle));
         chrome_drawn.push(airbag_button.handle());
@@ -6666,6 +7258,7 @@ impl Demo {
         chrome_drawn.push(icon_image.handle());
         chrome_drawn.push(lock_image.handle());
         chrome_drawn.extend(telltales.iter().map(|telltale| telltale.image.handle()));
+        chrome_drawn.extend(dock_images.iter().map(|entry| entry.image.handle()));
 
         // A stack: the background fills the window behind the row of pads, the
         // text panel and the controls layer, and all three are painted over it.
@@ -6750,6 +7343,15 @@ impl Demo {
         ] {
             if !root.add_child(&mut nodes, child) {
                 return Err("ui_demo: a panel could not be attached to the root");
+            }
+        }
+        // **The overlays after the chrome**, so they paint over the map and
+        // the chrome alike. Empty surfaces until opened; the paint walk still
+        // reaches them in this order, which is what puts an open panel on
+        // top of the dock it was opened from.
+        for overlay in &overlay_panels {
+            if !root.add_child(&mut nodes, overlay.panel.handle()) {
+                return Err("ui_demo: an overlay panel could not be attached to the root");
             }
         }
 
@@ -7145,6 +7747,19 @@ impl Demo {
             dock_panel,
             chrome_nodes,
             chrome_buttons,
+            dock_images,
+            dock_spec,
+            driver_temp,
+            pass_temp,
+            driver_value,
+            pass_value,
+            heat_driver,
+            heat_pass,
+            defrost_on,
+            volume,
+            sound_handle,
+            open_panel,
+            overlay_panels,
             pane_header,
             telltales,
             chrome_labels,
@@ -7368,6 +7983,64 @@ impl Demo {
         if let Some(telltale) = self.telltales.get_mut(index) {
             telltale.image.set_texture(texture);
         }
+    }
+
+    /// Swaps dock `icon`'s stand-in for the baked master `main` loaded, on
+    /// every node drawing it: the texture changes, the rects do not, so
+    /// nothing moves when the bytes arrive. The seat-heater master lands on
+    /// both heater buttons; the colour is each entry's bound tint and does
+    /// not follow the file. A master that never arrives leaves the
+    /// transparent stand-in, which draws nothing.
+    pub fn set_dock_picture(
+        &mut self,
+        icon: dock::DockIcon,
+        texture: TextureHandle,
+        _source: ImageSource,
+    ) {
+        for entry in &mut self.dock_images {
+            if entry.icon == icon {
+                entry.image.set_texture(texture);
+            }
+        }
+    }
+
+    /// Returns whether the chrome surface at `handle` paints its fill this
+    /// frame: always for the three persistent regions, and for an overlay
+    /// panel only while its opener has it open. A closed panel records
+    /// nothing — which is also why the overlays stay out of
+    /// [`Demo::chrome_drawn`].
+    #[must_use]
+    fn chrome_surface_visible(&self, handle: Handle) -> bool {
+        let Some(overlay) = self
+            .overlay_panels
+            .iter()
+            .find(|overlay| overlay.panel.is(handle))
+        else {
+            return true;
+        };
+        self.open_panel.get() == Some(overlay.kind)
+    }
+
+    /// Closes the open overlay panel when a press lands on neither the dock
+    /// nor the panel itself: a tap outside is the dismissal the manual gives
+    /// every Tesla popup, and the dock's own taps are claimed by the buttons'
+    /// `on_click` instead, so this never races them.
+    fn close_overlay_outside(&mut self, x: f32, y: f32) {
+        // The dialog owns every press while modal, and the demo page is not
+        // showing then anyway: never close under it.
+        if self.dialog_is_modal() {
+            return;
+        }
+        if self.open_panel.get().is_none() {
+            return;
+        }
+        if over_rect(self.dock_panel.rect(), x, y) {
+            return;
+        }
+        if over_rect(dock::overlay_rect(WINDOW, CONTENT_TOP), x, y) {
+            return;
+        }
+        self.open_panel.set(dock::close_all(self.open_panel.get()));
     }
 
     /// The four panel objects, in paint order.
@@ -8053,6 +8726,12 @@ impl Demo {
                     // load-bearing.
                     self.press_pane_car();
                 }
+                // A press outside the open overlay and the dock closes the
+                // overlay. After the press arms, so a press the demo already
+                // answered keeps its answer; the dock's own presses land in
+                // the dock's rect and are claimed by the buttons' `on_click`
+                // on release instead.
+                self.close_overlay_outside(x, y);
                 // **Nothing is offered to the chart**, and that is the same
                 // decision `the_chart_is_not_in_the_focus_order` records: a chart
                 // has no `on_event`, no value a drag would set and no action a tap
@@ -8104,6 +8783,10 @@ impl Demo {
                     // page gate leaves at most one reachable.
                     self.press_pane_car();
                 }
+                // The outside-tap dismissal on a finger, on the mouse arm's
+                // argument: a car has no mouse, so this is the route a hand
+                // actually takes.
+                self.close_overlay_outside(x, y);
             }
             Event::FingerUp { .. } | Event::FingerCanceled { .. } => {
                 self.slider_dragging = false;
@@ -8666,6 +9349,26 @@ impl Demo {
         // handler of its own and the toggle is one widget to a finger.
         if handle == self.lock_button.handle() || handle == self.lock_image.handle() {
             return self.lock_button.on_event(event);
+        }
+        // The dock's buttons: every clickable in both groups, so a tap
+        // steps, cycles, flips or opens through the `on_click` each one
+        // carries. `Button::on_event` takes no rect, like the tab arm above:
+        // the hit test already happened against the laid-out box.
+        if let Some(button) = self.chrome_button(handle) {
+            return button.on_event(event);
+        }
+        // A tap on a nested dock icon reaches its button: an `Image` has no
+        // handler of its own, and each icon button is one widget to a finger
+        // — the airbag badge's and the lock's arms above are the same rule.
+        if self
+            .dock_images
+            .iter()
+            .any(|entry| entry.image.handle() == handle)
+        {
+            let parent = self.nodes.borrow().get(handle).and_then(WidgetNode::parent);
+            if let Some(button) = parent.and_then(|parent| self.chrome_button(parent)) {
+                return button.on_event(event);
+            }
         }
         // The dialog, and each of its actions, in the one place that turns a
         // handle into a widget. **The three numbers handed to `on_event` are the
@@ -9241,13 +9944,16 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
-            // The chrome's three surfaces. An arm of their own because a surface
+            // The chrome's surfaces. An arm of their own because a surface
             // records a translucent rounded fill with no container background —
-            // see [`crate::chrome::chrome_surface_commands`].
+            // see [`crate::chrome::chrome_surface_commands`]. An overlay panel
+            // records its fill only while its opener has it open; the three
+            // persistent regions always do.
             if let Some(chrome) = self.chrome_of(handle) {
+                let show = self.chrome_surface_visible(handle);
                 let commands = match node.layout().rect() {
-                    Some(rect) => chrome::chrome_surface_commands(rect.into(), chrome),
-                    None => Vec::new(),
+                    Some(rect) if show => chrome::chrome_surface_commands(rect.into(), chrome),
+                    _ => Vec::new(),
                 };
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
@@ -9607,6 +10313,30 @@ impl Demo {
                 let commands = match node.layout().rect() {
                     Some(rect) => {
                         icons::paint(&telltale.spec, rect.into(), telltale.image.texture().id())
+                    }
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            // The dock's icons: one white-master command each, tinted the
+            // bound state colour its entry carries, through `icons::paint`
+            // like the airbag and lock icons. The size is the shared
+            // [`Demo::dock_spec`]; the colour is per entry, read at paint
+            // time. The paint gate empties them on the six other pages, so the
+            // arm only ever sees the demo page.
+            if let Some(entry) = self
+                .dock_images
+                .iter()
+                .find(|entry| entry.image.handle() == handle)
+            {
+                let commands = match node.layout().rect() {
+                    Some(rect) => {
+                        let spec = icons::IconSpec {
+                            color: entry.tint.get(),
+                            ..self.dock_spec
+                        };
+                        icons::paint(&spec, rect.into(), entry.image.texture().id())
                     }
                     None => Vec::new(),
                 };
@@ -25013,6 +25743,319 @@ mod tests {
         }
     }
 
+    // ------------------------------------------------ the dock: nine slots, two groups
+    //
+    // The bottom dock rebuilt 2026-10-15: nine slots in two groups — left
+    // `[car][debug][< temp >][seat heat][defrost][< sound n >]`, right
+    // `[seat heat][< temp >]` — over the five baked white masters, with five
+    // empty overlay panels over the right map area. What only this file can
+    // know is that the demo built them, wired their clicks, gave them rects,
+    // and paints the open panel: `dock.rs` owns the arithmetic.
+    //
+    // The buttons' order below is the construction order — car, debug, the
+    // driver stepper's three, the driver heater, the defrost, the sound
+    // stepper's three, the passenger heater, the passenger stepper's three —
+    // and `the_dock_buttons_read_left_to_right_in_spec_order` pins it, so a
+    // reorder fails here rather than silently moving every index below.
+
+    /// The centre of the dock button at `index`, or a panic naming it.
+    fn dock_center(demo: &Demo, index: usize) -> (f32, f32) {
+        let rect = demo
+            .node_rect(demo.chrome_buttons[index].handle())
+            .unwrap_or_else(|| panic!("dock button {index} is laid out"));
+        (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0)
+    }
+
+    /// Taps the dock button at `index`: press and release at its centre,
+    /// then one frame so the paint walk records what the click changed.
+    fn tap_dock(demo: &mut Demo, index: usize) {
+        let (x, y) = dock_center(demo, index);
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+    }
+
+    /// The label the dock button at `index` paints.
+    fn dock_label(demo: &Demo, index: usize) -> String {
+        demo.chrome_buttons[index].label.get()
+    }
+
+    /// The overlay panel node for `kind`, or a panic naming it.
+    fn overlay_node(demo: &Demo, kind: dock::DockPanel) -> Handle {
+        demo.overlay_panels
+            .iter()
+            .find(|overlay| overlay.kind == kind)
+            .unwrap_or_else(|| panic!("{kind:?} owns an overlay panel"))
+            .panel
+            .handle()
+    }
+
+    #[test]
+    fn the_dock_buttons_read_left_to_right_in_spec_order() {
+        let demo = laid_out_on(Page::Demo);
+        let labels: Vec<String> = (0..demo.chrome_buttons.len())
+            .map(|index| dock_label(&demo, index))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                String::new(), // car
+                String::new(), // debug
+                String::from("<"),
+                dock::format_temp(dock::TEMP_INIT),
+                String::from(">"), // driver stepper
+                String::new(),     // driver heater
+                String::new(),     // defrost
+                String::from("<"),
+                dock::format_volume(dock::VOLUME_INIT),
+                String::from(">"), // sound stepper
+                String::new(),     // passenger heater
+                String::from("<"),
+                dock::format_temp(dock::TEMP_INIT),
+                String::from(">"), // passenger stepper
+            ],
+            "fourteen buttons, in construction order: a reorder moves every \
+             click below onto the wrong control"
+        );
+    }
+
+    #[test]
+    fn the_dock_holds_fourteen_buttons_in_two_groups() {
+        let demo = laid_out_on(Page::Demo);
+        assert_eq!(
+            demo.chrome_buttons.len(),
+            dock::DOCK_BUTTONS.iter().sum::<usize>(),
+            "ten left plus four right"
+        );
+        let dock_rect = demo.dock_panel.rect();
+        let leftmost = |index: usize| {
+            demo.node_rect(demo.chrome_buttons[index].handle())
+                .unwrap_or_else(|| panic!("dock button {index} is laid out"))
+        };
+        let left_max = (0..dock::DOCK_BUTTONS[0])
+            .map(|index| {
+                let rect = leftmost(index);
+                assert!(
+                    rect.x >= dock_rect.x && rect.x + rect.width <= dock_rect.x + dock_rect.width,
+                    "button {index} is inside the dock: {rect:?} in {dock_rect:?}"
+                );
+                rect.x + rect.width
+            })
+            .fold(0.0, f32::max);
+        let right_min = (dock::DOCK_BUTTONS[0]..demo.chrome_buttons.len())
+            .map(|index| leftmost(index).x)
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            left_max < right_min,
+            "the ten left buttons end where the four right ones begin: \
+             {left_max} against {right_min}"
+        );
+    }
+
+    #[test]
+    fn clicking_a_temp_arrow_steps_the_setpoint_and_rewrites_the_label() {
+        let mut demo = laid_out_on(Page::Demo);
+        // Indices 2 and 4 are the driver stepper's `<` and `>`, 3 its value.
+        tap_dock(&mut demo, 4);
+        assert_eq!(demo.driver_temp.get(), 22.5, "one press up");
+        assert_eq!(dock_label(&demo, 3), dock::format_temp(22.5));
+        tap_dock(&mut demo, 2);
+        tap_dock(&mut demo, 2);
+        assert_eq!(demo.driver_temp.get(), 21.5, "two presses down");
+        assert_eq!(dock_label(&demo, 3), dock::format_temp(21.5));
+        assert_eq!(
+            demo.pass_temp.get(),
+            dock::TEMP_INIT,
+            "the passenger setpoint is independent"
+        );
+    }
+
+    #[test]
+    fn clicking_the_temp_number_opens_its_panel_and_clicking_again_closes_it() {
+        let mut demo = laid_out_on(Page::Demo);
+        assert_eq!(demo.open_panel.get(), None, "nothing open at launch");
+        tap_dock(&mut demo, 3);
+        assert_eq!(
+            demo.open_panel.get(),
+            Some(dock::DockPanel::DriverTemp),
+            "the number opens its panel rather than stepping"
+        );
+        assert!(
+            !demo
+                .commands_at(overlay_node(&demo, dock::DockPanel::DriverTemp))
+                .is_empty(),
+            "and the open panel draws"
+        );
+        tap_dock(&mut demo, 3);
+        assert_eq!(demo.open_panel.get(), None, "a second tap closes it");
+        assert!(
+            demo.commands_at(overlay_node(&demo, dock::DockPanel::DriverTemp))
+                .is_empty(),
+            "and the closed panel draws nothing"
+        );
+    }
+
+    #[test]
+    fn the_heater_cycles_off_one_two_and_back() {
+        let mut demo = laid_out_on(Page::Demo);
+        // Index 5 is the driver heater, 10 the passenger one.
+        assert_eq!(demo.heat_driver.get(), 0, "off at launch");
+        tap_dock(&mut demo, 5);
+        assert_eq!(demo.heat_driver.get(), 1, "one tap warms to level 1");
+        tap_dock(&mut demo, 5);
+        assert_eq!(demo.heat_driver.get(), 2, "and to level 2");
+        tap_dock(&mut demo, 5);
+        assert_eq!(demo.heat_driver.get(), 0, "and back to off");
+        assert_eq!(
+            demo.heat_pass.get(),
+            0,
+            "the passenger heater has its own level"
+        );
+    }
+
+    #[test]
+    fn the_defrost_toggles() {
+        let mut demo = laid_out_on(Page::Demo);
+        // Index 6 is the defrost.
+        assert!(!demo.defrost_on.get(), "off at launch");
+        tap_dock(&mut demo, 6);
+        assert!(demo.defrost_on.get(), "one tap colours it");
+        tap_dock(&mut demo, 6);
+        assert!(!demo.defrost_on.get(), "and the next clears it");
+    }
+
+    #[test]
+    fn clicking_a_sound_arrow_steps_the_volume_and_rewrites_the_number() {
+        let mut demo = laid_out_on(Page::Demo);
+        // Indices 7 and 9 are the sound `<` and `>`, 8 the number.
+        tap_dock(&mut demo, 9);
+        assert_eq!(demo.volume.get(), 55, "one press up");
+        assert_eq!(dock_label(&demo, 8), dock::format_volume(55));
+        tap_dock(&mut demo, 7);
+        assert_eq!(demo.volume.get(), 50, "and one down");
+    }
+
+    #[test]
+    fn the_sound_button_keeps_its_size_from_silence_to_full() {
+        let mut demo = laid_out_on(Page::Demo);
+        let before = demo
+            .node_rect(demo.sound_handle)
+            .expect("the sound button is laid out");
+        for _ in 0..20 {
+            tap_dock(&mut demo, 9);
+        }
+        assert_eq!(demo.volume.get(), 100, "twenty steps up is full");
+        let after = demo
+            .node_rect(demo.sound_handle)
+            .expect("the sound button is still laid out");
+        assert_eq!(
+            (after.width, after.height),
+            (before.width, before.height),
+            "measured for \"100%\" up front, so the node never moves"
+        );
+    }
+
+    #[test]
+    fn open_panels_are_exclusive() {
+        let mut demo = laid_out_on(Page::Demo);
+        // Index 0 is the car icon, 8 the sound number.
+        tap_dock(&mut demo, 0);
+        assert_eq!(demo.open_panel.get(), Some(dock::DockPanel::Car));
+        tap_dock(&mut demo, 8);
+        assert_eq!(
+            demo.open_panel.get(),
+            Some(dock::DockPanel::Sound),
+            "the sound panel takes over from the car one"
+        );
+        assert!(
+            demo.commands_at(overlay_node(&demo, dock::DockPanel::Car))
+                .is_empty(),
+            "and the car panel stops drawing"
+        );
+        assert!(
+            !demo
+                .commands_at(overlay_node(&demo, dock::DockPanel::Sound))
+                .is_empty(),
+            "while the sound panel draws"
+        );
+    }
+
+    #[test]
+    fn a_press_outside_closes_the_open_panel() {
+        let mut demo = laid_out_on(Page::Demo);
+        tap_dock(&mut demo, 0);
+        assert_eq!(demo.open_panel.get(), Some(dock::DockPanel::Car));
+        // The car pane's left half: over the map area's neighbour, in neither
+        // the dock nor the overlay.
+        let (down, _) = click_at(256.0, 500.0);
+        demo.handle_event(down);
+        assert_eq!(
+            demo.open_panel.get(),
+            None,
+            "a press outside the panel and the dock closes it"
+        );
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.commands_at(overlay_node(&demo, dock::DockPanel::Car))
+                .is_empty(),
+            "and the closed panel draws nothing"
+        );
+    }
+
+    #[test]
+    fn a_press_inside_the_panel_keeps_it_open() {
+        let mut demo = laid_out_on(Page::Demo);
+        tap_dock(&mut demo, 0);
+        let overlay = dock::overlay_rect(WINDOW, CONTENT_TOP);
+        let (down, _) = click_at(
+            overlay.x + overlay.width / 2.0,
+            overlay.y + overlay.height / 2.0,
+        );
+        demo.handle_event(down);
+        assert_eq!(
+            demo.open_panel.get(),
+            Some(dock::DockPanel::Car),
+            "a press inside the open panel is not an outside tap"
+        );
+    }
+
+    #[test]
+    fn every_overlay_is_the_right_map_area() {
+        let demo = laid_out_on(Page::Demo);
+        let expected = dock::overlay_rect(WINDOW, CONTENT_TOP);
+        assert_eq!(demo.overlay_panels.len(), 5, "one panel per opener");
+        for overlay in &demo.overlay_panels {
+            assert_eq!(
+                overlay.panel.rect(),
+                expected,
+                "{:?}: right of the pane, below the bar, above the dock",
+                overlay.kind
+            );
+        }
+    }
+
+    #[test]
+    fn closed_overlays_record_nothing_on_any_page() {
+        for page in [
+            Page::Pads,
+            Page::Text,
+            Page::Input,
+            Page::Controls,
+            Page::Data,
+            Page::Overlays,
+            Page::Demo,
+        ] {
+            let demo = laid_out_on(page);
+            for overlay in &demo.overlay_panels {
+                assert!(
+                    demo.commands_at(overlay.panel.handle()).is_empty(),
+                    "{page:?}: a panel nobody opened draws nothing"
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_demo_page_draws_the_icon_and_the_gallery_pages_do_not() {
         // The paint gate's half of the same claim: one tinted-image command
@@ -25570,7 +26613,11 @@ mod tests {
         let mut demo = laid_out_on(Page::Demo);
         let dark = chrome::chrome_palette(&Theme::dark()).surface;
         let light = chrome::chrome_palette(&Theme::light()).surface;
-        assert_eq!(demo.chrome_nodes.len(), 3, "three chrome surfaces");
+        assert_eq!(
+            demo.chrome_nodes.len(),
+            8,
+            "three persistent regions plus five overlay panels"
+        );
         for chrome in &demo.chrome_nodes {
             assert_eq!(
                 chrome.surface.get(),

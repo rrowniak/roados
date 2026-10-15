@@ -22,7 +22,10 @@
 //!    dark tint over the map reads as a black corner rather than as the live map.
 //!    With the radius, the corners are simply not composited and the map shows
 //!    through them.
-//! 4. **The dock's glyphs are placeholders.** See [`DOCK_GLYPHS`].
+//! 4. **The dock's glyphs are baked white masters.** One 48-pixel file per
+//!    glyph under `assets/icons/`, tinted at draw time through
+//!    [`crate::dock::dock_baked_file`]: the file never depends on the state,
+//!    the tint does.
 //! 5. **[`premultiplied`] exists and why.** `Color` is premultiplied alpha, so a
 //!    translucent surface is `(c · a) / 255` per channel, done in `u16` so the
 //!    product is not truncated before the divide.
@@ -107,24 +110,13 @@ pub const PANE_INSET: f32 = 12.0;
 /// The corner radius a chrome surface is rounded to.
 pub const CHROME_RADIUS: f32 = 12.0;
 
-/// The number of slots the bottom dock holds.
-pub const DOCK_SLOTS: usize = 5;
-
-/// The glyphs the five dock slots show, in slot order.
+/// The dock's contents live in [`crate::dock`]: nine slots in two groups —
+/// left `[car][debug][< temp >][seat heat][defrost][< sound n >]` and right
+/// `[seat heat][< temp >]` — with a spacer between them. The placeholder
+/// glyph table stood here until 2026-10-15, when the baked white masters
+/// replaced it; the table and its tests went with it rather than lingering
+/// beside the real icons.
 ///
-/// **These are placeholders, and that is a recorded deviation.** The operator's
-/// decision of 2026-09-30, `DEMO_APPLICATION.md` § *Operator decisions
-/// (2026-09-30)* item 3, is *"**Real icons.** … **No placeholder geometric
-/// shapes**"*. A dedicated task, `TASK_UI_PRIM_44`, inventories the icons and
-/// ships `ui_core::widgets::Icon`, which is what replaces these. Until it lands,
-/// the criterion that holds the dock is its geometry and its five-slot count,
-/// not its glyphs.
-///
-/// **A `const` array and not a `Vec`, and its length is the count** — the same
-/// reason `Page::ALL` is `[Page; 7]`: a fixed-size array, so the type carries
-/// the count.
-pub const DOCK_GLYPHS: [&str; DOCK_SLOTS] = ["C", "T", "A", "L", "V"];
-
 /// The chrome's colours, read from the theme and never invented.
 ///
 /// Test-only: production panels bind their surface through [`bound_surface`]
@@ -414,24 +406,8 @@ mod tests {
     }
 
     #[test]
-    fn the_dock_is_a_row_of_five_slots_and_the_glyph_table_has_five_entries() {
-        assert_eq!(DOCK_GLYPHS.len(), DOCK_SLOTS);
-        assert_eq!(DOCK_SLOTS, 5);
-    }
-
-    #[test]
-    fn every_dock_glyph_is_one_non_empty_character() {
-        for glyph in DOCK_GLYPHS {
-            assert_eq!(
-                glyph.chars().count(),
-                1,
-                "the glyph {glyph:?} is one character"
-            );
-            assert!(
-                !glyph.trim().is_empty(),
-                "an empty label draws nothing and cannot be seen"
-            );
-        }
+    fn the_dock_is_ten_buttons_left_and_four_right() {
+        assert_eq!(crate::dock::DOCK_BUTTONS, [10, 4]);
     }
 
     #[test]

@@ -10,7 +10,7 @@ task file wins and this file is corrected.
 `IMPLEMENTATION_STATE_DEMO.md` (the `TASK_UI_DEMO_*` sequence) and
 `doc/platform/IMPLEMENTATION_STATE.md` (`TASK_CROSSPLATFORM_*`, deferred).
 
-**Updated:** 2026-10-11.
+**Updated:** 2026-10-15.
 
 ## Current position
 
@@ -38,10 +38,6 @@ Re-measure before quoting it.
   guarantee; the demo asset is trusted. Deviations: one uploaded `Mesh` with
   five ranges/transforms (single shared VBO/IBO); wheels compare against the
   body's own box, not whole-model bounds.
-- **Nine tasks never reviewed** — `task-sequence.md` step 2, in a session
-  separate from the implementer's, was never run for **32, 34, 35, 36, 37, 38,
-  39, 40, 41**. All are implemented, verified and committed. The largest
-  unpaid debt in the sequence.
 - **Task 51 needs the operator.** Gap `L10` (concave fill) was declined on
   2026-10-02. Task 51 ships `paint::polygon_is_convex` and escalates the
   reversal with its cost specified. Row `L10` stays open until then.

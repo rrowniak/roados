@@ -7,31 +7,20 @@ task file wins.
 
 **Sequence:** `doc/ui/TASK_UI_DEMO_01..05.md`, designed by
 `doc/ui/DEMO_APPLICATION.md`. The library sequence beside it is
-`doc/ui/IMPLEMENTATION_STATE.md`. **Updated:** 2026-10-12.
+`doc/ui/IMPLEMENTATION_STATE.md`. **Updated:** 2026-10-15.
 
 ## Current position
 
-**`TASK_UI_DEMO_02` is in progress** — the three chrome regions are drawn over
-the map, *"partially implemented, layout not finished"*. Not reviewed. Its
-file is still in `doc/ui/`, not `done/`.
+**Nothing in flight.** `TASK_UI_DEMO_02` (chrome) and `TASK_UI_DEMO_03`
+(car-status pane) landed 2026-10-15: their files are in `doc/ui/done/` and
+are the record.
 
-**`TASK_UI_DEMO_03` was built and then removed** (2026-10-12): the pane, its
-three states and its 3-D car landed uncommitted, the operator rejected the
-looks, and then the rest of the left panel's contents followed — task 02's
-chrome pane subtree (PRND row, drive strip, indicators, card labels, pager)
-is gone too. What stands: the pane's bare translucent surface (empty, as the
-operator expects), the `DATA_*` rename, the status bar, the dock, and the
-map. The task files stay in `doc/ui/` as the rebuild spec. Not reviewed.
-
-**Next: DEMO-03 rebuilt** — the car-status pane from scratch on the clean
-base (map + translucent chrome), then 04 and 05. First row landed 2026-10-12:
-`PRND` with Park green, `70%` + level icon, three tests green.
+**Next: DEMO-04** — `doc/ui/TASK_UI_DEMO_04.md`, the indicator-light column;
+then 05. Two task files in `doc/ui/` are the queue.
 
 ## Left over
 
-- **DEMO-02's chrome is now bar, bare pane surface, and dock.** The pane's
-  contents are gone (see *Current position*): no PRND row, drive-mode strip,
-  indicator column, cards or pager. The dock's five slots open nothing.
+- **The dock's five slots open nothing.**
 - **Four dock glyphs are still placeholders**, against the operator's
   2026-09-30 *"real icons"* decision. The 33-glyph inventory is a later task's.
 - **Captures taken 2026-10-11** (release, `/tmp`, uncommitted): icon white at
@@ -47,12 +36,5 @@ base (map + translucent chrome), then 04 and 05. First row landed 2026-10-12:
   on 2026-10-09 and is void if the image is ever committed or shipped.
 - **Gap `#1` is not closed.** The map is a picture: no camera, no pan, no zoom,
   no route, no marker, no POI.
-- **For the DEMO-03 rebuild:** `Page::Demo` is `--tab=demo`; the map is its full-bleed
-  base, every chrome node a non-focusable `page_members` row hidden off-page
-  by the three gates. Surfaces in `Demo::chrome_nodes`, buttons in
-  `Demo::chrome_buttons`, labels in `Demo::chrome_labels`, pager in
-  `Demo::chrome_pager`, icon in `Demo::icon_image` + `icon_spec`/`icon_tint`.
-  `Panel` owns a rect plus a subtree (`set_rect`/`translate`/`resize` move
-  both). A surface is `Blur(σ = 1.0)` + matching rounded fill at radius 12.
 
 (End of file - total 58 lines)

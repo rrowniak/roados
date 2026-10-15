@@ -9,6 +9,9 @@ on 2026-10-10** — that file is a 3 KB status board now and takes no per-task
 record. This file owns the requirements and, with the code, is what is left of
 the record.
 
+**Amended 2026-10-15 per the operator:** tasks 32–41 stand reviewed; the
+2026-10-06 "Not reviewed" marker above is superseded.
+
 **Amended 2026-10-06 (sub-task 32.3):** two false premises in Context corrected,
 requirement 6 decision recorded, requirement 4 mechanism and task-45 boundary
 written, multi-line policy resolved, acceptance criteria ticked honestly, split

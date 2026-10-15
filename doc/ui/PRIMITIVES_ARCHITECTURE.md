@@ -522,9 +522,10 @@ ui/
         container.rs
         slider.rs
         toggle.rs
-        list.rs
-        scroll.rs
-        text_input.rs
+         list.rs
+         scroll.rs
+         segmented.rs           — the segmented control (added 2026-10-15 for DEMO-06: `Choice`/`set_choices`, no theme token)
+         text_input.rs
         keyboard.rs
         image.rs
         progress.rs

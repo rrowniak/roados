@@ -798,6 +798,43 @@ else** — and the demo needs all four:
 The list scrolls, the selected row is a **white rounded pill**, and a row may
 carry a **badge** (`Seats` → `NEW`). There is no underline or tab bar anywhere.
 
+> **Amended 2026-10-15 by `TASK_UI_DEMO_06`.** The panel is built: a scrollable
+> thirteen-row category list (`ui/src/ui_demo/src/controls.rs`,
+> `CategoryList`) with the white-pill selection and the `NEW` badge on Seats,
+> and **thirteen panes**. **Controls**, **Lights** and **Locks** are built as
+> specified above; the other ten — Dynamics, Charging, Autopilot, Seats,
+> Display, Schedule, Safety, Service, Software, Navigation — are **stated
+> proposals** from the four cell archetypes (segmented, tile, blue button,
+> slider) plus `Toggle`, with every value mocked (the `TEMP_INIT` precedent),
+> and are not claimed to have manual backing.
+>
+> **Shared state, not duplicated state:** one property for the Sentry tile and
+> the Safety toggle; one write path for the two fog buttons; one for the two
+> child-lock tiles; the Locks door-lock toggle writes `Demo::locked`, the
+> property the status-bar lock already flips. **Category glyphs are deferred**
+> (the thirteen settings-category icons are an asset task — the 33 Lucide
+> masters cover dock and chrome needs, not this list), so rows are text-only,
+> and **no departure-time editing** is built: `Schedule`'s `"Weekdays 07:30"` is
+> a static mocked label, because editing a time needs text entry, a later
+> `TASK_UI_DEMO_n` item. **No renames** (`Autopilot → Self-Driving`,
+> `Pedals & Steering → Dynamics`) — the photograph's names stand.
+>
+> **Two built deviations from the task text, for the tree's own reasons.** The
+> tile block is **three arithmetic rows** (`tile_rect`), not three `Flex` rows:
+> a `Flex` parent ignores a parked position, so hidden panes' tiles could not be
+> parked and would overlap the selected pane. And **hidden panes are parked as
+> zero-size points** rather than hidden — `no_two_placed_rects_overlap` reads
+> layout rects, and `touches` counts two zero-size boxes at one point as
+> touching — so each parked leaf gets a disjoint point. No `LayoutMode::Grid`
+> (task 52 is not built).
+>
+> **One rendering caveat, and it is the chrome's rather than this panel's:** the
+> panel's opaque children and the panel surface's translucent frosted fill land
+> in different render passes (opaque before transparent), so the surface is
+> composited **over** the children and the white pill reads as a frosted grey.
+> Everything stays legible; the exact "white" is what the compositing softens.
+> No row closed or renumbered.
+
 ### Climate — three surfaces
 
 The single most instructive control cluster in the whole interface, because

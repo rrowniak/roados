@@ -215,6 +215,7 @@
 //! dialog.
 
 mod chrome;
+mod controls;
 mod dock;
 mod fps;
 mod icons;
@@ -876,6 +877,20 @@ const CONTROLS_ORIGIN: (f32, f32) = (664.0, 396.0);
 /// than left under a name describing three widgets the demo no longer has:
 /// eight readouts draw at this size and none of them is a button's.
 const READOUT_FONT: f32 = 20.0;
+
+/// The font size the Controls panel's category names are drawn at.
+///
+/// It matches [`controls::CategoryList`]'s own row text, so the list and the
+/// pane headers read as one surface; a proposal, per `TASK_UI_DEMO_06`.
+const CATEGORY_FONT: f32 = 20.0;
+
+/// The font size the Controls panel's pane controls are measured and drawn at.
+///
+/// The widgets inside a pane are drawn *inside* their own widget, which
+/// measures its label through the advance this size supplies; the demo paints
+/// them through it and the widgets' own `on_event` hit-tests their boxes, so
+/// the one number serves every pane control. A proposal.
+const PANE_FONT: f32 = 16.0;
 
 /// Where the slider sits in the window.
 ///
@@ -1926,6 +1941,33 @@ const NOTHING_ENTERED: &str = "-";
 /// comparing.
 const RUN_SECONDS_VAR: &str = "ROADOS_RUN_SECONDS";
 
+/// The environment variable that opens the Controls panel at launch.
+///
+/// A capture affordance, not a product surface: no pointer event reaches this
+/// window on this host, so the Car overlay's own dock button cannot be pressed
+/// here and the panel would have no way to a capture. Set it to a category name
+/// (`car` opens the panel on **Controls**, `lights` on **Lights**, and any other
+/// category name on that category) to open the panel there at launch; unset
+/// leaves it closed, which is the demo's real behaviour.
+const OPEN_PANEL_VAR: &str = "ROADOS_OPEN_PANEL";
+
+/// Returns the category index [`OPEN_PANEL_VAR`]'s value asks for, or `None`
+/// when the panel should stay closed.
+///
+/// `car` is the photograph's name for the Controls panel and selects
+/// [`controls::CATEGORIES`]'s first entry; every other category name resolves
+/// through [`controls::category_index`], so `lights`, `seats` and the rest are
+/// the same affordance. Pure, so the parse is a unit test rather than something
+/// only an environment can exercise.
+#[must_use]
+fn open_panel_request(raw: Option<String>) -> Option<usize> {
+    let value = raw?;
+    if value.eq_ignore_ascii_case("car") {
+        return Some(0);
+    }
+    controls::category_index(&value)
+}
+
 // ------------------------------------------------------------------ task 22
 //
 // The dialog's five numbers and its two strings. They are constants for the same
@@ -2711,6 +2753,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         model,
         page,
     )?;
+    // **A capture affordance for the Controls panel.** No pointer event reaches
+    // this window on this host, so the only other way to open the Car overlay —
+    // its dock button's own on_click — cannot be driven here, and the panel
+    // would have no capture. `ROADOS_OPEN_PANEL=car` opens it at launch, the way
+    // `ROADOS_RUN_SECONDS` bounds a run: an environment variable, not a `--`
+    // flag, because it is a verification knob and not a product surface.
+    if let Some(index) = open_panel_request(std::env::var(OPEN_PANEL_VAR).ok()) {
+        let _ = demo.controls_list.select(index);
+        demo.open_panel.set(Some(dock::DockPanel::Car));
+    }
     // The baked master beside the dock, swapped in over the stand-in `Demo::new`
     // built: same node, same rect, so nothing moves when the bytes arrive.
     if let Some(picture) = icon_picture {
@@ -4749,6 +4801,24 @@ struct Demo {
     /// declaration order. Empty surfaces over the right map area until their
     /// contents land.
     overlay_panels: Vec<OverlayPanel>,
+    /// The Controls panel's category list: thirteen rows under the Car
+    /// overlay, `TASK_UI_DEMO_06`'s `CategoryList`. Its node is a child of the
+    /// Car panel's, so the chrome walk gives it its `Page::Demo` row.
+    controls_list: controls::CategoryList,
+    /// The Controls panel's thirteen panes: every leaf a child of the Car
+    /// panel's node, the selected pane laid out and the rest parked by
+    /// [`controls::ControlsPanes::relayout`].
+    controls: controls::ControlsPanes,
+    /// Whether the panes were last themed for the dark theme: the frame
+    /// re-themes them when the switch moves under them.
+    controls_dark: bool,
+    /// The category index the Controls panel's panes were last laid out for:
+    /// the frame re-lays them out only when this moves, so a parked leaf's
+    /// dirty flag is not rewritten every frame.
+    controls_selected: usize,
+    /// The Controls panel's shared state as of the last [`Demo::sync_controls`],
+    /// so the labels are rewritten only when something they name moved.
+    controls_state: controls::ControlsState,
     /// The pane's header row, painted by hand: `PRND` with Park green, and the
     /// battery icon. The percent label beside them is an ordinary entry of
     /// [`Demo::chrome_labels`].
@@ -7206,6 +7276,53 @@ impl Demo {
             let (panel, _) = Panel::container(&mut nodes, overlay_rect, LayoutMode::column());
             overlay_panels.push(OverlayPanel { kind, panel });
         }
+        // The Controls panel's contents, under the Car panel's node: the
+        // category list and all thirteen panes' leaves. The Car panel becomes
+        // `Absolute` so every child reads its explicitly set position — a
+        // `column` flow would stack the parked leaves of twelve hidden panes
+        // onto one point, and `touches` counts zero-size rects at one point
+        // as touching. The other four panels keep their mode; nothing else
+        // ever parents a child to them.
+        //
+        // **Every position is relative to the panel's own origin**, which is
+        // `overlay_rect`'s: the layout pass adds a parent's origin to each
+        // child's placement, so a control placed at `pane_rect`'s absolute
+        // figure would land a panel-origin too far right. The panel-local
+        // overlay below is the origin every `controls::` geometry helper is
+        // handed, and the paint and hit-test arms read the nodes' own
+        // laid-out rects — which the pass has already made absolute.
+        let local_overlay = Rect::new(0.0, 0.0, overlay_rect.width, overlay_rect.height);
+        let controls_list = controls::CategoryList::new(&mut nodes);
+        let controls_panes = controls::ControlsPanes::new(&mut nodes, &theme, locked.clone());
+        for overlay in &overlay_panels {
+            if overlay.kind != dock::DockPanel::Car {
+                continue;
+            }
+            let handle = overlay.panel.handle();
+            // The mode lives on the layout state, which the node owns; the
+            // pass re-reads it, so the node is marked dirty for the change.
+            if let Some(node) = nodes.get_mut(handle) {
+                node.layout_mut().set_mode(LayoutMode::Absolute);
+                mark_dirty(&mut nodes, handle);
+            }
+            let _ = node::attach(&mut nodes, handle, controls_list.handle());
+            for &leaf in controls_panes.leaves() {
+                let _ = node::attach(&mut nodes, handle, leaf);
+            }
+        }
+        // The list's own band, always live; the panes by selection.
+        if let Some(node) = nodes.get_mut(controls_list.handle()) {
+            let list_rect = controls::category_list_rect(local_overlay);
+            node.layout_mut()
+                .set_constraints(Constraints::tight(Size::new(
+                    list_rect.width,
+                    list_rect.height,
+                )));
+            node.layout_mut()
+                .set_position(Some(Offset::new(list_rect.x, list_rect.y)));
+            mark_dirty(&mut nodes, controls_list.handle());
+        }
+        controls_panes.relayout(&mut nodes, local_overlay, 0);
 
         let mut chrome_nodes = vec![
             Chrome {
@@ -7760,6 +7877,22 @@ impl Demo {
             sound_handle,
             open_panel,
             overlay_panels,
+            controls_list,
+            controls: controls_panes,
+            controls_dark: true,
+            controls_selected: 0,
+            controls_state: controls::ControlsState {
+                locked: false,
+                sentry: false,
+                child: false,
+                seat_driver: 0,
+                seat_passenger: 0,
+                charge: 80.0,
+                screen_clean: false,
+                car_wash: false,
+                tow: false,
+                check: false,
+            },
             pane_header,
             telltales,
             chrome_labels,
@@ -9267,6 +9400,44 @@ impl Demo {
     /// reachable on this tree; whether to close the fade is the operator's call with
     /// 24.3's design in front of them.
     fn offer_to(&self, handle: Handle, event: &mut InputEvent) -> bool {
+        // **The Controls panel, gated on its opener being open.** Its leaves
+        // are children of the Car overlay panel's node, which is on every page,
+        // so the tree's route reaches them whenever the panel is on screen —
+        // and the panel's own surface is drawn only while its opener is open.
+        // The gate is what makes a closed panel's controls unreachable, and it
+        // is the same `open_panel == Some(Car)` the paint arm's surface uses.
+        // The list is offered first; a tap on a row selects it. A pane control
+        // is offered at the box `layout_of` gives it, so a parked leaf — a
+        // control in a pane that is not selected — has no box and nothing here
+        // reaches it, and the two bound toggles write shared state through
+        // `offer_handle`.
+        if self.open_panel.get() == Some(dock::DockPanel::Car) {
+            let overlay = dock::overlay_rect(WINDOW, CONTENT_TOP);
+            let local = Rect::new(0.0, 0.0, overlay.width, overlay.height);
+            if handle == self.controls_list.handle() {
+                // The node's own laid-out rect is the list's absolute box.
+                return match self.node_rect(handle) {
+                    Some(rect) => self.controls_list.on_event(event, rect),
+                    None => false,
+                };
+            }
+            let selected = self.controls_list.selected();
+            if let Some((_, Some(_))) = self
+                .controls
+                .layout_of(local, selected)
+                .into_iter()
+                .find(|(held, _)| *held == handle)
+            {
+                // The mapping only says *which* pane the handle is in; the box
+                // to offer it at is the node's own laid-out (absolute) rect.
+                return match self.node_rect(handle) {
+                    Some(rect) => self
+                        .controls
+                        .offer_handle(event, handle, rect, &self.locked),
+                    None => false,
+                };
+            }
+        }
         if handle == self.slider.node() {
             return match self.slider_rect() {
                 Some(rect) => self.slider.widget.on_event(event, rect),
@@ -9821,6 +9992,14 @@ impl Demo {
             self.page_members
                 .retain(|member| arena.get(member.handle).is_some());
         }
+        // **The Controls panel's per-frame sync**, before the layout pass so
+        // the boxes it writes are the ones this frame lays out: the list's
+        // scroll bookkeeping, the panes' parked-or-placed layout when the
+        // selection moved, and the theme re-aim when the theme switch moved
+        // under it. Nothing here runs while the panel is closed beyond the
+        // cheap selection read the paint arm also makes.
+        self.sync_controls();
+
         // The car's ambient turn, after the ticks and before the paint: the
         // gesture owns the yaw while a drag is in progress and this owns it
         // the rest of the time, and the handover is neither a blend nor a
@@ -9906,6 +10085,21 @@ impl Demo {
         // holds would be a `RefCell` double borrow. The data car needs no
         // equivalent — its rect is the constant [`CAR_RECT`].
         let pane_car_base = self.pane_car_mvp();
+
+        // **The Controls panel's boxes, read once before the walk borrows the
+        // arena mutably**, on the same one-number rule the pane car's matrix
+        // above is. `layout_of` is the single mapping the paint arm, the
+        // hit-test arm and [`controls::ControlsPanes::relayout`] all read, so
+        // nothing here can drift from where the pass put a control.
+        let controls_overlay = dock::overlay_rect(WINDOW, CONTENT_TOP);
+        let controls_local = Rect::new(0.0, 0.0, controls_overlay.width, controls_overlay.height);
+        // **Nothing paints unless the Car overlay is open**, the same gate the
+        // panel's own surface reads. The children are children of the panel's
+        // node, which is on every page, so without this gate a closed panel
+        // would still draw its list and panes over the map.
+        let controls_open = self.open_panel.get() == Some(dock::DockPanel::Car);
+        let controls_selected = self.controls_list.selected();
+        let controls_layout = self.controls.layout_of(controls_local, controls_selected);
 
         let mut nodes = self.nodes.borrow_mut();
 
@@ -10339,6 +10533,69 @@ impl Demo {
                         icons::paint(&spec, rect.into(), entry.image.texture().id())
                     }
                     None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+
+            // **The Controls panel, under the Car overlay's surface**, and the
+            // arms are keyed by the one mapping `layout_of` owns. The list is
+            // painted at its own node's rect; a pane control at the box the
+            // mapping gives it, and a control whose pane is not the selected one
+            // records nothing — its node is parked, so there is no box to draw
+            // it in. A header is painted at the pane header's rect while its
+            // pane is selected, and records nothing otherwise; it is a leaf
+            // because a label that drew a header with no node would have no
+            // `Page::Demo` row and no paint-gate answer.
+            if handle == self.controls_list.handle() {
+                let commands = match node.layout().rect() {
+                    Some(rect) if controls_open => {
+                        let advance = |ch: char| self.metrics.advance(ch, CATEGORY_FONT);
+                        self.controls_list.paint(
+                            rect.into(),
+                            &advance,
+                            self.metrics.line_height(CATEGORY_FONT),
+                            &self.theme,
+                        )
+                    }
+                    _ => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            if let Some(index) = self.controls.header_of(handle) {
+                let commands = if index == controls_selected && controls_open {
+                    self.controls
+                        .paint_header(index, controls_overlay, &self.metrics)
+                } else {
+                    Vec::new()
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
+            if let Some((_, slot)) = controls_layout.iter().find(|(held, _)| *held == handle) {
+                let commands = match slot {
+                    // The mapping says the pane is selected; the **node's own
+                    // laid-out rect** is the box to draw in, because the pass
+                    // has already made it absolute by adding the panel's
+                    // origin, and the mapping's rect is panel-local.
+                    Some(_) if controls_open => {
+                        let advance = |ch: char| self.metrics.advance(ch, PANE_FONT);
+                        match node.layout().rect() {
+                            Some(rect) => self
+                                .controls
+                                .paint_leaf(
+                                    handle,
+                                    rect.into(),
+                                    &advance,
+                                    self.metrics.line_height(PANE_FONT),
+                                    &self.metrics,
+                                )
+                                .unwrap_or_default(),
+                            None => Vec::new(),
+                        }
+                    }
+                    _ => Vec::new(),
                 };
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
@@ -11026,6 +11283,84 @@ impl Demo {
             self.toggle_aimed = wanted;
             self.toggle
                 .animate_to_state(Motion::from_theme(&self.theme));
+        }
+    }
+
+    /// Moves the Controls panel's category selection one row up (`Q`),
+    /// clamping at the first category. The row's page activates `demo` first,
+    /// so the panel this moves is on screen when it moves.
+    fn controls_prev(&mut self) {
+        let _ = self.controls_list.step(-1);
+    }
+
+    /// Moves the Controls panel's category selection one row down (`W`),
+    /// clamping at the last category.
+    fn controls_next(&mut self) {
+        let _ = self.controls_list.step(1);
+    }
+
+    /// Actuates the selected Controls pane's primary control (`B`): the one
+    /// write path per pane, through the same setters the widgets and the tiles
+    /// use.
+    fn controls_act(&mut self) {
+        let selected = self.controls_list.selected();
+        self.controls.act(selected);
+    }
+
+    /// Syncs the Controls panel once a frame: the list's scroll bookkeeping,
+    /// the panes' layout when the selection moved, and the theme re-aim when
+    /// the theme switch moved under the panes.
+    ///
+    /// **The panes are laid out only when the selection moves**, so a parked
+    /// leaf's dirty flag is not rewritten every frame: `relayout` marks every
+    /// leaf dirty, and a per-frame call would repaint all sixty-eight every
+    /// frame. `controls_selected` is the record, on the same idiom
+    /// `sync_toggle_state`'s `toggle_aimed` is — the demo's own memory of what
+    /// it last wrote, so it can tell a real move from a frame that changed
+    /// nothing.
+    ///
+    /// The list's `sync` **is** per-frame because it recycles rows as the
+    /// scroll offset moves, which is a real change on the frame it happens and
+    /// a no-op on the frames it does not.
+    fn sync_controls(&mut self) {
+        let overlay = dock::overlay_rect(WINDOW, CONTENT_TOP);
+        let local = Rect::new(0.0, 0.0, overlay.width, overlay.height);
+        let selected = self.controls_list.selected();
+        // **A closed overlay panel leaves the hit-test tree.** The five panels
+        // share the overlay rect and are the root's last children, so `hit_test`
+        // reaches the *last* one first; with every panel visible a click inside
+        // the open Car panel came back with the chain `[a closed panel, root]`
+        // and was dropped by every arm, so nothing in the open panel could be
+        // clicked. `set_visible(false)` is the gate `hit_test_from` already
+        // honours for a node *and its whole subtree* — and it deliberately does
+        // not move a rect or mark the node dirty, so nothing re-lays out. The
+        // paint arms keep their own `chrome_surface_visible`/`controls_open`
+        // gate, so visibility here is about input only.
+        let open = self.open_panel.get();
+        {
+            let mut nodes = self.nodes.borrow_mut();
+            for panel in &self.overlay_panels {
+                if let Some(node) = nodes.get_mut(panel.panel.handle()) {
+                    node.layout_mut().set_visible(open == Some(panel.kind));
+                }
+            }
+            self.controls_list
+                .sync(&mut nodes, controls::category_list_rect(local));
+        }
+        if selected != self.controls_selected {
+            self.controls_selected = selected;
+            let mut nodes = self.nodes.borrow_mut();
+            self.controls.relayout(&mut nodes, local, selected);
+        }
+        if self.controls_dark != self.dark {
+            self.controls_dark = self.dark;
+            let theme = self.target_theme();
+            self.controls.apply_theme(&theme);
+        }
+        let state = self.controls.state(self.locked.get());
+        if state != self.controls_state {
+            self.controls_state = state;
+            self.controls.sync_demo(self.locked.get());
         }
     }
 
@@ -11872,6 +12207,12 @@ impl Demo {
         if let Some(status) = &self.model_status {
             handles.push(("model status", status.label.handle()));
         }
+        // **The Controls panel's leaves**, appended from the one list the panel
+        // owns, so this is a filter rather than a second written-out order. The
+        // names are the panel's; `expected_placed_rect_names` writes them out
+        // again, and the two are compared sorted with multiplicity, so a leaf
+        // added here without a name there is a failure.
+        handles.extend(self.controls.placed_names());
         handles
     }
 
@@ -12095,7 +12436,7 @@ impl Demo {
 /// 2026-10-03.
 type GalleryShortcut = (&'static str, Keycode, Option<Page>, fn(&mut Demo));
 
-/// The gallery's eighteen keyboard shortcuts, each with the page it belongs to.
+/// The gallery's twenty-two keyboard shortcuts, each with the page it belongs to.
 ///
 /// **`None` is one row and not an oversight.** `T` switches the theme, and the
 /// theme reaches every colour in the demo through the property graph — the parent
@@ -12105,7 +12446,7 @@ type GalleryShortcut = (&'static str, Keycode, Option<Page>, fn(&mut Demo));
 /// no page to land on, and `None` is what says *stay where you are*. Every other
 /// row names the page its widget is on, and `every_shortcut_works_from_every_page_
 /// and_lands_on_its_own` is what holds the seventeen and the one apart.
-const GALLERY_SHORTCUTS: [GalleryShortcut; 19] = [
+const GALLERY_SHORTCUTS: [GalleryShortcut; 22] = [
     (
         "Space, which presses every pad",
         Keycode::Space,
@@ -12219,6 +12560,24 @@ const GALLERY_SHORTCUTS: [GalleryShortcut; 19] = [
         Keycode::S,
         Some(Page::Data),
         Demo::shift_chart_sample,
+    ),
+    (
+        "Q, which moves the Controls selection to the previous category",
+        Keycode::Q,
+        Some(Page::Demo),
+        Demo::controls_prev,
+    ),
+    (
+        "W, which moves the Controls selection to the next category",
+        Keycode::W,
+        Some(Page::Demo),
+        Demo::controls_next,
+    ),
+    (
+        "B, which actuates the selected Controls pane's primary control",
+        Keycode::B,
+        Some(Page::Demo),
+        Demo::controls_act,
     ),
 ];
 
@@ -16761,6 +17120,7 @@ mod tests {
         if with_model_status {
             names.push("model status");
         }
+        names.extend(controls::ControlsPanes::placed_name_list());
         names
     }
 
@@ -16792,12 +17152,16 @@ mod tests {
         // the right place for the number rather than a doc comment. The model
         // status is the thirtieth, present exactly when the demo holds no
         // model — which is every test fixture, and every run until task 39.
+        // **Task `TASK_UI_DEMO_06` adds the Controls panel's sixty-four leaves**
+        // to both lists together, so this number moved by the same count the
+        // list did: 29/30 becomes 93/94.
         assert_eq!(
             want.len(),
-            if with_model_status { 30 } else { 29 },
+            if with_model_status { 94 } else { 93 },
             "the written-out list holds one card, nine text-panel labels, one \
-             fallback label and eighteen controls and readouts, and the model \
-             status when the demo holds no model"
+             fallback label and eighteen controls and readouts, the model status \
+             when the demo holds no model, and the Controls panel's sixty-four \
+             leaves"
         );
         assert_eq!(
             got, want,
@@ -16876,8 +17240,22 @@ mod tests {
         // **The chrome's whole subtrees**, appended in paint order. The chrome is
         // not in `placed_handles` — its pane overlaps the card of pads and its dock
         // the keyboard — so `assert_every_drawn_leaf_is_named_or_excused` needs
-        // every drawing chrome node here.
-        exempt.extend(demo.chrome_all.iter().copied());
+        // every drawing chrome node here. **The Controls panel's leaves are now
+        // named** — `TASK_UI_DEMO_06` put them in `placed_handles` — so they are
+        // filtered out here, because a node in both lists fails the assertion's
+        // `named`-excludes-`exempt` comparison rather than passing it twice.
+        let controls: Vec<Handle> = demo
+            .controls
+            .placed_names()
+            .into_iter()
+            .map(|(_, handle)| handle)
+            .collect();
+        exempt.extend(
+            demo.chrome_all
+                .iter()
+                .copied()
+                .filter(|handle| !controls.contains(handle)),
+        );
         exempt
     }
 
@@ -20309,6 +20687,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn open_panel_request_resolves_a_category_name_or_nothing() {
+        // The capture affordance's parse, checked through the function that
+        // holds it rather than through the process environment, for the reason
+        // `run_seconds_bounds_a_run…` gives: the environment is one value for
+        // the whole test binary.
+        assert_eq!(open_panel_request(None), None, "unset leaves it closed");
+        assert_eq!(open_panel_request(Some("car".to_string())), Some(0));
+        assert_eq!(open_panel_request(Some("CAR".to_string())), Some(0));
+        assert_eq!(
+            open_panel_request(Some("lights".to_string())),
+            Some(5),
+            "a category name resolves to its index"
+        );
+        assert_eq!(open_panel_request(Some("Seats".to_string())), Some(6));
+        assert_eq!(open_panel_request(Some("navigation".to_string())), Some(12));
+        assert_eq!(
+            open_panel_request(Some("nonsense".to_string())),
+            None,
+            "a name no category has leaves the panel closed"
+        );
+    }
+
     // -------------------------------------------------- task 22: the dialog
     //
     // Everything below is about the **wiring**, for the reason the gauge's and the
@@ -20567,6 +20968,35 @@ mod tests {
         chart_last: f32,
         /// `Space`: each pad's press.
         pads: Vec<f32>,
+        /// `Q`/`W`: the Controls panel's selected category.
+        controls_selected: usize,
+        /// `B` on Controls, and the Locks door lock's read-back: the shared
+        /// state the two bound toggles and the tiles move.
+        locked: bool,
+        /// `B` on Controls: the Sentry tile's state.
+        controls_sentry: bool,
+        /// `B` on Locks: the child-lock tile's state.
+        controls_child: bool,
+        /// `B` on Dynamics: Slip Start.
+        controls_slip: bool,
+        /// `B` on Charging: Scheduled charging.
+        controls_sched: bool,
+        /// `B` on Autopilot: Autosteer.
+        controls_autosteer: bool,
+        /// `B` on Seats: the driver heater level.
+        controls_seat_driver: u8,
+        /// `B` on Lights: the exterior-lights choice.
+        controls_lights: f32,
+        /// `B` on Display: the appearance choice.
+        controls_appearance: f32,
+        /// `B` on Schedule: Precondition for departure.
+        controls_precondition: bool,
+        /// `B` on Service: Car Wash Mode.
+        controls_wash: bool,
+        /// `B` on Software: the update check's done flag.
+        controls_check: bool,
+        /// `B` on Navigation: Online Routing.
+        controls_online: bool,
     }
 
     fn gallery_state(demo: &Demo) -> GalleryState {
@@ -20591,6 +21021,20 @@ mod tests {
                 .copied()
                 .unwrap_or(NO_READING_VALUE),
             pads: demo.pads.iter().map(|pad| pad.press.get()).collect(),
+            controls_selected: demo.controls_list.selected(),
+            locked: demo.locked.get(),
+            controls_sentry: demo.controls.sentry_on.get(),
+            controls_child: demo.controls.child_on.get(),
+            controls_slip: demo.controls.slip.checked.get(),
+            controls_sched: demo.controls.sched_charge.checked.get(),
+            controls_autosteer: demo.controls.autosteer.checked.get(),
+            controls_seat_driver: demo.controls.seat_driver.get(),
+            controls_lights: demo.controls.lights_ext.value.get(),
+            controls_appearance: demo.controls.appearance.value.get(),
+            controls_precondition: demo.controls.precondition.checked.get(),
+            controls_wash: demo.controls.car_wash_on.get(),
+            controls_check: demo.controls.check_done.get(),
+            controls_online: demo.controls.online_routing.checked.get(),
         }
     }
 
@@ -20622,6 +21066,13 @@ mod tests {
             dialog_closed_on(page)
         };
         demo.set_slider_value(SLIDER_MIN + SLIDER_STEP);
+        // **The Controls selection is primed off the first category**, and it
+        // is the same argument the slider priming gives: `Q` steps *towards*
+        // the first category and the demo starts *on* it, so from the launch
+        // state `Q` is a no-op and the row could not be shown to act. Priming
+        // to the second category makes both `Q` and `W` move, and `B` actuate
+        // Dynamics' Slip Start.
+        let _ = demo.controls_list.select(1);
         demo
     }
 
@@ -21115,7 +21566,7 @@ mod tests {
         // `match` — there is no `match`. What it does check is that every row's
         // function still does what its name says, which is the one way a table of
         // function pointers can rot silently.
-        assert_eq!(GALLERY_SHORTCUTS.len(), 19, "nineteen shortcuts");
+        assert_eq!(GALLERY_SHORTCUTS.len(), 22, "twenty-two shortcuts");
         assert!(
             !GALLERY_SHORTCUTS
                 .iter()
@@ -25582,7 +26033,13 @@ mod tests {
     }
 
     #[test]
-    fn the_map_node_is_not_in_placed_handles_and_the_two_counts_did_not_move() {
+    fn the_map_node_is_not_in_placed_handles_and_the_controls_leaves_are() {
+        // **`TASK_UI_DEMO_01`'s regression guard, updated by `TASK_UI_DEMO_06`.**
+        // It was written to hold the count still against an accidental leaf; 06
+        // grew it on purpose, by the Controls panel's sixty-four leaves, so the
+        // number moved by the same count on both sides and the guard now pins
+        // the new figure. A leaf added between the two lists is still a
+        // failure, which is the guard's whole value.
         let demo = laid_out_on(Page::Demo);
         let placed = demo.placed_handles();
         let expected_len = expected_placed_rect_names(demo.model_status.is_some()).len();
@@ -25593,14 +26050,226 @@ mod tests {
         );
         assert_eq!(
             expected_len,
-            if demo.model_status.is_some() { 30 } else { 29 },
-            "the written-out expected count is still 29 or 30"
+            if demo.model_status.is_some() { 94 } else { 93 },
+            "the written-out expected count holds the gallery's 29/30 plus the \
+             Controls panel's sixty-four leaves"
         );
         assert!(
             !placed
                 .iter()
                 .any(|(_, handle)| *handle == demo.map.handle()),
             "the map's full-bleed rect is not in placed_handles"
+        );
+        assert!(
+            demo.controls
+                .placed_names()
+                .iter()
+                .all(|(_, handle)| placed.iter().any(|(_, held)| held == handle)),
+            "and every Controls leaf is in placed_handles, which is what 06 added"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // TASK_UI_DEMO_06: the Controls panel.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn clicking_a_category_row_selects_it_through_handle_event() {
+        // **The regression that a closed sibling panel shadowed the open one.**
+        // The five overlay panels share the overlay rect and are the root's
+        // last children, so `hit_test` reached a *closed* panel first and the
+        // chain `[closed panel, root]` was consumed by nothing — every click in
+        // the open panel did nothing. `Demo::sync_controls` takes a closed
+        // panel out of the hit-test tree, and this is the test that says so.
+        let mut demo = laid_out_on(Page::Demo);
+        demo.open_panel.set(Some(dock::DockPanel::Car));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let list = demo
+            .node_rect(demo.controls_list.handle())
+            .expect("the list is placed");
+        let row = |index: usize| {
+            (
+                list.x + 40.0,
+                list.y + controls::CATEGORY_ROW_HEIGHT * (index as f32) + 20.0,
+            )
+        };
+        let (x, y) = row(4);
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(
+            demo.controls_list.selected(),
+            4,
+            "a click on a category row selects it"
+        );
+        let (x, y) = row(1);
+        let (down, up) = click_at(x, y);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_eq!(demo.controls_list.selected(), 1, "and another row moves it");
+    }
+
+    #[test]
+    fn clicking_a_pane_control_actuates_it_through_handle_event() {
+        // The Lights pane: a click on the blue Fog button writes the shared fog
+        // state; a click on the door-lock toggle writes `Demo::locked`. Both go
+        // through the same node rects the paint pass uses.
+        let mut demo = laid_out_on(Page::Demo);
+        let _ = demo.controls_list.select(5);
+        demo.open_panel.set(Some(dock::DockPanel::Car));
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let fog = demo
+            .node_rect(demo.controls.lights_fog.handle())
+            .expect("the fog button is placed");
+        assert!(!demo.controls.fog_on.get());
+        let (down, up) = click_at(fog.x + fog.width / 2.0, fog.y + fog.height / 2.0);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            demo.controls.fog_on.get(),
+            "a click on Fog flips the shared fog state"
+        );
+
+        // Locks, and the door-lock toggle: one property with the status bar.
+        let _ = demo.controls_list.select(4);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let lock = demo
+            .node_rect(demo.controls.locks_lock.handle())
+            .expect("the lock toggle is placed");
+        let before = demo.locked.get();
+        let (down, up) = click_at(lock.x + lock.width / 2.0, lock.y + lock.height / 2.0);
+        demo.handle_event(down);
+        demo.handle_event(up);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert_ne!(
+            demo.locked.get(),
+            before,
+            "a click on the door-lock toggle flips Demo::locked"
+        );
+    }
+
+    #[test]
+    fn a_closed_panel_is_not_a_hit_test_target() {
+        // The premise the two tests above rest on: with nothing open, a click
+        // over the overlay area reaches no controls node at all.
+        let mut demo = laid_out_on(Page::Demo);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let list = demo
+            .node_rect(demo.controls_list.handle())
+            .expect("the list is placed");
+        let point = Offset::new(list.x + 40.0, list.y + 20.0);
+        let chain = {
+            let nodes = demo.nodes.borrow();
+            input::route(
+                &nodes,
+                demo.root,
+                &InputEvent::new(InputEventKind::Tap, Some(point)),
+            )
+        };
+        assert!(
+            !chain.contains(&demo.controls_list.handle()),
+            "a closed panel's list is not in the routed chain"
+        );
+        assert!(
+            !chain.iter().any(|handle| demo
+                .controls
+                .placed_names()
+                .iter()
+                .any(|(_, h)| h == handle)),
+            "nor is any closed pane's control"
+        );
+    }
+
+    #[test]
+    fn the_b_key_map_covers_all_thirteen_panes() {
+        // **Every category, one `B`, and a recorded state that moves** — the
+        // The Lights row is primed off its clamp: it starts at `Auto`, the last
+        // choice, so a step forward would be a no-op and prove nothing.
+        for index in 0..controls::CATEGORY_COUNT {
+            let mut demo = laid_out_on(Page::Demo);
+            let _ = demo.controls_list.select(index);
+            let _ = demo.controls.lights_ext.select(0);
+            let _ = demo.controls.appearance.select(0);
+            demo.frame(WINDOW, Duration::from_millis(16));
+            let before = gallery_state(&demo);
+            demo.handle_event(key_event(Keycode::B));
+            demo.frame(WINDOW, Duration::from_millis(16));
+            assert_ne!(
+                gallery_state(&demo),
+                before,
+                "the B key actuates {}'s primary control",
+                controls::category_name(index).unwrap_or("?")
+            );
+        }
+    }
+
+    #[test]
+    fn the_q_w_and_b_keys_reach_the_panel_through_handle_event() {
+        let mut demo = laid_out_on(Page::Demo);
+        // The panel must be open for its controls to matter, but `Q`/`W`/`B`
+        // act through `handle_event` whether or not it is: the row's page is
+        // `demo`, already on show.
+        assert_eq!(demo.controls_list.selected(), 0, "it starts on Controls");
+        demo.handle_event(key_event(Keycode::W));
+        assert_eq!(demo.controls_list.selected(), 1, "W moves down one");
+        demo.handle_event(key_event(Keycode::Q));
+        assert_eq!(demo.controls_list.selected(), 0, "Q moves back up");
+        demo.handle_event(key_event(Keycode::Q));
+        assert_eq!(demo.controls_list.selected(), 0, "and clamps at the first");
+        // `B` on Controls actuates the Sentry tile.
+        assert!(!demo.controls.sentry_on.get());
+        demo.handle_event(key_event(Keycode::B));
+        assert!(demo.controls.sentry_on.get(), "B flips the Sentry state");
+    }
+
+    #[test]
+    fn every_controls_leaf_has_a_page_row_and_a_placed_handles_row() {
+        let demo = laid_out_on(Page::Demo);
+        let placed: Vec<Handle> = demo.placed_handles().into_iter().map(|(_, h)| h).collect();
+        let names = demo.controls.placed_names();
+        assert_eq!(names.len(), 64, "the panel's leaf count");
+        for (name, handle) in names {
+            assert!(placed.contains(&handle), "the {name} is in placed_handles");
+            assert!(
+                demo.page_members
+                    .iter()
+                    .any(|member| member.handle == handle && member.page == Page::Demo),
+                "the {name} has a Page::Demo row"
+            );
+            assert!(
+                demo.page_members
+                    .iter()
+                    .filter(|member| member.handle == handle)
+                    .all(|member| !member.focusable),
+                "the {name} is not focusable"
+            );
+        }
+    }
+
+    #[test]
+    fn the_panel_paints_nothing_while_closed() {
+        let mut demo = laid_out_on(Page::Demo);
+        // A construction with no opener tapped: the panel is closed.
+        assert_eq!(demo.open_panel.get(), None, "the panel opens closed");
+        demo.frame(WINDOW, Duration::from_millis(16));
+        let handles: Vec<Handle> = std::iter::once(demo.controls_list.handle())
+            .chain(demo.controls.leaves().iter().copied())
+            .collect();
+        for handle in handles {
+            assert!(
+                demo.commands_at(handle).is_empty(),
+                "a closed Controls panel records nothing"
+            );
+        }
+        // Open it through the dock's car button, and it draws.
+        tap_dock(&mut demo, 0);
+        demo.frame(WINDOW, Duration::from_millis(16));
+        assert!(
+            !demo.commands_at(demo.controls_list.handle()).is_empty(),
+            "the open panel draws its list"
         );
     }
 

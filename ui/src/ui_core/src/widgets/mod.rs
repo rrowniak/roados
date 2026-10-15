@@ -186,6 +186,7 @@ pub mod list;
 pub mod progress;
 pub mod rotator;
 pub mod scroll;
+pub mod segmented;
 pub mod slider;
 pub mod text_input;
 pub mod toast;

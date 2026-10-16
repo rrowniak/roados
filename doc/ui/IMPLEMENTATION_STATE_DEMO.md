@@ -11,18 +11,17 @@ task file wins.
 
 ## Current position
 
-**In flight: `TASK_UI_DEMO_06`** (the Controls panel) — implemented, suite green,
-**awaiting review and the operator's commit**. Its file is still in `doc/ui/`.
-It was built after `TASK_UI_PRIM_47`'s `Segmented` was added to `ui_core`
-(`ui/src/ui_core/src/widgets/segmented.rs`) — the hard prerequisite the task
-names — but **47 is not otherwise built**: `ModeScope`, `Snapshot`, the climate
-strip and its `DEMO_APPLICATION.md` closure are not there, so 47's file is not
-closed either. **DEMO-05 was skipped** by operator direction; it remains
-`doc/ui/TASK_UI_DEMO_05.md`.
+**Nothing in flight.** `TASK_UI_DEMO_06` (the Controls panel) landed 2026-10-15:
+`doc/ui/done/TASK_UI_DEMO_06.md` is its record. It added `Segmented`
+(`ui/src/ui_core/src/widgets/segmented.rs`) — `TASK_UI_PRIM_47`'s one built
+part — and `ui/src/ui_demo/src/controls.rs`. **PRIM-47 is not closed**:
+`ModeScope`, `Snapshot`, the climate strip and its `DEMO_APPLICATION.md`
+closure are not there, so 47's file stays in `doc/ui/`.
 
-**Next: DEMO-05**, or the operator's call. PRIM-43/45/46/48/49/50/51/52 and 47's
-rest are `doc/ui/TASK_UI_PRIM_*.md`; `PRIM-42` never landed despite its file
-sitting in `doc/ui/done/` (no `nav.rs` in the tree).
+**Next: DEMO-05** (`doc/ui/TASK_UI_DEMO_05.md`, skipped when 06 was built), or
+the operator's call. `ui/src/ui_demo/src/main.rs`'s `mod` list already carries
+`controls`; the library queue is `doc/ui/TASK_UI_PRIM_43,45..52.md` **and 47's
+rest**. `PRIM-42` never landed despite its file in `doc/ui/done/` (no `nav.rs`).
 
 ## Left over
 

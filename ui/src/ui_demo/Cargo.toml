@@ -16,7 +16,7 @@ ui_core = { path = "../ui_core" }
 # mirror to keep in step with it. Cargo unions features across the graph, so a
 # divergence in either direction is silent: dropping a feature here that
 # `ui_core` still declares changes nothing, and adding one changes the build
-# without saying so. `doc/ui/CROSSBUILD.md` §5.4 has the reasoning.
+# without saying so. `doc/ui/CROSSBUILD.md` §4 has the reasoning.
 sdl3 = { version = "0.20", features = [
     "build-from-source",
     "build-from-source-static",

@@ -38,7 +38,7 @@ binary rather than through an rpath, which is unreachable from a manifest;
 `build-from-source-unix-console` suppresses a `FATAL_ERROR` at
 `cmake/macros.cmake:415` that SDL raises when neither X11 nor Wayland is
 available, which is exactly the aarch64 configuration — see `CROSSBUILD.md`
-§5.4, which `AGENTS.md` § Rust also cites.
+§4, which `AGENTS.md` § Rust also cites.
 
 - `sdl3` with `build-from-source` builds SDL3 from vendored source via `sdl3-sys` (cmake crate). No system SDL3 package needed.
 - `sdl3` with `image` pulls in `sdl3-image-sys`, which builds **SDL_image 3.4.6** from vendored C source and statically links it. Justified in *SDL_image* below; the operator approved it 2026-09-30.
@@ -78,7 +78,7 @@ available, which is exactly the aarch64 configuration — see `CROSSBUILD.md`
     generated header carries `SDL_FILESYSTEM_UNIX 1`
     (`SDL/CMakeLists.txt:2112`). It is a few kilobytes of `open`/`stat`
     plumbing, and it is what `SDL_GetPrefPath` and friends need.
-    `CROSSBUILD.md` §5.2 has the mechanism.
+    `CROSSBUILD.md` §4 has the mechanism.
   - **render, gpu, dialog, tray, power** — compiled, and unused. `render` is
     unused because `ui_core` draws through its own GLES pipeline and never
     reaches `sdl3::render`; the others have no requirement behind them yet.
@@ -91,7 +91,7 @@ available, which is exactly the aarch64 configuration — see `CROSSBUILD.md`
   is not a reason to narrow what the product can do. Should that change, note
   that naming a subsystem switch means naming a feature on `sdl3-sys`, which
   `sdl3` does not re-export — so it takes a second direct dependency, and
-  `CROSSBUILD.md` §5 sets out that channel against the alternative of forcing
+  `CROSSBUILD.md` §4 sets out that channel against the alternative of forcing
   the options from a toolchain file, with their costs.
 
 ### SDL_image
@@ -128,7 +128,7 @@ GPU and GIF/APNG are out of scope in task 16.
 compiled from vendored sources by `cc`/`cmake` and statically linked. **No system
 library, and therefore no sysroot for the aarch64 cross build** — which is the
 property that decided it, given the sysroot question is still open
-(`CROSSBUILD.md` §8 item 1).
+(`CROSSBUILD.md` §7).
 
 **Cost if it had to be replaced.** The only thing this project would have to
 redo is one `load` call: the decoder hands back pixels, and everything

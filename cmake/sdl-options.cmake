@@ -4,7 +4,7 @@
 # `CMAKE_SYSTEM_NAME` and no `-march`, which is exactly why it can be read by a
 # native x86_64 build and by the aarch64 cross build alike. The options that
 # differ per target live in `cmake/aarch64-toolchain.cmake`, which includes
-# this file; see doc/ui/CROSSBUILD.md §4.1 and §5.4 for how each target reaches
+# this file; see doc/ui/CROSSBUILD.md §3 and §4 for how each target reaches
 # it.
 #
 # **Why this file exists at all.** None of the three options below is reachable
@@ -31,7 +31,7 @@
 # `SDL_VIDEO_VULKAN 1` and returns.
 #
 # **SDL_OPENGL.** Desktop OpenGL, reached through GLX. This project uses OpenGL
-# ES 3.1 through EGL (`PRIMITIVES.md` § *Backend*, `CROSSBUILD.md` §2.4).
+# ES 3.1 through EGL (`PRIMITIVES.md` § *Backend*, `CROSSBUILD.md` §1).
 #
 # *Why this cannot affect the GLES path* -- and the argument has to be at the C
 # level, not the CMake level, because that is where the risk is. Three facts:
@@ -61,7 +61,7 @@
 # because `FindOpenGLHeaders()` could not compile `<GL/gl.h>` on this host, i.e.
 # `libgl-dev` is not installed. Install that package and a native build silently
 # grows GLX code that nothing uses and no test notices -- a successful build of a
-# different artefact, which is the failure mode `CROSSBUILD.md` §6.7 records for a
+# different artefact, which is the failure mode `CROSSBUILD.md` §4 records for a
 # missing `pkg-config`.
 #
 # **SDL_TEST_LIBRARY.** SDL builds a static `SDL3_test` library by default

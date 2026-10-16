@@ -49,7 +49,20 @@
 #       provider) and `git`'s user config survive between runs. It is a
 #       *separate* directory from the host's `~/.local/share/opencode` on
 #       purpose: that one is a 7 GB SQLite database, and two opencode processes
-#       writing it concurrently is a way to lose a session.
+#       writing it concurrently is a way to lose a session. Skills are
+#       deliberately **not** in here — see the skill mounts below.
+#
+#   $HOME/.agents/skills → /home/dev/.agents/skills, read-only
+#   $HOME/.config/opencode/skills → /home/dev/.config/opencode/skills, read-only
+#   $HOME/.claude/skills → /home/dev/.claude/skills, read-only
+#       Opencode's global skill paths (`https://opencode.ai/docs/skills/`
+#       § *Place files*, *Understand discovery*). The isolated `HOME` above
+#       hides the host's `grill-me` (`~/.agents/skills`) and `ponytail`
+#       (`~/.config/opencode/skills`), so they are re-exposed one directory at
+#       a time, read-only. Skills subdirectories only, never the whole config:
+#       a volume over `/home/dev/.config/opencode` would hide this `HOME`'s own
+#       `opencode.jsonc`. Each mount is added only if the host directory
+#       exists — a `--volume` naming a missing source creates it as root.
 #
 #   /tmp/.X11-unix, read-only
 #       The X11 socket. `ui_demo` opens a real window and has no headless path:
@@ -131,6 +144,19 @@ if [ -t 0 ] && [ -t 1 ]; then
   tty=(-it)
 fi
 
+# Global skill paths (see the header). Conditional: a `--volume` with a missing
+# source creates a root-owned directory on the host.
+skills=()
+if [ -d "$HOME/.agents/skills" ]; then
+  skills+=(--volume "$HOME/.agents/skills:/home/dev/.agents/skills:ro")
+fi
+if [ -d "$HOME/.config/opencode/skills" ]; then
+  skills+=(--volume "$HOME/.config/opencode/skills:/home/dev/.config/opencode/skills:ro")
+fi
+if [ -d "$HOME/.claude/skills" ]; then
+  skills+=(--volume "$HOME/.claude/skills:/home/dev/.claude/skills:ro")
+fi
+
 exec docker run --rm ${tty[@]+"${tty[@]}"} \
   --user "$uid_:$gid_" \
   --group-add "$video_gid" \
@@ -148,6 +174,7 @@ exec docker run --rm ${tty[@]+"${tty[@]}"} \
   --volume "$cache/cargo:/home/dev/.cargo" \
   --volume "$cache/target:/workspace/ui/target" \
   --volume "$cache/home:/home/dev" \
+  ${skills[@]+"${skills[@]}"} \
   --volume /tmp/.X11-unix:/tmp/.X11-unix:ro \
   --volume "/run/user/$uid_:/run/user/$uid_:ro" \
   --device /dev/dri \

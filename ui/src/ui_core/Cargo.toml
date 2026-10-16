@@ -43,7 +43,7 @@
 # 2026-09-30; FreeType alone renders Latin text. Revisit when a complex-script
 # or bidi requirement lands.
 #
-# Sources: `doc/ui/CROSSBUILD.md` §5.1 and §5.4.
+# Sources: `doc/ui/CROSSBUILD.md` §4.
 [package]
 name = "ui_core"
 version = "0.1.0"

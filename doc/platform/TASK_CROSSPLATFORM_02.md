@@ -24,8 +24,8 @@ The option is on; the backend test failed. Do not misread it.
 
 ## Requirements
 
-1. **Do not add a forcing rule for `SDL_KMSDRM` yet.** The real cross build of
-   `CROSSBUILD.md` §6.4.2 settles this, and it goes against the obvious fix:
+1. **Do not add a forcing rule for `SDL_KMSDRM` yet.** The `CROSSBUILD.md` §4
+   trap settles this, and it goes against the obvious fix:
 
    ```
    SDL_KMSDRM:BOOL=ON                          # in the cache, no forcing
@@ -38,11 +38,12 @@ The option is on; the backend test failed. Do not misread it.
    target `pkg-config` and target `libdrm`/`gbm`. A forcing rule would change
    nothing observable and would add a channel the option does not need — and it
    would be the kind of change that looks like progress while fixing nothing.
-   **Verify this still holds after the sysroot lands**, then implement the
+   **Verify this still holds after the sysroot lands** (re-run the §2 cross
+   configure), then implement the
    sysroot, and only then consider whether any forcing is wanted at all.
 
 2. **Make the backend test pass**, which means a target `pkg-config` that
-   resolves `libdrm` and `gbm` — that is task 01. Re-run the §6.4.2 procedure and
+   resolves `libdrm` and `gbm` — that is task 01. Re-run the §2 cross configure and
    require `SDL_VIDEO_DRIVER_KMSDRM` to become a `#define` and `kmsdrm` to appear
    in the `Video drivers:` line.
 
@@ -52,7 +53,7 @@ The option is on; the backend test failed. Do not misread it.
    test* failed. An agent that reads this as "the option is off" will reach for a
    forcing rule and find that it changes nothing.
 
-4. **Verify the generated header**, not just the summary line. §6.4.2 is the
+4. **Verify the generated header**, not just the summary line. §4 is the
    model: the cache and `SDL_build_config.h` disagreed, and only the header is
    what the compiled library obeys.
 
@@ -75,11 +76,11 @@ The option is on; the backend test failed. Do not misread it.
 - [ ] `SDL_VIDEO_DRIVER_KMSDRM` is `#define` in the target's
       `SDL_build_config.h`.
 - [ ] `kmsdrm` appears in the target configure's `Video drivers:` line.
-- [ ] A record of whether any forcing rule was added and why — with the §6.4.2
+- [ ] A record of whether any forcing rule was added and why — with the §4
       finding quoted, so the next agent does not re-derive it.
 - [ ] Every remaining `(Wanted: ON): OFF` line is accounted for, each with its
       real cause.
-- [ ] `CROSSBUILD.md` §5.4 and §8 no longer describe the driver half of the
+- [ ] `CROSSBUILD.md` §4 and §7 no longer describe the driver half of the
       policy as unimplemented, and no longer imply it was ever verified.
 - [ ] If the backend test still fails, that is reported as a hard blocker with
       the evidence — not waived, and not worked around.
@@ -88,5 +89,6 @@ The option is on; the backend test failed. Do not misread it.
 
 - The sysroot itself — task 01.
 - Which runtime libraries the image ships — task 03.
-- Anything about the aarch64 CPU flags; `-march=armv8-a` is set already and the
-  head unit SoC is not yet decided.
+- Anything about the aarch64 CPU flags; `-march=armv8-a` is set already. The
+  head unit SoC has since been decided (BCM2711, 2026-10-16), so its tuning is
+  now answerable — but it still belongs outside this task.

@@ -142,7 +142,7 @@ if(ROADOS_SYSROOT AND NOT ROADOS_SYSROOT STREQUAL "")
   # "x86_64-linux-gnu" (the stand-in compiler's own) in the project body. The real
   # value therefore comes from a real aarch64-linux-gnu-gcc, which is the correct
   # one. This line only decides the script-mode (-P) case, where project() never
-  # runs. doc/ui/CROSSBUILD.md section 8, item 1 has the measurement.
+  # runs. doc/ui/CROSSBUILD.md section 3 has the measurement.
   if(NOT CMAKE_LIBRARY_ARCHITECTURE)
     set(CMAKE_LIBRARY_ARCHITECTURE "${ROADOS_TARGET_TRIPLE}")
   endif()
@@ -221,7 +221,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE "ONLY")
 # is all that is needed -- but note that with ROADOS_SYSROOT unset, a host
 # pkg-config would find the HOST's libdrm and record its path. That is a real
 # leak, and it is why a sysroot is not optional for this target. See
-# doc/ui/CROSSBUILD.md sections 2.2 and 6.7.
+# doc/ui/CROSSBUILD.md sections 1 and 4.
 
 if(NOT PKG_CONFIG_EXECUTABLE)
   if(DEFINED ENV{PKG_CONFIG} AND NOT "$ENV{PKG_CONFIG}" STREQUAL "")
@@ -251,7 +251,7 @@ endif()
 # If you are reading this and thinking "this should be symmetric" -- it should
 # not. Adding SDL_X11=ON here, or removing the two OFF lines below, does not make
 # the targets agree; it makes the demo stop opening a window on the dev host.
-# The asymmetry is the design. doc/ui/CROSSBUILD.md section 5.4 has the
+# The asymmetry is the design. doc/ui/CROSSBUILD.md section 4 has the
 # reasoning and the measurements.
 #
 # Turning X11 off for the target is also what makes the X11 development packages

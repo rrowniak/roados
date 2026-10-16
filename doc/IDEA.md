@@ -135,8 +135,11 @@ proprietary driver. The survivors — Mali, Broadcom VideoCore, Intel, AMD,
 Adreno and PowerVR — all reach OpenGL ES 3.1 or better with open drivers and
 no NDA.
 
-The target device is not yet chosen, so the application layer is kept free
-of target-specific dependencies and the target-specific parts sit behind
+The bench unit is decided (see `doc/platform/TARGET_PLATFORM.md`): a CM4
+wireless on a CM4IO carrier with a 15.6" HDMI + USB-HID touch panel. The
+car unit is not — it gets an industrial panel and a custom carrier behind
+the same interfaces. So the application layer is kept free of
+target-specific dependencies and the target-specific parts sit behind
 documented interfaces. The platform is a dependency, not a product: what is
 published is a set of services and a user interface against documented
 interfaces, not a distribution.

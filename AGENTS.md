@@ -14,8 +14,8 @@ The Rust workspace is `ui/`: the `ui_core` library, the `ui_demo` binary, and
 `ui/Cargo.lock`, which is committed because the workspace ships a binary.
 Build output is `/ui/target/` and is ignored.
 
-Before changing a manifest, read `doc/ui/CROSSBUILD.md` §5.4 for the SDL
-features and the video-driver split and §5.5 for the options that no cargo feature
+Before changing a manifest, read `doc/ui/CROSSBUILD.md` §4 for the SDL
+features, the video-driver split, and the options that no cargo feature
 can reach. Dependency **versions** are in `doc/ui/PRIMITIVES_ARCHITECTURE.md`
 § *Dependencies*, and only there — **and that section's feature list is
 authoritative as of 2026-10-05**: it was reconciled against both manifests, so
@@ -104,8 +104,8 @@ Before performing non-trivial work, inspect:
 - `.ai/workflows/` — engineering workflows
 - `doc/findings/` — research already done; check it before re-researching
 - `doc/platform/` — the target-platform and cross-compilation sequence,
-  `TASK_CROSSPLATFORM_01..04.md`, **deferred until the target platform is
-  decided**; its `IMPLEMENTATION_STATE.md` says so and is the place to resume it
+  `TASK_CROSSPLATFORM_01..04.md`, **ungated since the target platform was
+  decided 2026-10-16**; its `IMPLEMENTATION_STATE.md` is the place to resume it
 
 The `.ai/` directory is part of the project's engineering infrastructure.
 Do not modify its contents unless the task explicitly concerns the AI

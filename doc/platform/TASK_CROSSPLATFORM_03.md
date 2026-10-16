@@ -68,7 +68,7 @@ will do so on the head unit rather than on the build machine.
 
 5. **Record the static-linking alternative and its cost.** `SDL_DEPS_SHARED=OFF`
    would remove this whole obligation and make a sysroot mandatory instead, per
-   `CROSSBUILD.md` §4.3. Write down the trade rather than leaving it folklore.
+   `CROSSBUILD.md` §3. Write down the trade rather than leaving it folklore.
 
 6. **Fix the "no host isolation" warning if it still misleads.** The toolchain
    file states that `CMAKE_FIND_ROOT_PATH_MODE_*` are not a host-isolation

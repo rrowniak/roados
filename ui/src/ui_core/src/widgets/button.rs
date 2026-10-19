@@ -16,6 +16,19 @@
 //! a caller can see where a transition is going and the widget can start one
 //! without the caller repeating the resolution.
 //!
+//! A button also has a **selected** appearance, apart from the states above:
+//! [`Button::selected`] is a flag the caller writes — not a state, and not
+//! [`Button::activatable`] or [`Button::focused`] — and it chooses which of two
+//! [`Palette`]s the button's colours are derived from. The first is
+//! [`Button::palette`] and the second [`Button::selected_palette`], which
+//! defaults to the first, so a button nobody selects draws exactly what it drew
+//! before `selected` existed. It reaches the screen in two places:
+//! [`Button::style`] derives the background and the label from the palette
+//! `selected` chooses, and [`Button::paint_faded`] draws the focus ring in that
+//! palette's ring colour. Selecting a button does not move its appearance on its
+//! own — the caller aims it with [`Button::animate_to_state`] or
+//! [`Button::snap_to_state`], the way every other appearance change is carried.
+//!
 //! The button owns the clock its transitions run on, the way [`Theme`] owns the
 //! one its token transitions run on. An owned clock is what makes a state change
 //! *replace* the transition before it: [`AnimationClock::clear`] is whole-clock,
@@ -390,11 +403,37 @@ pub struct Button {
     /// [`Button::focus_ring`]**, which is the ring's *width* in pixels and shares
     /// no question with this one.
     pub activatable: Property<bool>,
+    /// Whether the button is drawn in its
+    /// [`selected_palette`](Button::selected_palette) rather than its
+    /// [`palette`](Button::palette). **Defaults to `false`.**
+    ///
+    /// **Its own question, and not a mode of [`Button::activatable`] or
+    /// [`Button::focused`].** `activatable` asks whether an interaction may fire
+    /// the click and `focused` whether the button holds focus and wears the ring;
+    /// `selected` asks which of two palettes the appearance is derived from, and
+    /// a tab is selected whatever it is focused, hovered or pressed. A caller
+    /// writes it — [`TabBar`](crate::widgets::tab_bar::TabBar) is the one in this
+    /// tree — and the appearance moves only when the caller aims the button.
+    ///
+    /// **`false` by default**, so a button nobody selects draws exactly what it
+    /// drew before this field existed: [`palette`](Button::palette) is the base,
+    /// and [`selected_palette`](Button::selected_palette) is a second palette
+    /// waiting to be chosen.
+    ///
+    /// **Two screen paths**, and they are the whole of it: [`Button::style`]
+    /// derives the background and the label from the base palette `selected`
+    /// chooses, and [`Button::paint_faded`] draws the ring in that palette's ring
+    /// colour — the one part of the appearance that is not an animated property.
+    pub selected: Property<bool>,
     /// The scale the button is drawn at, animated on press.
     pub scale: Property<f32>,
     /// The opacity the button is drawn at, animated for the disabled state.
     pub opacity: Property<f32>,
     palette: Palette,
+    /// The palette drawn while [`selected`](Button::selected) is set. It starts
+    /// equal to `palette`, so `selected` is invisible until a caller gives the
+    /// two apart.
+    selected_palette: Palette,
     clock: RefCell<AnimationClock>,
     node: Handle,
 }
@@ -431,9 +470,12 @@ impl Button {
             // `true`, and the field's doc is the argument: every existing caller
             // writes only `focused` and must keep both behaviours.
             activatable: Property::new(true),
+            // `false`, so the second palette is a choice rather than a default.
+            selected: Property::new(false),
             scale: Property::new(1.0),
             opacity: Property::new(1.0),
             palette,
+            selected_palette: Palette::default(),
             clock: RefCell::new(AnimationClock::new()),
             node,
         }
@@ -461,6 +503,36 @@ impl Button {
     /// leave the button chasing a palette that is still moving.
     pub fn set_palette(&mut self, palette: Palette) {
         self.palette = palette;
+    }
+
+    /// Returns the palette the button is drawn in while it is
+    /// [`selected`](Button::selected).
+    #[must_use]
+    pub fn selected_palette(&self) -> Palette {
+        self.selected_palette
+    }
+
+    /// Sets the palette the button is drawn in while it is selected, and leaves
+    /// the button's current appearance where it is.
+    ///
+    /// The appearance moves when the caller says so, by aiming the button, for
+    /// the reason [`Button::set_palette`] gives.
+    pub fn set_selected_palette(&mut self, palette: Palette) {
+        self.selected_palette = palette;
+    }
+
+    /// Returns the palette [`selected`](Button::selected) chooses: the selected
+    /// palette when it is set, the plain [`palette`](Button::palette) otherwise.
+    ///
+    /// It is the one place the choice is made, and [`Button::style`] and
+    /// [`Button::paint_faded`] both call it, so the fill and the ring cannot
+    /// disagree about which palette is in force.
+    fn base_palette(&self) -> Palette {
+        if self.selected.get() {
+            self.selected_palette
+        } else {
+            self.palette
+        }
     }
 
     /// Returns the button's primary state, in the order one overrides another:
@@ -526,9 +598,10 @@ impl Button {
     /// ```
     #[must_use]
     pub fn style(&self) -> Style {
+        let base = self.base_palette();
         let mut style = Style {
-            background: self.palette.background,
-            foreground: self.palette.foreground,
+            background: base.background,
+            foreground: base.foreground,
             scale: 1.0,
             opacity: 1.0,
             ring_width: 0.0,
@@ -883,6 +956,13 @@ impl Button {
     /// button at half strength" wants the product; a caller that means "ignore the
     /// button's own opacity" wants [`Button::paint`].
     ///
+    /// **The focus ring comes from the palette [`selected`](Button::selected)
+    /// chooses, not from [`palette`](Button::palette) directly.** The ring is the
+    /// one colour the button draws straight from its palette rather than from an
+    /// animated property, so a selected button's ring is its selected palette's
+    /// ring even before the fill has been aimed — which is why `selected` reaches
+    /// the screen through two paths and not one.
+    ///
     /// **It exists because [`Button::opacity`] is documented as the *disabled*
     /// state's opacity, and a button inside something that is itself fading is a
     /// second, unrelated reason for it to be drawn translucent.**
@@ -957,7 +1037,7 @@ impl Button {
             painter.rounded_rect(
                 grow(background, ring),
                 radius + ring,
-                with_opacity(self.palette.ring, opacity),
+                with_opacity(self.base_palette().ring, opacity),
             );
         }
         painter.rounded_rect(
@@ -2561,5 +2641,163 @@ mod tests {
              control: a ring that ignored the multiplier would pass the half \
              assertion and fail this one"
         );
+    }
+
+    /// A second palette, unlike both themes and the neutral default, so a test
+    /// can tell which one a button drew.
+    fn other_palette() -> Palette {
+        Palette {
+            background: Color::new(9, 18, 27, 255),
+            foreground: Color::new(200, 100, 50, 255),
+            ring: Color::new(3, 6, 9, 255),
+        }
+    }
+
+    #[test]
+    fn a_button_nobody_selected_draws_exactly_what_it_drew_before_selected_existed() {
+        // The new field is not allowed to change the appearance of a button
+        // nobody selected. The selected palette is deliberately unlike the base,
+        // so a body that read it regardless of the flag would fail here.
+        let (_nodes, mut button) = button();
+        let rect = Rect::new(10.0, 20.0, 100.0, 44.0);
+        let before = button.paint(rect, &mono, LINE);
+        button.set_selected_palette(other_palette());
+        button.snap_to_state();
+        assert_eq!(
+            button.paint(rect, &mono, LINE),
+            before,
+            "an unselected button draws its plain palette, command for command"
+        );
+        assert_eq!(button.style().background, button.palette().background);
+    }
+
+    #[test]
+    fn the_second_palette_defaults_to_the_unselected_one() {
+        let mut nodes = Arena::new();
+        let button = Button::new(&mut nodes, "Ok");
+        assert_eq!(
+            button.selected_palette(),
+            button.palette(),
+            "a fresh button has one palette, and it is both"
+        );
+        assert_eq!(button.selected_palette(), Palette::default());
+    }
+
+    #[test]
+    fn a_selected_button_draws_its_selected_palette_and_an_unselected_one_draws_its_own() {
+        let (_nodes, mut button) = button();
+        let plain = button.palette();
+        let chosen = other_palette();
+        button.set_selected_palette(chosen);
+        let rect = Rect::new(0.0, 0.0, 100.0, 44.0);
+
+        button.snap_to_state();
+        let unselected = rounded(&button.paint(rect, &mono, LINE));
+        assert_eq!(unselected[0].2, plain.background, "the plain background");
+
+        button.selected.set(true);
+        button.snap_to_state();
+        let selected = rounded(&button.paint(rect, &mono, LINE));
+        assert_eq!(selected[0].2, chosen.background, "and the selected one");
+        assert_ne!(selected[0].2, unselected[0].2);
+    }
+
+    #[test]
+    fn selecting_a_button_changes_nothing_it_paints_until_it_is_aimed() {
+        let (_nodes, mut button) = button();
+        button.set_selected_palette(other_palette());
+        button.snap_to_state();
+        let rect = Rect::new(0.0, 0.0, 100.0, 44.0);
+        let before = button.paint(rect, &mono, LINE);
+
+        button.selected.set(true);
+        assert_eq!(
+            button.paint(rect, &mono, LINE),
+            before,
+            "a flag alone does not move the animated colours"
+        );
+
+        button.snap_to_state();
+        assert_ne!(
+            button.paint(rect, &mono, LINE),
+            before,
+            "and aiming it does"
+        );
+    }
+
+    #[test]
+    fn a_selected_button_ring_colour_comes_from_the_selected_palette() {
+        let (_nodes, mut button) = button();
+        let chosen = other_palette();
+        button.set_selected_palette(chosen);
+        button.focused.set(true);
+        button.selected.set(true);
+        button.snap_to_state();
+
+        let shapes = rounded(&button.paint(Rect::new(0.0, 0.0, 44.0, 44.0), &mono, LINE));
+        assert_eq!(shapes.len(), 2, "the ring and the background");
+        assert_eq!(
+            shapes[0].2, chosen.ring,
+            "the ring is the selected palette's, not the plain one's"
+        );
+    }
+
+    #[test]
+    fn a_selected_button_still_activates_and_still_draws_its_ring() {
+        let (_nodes, mut button) = button();
+        let clicks = counter(&mut button);
+        button.selected.set(true);
+        button.focused.set(true);
+
+        let mut event = key_down(Key::Keyboard(sdl3::keyboard::Keycode::Return));
+        assert!(
+            button.on_event(&mut event),
+            "a selected button answers Enter"
+        );
+        assert_eq!(clicks.get(), 1);
+
+        let shapes = rounded(&button.paint(Rect::new(0.0, 0.0, 44.0, 44.0), &mono, LINE));
+        assert_eq!(shapes.len(), 2, "and still wears its ring");
+    }
+
+    #[test]
+    fn may_activate_is_selected_independent_in_all_four_cases() {
+        // `selected` chooses a palette and must not leak into the "does not act"
+        // rule, which is `disabled` and `activatable` together.
+        for selected in [false, true] {
+            for disabled in [false, true] {
+                let (_nodes, button) = button();
+                button.selected.set(selected);
+                button.disabled.set(disabled);
+                assert_eq!(
+                    button.may_activate(),
+                    !disabled,
+                    "selected {selected}, disabled {disabled}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selected_is_not_a_button_state_and_the_primary_state_still_describes_the_background() {
+        let (_nodes, mut button) = button();
+        let plain = button.palette();
+        let chosen = other_palette();
+        button.set_selected_palette(chosen);
+
+        button.selected.set(true);
+        assert_eq!(
+            button.state(),
+            ButtonState::Default,
+            "selected is not one of the five states"
+        );
+        assert_eq!(
+            button.style().background,
+            chosen.background,
+            "and it is the palette the background is derived from"
+        );
+        button.selected.set(false);
+        assert_eq!(button.state(), ButtonState::Default);
+        assert_eq!(button.style().background, plain.background);
     }
 }

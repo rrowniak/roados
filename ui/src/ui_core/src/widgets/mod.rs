@@ -188,6 +188,7 @@ pub mod rotator;
 pub mod scroll;
 pub mod segmented;
 pub mod slider;
+pub mod tab_bar;
 pub mod text_input;
 pub mod toast;
 pub mod toggle;

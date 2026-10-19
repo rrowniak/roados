@@ -525,6 +525,7 @@ ui/
          list.rs
          scroll.rs
          segmented.rs           — the segmented control (added 2026-10-15 for DEMO-06: `Choice`/`set_choices`, no theme token)
+         tab_bar.rs             — the row of tabs and the selected one
          text_input.rs
         keyboard.rs
         image.rs

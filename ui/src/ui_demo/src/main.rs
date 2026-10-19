@@ -94,24 +94,19 @@
 //! kept their meaning within a page, and the frame-rate readout and the
 //! text-entry band both came back down to the bottom of the window to pay for it.
 //!
-//! **The bar is six buttons in a row, and it is on every page.** `Demo::tab_bar`
-//! is a [`Container`] in [`LayoutMode::row`] with the theme's `Surface` behind it
-//! and [`TAB_BAR_PADDING`] around it; its children are one [`Button`] per page in
-//! [`Page::ALL`] order, each labelled with [`Page::name`] and each
-//! [`TAB_BUTTON_TALL`] tall. It is the demo's **second** container with a
-//! background — the card of pads is the first, and the other four draw nothing.
+//! **The bar is a `ui_core` [`TabBar`], and it is on every page.** Its own
+//! [`Container`] carries the theme's `Surface` behind it and the core bar's
+//! padding around it; its children are the bar's [`Button`]s, one per page in
+//! [`Page::ALL`] order, labelled with [`Page::name`] and as tall as the core
+//! bar's `TAB_HEIGHT`. It is the demo's **second** container with a background —
+//! the card of pads is the first, and the other four draw nothing.
 //!
-//! **`Button` has no `selected` property and the demo supplies one.** The widget's
-//! properties are `label`, `background`, `foreground`, `border_radius`, `on_click`,
-//! `focus_ring`, `padding_h`, `padding_v`, `font_size`, `hovered`, `pressed`,
-//! `disabled`, `focused`, `activatable`, `scale` and `opacity`; there is no
-//! `selected` among them, and a reader looking for one in
-//! `ui_core::widgets::button` will not find it. **The selected appearance is the
-//! demo's own**: `tab_palette` gives the button for the page on show the
-//! theme's active pair and every other button the rest pair, and
-//! [`Demo::aim_tab_buttons`] carries the two that changed there over
-//! [`tab_motion`]. Read the struct rather than looking for a property that is not
-//! there.
+//! **The selection is the core's, and the demo only themes it.** `Button` carries
+//! `selected` and `selected_palette`, and the bar writes both through
+//! [`TabBar::select`]; the demo gives the bar the theme's two tab pairs with
+//! `set_palette`/`set_selected_palette` and lets [`TabBar::sync`] carry the two
+//! tabs a switch moved between over [`tab_motion`]. Read the widget rather than
+//! looking for a demo-local `Tab` row; there is none.
 //!
 //! **The bar's nodes are in no page's list, and that is what 24.1 settled.** A
 //! [`PageMember`] carries one page per row and cannot express "all six", so a
@@ -265,6 +260,7 @@ use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapM
 use ui_core::widgets::progress::{Palette as ProgressPalette, Progress};
 use ui_core::widgets::rotator::Rotator;
 use ui_core::widgets::slider::{Orientation, Palette as SliderPalette, Slider};
+use ui_core::widgets::tab_bar::{TabBar, TabId};
 use ui_core::widgets::text_input::{Palette as TextInputPalette, TextInput};
 use ui_core::widgets::toast::{Palette as ToastPalette, Severity, Toasts};
 use ui_core::widgets::toggle::{Palette as TogglePalette, Toggle};
@@ -342,41 +338,19 @@ const TAB_BAR_HEIGHT: f32 = 64.0;
 /// box and the bar sits at `y 0`. One number, therefore, is what makes
 /// requirement 2's "44 tall at y 10" true of the code rather than of a comment.
 ///
-/// [`TAB_BUTTON_TALL`] plus this on the top and the bottom is exactly
-/// [`TAB_BAR_HEIGHT`], and `the_bar_is_exactly_as_tall_as_its_padding_and_its_
-/// buttons` asserts the equality rather than leaving it to arithmetic in prose.
-const TAB_BAR_PADDING: f32 = 10.0;
-
-/// How tall one tab button is drawn, and the project's own touch-target floor.
+/// The core bar's `TAB_HEIGHT` plus its padding on the top and the bottom is
+/// exactly [`TAB_BAR_HEIGHT`], and
+/// `the_bar_is_exactly_as_tall_as_its_padding_and_its_buttons` asserts the
+/// equality rather than leaving it to arithmetic in prose.
 ///
-/// **44, and it is the same 44 three other places already name**: the keyboard's
-/// [`KEY_HEIGHT`], the parent's requirement 2, and `Button`'s own
-/// `MIN_TOUCH_TARGET`, which is private and which this equals by arriving at the
-/// same number rather than by reading it. The widget *enforces* the floor on its
-/// own node through [`Button::size`]; this constant is the demo asking for that
-/// height outright, and `every_tab_button_is_at_least_the_touch_target_floor_tall`
-/// is asserted **over the laid-out rects** rather than read off the number here,
-/// because a constant compared with itself is a sentence.
-const TAB_BUTTON_TALL: f32 = 44.0;
-
-/// The gap between two tab buttons on the bar's main axis.
-///
-/// **The theme's `SpacingSm`, copied rather than read**, for the reason
-/// `Button`'s own `THEME_SPACING_SM` is copied: the widget has no theme to read a
-/// spacing from, and `Button`'s test
-/// `the_default_padding_and_radius_are_the_theme_tokens_values` is what stops
-/// that copy drifting. Reading it per frame from the theme would be the
-/// alternative, and it would need to be told about a switch rather than following
-/// one.
-const TAB_BUTTON_GAP: f32 = 8.0;
-
 /// The font size a tab button's page name is drawn at.
 ///
 /// **The theme's `FontSizeLg` (18) rather than the widget's 14 default**, and the
 /// reason is the one the operator gave for the field and the keyboard: a name
 /// that has to be read at arm's length from a driver's seat is read at the size
 /// the rest of the demo's readouts are read at, and 14 pixels on a bar 64 tall is
-/// a caption. `TAB_BUTTON_TALL` is the floor and this is the choice inside it.
+/// a caption. The core bar's `TAB_HEIGHT` is the floor and this is the choice
+/// inside it.
 ///
 /// Not read from the theme, and that is deliberate: every font size the demo
 /// writes is its own constant — [`READOUT_FONT`], [`KEY_FONT`],
@@ -2192,9 +2166,9 @@ impl Page {
     ///
     /// **One list, and the order is load-bearing three times**: it is the order the
     /// `--help` text and the unknown-name message print the seven names in, it is the
-    /// order task 24.3's tab bar puts the seven buttons in, and **it is the order
-    /// [`Demo::tabs`] pairs the buttons with their pages in**, so a button and the
-    /// page it asks for cannot be a pair two lists disagree about.
+    /// order the demo gives the bar its labels in, and **`TabId`'s index is the row
+    /// of this list**, so a tab and the page it asks for cannot be a pair two lists
+    /// disagree about.
     ///
     /// **`Demo` is first**, before `Pads`. The order is load-bearing three times
     /// (`--help`, the unknown-name message, the tab bar's button order) and this
@@ -4342,17 +4316,15 @@ fn chrome_line_height(metrics: &TextMetrics) -> f32 {
     metrics.line_height(DOCK_FONT)
 }
 
-/// Returns the colours a tab button is drawn in: the theme's **active** pair when
-/// the button is the one for the page on show, and its **rest** pair when it is
-/// not.
+/// Returns the two palettes a tab bar is drawn with: the **rest** pair every tab
+/// starts on, and the **active** pair `Button::selected` switches the selected
+/// tab to.
 ///
-/// **This is the whole of the demo's selected appearance, and `Button` has no
-/// `selected` property to hold it.** The widget's public properties are `label`,
-/// `background`, `foreground`, `border_radius`, `on_click`, `focus_ring`,
-/// `padding_h`, `padding_v`, `font_size`, `hovered`, `pressed`, `disabled`,
-/// `focused`, `activatable`, `scale` and `opacity`; a reader who opens
-/// `ui_core::widgets::button` looking for a selected state will not find one, and
-/// this function is why there is nothing to find.
+/// **The pair is `(unselected, selected)`**, which is the order the bar takes
+/// them in: `set_palette` for the field all seven share and
+/// `set_selected_palette` for the one the selection moves to. The split is the
+/// widget's now — `Button` carries `selected` and `selected_palette` — and the
+/// demo's only decision is which theme colours go in each half.
 ///
 /// **The active pair is [`ButtonPalette::from_theme`] and the rest pair is
 /// written out, and both are the theme's own tokens** — `Primary` on `OnPrimary`
@@ -4380,19 +4352,17 @@ fn chrome_line_height(metrics: &TextMetrics) -> f32 {
 /// [`Button::animate_to_state`] aims at [`Button::style`], which is the palette
 /// resolved through the button's state flags — writing the two properties directly
 /// would put a value on the button that the next `animate_to_state` throws away.
-fn tab_palette(theme: &Theme, selected: bool) -> ButtonPalette {
-    if selected {
-        return ButtonPalette::from_theme(theme);
-    }
+fn tab_palettes(theme: &Theme) -> (ButtonPalette, ButtonPalette) {
     let token = |wanted: ThemeToken, fallback: Color| match theme.get(wanted) {
         PropertyValue::Color(color) => color,
         _ => fallback,
     };
-    ButtonPalette {
+    let unselected = ButtonPalette {
         background: token(ThemeToken::Border, Color::new(51, 51, 51, 255)),
         foreground: token(ThemeToken::Text, Color::new(255, 255, 255, 255)),
         ring: token(ThemeToken::Primary, Color::new(187, 134, 252, 255)),
-    }
+    };
+    (unselected, ButtonPalette::from_theme(theme))
 }
 
 /// Returns the advance a tab button's page name is measured with, at
@@ -4424,13 +4394,6 @@ fn tab_line_height(metrics: &TextMetrics) -> f32 {
 /// controls, which is what keeps this index the one it was on 2026-10-04.
 #[cfg(test)]
 const CONTROLS_LAYER: usize = 3;
-
-/// Where the tab bar sits in [`Demo::containers`].
-///
-/// **Last, and that is the load-bearing half** — see [`CONTROLS_LAYER`]'s doc and
-/// [`Demo::containers`]'s.
-#[cfg(test)]
-const TAB_BAR: usize = 5;
 
 /// A slider in the demo: the widget, and the dragging state the demo last wrote
 /// to it and last aimed it at.
@@ -5062,15 +5025,16 @@ struct Demo {
     ///
     /// **A node that is not in this list is on every page**, and that is not a
     /// gap: the root, the background, the controls layer, the frame-rate readout,
-    /// the toast host, **the tab bar and its six buttons** are the always-painted
-    /// set — `tests::always_painted_handles` is the written-out answer, and the
+    /// the toast host, **the tab bar and its seven buttons** are the
+    /// always-painted set — `tests::always_painted_handles` is the written-out
+    /// answer, and the
     /// test that uses it is what says the set is **complete** rather than merely
     /// plausible.
     ///
     /// **They are kept showing because no row exists that could hide them**, not
     /// because they draw nothing: three of them record nothing at all (the root,
     /// the layer and the toast host), the background records a filled rect every
-    /// frame, the readout its label, the bar its `Surface` and the six buttons
+    /// frame, the readout its label, the bar its `Surface` and the seven buttons
     /// their backgrounds and labels. An earlier version of this sentence said four
     /// of the five record no geometry of their own, which put the background in
     /// the same class as the root and made a node that paints every frame read as
@@ -5091,19 +5055,16 @@ struct Demo {
     /// [`Demo::order`]: a node that did not exist when the table was built is a
     /// node no gate can see.
     page_members: Vec<PageMember>,
-    /// The six tab buttons, in [`Page::ALL`] order, each paired with the page it
-    /// asks for.
+    /// The seven tabs, as one `ui_core` bar: the containers, buttons, selection,
+    /// motion and the callback a selection reports through.
     ///
-    /// **A [`Tab`] and not a `Vec<Button>`, and the pairing is the whole of it.**
-    /// Six buttons and six pages are two lists the moment they are held apart, and
-    /// `GALLERY_SHORTCUTS` is the reason this file knows what that costs. So the
-    /// page rides on the row, the same argument as [`PageMember`]'s own fields, and
-    /// every reader below — the paint arm, the focus order, the selection pair —
-    /// asks the row rather than indexing a parallel vector.
-    ///
-    /// **The buttons are on every page, so they are in no page's list**: see
-    /// [`Demo::page_members`] and `tests::always_painted_handles`.
-    tabs: Vec<Tab>,
+    /// **The bar owns the buttons and the pairing is its own**, so a page and its
+    /// tab cannot be two lists that drift: `TabId`'s index is the row of
+    /// [`Page::ALL`] the label came from, and `TabBar::select_name` is the only
+    /// way the demo moves the selection. The seven are on every page, so they are
+    /// in no page's list: see [`Demo::page_members`] and
+    /// `tests::always_painted_handles`.
+    bar: TabBar,
     /// The page a click asked for, waiting for the demo to act on it.
     ///
     /// **The third of the demo's two-hop properties**, after
@@ -5112,25 +5073,15 @@ struct Demo {
     /// lent, and a property is the only thing it can be given that reaches the demo.
     ///
     /// **`Property<Option<Page>>` and not a `bool`**, and that is the whole of the
-    /// choice: the six handlers are one closure over one property, and a `bool`
-    /// cannot say *which* button fired it. Six booleans would be six properties
-    /// and a six-armed drain.
+    /// choice: a `bool` cannot say *which* tab fired it. It has **one writer** —
+    /// the bar's `on_select` — so the seven per-button handlers that used to write
+    /// it are gone.
+    ///
+    /// **Drained at the end of [`Demo::frame`]** rather than in
+    /// [`Demo::handle_event`]: the bar applies a click on the next `sync`, which
+    /// runs in that frame, and the switch then happens after the paint pass rather
+    /// than in the middle of a dispatch.
     pending_page: Property<Option<Page>>,
-}
-
-/// One tab on the bar: the page it switches to, and the button that asks for it.
-///
-/// **A row and not two fields on [`Demo`]**, for the reason
-/// [`GALLERY_SHORTCUTS`]'s own doc gives about a `match` beside a list of its
-/// keys: six buttons and six pages are two lists the moment they are held apart,
-/// and they are the kind that drift silently. `Page::ALL` is the third list and it
-/// is the one the tests read, so a pair here that disagrees with it is a pair a
-/// test catches.
-struct Tab {
-    /// The page a click on this button asks for.
-    page: Page,
-    /// The widget itself.
-    button: Button,
 }
 
 /// One row of [`Demo::page_members`]: a node, the page that shows it, and whether
@@ -5324,143 +5275,80 @@ impl Demo {
         }
 
         // **What the page a click asked for, waiting for the demo to act on it.**
-        // Declared before the bar because the six handlers are wired into it on
+        // Declared before the bar because the bar's `on_select` is wired to it on
         // the next block. See [`Demo::pending_page`] for why it is a property and
         // why it is an `Option<Page>` rather than a `bool`.
         let pending_page = Property::new(None);
 
-        // --------------------------------------------- task 24.3: the tab bar
+        // --------------------------------------------- task 43.2: the tab bar
         //
-        // **A `Container` in `row()` holding one `Button` per page, and the
-        // operator's decision of 2026-10-03 that it is built in the demo** — there
-        // is no `TabBar` in `ui_core` and building one was declined, so
-        // `DEMO_APPLICATION.md` gaps #3 and #7 stay open and this is what gap #7
-        // prescribes for the dock.
+        // **One `ui_core` `TabBar`, and the demo no longer builds a row of
+        // `Button`s of its own.** The bar owns the container, the seven buttons,
+        // the click handler that asks for a tab, the selection and the motion;
+        // the demo gives it the two themed pairs and the geometry its labels are
+        // read at, and then only follows it.
         //
-        // Four things are decided here and each has a reason:
-        //
-        // - **`LayoutMode::row()`, which places the buttons.** The bar is the
-        //   demo's one container whose children it does *not* place itself: the
-        //   six buttons are laid out by `arrange_flex` inside the bar's padded
-        //   box, exactly as the card lays the three pads out inside its own. That
-        //   is why no button's rect appears in `Demo::placed_handles` — the list
-        //   is of the leaves the demo *places* — and why the six are in
-        //   `tests::undrawn_leaf_exemptions` with the three pads rather than
-        //   named;
-        // - **the theme's `Surface` behind it**, bound as a property rather than
-        //   read once, for the reason the card's is: the property graph carries a
-        //   theme switch to a widget that is holding a token, and
-        //   `the_tab_bar_follows_a_theme_switch` is what says it did;
-        // - **`Padding::all(TAB_BAR_PADDING)`**, which is both the requirement's
-        //   visible padding and the reason a button lands at `y 10` — a `row`
-        //   places a child at the padded edge of its parent's inner box;
-        // - **a tight [`WINDOW.width`] by [`TAB_BAR_HEIGHT`]**, so the bar spans
-        //   the window rather than being as wide as six buttons and leaving the
-        //   background showing beside them.
-        let mut tab_bar = Container::new(&mut nodes, LayoutMode::row());
-        tab_bar.set_flex_config(
+        // The order is the whole of it: the palette and the geometry properties
+        // are set **before** `measure`, because `Button::content_size` reads
+        // `padding_h`, `font_size` and the label, and a width measured before they
+        // are set is a width for the widget's defaults; and `snap_to_state` comes
+        // **after** the initial selection, because the selection is what every
+        // tab's appearance starts from.
+        let mut bar = TabBar::new(&mut nodes, Page::ALL.iter().map(|page| page.name()));
+        let (unselected, selected) = tab_palettes(&theme);
+        bar.set_palette(unselected);
+        bar.set_selected_palette(selected);
+        bar.set_motion(tab_motion(&theme));
+        for id in bar.tab_ids() {
+            if let Some(button) = bar.tab(id) {
+                button.font_size.set(TAB_BUTTON_FONT);
+                button.padding_h.set(TAB_BUTTON_PADDING_H);
+            }
+        }
+        let _ = bar.measure(
             &mut nodes,
-            FlexConfig::new()
-                .with_spacing(TAB_BUTTON_GAP)
-                .with_cross_axis_alignment(CrossAxisAlignment::Center),
+            &tab_advance(&metrics),
+            tab_line_height(&metrics),
         );
-        tab_bar.set_padding(&mut nodes, Padding::all(TAB_BAR_PADDING));
-        tab_bar.background = themed_color(
+        // **The page the demo opens on is the selected tab**, because
+        // [`Demo::show_page`] early-returns on a switch to the page already on
+        // show and would therefore never select it.
+        let _ = bar.select_name(page.name());
+        {
+            let node = nodes
+                .get_mut(bar.handle())
+                .ok_or("ui_demo: the tab bar is missing")?;
+            node.layout_mut().set_constraints(Constraints::tight(Size {
+                width: WINDOW.width,
+                height: TAB_BAR_HEIGHT,
+            }));
+            // At the window's own top left, and **no [`CONTENT_TOP`] here**,
+            // because the shift moved the gallery down past this strip.
+            node.layout_mut().set_position(Some(Offset::new(0.0, 0.0)));
+        }
+        // **The theme's `Surface` behind it**, bound as a property rather than
+        // read once, for the reason the card's is: the property graph carries a
+        // theme switch to a widget holding a token.
+        bar.bar.background = themed_color(
             &theme.property(ThemeToken::Surface),
             Color::new(0, 0, 0, 255),
         );
-        tab_bar.border_radius.set(
+        bar.bar.border_radius.set(
             theme
                 .get(ThemeToken::BorderRadiusMd)
                 .as_number()
                 .unwrap_or(CARD_RADIUS_FALLBACK),
         );
-        {
-            let bar = nodes
-                .get_mut(tab_bar.handle())
-                .ok_or("ui_demo: the tab bar is missing")?;
-            bar.layout_mut().set_constraints(Constraints::tight(Size {
-                width: WINDOW.width,
-                height: TAB_BAR_HEIGHT,
-            }));
-            // **At the window's own top left, and written out rather than left
-            // implicit**, for the reason the card's position is: every other
-            // positioned node in this function declares one, and a bar whose
-            // origin came from a parent's default is one whose origin a change of
-            // that parent's mode would move. The root is `LayoutMode::Absolute`
-            // **because** of task 24.2's card — a `Stack` parent reads no
-            // `position` at all — and the bar is the second node to depend on
-            // that.
-            //
-            // **No [`CONTENT_TOP`] here**, and that is the one position in this
-            // function that does not carry it: the shift is what moved the gallery
-            // *down past* this strip, so adding it here would put the bar where
-            // the gallery now begins.
-            bar.layout_mut().set_position(Some(Offset::new(0.0, 0.0)));
-        }
-        // **The six buttons, in [`Page::ALL`] order**, and the page rides on the
-        // row rather than beside it. Three things each button is given before it
-        // is measured, and the order is the whole of it:
-        //
-        // - the **palette**, which is [`tab_palette`]'s answer and is the *only*
-        //   way the demo supplies a selected appearance — `Button` has no
-        //   `selected` property, so a reader looking for one in
-        //   `ui_core::widgets::button` will not find it;
-        // - the **geometry properties**, because `Button::content_size` reads
-        //   `padding_h`, `font_size` and the label, and a width measured before
-        //   they are set is a width for the widget's defaults;
-        // - **`snap_to_state`**, for the reason every other widget in this
-        //   function has one: `Button::new` wrote the *default* palette's colours,
-        //   and aiming alone would leave the bar grey until something moved it.
-        let mut tabs: Vec<Tab> = Vec::with_capacity(Page::ALL.len());
-        for &tab_page in &Page::ALL {
-            let mut button = Button::new(&mut nodes, tab_page.name());
-            button.set_palette(tab_palette(&theme, tab_page == page));
-            button.font_size.set(TAB_BUTTON_FONT);
-            button.padding_h.set(TAB_BUTTON_PADDING_H);
-            button.border_radius.set(
-                theme
-                    .get(ThemeToken::BorderRadiusMd)
-                    .as_number()
-                    .unwrap_or(CARD_RADIUS_FALLBACK),
-            );
-            {
-                // **The width is measured, not guessed**, and it is measured
-                // through the demo's own [`TextMetrics`] rather than through a
-                // stand-in: `Button::content_size` is the only thing in the
-                // repository that knows how wide a page name is at
-                // [`TAB_BUTTON_FONT`], and a constant per page would be six copies
-                // of an answer that has to change when the font or the padding
-                // does. **The height is [`TAB_BUTTON_TALL`] outright** rather than
-                // the widget's `Button::size`, because `size` floors at 44 and
-                // requirement 2 asks for 44 — a floor would be indistinguishable
-                // from the number here, and the floor is the widget's business
-                // while this number is the demo's.
-                let content =
-                    button.content_size(&tab_advance(&metrics), tab_line_height(&metrics));
-                let size = Size::new(content.width, TAB_BUTTON_TALL);
-                nodes
-                    .get_mut(button.handle())
-                    .ok_or("ui_demo: a tab button's node is missing")?
-                    .layout_mut()
-                    .set_constraints(Constraints::tight(size));
+        bar.snap_to_state();
+        // **The one writer of [`Demo::pending_page`]**, and it is the bar's own
+        // callback: a click asks the bar for a tab, and a tab names a page. The
+        // drain is at the end of [`Demo::frame`] — see [`Demo::pending_page`].
+        let asked = pending_page.clone();
+        bar.on_select = Callback::from_fn(move |id: TabId| {
+            if let Some(&page) = Page::ALL.get(id.index()) {
+                asked.set(Some(page));
             }
-            {
-                // **The click writes a property, and the property is drained at
-                // the end of the event that fired it** — see
-                // [`Demo::pending_page`] and the drain in [`Demo::handle_event`].
-                let asked = pending_page.clone();
-                button.on_click = Callback::new(move || asked.set(Some(tab_page)));
-            }
-            button.snap_to_state();
-            if !tab_bar.add_child(&mut nodes, button.handle()) {
-                return Err("ui_demo: a tab button could not be attached to the bar");
-            }
-            tabs.push(Tab {
-                page: tab_page,
-                button,
-            });
-        }
+        });
 
         // The text panel, and the labels in it. Their colours come from the
         // theme like the pads', bound through the token `C` moves, so both a
@@ -7445,7 +7333,7 @@ impl Demo {
             // by this list**, and there is nothing else in the strip to be under:
             // `the_bar_and_the_background_are_the_only_thing_in_the_strip` asserts
             // that over every page's every command.
-            tab_bar.handle(),
+            bar.handle(),
             row.handle(),
             text_panel.handle(),
             controls.handle(),
@@ -7825,17 +7713,11 @@ impl Demo {
             // this function: a modal opens with focus inside it. `sync_dialog_focus`
             // is what turns this into the property the button draws a ring from.
             focused: first_action,
-            containers: vec![
-                row,
-                text_column,
-                text_panel,
-                controls,
-                root,
-                // **Last, and the field's doc says why**: two helpers name a
-                // container by index and appending keeps the five that were
-                // already there the same five.
-                tab_bar,
-            ],
+            // **Five, and the bar is not among them**: a `TabBar` owns its
+            // container, so the demo cannot keep a second copy of it here. The
+            // frame paints the bar's own container by handle and the tests read
+            // it through [`Demo::tab_bar`].
+            containers: vec![row, text_column, text_panel, controls, root],
             gauge,
             gauge_type,
             gauge_readout,
@@ -7939,7 +7821,7 @@ impl Demo {
             toast_next: TOASTS_AT_LAUNCH,
             page,
             page_members,
-            tabs,
+            bar,
             pending_page,
         };
         // **The hit-test gate is closed here rather than on the first switch**, so
@@ -8004,20 +7886,21 @@ impl Demo {
     /// **one page per row**, so it cannot return a node that is on every page.
     ///
     /// **Requirement 6 puts the addition in [`Demo::focus_navigation`] instead** —
-    /// the six buttons are on every page, so they belong to every page's *focusable
+    /// the seven buttons are on every page, so they belong to every page's *focusable
     /// set* rather than to any page's *membership*, and that is a different question
     /// asked in a different place. This function's doc used to claim the addition as
     /// its own, which was both a second definition of where it goes and a promise the
     /// signature cannot keep.
     ///
-    /// **And the shape is now built rather than described.** The six buttons are on
+    /// **And the shape is now built rather than described.** The seven buttons are on
     /// every page and no page's list, which is `tests::always_painted_handles`'
-    /// shape; `Demo::tab_focusables` is the one place they enter the `Tab` order,
-    /// and `every_page_lists_at_least_one_node_and_no_node_is_on_two_pages` is the
+    /// shape; [`Demo::focus_navigation`] is the one place they enter the `Tab`
+    /// order, from `TabBar::tab_ids`, and
+    /// `every_page_lists_at_least_one_node_and_no_node_is_on_two_pages` is the
     /// assertion that says a button *as a row of the table* would make it a page's
     /// own node instead.
     ///
-    /// This still returns the page's own controls alone, and the six pages between
+    /// This still returns the page's own controls alone, and the seven pages between
     /// them hold the five focusables the demo has besides the bar: three on
     /// `controls`, one on `data`, one on `input`.
     fn focusables(&self) -> Vec<Handle> {
@@ -8028,42 +7911,10 @@ impl Demo {
             .collect()
     }
 
-    /// Returns the six tab buttons' handles, in [`Page::ALL`] order.
-    ///
-    /// **The one place the bar enters the `Tab` order**, and it is a function
-    /// rather than a written-out list for the reason
-    /// [`Demo::focusables`] is a filter: a list of six handles beside
-    /// [`Demo::tabs`] is a second list of the six buttons, and a sweep of a
-    /// mechanism's call sites is not a sweep of the data it is built from —
-    /// which is what a second list costs.
-    ///
-    /// **The order inside this list is not the order `Tab` walks.** That is the
-    /// tree's paint order — [`input::Focus`] recomputes it by walking from
-    /// [`Demo::root`] — and the bar is attached to the root **before** the text
-    /// panel and the controls layer, so the six come first for a reason that is in
-    /// `Demo::new`'s child list rather than here. `tab_walks_the_six_buttons_
-    /// before_the_pages_own_controls` is what says the two agree.
-    fn tab_focusables(&self) -> Vec<Handle> {
-        self.tabs.iter().map(|tab| tab.button.handle()).collect()
-    }
-
-    /// Returns the widget for the tab button at `handle`, or `None` for any other
-    /// node in the demo.
-    ///
-    /// **A search over [`Demo::tabs`] rather than a position**, because a handle is
-    /// what routing and the paint walk arrive with and a position would be a second
-    /// way of naming the same six things.
-    fn tab_button(&self, handle: Handle) -> Option<&Button> {
-        self.tabs
-            .iter()
-            .find(|tab| tab.button.handle() == handle)
-            .map(|tab| &tab.button)
-    }
-
     /// Returns the chrome surface at `handle`, or `None` for any other node.
     ///
     /// A search over [`Demo::chrome_nodes`] rather than a position, for the
-    /// reason [`Demo::tab_button`] gives: a handle is what routing and the paint
+    /// reason `TabBar::tab_id_of` gives: a handle is what routing and the paint
     /// walk arrive with.
     fn chrome_of(&self, handle: Handle) -> Option<&Chrome> {
         self.chrome_nodes
@@ -8239,55 +8090,6 @@ impl Demo {
         self.set_panel_rect(handle, Rect::new(rect.x, rect.y, size.width, size.height))
     }
 
-    /// Returns the index of the tab button under `(x, y)`, and `None` for a point
-    /// that is not over one.
-    ///
-    /// **Asked of the buttons' own laid-out rects**, which are the boxes they are
-    /// drawn in and the boxes [`input::route`] hit-tests against — so a press that
-    /// this says misses is a press the router cannot deliver either. That is the
-    /// same rule the three existing helpers follow (`Demo::pad_at`,
-    /// `Demo::slider_at`, `Demo::keyboard_at`) and for the same reason: a hit test
-    /// of the demo's own arithmetic would be asking twice and checking nothing.
-    fn tab_at(&self, x: f32, y: f32) -> Option<usize> {
-        self.tabs.iter().position(|tab| {
-            self.node_rect(tab.button.handle())
-                .is_some_and(|rect| over_rect(rect, x, y))
-        })
-    }
-
-    /// Points every tab button at the palette its role calls for under the theme the
-    /// demo is **heading for**, and carries the buttons for `changed` to it.
-    ///
-    /// **The palettes are written for all six and the transition is aimed at the
-    /// ones in `changed`, and that split is the whole of requirement 4.** A page
-    /// switch passes the two pages it moved between — the one that was selected and
-    /// the one that now is — because those are the only two whose pair differs; a
-    /// theme switch passes all six, because every button's palette moved.
-    ///
-    /// **The theme is [`Demo::target_theme`] and not [`Demo::theme`].** The demo's
-    /// own `theme` is *mid-transition* for 300 ms after a switch, so a bar whose
-    /// palette were read from it would be aimed at a target that is moving — which
-    /// is precisely the defect [`Demo::toggle_theme`]'s doc describes for a palette
-    /// read after `switch_to`, reached from the other direction. `target_theme` is
-    /// the two lines `toggle_theme` used to open with, and both now read it.
-    ///
-    /// **The aim is written here and nowhere else, and never per frame.** A
-    /// per-frame aim restarts the button's clock every frame and the colour creeps
-    /// toward its target for ever, which is the gauge needle's argument in reverse
-    /// and the reason `Demo::sync_toggle_state` exists. [`Demo::frame`] ticks the
-    /// six buttons and does not aim them.
-    fn aim_tab_buttons(&mut self, changed: &[Page]) {
-        let theme = self.target_theme();
-        let motion = tab_motion(&theme);
-        for tab in &mut self.tabs {
-            tab.button
-                .set_palette(tab_palette(&theme, tab.page == self.page));
-            if changed.contains(&tab.page) {
-                tab.button.animate_to_state(motion);
-            }
-        }
-    }
-
     /// Returns the theme the demo is on, or heading for.
     ///
     /// **A plain field's answer rather than [`Demo::theme`]'s**, and the difference
@@ -8303,63 +8105,6 @@ impl Demo {
             Theme::dark()
         } else {
             Theme::light()
-        }
-    }
-
-    /// Writes each tab button's `hovered` from whether a pointer is over it, and
-    /// aims the buttons whose flag moved.
-    ///
-    /// **Guarded by the value, for the reason `Demo::tick_fps` is.** A pointer that
-    /// moves inside a button arrives as a stream of motion events, and an aim on
-    /// every one of them restarts the transition on every one of them — which is
-    /// the creep `Demo::aim_tab_buttons` exists to avoid, reached from a different
-    /// direction. So the write and the aim happen on the frame the flag changes and
-    /// on no other.
-    ///
-    /// **Asked of [`Demo::tab_at`]**, so "which button is under the pointer" has one
-    /// answer in the demo rather than one per reader.
-    fn sync_tab_hover(&mut self, x: f32, y: f32) {
-        let over = self.tab_at(x, y);
-        for (index, tab) in self.tabs.iter_mut().enumerate() {
-            let wanted = over == Some(index);
-            if tab.button.hovered.get() != wanted {
-                tab.button.hovered.set(wanted);
-                tab.button.animate_to_state(tab_motion(&self.theme));
-            }
-        }
-    }
-
-    /// Holds `index`'s button down, and aims it.
-    ///
-    /// **The press is the demo's to write, for the reason [`Demo::grab_key`]'s
-    /// is**: the gesture recogniser reports a tap on the *release*, so there is no
-    /// "the finger went down on the button" for the widget to read, and the pressed
-    /// appearance has to be on screen for the whole time the pointer is down.
-    ///
-    /// **And the aim is here and not in `Demo::frame`**, on the gauge's argument:
-    /// the tick is per frame, the aim is per press.
-    fn press_tab(&mut self, index: usize) {
-        let motion = tab_motion(&self.theme);
-        if let Some(tab) = self.tabs.get_mut(index) {
-            tab.button.pressed.set(true);
-            tab.button.animate_to_state(motion);
-        }
-    }
-
-    /// Releases whichever button [`Demo::press_tab`] held down, and aims it.
-    ///
-    /// **One function rather than an index**, on [`Demo::release_all`]'s argument:
-    /// the release has to be able to find out *whether* there was a press, and a
-    /// condition on the current position would decline a release whose pointer had
-    /// travelled off the button — which is a button left at 0.95 scale with no
-    /// gesture left that could bring it back.
-    fn release_tab(&mut self) {
-        let motion = tab_motion(&self.theme);
-        for tab in &mut self.tabs {
-            if tab.button.pressed.get() {
-                tab.button.pressed.set(false);
-                tab.button.animate_to_state(motion);
-            }
         }
     }
 
@@ -8398,18 +8143,24 @@ impl Demo {
     /// separable from it.
     ///
     /// **And it is the bar's only entry point**, which is the claim that decides
-    /// where requirement 5's drain sits rather than here: [`Demo::pending_page`]
-    /// is drained at the *end* of the event that fired it and calls this, so a page
-    /// switch never happens in the middle of a dispatch — a switch here would move
-    /// rects and write `set_visible` under an event [`Demo::route_input_event`] is
-    /// still walking up the chain.
+    /// where the drain sits rather than here: [`Demo::pending_page`] is drained at
+    /// the *end* of [`Demo::frame`] and calls this, so a page switch never happens
+    /// in the middle of a dispatch — a switch here would move rects and write
+    /// `set_visible` under an event [`Demo::route_input_event`] is still walking up
+    /// the chain.
     fn show_page(&mut self, page: Page) {
         if self.page == page {
             return;
         }
-        let previous = self.page;
         self.page = page;
         self.sync_page_visibility();
+        // **The selection follows every switch, not only the ones a button asked
+        // for.** A page reached with a gallery shortcut — `,` for `data`, `D` for
+        // `overlays` — moves it too; a bar that only followed its own clicks would
+        // show two tabs filled in on the second page the reader ever visited.
+        // `select_name` is idempotent, so the click path (whose selection the
+        // bar's own `sync` already made) pays nothing here.
+        let _ = self.bar.select_name(page.name());
         // **Retire the focus the page being left was holding, and only that.**
         // `set_focus(None)` unconditionally would be wrong in one case the
         // requirement does not name and the key table makes: `K` while the dialog
@@ -8426,16 +8177,6 @@ impl Demo {
         if self.focused.is_some_and(|held| !self.on_show(held)) {
             self.set_focus(None);
         }
-        // **The bar follows every switch, not only the ones a button asked for.**
-        // This is the one place the selected appearance is written, so a page
-        // reached with a gallery shortcut — `,` for `data`, `D` for `overlays` —
-        // moves the selection too; a bar that only followed its own clicks would
-        // show two buttons filled in on the second page the reader ever visited.
-        //
-        // **And it is here rather than in the drain of [`Demo::pending_page`]**
-        // because of that: the drain is where a *click* lands, and the switch is
-        // the thing every route goes through.
-        self.aim_tab_buttons(&[previous, page]);
     }
 
     /// Writes the hit-test gate: every node in the table is visible on the page
@@ -8796,6 +8537,10 @@ impl Demo {
                 y,
                 ..
             } => {
+                // Read before the chain so the arena borrow ends here: the later
+                // arms call `&mut self`, and an `if let` temporary would live to
+                // the end of the whole chain.
+                let tab_under = self.bar.tab_at(&self.nodes.borrow(), Offset::new(x, y));
                 // A press is tracked here rather than taken from the recogniser,
                 // because a recogniser reports a tap on the *release*: the
                 // pressed appearance has to be on screen for the whole time the
@@ -8829,7 +8574,7 @@ impl Demo {
                     // press that missed the key grabs nothing, and the keyboard
                     // lights whichever key the gesture ends on.
                     self.grab_key(Offset::new(x, y));
-                } else if let Some(index) = self.tab_at(x, y) {
+                } else if let Some(id) = tab_under {
                     // **Last of the four, and last for a reason a reader can
                     // check**: the bar's box is 0…64 tall and nothing else in the
                     // demo is above 64, so no earlier arm can have claimed the
@@ -8841,7 +8586,7 @@ impl Demo {
                     // reaches the bar *directly*, so the modal filter in
                     // [`Demo::route_input_event`] cannot see it, and a button
                     // lighting up under the scrim is the same defect a lit pad was.
-                    self.press_tab(index);
+                    self.bar.press(id);
                 } else if self.car_at(x, y).is_some() {
                     // **After the four existing press arms, and the position is
                     // not load-bearing**: `the_car_rect_overlaps_nothing_the_
@@ -8884,9 +8629,9 @@ impl Demo {
                 self.release_key();
                 // **Unguarded, like every release here**, on the argument the pads'
                 // release gives: a release has no effect on anything a guarded press
-                // did not start, and `release_tab` asks whether there *was* a press
-                // rather than where the pointer is.
-                self.release_tab();
+                // did not start, and the bar's `release` asks whether there *was* a
+                // press rather than where the pointer is.
+                self.bar.release();
             }
             // A finger is a pointer too, and a car has no mouse: the same press
             // and release the left button gets, from the touch events SDL delivers
@@ -8897,16 +8642,17 @@ impl Demo {
             // argument above: a finger down on the scrim must not start a drag or
             // light a key, and a finger lifted afterwards must still tidy up.
             Event::FingerDown { x, y, .. } => {
+                let tab_under = self.bar.tab_at(&self.nodes.borrow(), Offset::new(x, y));
                 if self.dialog_is_modal() {
                     // Nothing to do, and nothing to undo: the arms below are not.
                 } else if self.slider_at(x, y).is_some() {
                     self.slider_dragging = true;
                 } else if self.keyboard_at(x, y) {
                     self.grab_key(Offset::new(x, y));
-                } else if let Some(index) = self.tab_at(x, y) {
+                } else if let Some(id) = tab_under {
                     // The bar on a finger, on the mouse arm's argument: the press is
                     // guarded by the modal chain above and the release below is not.
-                    self.press_tab(index);
+                    self.bar.press(id);
                 } else if self.car_at(x, y).is_some() {
                     // The car on a finger, on the mouse arm's argument: a car
                     // has no mouse, so this is the route a hand actually takes.
@@ -8929,7 +8675,7 @@ impl Demo {
                 // finger that is gone must not leave a key lit — and it releases
                 // the tab button for the same reason.
                 self.release_key();
-                self.release_tab();
+                self.bar.release();
             }
             // **Hover, and it is the one thing the bar puts back that a keyboard
             // cannot reach.** `MouseMotion` and `FingerMotion` were two arms of the
@@ -8944,7 +8690,8 @@ impl Demo {
             // would tint as the pointer crosses the panel, which is cosmetic and
             // happens on no page but `overlays`.
             Event::MouseMotion { x, y, .. } | Event::FingerMotion { x, y, .. } => {
-                self.sync_tab_hover(x, y);
+                let over = self.bar.tab_at(&self.nodes.borrow(), Offset::new(x, y));
+                let _ = self.bar.hover(over);
             }
             _ => {}
         }
@@ -8962,25 +8709,10 @@ impl Demo {
             self.pending_theme.set(false);
             self.toggle_theme();
         }
-        // **The tab bar's click, drained here for the same reason and one more.**
-        //
-        // The extra one is [`Demo::route_input_event`]: a routed tap is offered to
-        // one node at a time, and the node it was offered to is the tab button —
-        // whose `on_click` fires *inside* that walk. Switching pages there would
-        // call [`Demo::sync_page_visibility`], which writes `set_visible` on the
-        // arena, while the walk still holds the chain it built from the same tree,
-        // and would re-place the bar's own subtree's siblings under an event that
-        // has not finished being routed. `pending_theme` above is the same rule for
-        // a theme switch, and `pending_key` in [`Demo::offer_to`] is the same rule
-        // for a keystroke.
-        //
-        // **`Property<Option<Page>>` rather than a `bool`,** which is the whole of
-        // [`Demo::pending_page`]'s type: six handlers and one property, and a
-        // `bool` could not say which button fired it.
-        if let Some(page) = self.pending_page.get() {
-            self.pending_page.set(None);
-            self.show_page(page);
-        }
+        // **The tab bar's click is not drained here.** The bar applies it on the
+        // next `TabBar::sync` and reports through `on_select`; the drain is at the
+        // end of [`Demo::frame`], where the event has finished routing and the
+        // arena is free. See [`Demo::pending_page`].
     }
 
     /// Delivers one event the recogniser produced to the widget under it.
@@ -9138,7 +8870,7 @@ impl Demo {
         // **The alternative was to move the bar**, and both moves fail:
         //
         // - attached **last**, it is hit-tested first, and then `Focus::focus_order`
-        //   — which walks the *same* child list forwards — puts the six buttons
+        //   — which walks the *same* child list forwards — puts the seven buttons
         //   **last** in the `Tab` order and requirement 6's "first" is false;
         // - with the controls layer's box **trimmed** to stop at the strip, nothing
         //   moves but nothing is gained either: the layer's origin has to stay at
@@ -9178,9 +8910,13 @@ impl Demo {
         // what differs is only which *container* the tree put in the chain on the
         // way there.
         if !event.consumed() {
-            if let Some(index) = self.tab_at(point.x, point.y) {
-                if let Some(button) = self.tabs.get(index).map(|tab| tab.button.handle()) {
-                    self.offer_to(button, event);
+            let over = self
+                .bar
+                .tab_at(&self.nodes.borrow(), Offset::new(point.x, point.y));
+            if let Some(id) = over {
+                if let Some(button) = self.bar.tab(id) {
+                    let handle = button.handle();
+                    self.offer_to(handle, event);
                 }
             }
         }
@@ -9327,7 +9063,7 @@ impl Demo {
     /// is where the buttons' arm used to be**, and the fall-through they needed is
     /// gone with it: the last arm is now the keyboard's, which returns explicitly.
     ///
-    /// **The tab bar's six buttons are in here again**, as the last arm before the
+    /// **The tab bar's seven buttons are in here again**, as the last arm before the
     /// dialog's, and they are the only handles in the gallery tree that reach a
     /// [`Button`]. Three routes arrive and all three end at the same line:
     ///
@@ -9335,12 +9071,12 @@ impl Demo {
     ///   The bar is a child of [`Demo::root`] and its buttons are on every page,
     ///   but `hit_test_from` walks a node's children in **reverse** and the
     ///   controls layer and the text panel are both attached after the bar, so the
-    ///   chain for a tap on any of the six buttons on any of the six pages is two
+    ///   chain for a tap on any of the seven buttons on any of the seven pages is two
     ///   handles and **never names the button**.
     ///   `a_tap_over_a_bar_button_is_not_in_the_routed_chain` asserts exactly that,
     ///   and [`Demo::route_input_event`]'s comment is where the measurement lives;
     ///   **the route that carries the tap is the fallback in that same function**,
-    ///   which asks [`Demo::tab_at`] after the tree has declined. `Button::on_event`
+    ///   which asks [`TabBar::tab_at`] after the tree has declined. `Button::on_event`
     ///   fires the click from there, unchanged;
     /// - **`Space` and `Enter`**, offered by [`Demo::offer_to_focused`] because the
     ///   button holds focus — the widget refuses an activation key it is not
@@ -9387,7 +9123,7 @@ impl Demo {
     /// three helpers do — and **that includes the bar's, which is why
     /// `handle_event`'s press arms needed the modal guard this arm's does not
     /// have.** Measured on task 24.3's tree: with the dialog up, a tap on every one
-    /// of the six buttons leaves the page on `overlays` and writes nothing.
+    /// of the seven buttons leaves the page on `overlays` and writes nothing.
     ///
     /// **What is left is the 300 ms fade**, and it is [`Demo::show_page`]'s own
     /// paragraph rather than a second claim about it: `D` dismisses, and inside the
@@ -9494,7 +9230,7 @@ impl Demo {
             }
             return consumed;
         }
-        // **The six tab buttons, before the dialog's arms and after everything
+        // **The seven tab buttons, before the dialog's arms and after everything
         // above**, because a handle in the gallery tree cannot be the dialog's and
         // the position is free — and because it is the arm a reader looking for
         // "where does the click reach" comes to first.
@@ -9504,8 +9240,10 @@ impl Demo {
         // already happened, in [`input::route`], against the button's own laid-out
         // box. That is the widget's own contract and it is why the demo cannot
         // answer a tap with a button it has not already found.
-        if let Some(button) = self.tab_button(handle) {
-            return button.on_event(event);
+        if let Some(id) = self.bar.tab_id_of(handle) {
+            if let Some(button) = self.bar.tab(id) {
+                return button.on_event(event);
+            }
         }
         // The airbag badge: a real button, so a tap on it toggles the
         // passenger-airbag state — and a tap on its icon does too, because
@@ -9708,11 +9446,11 @@ impl Demo {
     /// membership table** — [`Demo::focusables`] — and the five this demo had on
     /// 2026-10-03 now sit on three pages: the slider, the toggle and the bar on
     /// `controls`, the image on `data`, the field on `input`. **And in front of all
-    /// of them, on every one of the six pages, are the six tab buttons** — see
-    /// [`Demo::tab_focusables`] for why the addition is here and not in
-    /// `focusables`, and why the order within the list is not the order `Tab`
-    /// walks. `tab_walks_the_six_buttons_before_the_pages_own_controls` is what
-    /// says the two agree.
+    /// of them, on every one of the seven pages, are the seven tab buttons** —
+    /// `TabBar::tab_ids` is where they come from, and the order within the list is
+    /// not the order `Tab` walks.
+    /// `tab_walks_the_six_buttons_before_the_pages_own_controls` is what says the
+    /// two agree.
     ///
     /// **The gauge is deliberately not in this list**, for the reason
     /// [`Demo::offer_to`] gives: it has no `on_event` and no `focused` property,
@@ -9769,14 +9507,19 @@ impl Demo {
             // `offer_to` is what decides, and a widget with no key of its own
             // declines.
             //
-            // **And the six tab buttons in front of them, in the order
-            // [`Demo::tab_focusables`] gives** — which is `Page::ALL` order, and
-            // is *not* the order the walk takes: the walk re-derives that from the
-            // tree, and the bar is attached to the root before the controls layer,
-            // so the two agree without either being arranged to make the other
-            // true.
+            // **And the seven tab buttons in front of them, in the order
+            // `TabBar::tab_ids` gives** — which is `Page::ALL` order, and is *not*
+            // the order the walk takes: the walk re-derives that from the tree,
+            // and the bar is attached to the root before the controls layer, so the
+            // two agree without either being arranged to make the other true.
             let page_focusables = self.focusables();
-            let tabs = self.tab_focusables();
+            let tabs: Vec<Handle> = self
+                .bar
+                .tab_ids()
+                .into_iter()
+                .filter_map(|id| self.bar.tab(id))
+                .map(Button::handle)
+                .collect();
             let actions: Vec<Handle> = self
                 .dialog
                 .actions
@@ -9837,7 +9580,7 @@ impl Demo {
     /// `progress_focused` and `image_focused`. Neither the gauge nor the chart is
     /// named here because neither is in the order; see [`Demo::offer_to`].
     ///
-    /// **And the six tab buttons are written here too**, which is what puts the
+    /// **And the seven tab buttons are written here too**, which is what puts the
     /// focus ring on the button that holds focus — the one thing the demo could not
     /// show between 2026-10-01 and task 24.3. They are **not** guarded by the
     /// "changed" tests the two above carry, because a `Property::set` that writes
@@ -9853,9 +9596,8 @@ impl Demo {
     fn set_focus(&mut self, next: Option<Handle>) {
         self.focused = next;
         let focused = self.focused;
-        for tab in &self.tabs {
-            tab.button.focused.set(Some(tab.button.handle()) == focused);
-        }
+        self.bar
+            .focus(focused.and_then(|handle| self.bar.tab_id_of(handle)));
         let slider_wanted = Some(self.slider.node()) == focused;
         if self.slider.widget.focused.get() != slider_wanted {
             self.slider.widget.focused.set(slider_wanted);
@@ -9943,16 +9685,14 @@ impl Demo {
         // and from the widget's own dismissal — a per-frame aim would restart both
         // on every frame, which is the argument `sync_toggle_state` makes.
         let _ = self.dialog.tick(delta);
-        // The six tab buttons' own clocks, on the same argument and for the same
-        // reason as every other tick in this function: the tick is here and the
-        // **aim** is not. A button's transition is started by
-        // [`Demo::aim_tab_buttons`], [`Demo::press_tab`], [`Demo::release_tab`]
-        // and [`Demo::sync_tab_hover`] — once per switch, once per press and once
-        // on the frame a hover flag moves — and a per-frame aim would restart it
-        // every frame, which is the argument `sync_toggle_state` makes.
-        for tab in &self.tabs {
-            let _ = tab.button.tick(delta);
-        }
+        // The tab bar's own clocks, and **the one aim**. `TabBar::tick` advances
+        // the seven buttons' transitions; `TabBar::sync` drains a clicked tab
+        // through `select` and aims exactly the tabs whose selected, hovered or
+        // pressed flags moved since the last aim. Neither is per-tab here, which
+        // is the point of the widget: a second aim in this function would restart
+        // the transition every frame.
+        let _ = self.bar.tick(delta);
+        self.bar.sync();
         // The toasts' arrivals, departures and countdowns, on the same argument:
         // the tick is here, the **aim** is not. `Toasts::show` is what starts a
         // fade and the countdown is what ends it, and a per-frame aim would
@@ -10116,20 +9856,35 @@ impl Demo {
                 continue;
             }
             // A container paints its own background, and paints nothing at all
-            // when it has none. **The demo assembles six containers and exactly two
-            // of the six have a background**: the row of pads, which draws the card
-            // the pads sit inside, and the tab bar. **The other four draw nothing —
-            // the root, the text column, the text panel and the controls layer** —
-            // and the root is the one that surprises, because it is
+            // when it has none. **The demo assembles five containers and exactly
+            // one of the five has a background**: the row of pads, which draws the
+            // card the pads sit inside. **The other four draw nothing — the root,
+            // the text column, the text panel and the controls layer** — and the
+            // root is the one that surprises, because it is
             // `Constraints::tight(WINDOW)`. **It is the window background *node*
             // that fills the window, not the root container**: `Container::new`
             // starts `background` at alpha 0 and nothing here sets it on the root,
-            // so this arm records nothing for it.
-            // `the_container_with_a_background_are_the_card_and_the_bar` is the
-            // test that says which is which, on the two pages that tell them apart.
+            // so this arm records nothing for it. **The bar's own container is the
+            // demo's second with a background and it is not in this list** — see
+            // the arm above. `the_container_with_a_background_are_the_card_and_the
+            // _bar` is the test that says which is which, on the two pages that
+            // tell them apart.
             //
             // The walk is parent first, so the card is recorded before the pads and
             // so is drawn behind them.
+            //
+            // **The tab bar's own container is not in `self.containers`** — the
+            // `TabBar` owns it — so it has an arm of its own, recording the same
+            // one background the container arm would. Its seven tabs are children
+            // of this node and have their own arms below.
+            if handle == self.bar.handle() {
+                let commands = match node.layout().rect() {
+                    Some(rect) => self.bar.bar.paint(rect.into()),
+                    None => Vec::new(),
+                };
+                *node.paint_mut() = PaintState::from_commands(commands);
+                continue;
+            }
             if let Some(container) = self.containers.iter().find(|it| it.handle() == handle) {
                 let commands = match node.layout().rect() {
                     Some(rect) => container.paint(rect.into()),
@@ -10348,27 +10103,29 @@ impl Demo {
                 *node.paint_mut() = PaintState::from_commands(commands);
                 continue;
             }
-            // The six tab buttons, and **an arm of their own for the same reason
+            // The seven tab buttons, and **an arm of their own for the same reason
             // the slider and the field have one**: `Button::paint` measures its
             // label, so it takes an advance closure and a line height, and adding
             // two parameters to the rect-only arm below would be a change to five
             // widgets' code for one widget's seam.
             //
-            // **The bar's own container is not here** — it is one of
-            // `self.containers`, so the arm above paints it with a background —
-            // and its children are reached through the bar rather than as the
-            // root's siblings, which is why the walk finds them at all: `order` is
-            // a `paint_order` walk and the bar is a child of the root.
-            if let Some(button) = self.tab_button(handle) {
-                let advance = tab_advance(&self.metrics);
-                let commands = match node.layout().rect() {
-                    Some(rect) => {
-                        button.paint(rect.into(), &advance, tab_line_height(&self.metrics))
-                    }
-                    None => Vec::new(),
-                };
-                *node.paint_mut() = PaintState::from_commands(commands);
-                continue;
+            // **The bar's own container is not one of `self.containers`** — a
+            // `TabBar` owns it — so it has an arm of its own above, and its
+            // children are reached through the bar rather than as the root's
+            // siblings. `order` is a `paint_order` walk and the bar is a child of
+            // the root, which is why the walk finds them at all.
+            if let Some(id) = self.bar.tab_id_of(handle) {
+                if let Some(button) = self.bar.tab(id) {
+                    let advance = tab_advance(&self.metrics);
+                    let commands = match node.layout().rect() {
+                        Some(rect) => {
+                            button.paint(rect.into(), &advance, tab_line_height(&self.metrics))
+                        }
+                        None => Vec::new(),
+                    };
+                    *node.paint_mut() = PaintState::from_commands(commands);
+                    continue;
+                }
             }
             // The dock's five buttons, keyed by an arm of their own for the same
             // reason the tab buttons have one: `Button::paint` measures its label.
@@ -10744,6 +10501,19 @@ impl Demo {
         // Running it first would be undone by every arm after it, and running it
         // per arm would be the list of call sites the requirement rejects.
         self.empty_off_page_paint(&mut nodes);
+        // End the arena borrow before `show_page` takes its own.
+        drop(nodes);
+
+        // **The tab bar's click, drained at the frame's end.** The bar's own
+        // `sync` above applies a clicked tab and reports it here; this is the
+        // point where the switch is safe — the event that fired the click has
+        // finished routing and the arena is no longer borrowed, so
+        // `show_page`'s `set_visible` walk cannot re-place a subtree under a
+        // dispatch still holding the chain it built.
+        if let Some(page) = self.pending_page.get() {
+            self.pending_page.set(None);
+            self.show_page(page);
+        }
     }
 
     /// Opens the dialog if it is closed and closes it if it is up.
@@ -11543,6 +11313,7 @@ impl Demo {
         let text_input_palette = TextInputPalette::from_theme(&new_theme);
         let keyboard_palette = KeyboardPalette::from_theme(&new_theme);
         let motion = Motion::from_theme(&new_theme);
+        let (tab_unselected, tab_selected) = tab_palettes(&new_theme);
         self.theme.switch_to(new_theme, THEME_TRANSITION);
         self.gauge.set_palette(gauge_palette);
         self.gauge.animate_to_state(motion);
@@ -11613,14 +11384,16 @@ impl Demo {
         // with nothing told. That is requirement 7's whole claim and
         // `the_tab_bar_follows_a_theme_switch` is what says it happened.
         //
-        // **Its six buttons *are* here**, on the same argument as every other
-        // themed widget above: `Button`'s palette is a private plain field behind
-        // [`Button::set_palette`], not a bound property, so a caller announces a new
-        // palette and then aims at it. **All six and not only the selected one** —
-        // a theme switch moves every button's pair, and aiming only the two a
-        // *switch* would move is aiming at a target that a theme switch has
-        // already replaced for the other four.
-        self.aim_tab_buttons(&Page::ALL);
+        // **Its seven pairs *are* here**, on the same argument as every other
+        // themed widget above: `Button`'s two palettes are private plain fields
+        // behind the setters, not bound properties, so a caller announces the new
+        // pair and then aims at it. The bar's `sync` aims every tab, because
+        // `set_palette` marked all seven stale — a theme switch moves every tab's
+        // pair, not only the selected one's.
+        self.bar.set_palette(tab_unselected);
+        self.bar.set_selected_palette(tab_selected);
+        self.bar.set_motion(motion);
+        let _ = self.bar.sync();
     }
 
     /// Moves the image to the next fit in [`IMAGE_FITS`], wrapping round.
@@ -12320,25 +12093,22 @@ impl Demo {
         &self.containers[CONTROLS_LAYER]
     }
 
-    /// Returns the tab bar: the `row()` container its six buttons are children of.
+    /// Returns the tab bar: the `ui_core` widget whose container holds the seven
+    /// tabs.
     ///
-    /// **`cfg(test)` on the same ground as [`Demo::controls_layer`]:** the frame
-    /// loop walks `self.containers` and finds the bar by handle, so nothing in
-    /// production needs it by index, and what the tests want from it is its handle
-    /// — to name it in `undrawn_leaf_exemptions` and to say which node in the tree
-    /// has six children.
+    /// **`cfg(test)` on the same ground as [`Demo::controls_layer`]:** nothing in
+    /// production asks for it — [`Demo::bar`] is the field — and what the tests
+    /// want from it is the widget's own answers: its handle, its tab ids, and the
+    /// container whose children are the tabs.
     ///
-    /// **By index and not by handle**, which is a choice rather than an oversight:
-    /// the alternative is a [`Demo`] field holding the handle, and a field beside
-    /// the widget is a second answer to "which node is the bar" that nothing keeps
-    /// in step. The index is checked by
-    /// `the_container_with_a_background_are_the_card_and_the_bar`, which asserts
-    /// that this returns a container with six children whose mode is `row` and a
-    /// background that is not transparent — so a reorder fails rather than quietly
-    /// naming a different container.
+    /// **A field and not an index**, unlike the other two: a [`TabBar`] owns its
+    /// [`Container`], so the demo cannot keep a second copy in
+    /// [`Demo::containers`] and there is no index to name. The absence is checked
+    /// by `the_container_with_a_background_are_the_card_and_the_bar`, which reads
+    /// the bar's container through this accessor rather than the list.
     #[cfg(test)]
-    fn tab_bar(&self) -> &Container {
-        &self.containers[TAB_BAR]
+    fn tab_bar(&self) -> &TabBar {
+        &self.bar
     }
 
     /// Returns the text the slider's readout is showing, as the last frame
@@ -12678,6 +12448,7 @@ mod tests {
     use std::time::Duration;
     use ui_core::font::replacement_advance;
     use ui_core::widgets::rotator::ROTOR_SENSITIVITY;
+    use ui_core::widgets::tab_bar::TAB_HEIGHT;
 
     /// Monospace stand-in measurements: every character half its size wide, and
     /// every line 1.2 times its size tall, so both grow with the font size the
@@ -14476,6 +14247,10 @@ mod tests {
         let nodes = demo.nodes.borrow();
         let containers: Vec<Handle> = demo.containers.iter().map(Container::handle).collect();
         let widget_owned = widget_owned_parents(&demo);
+        // **The tab bar's container is the third kind**: a `Container` the demo
+        // built (through `TabBar::new`) but cannot keep in `Demo::containers`
+        // because the widget owns it. It is allowed here by handle.
+        let bar_parent = demo.tab_bar().handle();
         // **The chrome's parents, which are `Container` widgets too** but are kept
         // out of `Demo::containers` because their surfaces are painted by the
         // chrome arm rather than by `Container::paint` (see `chrome.rs`, and
@@ -14500,28 +14275,28 @@ mod tests {
             parents += 1;
             assert!(
                 containers.contains(&handle)
+                    || handle == bar_parent
                     || widget_owned.contains(&handle)
                     || chrome_parents.contains(&handle),
-                "node {handle:?} has children but is neither a Container of the \
-                 demo's nor one of the widget-owned parents {:?}",
+                "node {handle:?} has children but is none of the demo's Containers, \
+                 the tab bar's own, or one of the widget-owned parents {:?}",
                 widget_owned
             );
         }
         assert_eq!(
             parents,
-            containers.len() + widget_owned.len() + chrome_parents.len(),
-            "and every parent in the tree is one of those six, a widget-owned one, or \
-             one of the chrome's own containers: the six the demo assembles, the \
-             dialog and the toast host, and the chrome subtrees"
+            containers.len() + 1 + widget_owned.len() + chrome_parents.len(),
+            "and every parent in the tree is one of the demo's five, the tab bar's \
+             own container, a widget-owned one, or one of the chrome's own \
+             containers: the demo's five, the bar, the dialog and the toast host, \
+             and the chrome subtrees"
         );
         assert_eq!(
             containers.len(),
-            6,
-            "the demo assembles six: the card, the text column and its panel, the \
-             controls layer, the root and **the tab bar**. It was five between task \
-             24.1 and task 24.3 and was six before 2026-10-01, while the button row \
-             was a container of its own — the same six the demo has now assembled for \
-             a different reason"
+            5,
+            "the demo assembles five containers — the card, the text column and its \
+             panel, the controls layer and the root — and the tab bar's own is the \
+             sixth parent, owned by the `TabBar`"
         );
         assert_eq!(
             widget_owned.len(),
@@ -14679,13 +14454,7 @@ mod tests {
                 let nodes = demo.nodes.borrow();
                 let node = nodes.get(handle).expect("a container's node");
                 let commands = node.paint().commands().len();
-                if handle == demo.tab_bar().handle() {
-                    assert_eq!(
-                        commands, 1,
-                        "{page:?}: the bar is on every page and carries a background, \
-                         so it records its one rounded rectangle everywhere"
-                    );
-                } else if handle == demo.card().handle() {
+                if handle == demo.card().handle() {
                     assert_eq!(
                         commands,
                         usize::from(page == Page::Pads),
@@ -14701,17 +14470,26 @@ mod tests {
                     );
                 }
             }
+            // **The bar is not in the list** — a `TabBar` owns its container — so
+            // it is checked beside it, and the same claim holds: one rounded
+            // rectangle, on every page.
+            let nodes = demo.nodes.borrow();
+            let bar = nodes.get(demo.tab_bar().handle()).expect("the bar's node");
+            assert_eq!(
+                bar.paint().commands().len(),
+                1,
+                "{page:?}: the bar is on every page and carries a background, so it \
+                 records its one rounded rectangle everywhere"
+            );
         }
         let demo = laid_out_on(Page::Text);
-        // **And the two are the two, by index.** `Demo::controls_layer` and
-        // `Demo::tab_bar` name containers by index, so an appended bar that
-        // somehow answered for the controls layer would be invisible to every other
-        // test here; this is the line that says the accessor still names the bar.
+        // **The accessor names the widget, and the widget names the one container
+        // the demo no longer keeps.** The bar's container is the tabs' parent.
         let bar = demo.tab_bar();
         let first_tab_parent = {
             let nodes = demo.nodes.borrow();
             nodes
-                .get(demo.tabs[0].button.handle())
+                .get(tab_handles(&demo)[0])
                 .and_then(WidgetNode::parent)
                 .expect("the first tab button is attached")
         };
@@ -14734,7 +14512,7 @@ mod tests {
                 "holding one button per page"
             );
             assert!(
-                bar.background.get().a > 0,
+                bar.bar.background.get().a > 0,
                 "over a background that is not transparent, which is what makes the \
                  padding visible"
             );
@@ -17230,7 +17008,7 @@ mod tests {
     /// three times and this one exists to catch.
     fn undrawn_leaf_exemptions(demo: &Demo) -> Vec<Handle> {
         let mut exempt = vec![demo.background, demo.map.handle(), demo.tab_bar().handle()];
-        exempt.extend(demo.tab_focusables());
+        exempt.extend(tab_handles(demo));
         if demo.page == Page::Overlays {
             exempt.push(demo.dialog.handle());
         }
@@ -17507,7 +17285,7 @@ mod tests {
     /// there, so an exemption covering nothing cannot pass.
     fn strip_excused(demo: &Demo) -> Vec<Handle> {
         let mut excused = vec![demo.background, demo.tab_bar().handle()];
-        excused.extend(demo.tab_focusables());
+        excused.extend(tab_handles(demo));
         if demo.page == Page::Overlays {
             excused.push(demo.dialog.handle());
         }
@@ -18827,7 +18605,7 @@ mod tests {
                 "the car at {car:?} shares a pixel with the {what} at {rect:?}"
             );
         }
-        for button in demo.tab_focusables() {
+        for button in tab_handles(&demo) {
             let rect = demo.node_rect(button).expect("a laid-out button");
             assert!(
                 !touches(car, rect),
@@ -19850,17 +19628,16 @@ mod tests {
     /// `the_dialog_replaces_the_tab_order_while_it_is_showing`'s subject rather than
     /// this helper's.
     ///
-    /// **The six names are `tab_name`'s and the six handles are read out of
-    /// [`Demo::tabs`]**, so the two halves cannot drift; what *is* written out is
-    /// the order, which is the claim under test.
+    /// **The seven names are `tab_name`'s and the seven handles are read out of
+    /// `TabBar::tab_ids`**, so the two halves cannot drift; what *is* written out
+    /// is the order, which is the claim under test.
     fn expected_focus_order(demo: &Demo, page: Page) -> Vec<(&'static str, Handle)> {
         // **The six tab buttons in front of every page's own controls, and that is
         // requirement 6's whole content.** They are on every page, so every page's
         // walk begins with them; the order is `Page::ALL`'s, which is also the
         // order the bar lays them out in and the order `--help` prints their names
         // in.
-        let mut order: Vec<(&'static str, Handle)> = demo
-            .tab_focusables()
+        let mut order: Vec<(&'static str, Handle)> = tab_handles(demo)
             .into_iter()
             .zip(Page::ALL)
             .map(|(_, page)| (tab_name(page), tab_handle(demo, page)))
@@ -19923,15 +19700,63 @@ mod tests {
         }
     }
 
-    /// Returns the handle of the bar's button for `page`.
-    fn tab_handle(demo: &Demo, page: Page) -> Handle {
-        demo.tabs.iter().find(|tab| tab.page == page).map_or_else(
-            || panic!("no tab button for {page:?}"),
-            |tab| tab.button.handle(),
-        )
+    /// Returns every tab's button handle, in `Page::ALL` order.
+    ///
+    /// A test helper rather than a `Demo` method: the bar owns the tabs and
+    /// `TabBar::tab_ids`/`TabBar::tab` are the production door, so a second
+    /// method on `Demo` would be the delegation `TASK_UI_PRIM_43` deleted.
+    fn tab_handles(demo: &Demo) -> Vec<Handle> {
+        demo.bar
+            .tab_ids()
+            .into_iter()
+            .filter_map(|id| demo.bar.tab(id))
+            .map(Button::handle)
+            .collect()
     }
 
-    /// Returns the index of `page`'s button in [`Demo::tabs`].
+    /// Returns every tab's button, in `Page::ALL` order.
+    fn tab_buttons(demo: &Demo) -> Vec<&Button> {
+        demo.bar
+            .tab_ids()
+            .into_iter()
+            .filter_map(|id| demo.bar.tab(id))
+            .collect()
+    }
+
+    /// Returns the button the bar holds for `page`, or panics when it holds none.
+    fn bar_tab(demo: &Demo, page: Page) -> &Button {
+        let id = demo
+            .bar
+            .tab_ids()
+            .into_iter()
+            .find(|id| demo.bar.label(*id) == Some(page.name()))
+            .unwrap_or_else(|| panic!("no tab button for {page:?}"));
+        demo.bar
+            .tab(id)
+            .unwrap_or_else(|| panic!("no button for {page:?}"))
+    }
+
+    /// Returns the handle of the bar's button for `page`.
+    fn tab_handle(demo: &Demo, page: Page) -> Handle {
+        bar_tab(demo, page).handle()
+    }
+
+    /// Returns the label of the selected tab, or `None` when nothing is selected.
+    fn selected_name(demo: &Demo) -> Option<&str> {
+        demo.bar.selected().and_then(|id| demo.bar.label(id))
+    }
+
+    /// The bar's own top and bottom padding, read off the two declared heights.
+    ///
+    /// The demo no longer names the core bar's padding: it would be a second
+    /// copy of a widget constant. `TAB_BAR_HEIGHT` is the demo's strip and
+    /// `TAB_HEIGHT` is the core bar's tab, and the padding between them is the
+    /// arithmetic rather than a copied number.
+    fn tab_padding() -> f32 {
+        (TAB_BAR_HEIGHT - TAB_HEIGHT) / 2.0
+    }
+
+    /// Returns the index of `page`'s button in the bar's `tab_ids`.
     ///
     /// **Derived from [`Page::ALL`] rather than written**, so the reorder that
     /// moved `demo` first moved every assertion with it: a literal index is a
@@ -19990,10 +19815,13 @@ mod tests {
             | "the overlays tab button"
             | "the demo tab button" => Page::ALL
                 .into_iter()
-                .zip(demo.tab_focusables())
+                .zip(tab_handles(demo))
                 .find(|(page, _)| tab_name(*page) == what)
                 .is_some_and(|(_, handle)| {
-                    demo.tab_button(handle).is_some_and(|b| b.focused.get())
+                    demo.bar
+                        .tab_id_of(handle)
+                        .and_then(|id| demo.bar.tab(id))
+                        .is_some_and(|b| b.focused.get())
                 }),
             "slider" => demo.slider.widget.focused.get(),
             "toggle" => demo.toggle.focused.get(),
@@ -23322,7 +23150,7 @@ mod tests {
     /// which is the whole thing it exists to catch.
     fn always_painted_handles(demo: &Demo) -> Vec<Handle> {
         let mut handles = vec![demo.root, demo.background, demo.tab_bar().handle()];
-        handles.extend(demo.tab_focusables());
+        handles.extend(tab_handles(demo));
         handles.extend([
             demo.controls_layer().handle(),
             demo.fps_readout.label.handle(),
@@ -24577,7 +24405,7 @@ mod tests {
     fn six_tab_buttons_are_laid_out_in_page_order_and_labelled_with_their_page_names() {
         let demo = laid_out();
         assert_eq!(
-            demo.tabs.len(),
+            demo.bar.tab_ids().len(),
             Page::ALL.len(),
             "one button per page, in Page::ALL's order"
         );
@@ -24586,14 +24414,13 @@ mod tests {
         // fail the reader, and the order *is* the acceptance criterion.
         let mut previous_right = f32::NEG_INFINITY;
         for (index, page) in Page::ALL.into_iter().enumerate() {
-            let tab = &demo.tabs[index];
+            let tab = bar_tab(&demo, page);
             assert_eq!(
-                tab.page, page,
-                "the {index}th button is the one for {page:?}"
+                demo.bar.label(demo.bar.tab_ids()[index]),
+                Some(page.name()),
+                "the {index}th tab is the one for {page:?}"
             );
-            let rect = demo
-                .node_rect(tab.button.handle())
-                .expect("a laid-out tab button");
+            let rect = demo.node_rect(tab.handle()).expect("a laid-out tab button");
             assert!(
                 rect.x > previous_right,
                 "{page:?} at {rect:?} does not start to the right of the button \
@@ -24604,7 +24431,7 @@ mod tests {
             // property**, so this is the widget's answer and not a copy of the
             // table beside it.
             assert_eq!(
-                tab.button.label.get(),
+                tab.label.get(),
                 page.name(),
                 "and it is labelled with the page's own name"
             );
@@ -24619,8 +24446,8 @@ mod tests {
             );
         }
         assert_eq!(
-            demo.tabs[0].page,
-            Page::DEFAULT,
+            demo.bar.label(demo.bar.tab_ids()[0]),
+            Some(Page::DEFAULT.name()),
             "and the first is the default page's, so a run with no argument opens on \
              the button that is filled in"
         );
@@ -24642,8 +24469,7 @@ mod tests {
             // **The widget's own answer for the floor**, computed from the same
             // `content_size` the demo measured the width with, so the comparison
             // below is the one a caller would make.
-            let asked = demo.tabs[0]
-                .button
+            let asked = bar_tab(&demo, page)
                 .size(&tab_advance(&demo.metrics), tab_line_height(&demo.metrics));
             let floor = asked.height.min(asked.width.min(asked.height));
             assert!(
@@ -24660,8 +24486,8 @@ mod tests {
                  widget enforces on itself"
             );
             assert_eq!(
-                rect.height, TAB_BUTTON_TALL,
-                "{page:?}: and this demo asks for exactly that height rather than \
+                rect.height, TAB_HEIGHT,
+                "{page:?}: and the bar asks for exactly that height rather than \
                  taking the floor, which is requirement 2's number"
             );
         }
@@ -24690,7 +24516,7 @@ mod tests {
         );
         assert_eq!(bar.height, TAB_BAR_HEIGHT, "and 64 tall");
         assert_eq!(
-            TAB_BAR_PADDING * 2.0 + TAB_BUTTON_TALL,
+            TAB_HEIGHT + tab_padding() * 2.0,
             bar.height,
             "which is exactly its padding above and below plus its buttons, so 64 \
              was chosen rather than left over"
@@ -24703,7 +24529,7 @@ mod tests {
                     .expect("the bar's node")
                     .layout()
                     .padding(),
-                Padding::all(TAB_BAR_PADDING),
+                Padding::all(tab_padding()),
                 "and the padding is the requirement's visible one, on all four sides"
             );
         }
@@ -24718,11 +24544,12 @@ mod tests {
                 "{page:?}: the button at {rect:?} is inside the bar at {bar:?}"
             );
             assert_eq!(
-                rect.y, TAB_BAR_PADDING,
+                rect.y,
+                tab_padding(),
                 "{page:?}: and at y 10, which is the padded top edge of a row's inner box"
             );
             assert!(
-                rect.height <= bar.height - TAB_BAR_PADDING * 2.0,
+                rect.height <= bar.height - tab_padding() * 2.0,
                 "{page:?}: and the padding is still visible below it"
             );
         }
@@ -24736,7 +24563,7 @@ mod tests {
     /// can read.
     ///
     /// **The pairs are the theme's own tokens and not literals**, so the assertion
-    /// is about `tab_palette` agreeing with the theme rather than about two
+    /// is about `tab_palettes` agreeing with the theme rather than about two
     /// numbers. `Theme::dark()` is named because the demo starts on it and
     /// `demo.handle_event(toggle_theme_event())` would move the theme under the
     /// comparison.
@@ -24746,16 +24573,16 @@ mod tests {
             let demo = laid_out_on(page);
             let theme = Theme::dark();
             let active = ButtonPalette::from_theme(&theme);
-            let rest = tab_palette(&theme, false);
+            let rest = tab_palettes(&theme).0;
             assert_ne!(
                 active.background, rest.background,
                 "the two pairs really do differ, or the assertion below is vacuous"
             );
             for (index, button_page) in Page::ALL.into_iter().enumerate() {
-                let tab = &demo.tabs[index];
+                let button = &tab_buttons(&demo)[index];
                 let wanted = if button_page == page { &active } else { &rest };
                 assert_eq!(
-                    tab.button.background.get(),
+                    button.background.get(),
                     wanted.background,
                     "{page:?}: the {button_page:?} button's background is the {}",
                     if button_page == page {
@@ -24765,15 +24592,24 @@ mod tests {
                     }
                 );
                 assert_eq!(
-                    tab.button.foreground.get(),
+                    button.foreground.get(),
                     wanted.foreground,
                     "{page:?}: and so is its label's colour"
                 );
+                // The selected tab keeps the rest pair as its *unselected* palette
+                // and the active one in `selected_palette`; the others hold the
+                // rest pair in both, which is the widget's default.
                 assert_eq!(
-                    tab.button.palette(),
-                    *wanted,
-                    "{page:?}: read off the widget's own palette, which is what \
-                     `animate_to_state` aims at"
+                    button.palette(),
+                    rest,
+                    "{page:?}: every tab's unselected palette is the rest pair"
+                );
+                assert_eq!(
+                    button.selected_palette(),
+                    active,
+                    "{page:?}: every tab's second palette is the active pair — the \
+                     bar gives one to all seven and `Button::selected` is what chooses \
+                     it"
                 );
             }
             // **And the painted background is the pair's**, so this is about pixels
@@ -24801,28 +24637,35 @@ mod tests {
         // says so rather than assuming it.
         demo.frame(WINDOW, Duration::from_millis(16));
         assert!(
-            demo.tabs.iter().all(|tab| !tab.button.is_animating()),
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| !button.is_animating()),
             "nothing is animating at rest, or the assertion below means nothing"
         );
 
         demo.show_page(Page::Data);
+        // **The switch selects; the bar's own `sync` aims.** The demo drains a
+        // click at the end of a frame, and that same frame's `sync` is what starts
+        // the transition, so a direct `show_page` needs a frame before the aim
+        // exists.
+        demo.frame(WINDOW, Duration::ZERO);
 
         let pads_at = tab_index(Page::Pads);
         let data_at = tab_index(Page::Data);
         assert!(
-            demo.tabs[pads_at].button.is_animating(),
+            tab_buttons(&demo)[pads_at].is_animating(),
             "the button that *was* selected is animating away from the active pair"
         );
         assert!(
-            demo.tabs[data_at].button.is_animating(),
+            tab_buttons(&demo)[data_at].is_animating(),
             "and the one that now is is animating into it"
         );
         assert!(
-            demo.tabs
+            tab_buttons(&demo)
                 .iter()
                 .enumerate()
                 .filter(|(index, _)| *index != pads_at && *index != data_at)
-                .all(|(_, tab)| !tab.button.is_animating()),
+                .all(|(_, button)| !button.is_animating()),
             "**and the other five are not**, which is what says the aim is written \
              for the two that changed rather than for all seven: a bar where every \
              button restarts its clock on every switch is seven clocks restarted for \
@@ -24835,14 +24678,14 @@ mod tests {
         // write the target. A property that read its target here would be a write,
         // and the assertion above that `is_animating` is what tells the two apart.
         assert_eq!(
-            demo.tabs[pads_at].button.background.get(),
+            tab_buttons(&demo)[pads_at].background.get(),
             ButtonPalette::from_theme(&Theme::dark()).background,
             "the button that left still reads the *active* colour, and is animating \
              toward the rest pair"
         );
         assert_eq!(
-            demo.tabs[data_at].button.background.get(),
-            tab_palette(&Theme::dark(), false).background,
+            tab_buttons(&demo)[data_at].background.get(),
+            tab_palettes(&Theme::dark()).0.background,
             "and the one that arrived still reads the *rest* colour, and is \
              animating toward the active pair"
         );
@@ -24851,7 +24694,9 @@ mod tests {
         // is the other half of "animates rather than jumps".
         demo.frame(WINDOW, Duration::from_millis(400));
         assert!(
-            demo.tabs.iter().all(|tab| !tab.button.is_animating()),
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| !button.is_animating()),
             "and after the transition every button has arrived"
         );
         assert_eq!(
@@ -24861,7 +24706,7 @@ mod tests {
         );
         assert_eq!(
             tab_fill(&demo, Page::Pads),
-            Some(tab_palette(&Theme::dark(), false).background),
+            Some(tab_palettes(&Theme::dark()).0.background),
             "and the one that left it in the rest pair"
         );
     }
@@ -24911,8 +24756,10 @@ mod tests {
         // button half way between the two pairs' backgrounds.
         let mut demo = laid_out_on(Page::Pads);
         demo.show_page(Page::Data);
+        // One frame to aim, then half a motion to move.
+        demo.frame(WINDOW, Duration::ZERO);
         demo.frame(WINDOW, fast / 2);
-        let midway = demo.tabs[tab_index(Page::Data)].button.background.get();
+        let midway = tab_buttons(&demo)[tab_index(Page::Data)].background.get();
         assert_ne!(
             midway,
             ButtonPalette::from_theme(&Theme::dark()).background,
@@ -24921,7 +24768,7 @@ mod tests {
         );
         assert_ne!(
             midway,
-            tab_palette(&Theme::dark(), false).background,
+            tab_palettes(&Theme::dark()).0.background,
             "and not yet back where it started either"
         );
     }
@@ -24958,36 +24805,36 @@ mod tests {
                  release"
             );
             assert!(
-                demo.tabs
-                    .iter()
-                    .find(|tab| tab.page == target)
-                    .is_some_and(|tab| tab.button.pressed.get()),
+                bar_tab(&demo, target).pressed.get(),
                 "{target:?}: and the press is on screen as the button's own pressed \
                  state"
             );
 
             demo.handle_event(up);
+            // **The click asks the bar; the frame applies it.** `TabBar::sync`
+            // selects the tab and reports it, and the `pending_page` drain at the
+            // frame's end is what switches the page.
+            demo.frame(WINDOW, Duration::ZERO);
             assert_eq!(
                 demo.page, target,
-                "{target:?}: the release's tap switched to it, through handle_event"
+                "{target:?}: the release's tap switched to it, through the bar and \
+                 the frame's drain"
             );
-            // **And the selection moved with it**, in the same call — which is what
-            // says the drain really reached `show_page` rather than setting a field
-            // some later frame reads.
+            // **And the selection moved with it**, in the same frame — which is
+            // what says the drain really reached `show_page` rather than setting a
+            // field some later frame reads.
+            let button = bar_tab(&demo, target);
             assert!(
-                demo.tabs
-                    .iter()
-                    .find(|tab| tab.page == target)
-                    .is_some_and(|tab| {
-                        tab.button.palette().background
-                            == ButtonPalette::from_theme(&Theme::dark()).background
-                    }),
-                "{target:?}: and the clicked button now holds the *active* palette. \
+                button.selected.get()
+                    && demo.bar.selected().and_then(|id| demo.bar.label(id)) == Some(target.name()),
+                "{target:?}: and the clicked tab is the bar's selection"
+            );
+            assert_eq!(
+                button.selected_palette().background,
+                ButtonPalette::from_theme(&Theme::dark()).background,
+                "{target:?}: and its selected palette is the theme's active pair. \
                  The **palette** and not the `background` property, because the \
-                 property is mid-transition on the frame of the switch — that is \
-                 what `a_page_switch_animates_the_two_buttons_that_changed` is \
-                 about, and asking for the property's value here would be asking \
-                 two tests the same question"
+                 property is mid-transition on the frame of the switch"
             );
         }
     }
@@ -25021,13 +24868,18 @@ mod tests {
                      stop, and nothing else"
                 );
                 assert!(
-                    demo.tab_button(demo.focused.expect("a focus"))
+                    demo.focused
+                        .and_then(|handle| demo.bar.tab_id_of(handle))
+                        .and_then(|id| demo.bar.tab(id))
                         .is_some_and(|button| button.focused.get()),
                     "{name} on the {target:?} button: and it holds its `focused` \
                      property, which is what draws the ring"
                 );
 
                 demo.handle_event(key_event(keycode));
+                // The bar's click asks; the frame's `sync` selects and its drain
+                // switches the page.
+                demo.frame(WINDOW, Duration::ZERO);
                 assert_eq!(
                     demo.page, target,
                     "{name} on the {target:?} button switched the page"
@@ -25138,7 +24990,9 @@ mod tests {
             "a press on the bar under the scrim switches nothing"
         );
         assert!(
-            demo.tabs.iter().all(|tab| !tab.button.pressed.get()),
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| !button.pressed.get()),
             "and lights nothing: the press arms are behind the same modal guard as \
              the pads', the slider's and the keyboard's"
         );
@@ -25182,11 +25036,10 @@ mod tests {
              button that the scrim covers"
         );
         assert!(
-            !demo
-                .tab_focusables()
+            !tab_handles(&demo)
                 .iter()
                 .any(|handle| Some(*handle) == demo.focused),
-            "and never on one of the six"
+            "and never on one of the seven"
         );
 
         // **Half two: the dialog is closed, and the same gesture works.**
@@ -25200,6 +25053,7 @@ mod tests {
         let (down, up) = click_at(x, y);
         demo.handle_event(down);
         demo.handle_event(up);
+        demo.frame(WINDOW, Duration::ZERO);
         assert_eq!(
             demo.page,
             Page::Pads,
@@ -25233,10 +25087,12 @@ mod tests {
         // transition out and this is the only moment at which "all six are
         // animating" is true.
         assert!(
-            demo.tabs.iter().all(|tab| tab.button.is_animating()),
-            "all six buttons are animating on the frame of the switch, because a \
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| button.is_animating()),
+            "all seven buttons are animating on the frame of the switch, because a \
              theme switch moves every pair and aiming only the selected one would \
-             leave the other five chasing a palette that has already been replaced"
+             leave the other six chasing a palette that has already been replaced"
         );
         // **Four 100 ms frames**, not one 16 ms one, and the difference is the point:
         // the theme's own tokens *animate* over `THEME_TRANSITION`, so a single
@@ -25258,13 +25114,13 @@ mod tests {
         // is a private field behind a setter and not a bound property, so the demo
         // announces the new one and aims at it like every other themed widget.
         assert_eq!(
-            demo.tabs[0].button.background.get(),
-            tab_palette(&Theme::light(), true).background,
+            tab_buttons(&demo)[0].background.get(),
+            tab_palettes(&Theme::light()).1.background,
             "the selected button is on the light theme's active pair"
         );
         assert_eq!(
-            demo.tabs[1].button.background.get(),
-            tab_palette(&Theme::light(), false).background,
+            tab_buttons(&demo)[1].background.get(),
+            tab_palettes(&Theme::light()).0.background,
             "and every other one is on the light theme's rest pair"
         );
 
@@ -25301,29 +25157,31 @@ mod tests {
             .node_rect(tab_handle(&demo, target))
             .expect("a laid-out button");
         assert_eq!(
-            demo.tabs[at].button.scale.get(),
+            tab_buttons(&demo)[at].scale.get(),
             1.0,
             "at rest it is at 1.0"
         );
 
         demo.handle_event(mouse_down_at(x, y, 0));
         assert!(
-            demo.tabs[at].button.pressed.get(),
+            tab_buttons(&demo)[at].pressed.get(),
             "the press arm writes the button's own `pressed`"
         );
+        // The press only writes the flag; the bar's `sync` is what aims it.
+        demo.frame(WINDOW, Duration::ZERO);
         assert!(
-            demo.tabs[at].button.is_animating(),
+            tab_buttons(&demo)[at].is_animating(),
             "and aims it, so the press is a transition rather than a write"
         );
         for _ in 0..20 {
             demo.frame(WINDOW, Duration::from_millis(16));
         }
         assert!(
-            !demo.tabs[at].button.is_animating(),
+            !tab_buttons(&demo)[at].is_animating(),
             "the press arrives rather than being restarted every frame"
         );
         assert_eq!(
-            demo.tabs[at].button.scale.get(),
+            tab_buttons(&demo)[at].scale.get(),
             0.95,
             "and it is drawn smaller, which is `Button`'s own pressed scale"
         );
@@ -25345,9 +25203,12 @@ mod tests {
         for _ in 0..20 {
             demo.frame(WINDOW, Duration::from_millis(16));
         }
-        assert!(!demo.tabs[at].button.pressed.get(), "the release clears it");
+        assert!(
+            !tab_buttons(&demo)[at].pressed.get(),
+            "the release clears it"
+        );
         assert_eq!(
-            demo.tabs[at].button.scale.get(),
+            tab_buttons(&demo)[at].scale.get(),
             1.0,
             "and the scale comes back"
         );
@@ -25368,7 +25229,9 @@ mod tests {
         let mut demo = other;
         demo.handle_event(mouse_up_at(ox, oy, 40_000_000));
         assert!(
-            demo.tabs.iter().all(|tab| !tab.button.pressed.get()),
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| !button.pressed.get()),
             "a release with no press behind it starts nothing"
         );
     }
@@ -25417,9 +25280,8 @@ mod tests {
     /// criterion names this state rather than "part way through".
     ///
     /// **The page on show is [`Page::Data`] and the button is its own**, so the
-    /// button is the *selected* one and **nothing aims it but [`Demo::press_tab`]**:
-    /// a click's `show_page` would aim it on the way out of the press, which is
-    /// what hid this from the test beside it until the review of this task.
+    /// button is the *selected* one and **only the bar's `sync` aims it**: the
+    /// press writes the flag, and the next frame's sync starts the transition.
     #[test]
     fn a_press_paints_a_colour_strictly_between_the_two_ends() {
         let target = Page::Data;
@@ -25428,7 +25290,7 @@ mod tests {
         let motion = tab_motion(&theme);
         let half = motion.duration / 2;
         // **The selected pair, because the button belongs to the page on show.**
-        let pair = tab_palette(&theme, true);
+        let pair = tab_palettes(&theme).1;
         let arrived_colour = arrived_press(&pair);
 
         let at_rest = painted_tab(&demo, target)
@@ -25441,6 +25303,8 @@ mod tests {
 
         let (x, y) = tab_center(&demo, target);
         demo.handle_event(mouse_down_at(x, y, 0));
+        // One frame to aim, then half a motion to move.
+        demo.frame(WINDOW, Duration::ZERO);
         demo.frame(WINDOW, half);
         let midway = painted_tab(&demo, target)
             .0
@@ -25501,11 +25365,10 @@ mod tests {
     /// and that is the one release nothing else aims.**
     ///
     /// The test above releases a button belonging to a **different** page, so the
-    /// click's own [`Demo::show_page`] aims it on the way through
-    /// [`Demo::aim_tab_buttons`] — and the release's own aim is redundant there.
-    /// **Press and release the button of the page that is already showing and
-    /// `show_page` early-returns**, so nothing aims the button except
-    /// [`Demo::release_tab`].
+    /// click's own [`Demo::show_page`] changes the selection — and the bar's
+    /// `sync` aims it on the way through. **Press and release the button of the
+    /// page that is already showing and `show_page` early-returns**, so the only
+    /// aim is the sync after the release.
     ///
     /// **The review of this task found that by mutation**, not by reading:
     /// dropping `tab.button.animate_to_state(motion)` from `release_tab` left the
@@ -25535,14 +25398,14 @@ mod tests {
 
         demo.handle_event(mouse_down_at(x, y, 0));
         assert!(
-            demo.tabs[index].button.pressed.get(),
+            tab_buttons(&demo)[index].pressed.get(),
             "the press arm writes the button's own `pressed`"
         );
         for _ in 0..20 {
             demo.frame(WINDOW, Duration::from_millis(16));
         }
         assert_eq!(
-            demo.tabs[index].button.scale.get(),
+            tab_buttons(&demo)[index].scale.get(),
             0.95,
             "and it arrives at the pressed scale, so the release has somewhere to \
              come back from"
@@ -25554,15 +25417,17 @@ mod tests {
         // there.
         demo.handle_event(mouse_up_at(x, y, 40_000_000));
         assert!(
-            !demo.tabs[index].button.pressed.get(),
+            !tab_buttons(&demo)[index].pressed.get(),
             "the release clears the flag"
         );
         assert_eq!(
             demo.page, target,
             "and the tap it routes found no page to switch to"
         );
+        // The release writes the flag; the next frame's sync aims it.
+        demo.frame(WINDOW, Duration::ZERO);
         assert!(
-            demo.tabs[index].button.is_animating(),
+            tab_buttons(&demo)[index].is_animating(),
             "**and the button is animating**, which is what says the release aimed it \
              rather than only clearing a flag: a release with no aim leaves the \
              scale where the press put it and nothing running"
@@ -25571,13 +25436,15 @@ mod tests {
             demo.frame(WINDOW, Duration::from_millis(16));
         }
         assert_eq!(
-            demo.tabs[index].button.scale.get(),
+            tab_buttons(&demo)[index].scale.get(),
             1.0,
             "so the button comes back to rest — the number a release with no aim \
              leaves at 0.95 for ever"
         );
         assert!(
-            demo.tabs.iter().all(|tab| !tab.button.pressed.get()),
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| !button.pressed.get()),
             "and no button was left pressed"
         );
     }
@@ -25603,12 +25470,12 @@ mod tests {
 
         demo.handle_event(finger_down_at(x, y, 0));
         assert!(
-            demo.tabs[at].button.pressed.get(),
+            tab_buttons(&demo)[at].pressed.get(),
             "a finger down on the button presses it"
         );
         demo.handle_event(finger_up_at(x, y, 40_000_000));
         assert!(
-            !demo.tabs[at].button.pressed.get(),
+            !tab_buttons(&demo)[at].pressed.get(),
             "and the finger's release lets it go"
         );
         // **And the release's tap switched the page**, which is the half that is
@@ -25616,13 +25483,14 @@ mod tests {
         // finger tap has to reach the button rather than being dropped beside it.
         // The finger arm of `handle_event` is the only place the *press* is written,
         // so the click and the press are two separate code paths for one gesture.
+        demo.frame(WINDOW, Duration::ZERO);
         assert_eq!(
             demo.page, target,
             "so the same finger gesture the mouse test above performs switches to \
              the button's page"
         );
         assert!(
-            demo.tabs[at].button.is_animating(),
+            tab_buttons(&demo)[at].is_animating(),
             "and animates the selection, because the click reached the same drain"
         );
     }
@@ -25649,10 +25517,10 @@ mod tests {
         let line_height = tab_line_height(&demo.metrics);
         let mut widths: Vec<f32> = Vec::new();
         for page in Page::ALL {
-            let tab = &demo.tabs[Page::ALL.iter().position(|p| *p == page).unwrap_or(0)];
-            let asked = tab.button.content_size(&advance, line_height);
+            let tab = bar_tab(&demo, page);
+            let asked = tab.content_size(&advance, line_height);
             let laid = demo
-                .node_rect(tab.button.handle())
+                .node_rect(tab.handle())
                 .unwrap_or_else(|| panic!("the {page:?} tab button is laid out"));
             assert_eq!(
                 laid.width, asked.width,
@@ -25714,7 +25582,9 @@ mod tests {
     fn a_pointer_over_a_tab_button_hovers_it_and_nothing_else() {
         let mut demo = laid_out_on(Page::Controls);
         assert!(
-            demo.tabs.iter().all(|tab| !tab.button.hovered.get()),
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| !button.hovered.get()),
             "nothing is hovered with the pointer nowhere"
         );
 
@@ -25722,19 +25592,21 @@ mod tests {
         let text_at = tab_index(Page::Text);
         demo.handle_event(mouse_motion_at(x, y));
         assert!(
-            demo.tabs[text_at].button.hovered.get(),
+            tab_buttons(&demo)[text_at].hovered.get(),
             "a pointer over the text button hovers it"
         );
         assert!(
-            demo.tabs
+            tab_buttons(&demo)
                 .iter()
                 .enumerate()
-                .all(|(i, tab)| tab.button.hovered.get() == (i == text_at)),
+                .all(|(i, button)| button.hovered.get() == (i == text_at)),
             "and no other: the seven are told apart by their own boxes, not by a \
              single shared flag"
         );
+        // The motion only writes the flags; the next frame's sync aims them.
+        demo.frame(WINDOW, Duration::ZERO);
         assert!(
-            demo.tabs[text_at].button.is_animating(),
+            tab_buttons(&demo)[text_at].is_animating(),
             "and the tint is a transition, not a write"
         );
         // **Past the transition before the pixels are read**, for the same reason
@@ -25745,7 +25617,7 @@ mod tests {
         for _ in 0..20 {
             demo.frame(WINDOW, Duration::from_millis(16));
         }
-        let rest_fill = tab_palette(&Theme::dark(), false).background;
+        let rest_fill = tab_palettes(&Theme::dark()).0.background;
         let hovered_fill = tab_fill(&demo, Page::Text).expect("a painted button");
         assert_ne!(
             hovered_fill, rest_fill,
@@ -25763,13 +25635,285 @@ mod tests {
         // snapped, so the tint fades instead of jumping.
         demo.handle_event(mouse_motion_at(x, y + 400.0));
         assert!(
-            demo.tabs.iter().all(|tab| !tab.button.hovered.get()),
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| !button.hovered.get()),
             "a pointer below the bar hovers nothing"
         );
+        demo.frame(WINDOW, Duration::ZERO);
         assert!(
-            demo.tabs[text_at].button.is_animating(),
+            tab_buttons(&demo)[text_at].is_animating(),
             "and the button that was hovered is animating back to its rest colour"
         );
+    }
+
+    // --------------------------------------------------- task 43.2: the bar API
+
+    #[test]
+    fn every_tab_index_names_the_page_at_that_index_of_page_all() {
+        let demo = laid_out();
+        let ids = demo.bar.tab_ids();
+        assert_eq!(ids.len(), Page::ALL.len());
+        for (index, page) in Page::ALL.into_iter().enumerate() {
+            let id = ids[index];
+            assert_eq!(id.index(), index, "the id is the position it came in at");
+            assert_eq!(
+                demo.bar.label(id),
+                Some(page.name()),
+                "{page:?}: the label at its index is its page's name"
+            );
+            assert_eq!(
+                demo.bar.tab(id).map(Button::handle),
+                Some(tab_handle(&demo, page)),
+                "{page:?}: and the id names the same button as the page does"
+            );
+        }
+    }
+
+    #[test]
+    fn the_demo_bar_has_one_tab_per_page_and_no_tab_beyond_the_seven() {
+        let demo = laid_out();
+        assert_eq!(
+            demo.bar.tab_ids().len(),
+            Page::ALL.len(),
+            "the bar holds one tab per page and no more"
+        );
+        for page in Page::ALL {
+            let named = demo
+                .bar
+                .tab_ids()
+                .into_iter()
+                .filter(|id| demo.bar.label(*id) == Some(page.name()))
+                .count();
+            assert_eq!(named, 1, "{page:?}: names exactly one tab");
+        }
+        assert!(
+            !demo.bar.select_name("no such page"),
+            "and a name no page carries is not a tab beyond the seven"
+        );
+        assert_eq!(demo.bar.tab_ids().len(), Page::ALL.len());
+    }
+
+    #[test]
+    fn the_tab_bar_selection_and_the_screens_current_name_never_disagree() {
+        for start in Page::ALL {
+            let mut demo = laid_out_on(start);
+            assert_eq!(
+                selected_name(&demo),
+                Some(start.name()),
+                "{start:?}: the launch selection is the page on show"
+            );
+            // **The direct switch**, as a shortcut takes.
+            for target in Page::ALL {
+                demo.show_page(target);
+                demo.frame(WINDOW, Duration::ZERO);
+                assert_eq!(
+                    selected_name(&demo),
+                    Some(demo.page.name()),
+                    "{start:?} -> {target:?}: a direct switch moves both"
+                );
+            }
+            // **The click switch**, as the bar takes.
+            for target in Page::ALL {
+                let (x, y) = tab_center(&demo, target);
+                let (down, up) = click_at(x, y);
+                demo.handle_event(down);
+                demo.handle_event(up);
+                demo.frame(WINDOW, Duration::ZERO);
+                assert_eq!(
+                    selected_name(&demo),
+                    Some(demo.page.name()),
+                    "{start:?} -> {target:?}: a clicked tab moves both"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_bar_still_records_the_command_sequence_it_recorded_before() {
+        let demo = laid_out();
+        let bar = demo.tab_bar().handle();
+        // The bar's own one rounded rectangle, at its own box.
+        let commands = demo.commands_at(bar);
+        assert_eq!(commands.len(), 1, "the bar records its background only");
+        match &commands[0] {
+            DrawCommand::RoundedRect { rect, color, .. } => {
+                assert_eq!(*rect, demo.node_rect(bar).expect("the bar is laid out"));
+                assert_eq!(*color, demo.bar.bar.background.get());
+            }
+            other => panic!("the bar's command is {other:?}, not a RoundedRect"),
+        }
+        // Then each tab, in `Page::ALL` order: its background and then its label.
+        for (index, page) in Page::ALL.into_iter().enumerate() {
+            let handle = tab_handles(&demo)[index];
+            let commands = demo.commands_at(handle);
+            assert_eq!(
+                commands.len(),
+                2,
+                "{page:?}: a tab records its background then its text"
+            );
+            match (&commands[0], &commands[1]) {
+                (DrawCommand::RoundedRect { rect, .. }, DrawCommand::Text { text, .. }) => {
+                    assert_eq!(*rect, demo.node_rect(handle).expect("the tab is laid out"));
+                    assert_eq!(text, page.name());
+                }
+                other => panic!("{page:?}: the tab's commands are {other:?}"),
+            }
+        }
+        // And the bar is recorded before every tab it paints.
+        let bar_at = demo
+            .order
+            .iter()
+            .position(|handle| *handle == bar)
+            .expect("the bar is in the paint order");
+        let first_tab_at = demo
+            .order
+            .iter()
+            .position(|handle| *handle == tab_handles(&demo)[0])
+            .expect("the first tab is in the paint order");
+        assert!(
+            bar_at < first_tab_at,
+            "the bar at {bar_at} records before its first tab at {first_tab_at}"
+        );
+    }
+
+    #[test]
+    fn a_page_switch_aims_exactly_the_two_tabs_it_moved_between() {
+        let mut demo = laid_out_on(Page::Pads);
+        demo.frame(WINDOW, Duration::ZERO);
+        assert!(
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| !button.is_animating()),
+            "nothing is animating at rest"
+        );
+
+        demo.show_page(Page::Data);
+        assert!(
+            tab_buttons(&demo)
+                .iter()
+                .all(|button| !button.is_animating()),
+            "**a switch selects and does not aim**: the aim is `TabBar::sync`'s"
+        );
+        demo.frame(WINDOW, Duration::ZERO);
+
+        let pads_at = tab_index(Page::Pads);
+        let data_at = tab_index(Page::Data);
+        let aimed: Vec<usize> = tab_buttons(&demo)
+            .iter()
+            .enumerate()
+            .filter(|(_, button)| button.is_animating())
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(
+            aimed,
+            vec![pads_at, data_at],
+            "exactly the two tabs the switch moved between are aimed"
+        );
+    }
+
+    #[test]
+    fn a_tab_on_the_page_already_on_show_is_aimed_by_its_press_and_its_release() {
+        let target = Page::Data;
+        let mut demo = laid_out_on(target);
+        let at = tab_index(target);
+        let (x, y) = tab_center(&demo, target);
+
+        demo.handle_event(mouse_down_at(x, y, 0));
+        assert!(tab_buttons(&demo)[at].pressed.get(), "the press writes it");
+        assert!(
+            !tab_buttons(&demo)[at].is_animating(),
+            "and does not aim it: that is the bar's `sync`"
+        );
+        demo.frame(WINDOW, Duration::ZERO);
+        assert!(
+            tab_buttons(&demo)[at].is_animating(),
+            "the sync after the press aims it"
+        );
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert_eq!(
+            tab_buttons(&demo)[at].scale.get(),
+            0.95,
+            "and the press arrives, so the release has somewhere to come back from"
+        );
+
+        demo.handle_event(mouse_up_at(x, y, 40_000_000));
+        assert!(
+            !tab_buttons(&demo)[at].pressed.get(),
+            "the release clears it"
+        );
+        assert!(
+            !tab_buttons(&demo)[at].is_animating(),
+            "and does not aim it either"
+        );
+        demo.frame(WINDOW, Duration::ZERO);
+        assert!(
+            tab_buttons(&demo)[at].is_animating(),
+            "the sync after the release aims it back"
+        );
+        for _ in 0..20 {
+            demo.frame(WINDOW, Duration::from_millis(16));
+        }
+        assert_eq!(
+            tab_buttons(&demo)[at].scale.get(),
+            1.0,
+            "and it comes back to rest"
+        );
+        assert_eq!(demo.page, target, "the page never moved");
+    }
+
+    #[test]
+    fn the_focus_ring_follows_the_focus_record_and_the_selection_follows_the_screen() {
+        let mut demo = laid_out_on(Page::Pads);
+        let target = Page::Text;
+        let at = tab_index(target);
+        demo.set_focus(Some(tab_handle(&demo, target)));
+        assert!(
+            tab_buttons(&demo)[at].focused.get(),
+            "the focus record writes the tab's own `focused`, which draws the ring"
+        );
+        assert_eq!(
+            selected_name(&demo),
+            Some(Page::Pads.name()),
+            "and focus does not move the selection"
+        );
+        assert!(
+            tab_buttons(&demo)
+                .iter()
+                .enumerate()
+                .all(|(index, button)| button.focused.get() == (index == at)),
+            "and only the focused tab carries it"
+        );
+
+        demo.show_page(target);
+        demo.frame(WINDOW, Duration::ZERO);
+        assert_eq!(
+            selected_name(&demo),
+            Some(target.name()),
+            "the switch moves the selection"
+        );
+        assert!(
+            tab_buttons(&demo)[at].focused.get(),
+            "and a tab is on every page, so the switch keeps its ring"
+        );
+    }
+
+    #[test]
+    fn the_two_tab_palettes_differ_in_all_three_colours() {
+        for theme in [Theme::dark(), Theme::light()] {
+            let (rest, selected) = tab_palettes(&theme);
+            assert_ne!(
+                rest.background, selected.background,
+                "the two backgrounds are different"
+            );
+            assert_ne!(
+                rest.foreground, selected.foreground,
+                "the two labels are different"
+            );
+            assert_ne!(rest.ring, selected.ring, "the two rings are different");
+        }
     }
 
     // ----------------------------------------------- what holds the new nodes up
@@ -25798,7 +25942,7 @@ mod tests {
                 "{page:?}: and it records its background, so the exemption covers \
                  something that draws"
             );
-            for button in demo.tab_focusables() {
+            for button in tab_handles(&demo) {
                 assert!(
                     excused.contains(&button),
                     "{page:?}: and so is each of its six buttons"
@@ -25862,7 +26006,7 @@ mod tests {
     fn a_tap_over_a_bar_button_is_not_in_the_routed_chain() {
         for page in Page::ALL {
             let demo = dialog_closed_on(page);
-            let buttons = demo.tab_focusables();
+            let buttons = tab_handles(&demo);
             for (index, &handle) in buttons.iter().enumerate() {
                 let (x, y) = tab_center(&demo, Page::ALL[index]);
                 let chain = {
@@ -25944,12 +26088,10 @@ mod tests {
     #[test]
     fn the_seventh_tab_button_lays_out_inside_the_window() {
         let demo = laid_out();
-        let last_tab = demo
-            .tabs
+        let last_tab = tab_handles(&demo)
             .last()
-            .expect("the bar has one button per page")
-            .button
-            .handle();
+            .copied()
+            .expect("the bar has one button per page");
         let rect = demo
             .node_rect(last_tab)
             .expect("the last tab button is laid out");
@@ -26297,7 +26439,7 @@ mod tests {
         // task never touches it: every tab button is still a node the demo page
         // shows. This is the criterion that `TASK_UI_PRIM_43`'s arrival changes
         // nothing here.
-        for button in demo.tab_focusables() {
+        for button in tab_handles(&demo) {
             assert!(
                 demo.on_show(button),
                 "the gallery's tab bar is still present on the demo page"

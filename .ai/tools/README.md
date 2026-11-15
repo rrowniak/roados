@@ -64,6 +64,38 @@ unescapes entities, and collapses whitespace. Prints a separator and the text.
   keep: full, deterministic, unsummarised output from a page you already have on
   disk.
 
+## `herdr-dispatch.sh` — run one worker agent in a herdr tab
+
+```sh
+.ai/tools/herdr-dispatch.sh scout-licence scout /tmp/opencode/herdr/scout-licence.brief.md
+for n in a b c; do .ai/tools/herdr-dispatch.sh "coder-$n" coder "/tmp/opencode/herdr/coder-$n.brief.md" > "/tmp/opencode/herdr/coder-$n.out" & done; wait
+```
+
+Opens a tab without focusing it, starts `opencode` on the model for that role
+(`../protocols/subagents.md` § *Roster*), points the worker at
+`.ai/agents/<role>.md` and the brief, waits for it, then prints
+`/tmp/opencode/herdr/<name>.md` and closes the tab. `TIMEOUT_MS` (default
+30 min) bounds the wait.
+
+### Use it for
+
+Every dispatch made inside herdr (`HERDR_ENV=1`).
+
+### Do not use it for
+
+- Running outside herdr. The script refuses; fall back to the Task tool.
+- Answering a worker. Exit 3 leaves the pane open because the worker stalled,
+  hit a permission prompt or asked a question. Inspect it with
+  `herdr agent read <name>`, then answer with `herdr agent prompt`, or close
+  the pane and re-dispatch.
+
+### Known limits
+
+- The model map is hard-coded in the script. Change it there and in
+  § *Roster* together.
+- Names must be unique among live agents (`[a-z][a-z0-9_-]{0,31}`). Reusing the
+  name of a worker that is still alive fails at `agent start`.
+
 ## `fps-check.sh` — measure the demo's frame rate, and judge it against a floor
 
 ```sh

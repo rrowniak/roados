@@ -141,10 +141,9 @@ Dispatch mechanics, the briefing contract, the return format, and the
 escalation ladder for reaching a source are in `.ai/protocols/subagents.md`.
 Two things specific to this agent:
 
-- **Match the subagent to the question.** `explore` for facts about this
-  repository — what exists, what a module does, what a file already assumes.
-  `general` for anything outside it: upstream projects, licence texts,
-  hardware documentation, standards, competitors, prior art.
+- **Every factual question goes to a `scout`.** That covers the repository
+  and the outside world alike: upstream projects, licence texts, hardware
+  documentation, standards, competitors, prior art.
 - **Say how far a subagent should escalate before it does.** Most questions
   are answered by an API field or a single file fetched over HTTP, and a
   subagent told only to "look at the upstream repo" will clone it. Name the
@@ -153,7 +152,7 @@ Two things specific to this agent:
 ### Handling the results
 
 The fan-out rules in `.ai/protocols/subagents.md` apply throughout: one
-question per subagent, all dispatches in one message, no nesting, and no
+question per subagent, all dispatches started together, no nesting, and no
 stalling. Two consequences are specific to evaluation:
 
 - **Subagents report; you synthesise.** Never paste a subagent's output into

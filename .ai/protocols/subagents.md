@@ -1,22 +1,54 @@
 # Subagent protocol
 
-This protocol is canonical for this repository. `researcher.md` and
-`idea-evaluator.md` dispatch by it and must not restate it. If either agent
-disagrees with this file, this file wins.
+This protocol is canonical for this repository. Every agent that dispatches
+does so by it and must not restate it. If an agent disagrees with this file,
+this file wins.
 
 ## Roster
 
-The Task tool in this harness provides two subagent types. Do not name a
-third.
+A worker is an `.ai/agents/<role>.md` file run as its own `opencode`
+process. **Cost rule: Flash is the default.** Pro is reserved for the two roles
+where a cheap miss is expensive.
 
-- **`explore`** — facts about this repository: what exists, what a module
-  does, what a file already assumes. Fast, read-only. The default.
-- **`general`** — anything outside the repository: upstream projects, licence
-  texts, hardware documentation, standards, competitors, prior art, field
-  reports. Give it web access needs explicitly.
+| Role | Model | Writes | Job |
+|------|-------|--------|-----|
+| `scout` | Flash | no | one factual question, repo or web |
+| `coder` | Flash | yes, owned files only | one bounded sub-task |
+| `developer` | Flash | yes | one task; may fan out to `coder` |
+| `researcher`, `idea-evaluator` | Flash | no | synthesis over `scout`s |
+| `reviewer` | Pro | no | review, in a session separate from the author's |
+| `architect` | Pro | no | escalation: a design question, or a blocked worker |
 
-There is no `scout`. Reading a dependency's actual implementation is
-`general`'s job, escalated per the ladder below.
+Flash is `opencode-go/deepseek-v4.1-flash` and Pro is
+`opencode-go/deepseek-v4-pro`. The map lives in `../tools/herdr-dispatch.sh`;
+change both places together.
+
+### Backends
+
+- **herdr (`HERDR_ENV=1`): the default.** Dispatch each worker with
+  `../tools/herdr-dispatch.sh <name> <role> <brief-file>`. For parallel workers,
+  run the calls in the background in one shell command and `wait` on them.
+- **Task tool: the fallback outside herdr.** Use `explore` for a `scout`
+  question about this repository and `general` for everything else, and tell
+  it to read `.ai/agents/<role>.md`. The cost rule does not hold on this path:
+  Task subagents run on the caller's model.
+
+### Return channel
+
+The worker writes its return block — § *Return format*, or the handoff from
+§ *Implementation fan-out* — to `/tmp/opencode/herdr/<name>.md`. Read that
+file; do not read the pane's scrollback, which is lossy and costs more tokens.
+A missing file is a failed dispatch (exit 3; the pane stays open).
+
+### Escalation
+
+When a Flash worker fails, is stuck in a loop, or reports that it is blocked:
+read its output once and diagnose. Then re-dispatch it with a corrected brief,
+or pass the diagnosis to an `architect`. Never re-send the same brief to the
+same model a third time.
+
+Reading a dependency's actual implementation is a `scout`'s job, escalated per
+the ladder below.
 
 ## Fan-out
 
@@ -24,7 +56,8 @@ There is no `scout`. Reading a dependency's actual implementation is
   and hand-waves the other, and you cannot tell which.
 - **Three to six is the useful range.** Fewer wastes the parallelism; more
   produces a pile nobody reads.
-- **All dispatches go in one message**, so they run concurrently.
+- **All dispatches start together** — one message with Task calls, or one
+  shell command that runs `herdr-dispatch.sh` calls in the background and then `wait`s — so they run concurrently.
 - **Do not let subagents fan out further.** Nesting multiplies cost and makes
   results unattributable. If a subagent reports that its question depends on
   another question, dispatch that as a new top-level subagent.
@@ -46,7 +79,7 @@ writes code. The rules are different.
 
 The developer agent estimates scope per `.ai/agents/developer.md` § *Scope
 check*. When a task exceeds the threshold, the developer splits it into
-isolated sub-tasks and dispatches one `general` subagent per sub-task.
+isolated sub-tasks and dispatches one `coder` per sub-task.
 
 **The developer is the orchestrator, not a peer.** It splits the work, briefs
 each subagent, collects the handoffs, and integrates. Subagents do not see
@@ -75,7 +108,7 @@ not two.
 The developer decides the execution order:
 
 - **Parallel** when sub-tasks touch disjoint files and have no data
-  dependencies. All dispatches go in one message, per the research fan-out
+  dependencies. All dispatches start together, per the research fan-out
   rules.
 - **Sequential** when sub-task B reads a type or function sub-task A creates.
   A lands, is verified, and B is briefed against the now-existing code.

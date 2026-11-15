@@ -15,18 +15,18 @@ single agent file owns: **the order of the steps, and the gates between them.**
 
 One task at a time, in numeric order. Not overlapping, not batched.
 
-1. **Developer.** Dispatch `.ai/agents/developer.md` as a `general` subagent
-   (`.ai/protocols/subagents.md` allows only `explore` and `general`; `developer`
-   and `reviewer` are instruction files, not subagent types). It implements the
-   task and returns a handoff: what it did, what it verified, what it left out.
+1. **Developer.** Dispatch a `developer` worker per `.ai/protocols/subagents.md`
+   § *Roster*. The orchestrator (`.ai/agents/orchestrator.md`) runs this loop.
+   It implements the task and returns a handoff: what it did, what it verified,
+   what it left out.
 
    If the task exceeds the scope threshold in `.ai/agents/developer.md` §
    *Scope check*, the developer splits it into isolated sub-tasks per
    `.ai/protocols/subagents.md` § *Implementation fan-out*. Each sub-task is
-   dispatched as a separate `general` subagent. The developer integrates their
+   dispatched as a separate `coder`. The developer integrates their
    work and returns a single handoff for the whole task.
 
-2. **Review.** Dispatch `.ai/agents/reviewer.md` as `general`, in a **different
+2. **Review.** Dispatch a `reviewer` worker, in a **different
    session from the developer.** A reviewer in the author's session inherits the
    author's reasoning and reviews its own conclusions. Do not reuse the
    developer's session.

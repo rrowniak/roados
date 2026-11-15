@@ -154,11 +154,10 @@ Dispatch mechanics, the briefing contract, the return format, and the
 escalation ladder are in `.ai/protocols/subagents.md`. Three things specific
 to this agent:
 
-- **`general` is the workhorse.** Anything outside this repository goes to it.
-  Give it web access needs explicitly — a subagent that assumes it has none
-  returns a confident `[C]` instead of a fetch failure you could see.
-- **Match the subagent to the question.** `general` for outside facts,
-  `explore` when framing needs the repository's own state.
+- **`scout` is the workhorse**, for repository and outside facts alike.
+  State its web access needs explicitly in the brief. A subagent that assumes
+  it has none returns a confident `[C]` instead of a fetch failure you could
+  see.
 - **Subagents report; you verify.** Their output is a claim until you have
   checked its evidence line. Two subagents disagreeing on a fact is a finding
   worth reporting, not something to average.

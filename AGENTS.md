@@ -113,10 +113,10 @@ engineering system — reviewing, extending, or fixing it counts.
 
 ### Harness
 
-opencode. The Task tool provides two subagent types:
-
-- `explore` — read-only facts about this repository
-- `general` — anything outside it: web, upstream sources, licences, standards
+opencode inside herdr. Workers are `.ai/agents/<role>.md` run as separate
+opencode processes via `.ai/tools/herdr-dispatch.sh`, on DeepSeek Flash by
+default; the roster, the models and the Task-tool fallback (`explore` /
+`general`) are owned by `.ai/protocols/subagents.md` § *Roster*.
 
 ### Skill: ponytail
 
@@ -137,10 +137,12 @@ dependency and commit decisions.
 
 Use the relevant instructions from `.ai/agents/` according to the task:
 
+- Top-level session, routing, dispatch → `.ai/agents/orchestrator.md`
 - Idea evaluation, critique, alternatives → `.ai/agents/idea-evaluator.md`
 - Research → `.ai/agents/researcher.md`
 - Implementation → `.ai/agents/developer.md`
 - Code review → `.ai/agents/reviewer.md`
+- Single fact, single sub-task, escalation → `scout.md`, `coder.md`, `architect.md`
 
 ### Workflow
 
@@ -159,7 +161,6 @@ Referenced by the design, absent from the repository. Do not assume their
 contents; read this file again when they land.
 
 - `.ai/skills/` — reusable capabilities
-- `.ai/agents/architect.md` — architecture decisions
 
 Skills provide specialized instructions and workflows for specific tasks.
 

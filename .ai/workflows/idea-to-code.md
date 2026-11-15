@@ -5,6 +5,9 @@ Sequence and gates for a non-trivial change. The craft and judgement live in
 the facts live in `.ai/agents/researcher.md`. This file is the order and the
 stops.
 
+`.ai/agents/orchestrator.md` runs the stages, dispatching each role per
+`.ai/protocols/subagents.md` § *Roster*.
+
 ## Stages
 
 ```

@@ -106,7 +106,7 @@ null result without this section is indistinguishable from not having looked.>
 
 - **Decisions.** A finding is evidence. A decision is an ADR, or a paragraph
   in the document that owns the question.
-- **Repository facts that are one grep away.** If `explore` can answer it in
+- **Repository facts that are one grep away.** If a `scout` can answer it in
   one read, it is not a finding and it will never be looked up again.
 - **Anything `[C]` that is not load-bearing.** A tag on everything is a tag on
   nothing. Write the ones that feed a decision; let the rest decay in the

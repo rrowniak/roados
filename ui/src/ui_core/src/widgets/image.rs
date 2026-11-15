@@ -111,21 +111,19 @@
 //! larger than the rect and sample all of the image, which is the other way to
 //! spell "cover" and the one that needs a clip to look right.
 //!
-//! The two are the same picture *under a clip* — a cropped quad and an
-//! overflowing one differ only in which part of the scaled image is on screen —
-//! and [`DrawCommand`] has no scissor state of its own, which
-//! `doc/ui/IMPLEMENTATION_STATE.md` § *Deviations from the spec, and why* records
-//! as a deferral to whichever task draws within a node's own bounds. So the
-//! overflowing version is right only when something clips, and wrong in a panel
-//! that does not: a `Cover` image would paint a screen's worth of itself over
-//! whatever is beside it. The cropped version is right in both, and it is also
-//! the version in which the two halves of a fit cannot disagree: the crop is
-//! computed from the rect and the image's own shape, so the picture is the same
-//! whether or not a container ever cuts it.
+//! The two are the same picture *under a clip*, and a node's paint is clipped to
+//! its [`LayoutState::clip`](crate::layout::LayoutState::clip) by
+//! `Renderer::apply_clip` — but **an
+//! overflowing quad is right only when something clips it**, and a `Cover` image
+//! in a panel that does not clip would paint a screen's worth of itself over
+//! whatever is beside it. The cropped version is right whether or not anything
+//! clips, and it is also the version in which the two halves of a fit cannot
+//! disagree: the crop is computed from the rect and the image's own shape, so the
+//! picture is the same whether or not a container cuts it.
 //!
 //! Requirement 3's "clip overflow" is therefore met by the overflow never being
-//! drawn rather than by clipping it, which is the only form of it this library
-//! can honour today.
+//! drawn rather than by clipping it, which keeps the fit independent of the
+//! node's ancestors.
 //!
 //! # What is deliberately not here
 //!
@@ -252,11 +250,11 @@ pub enum ImageFit {
     /// **The quad is the node's own rect, exactly as [`Fill`](ImageFit::Fill)
     /// draws it, and nothing overflows.** Covering is done by sampling a centred
     /// band of the image that has the rect's own shape, not by drawing a bigger
-    /// quad and letting something cut it: the two are the same picture under a
-    /// clip, and only this one is right without one, because [`DrawCommand`] has
-    /// no scissor state and `doc/ui/IMPLEMENTATION_STATE.md` § *Deviations from
-    /// the spec, and why* records per-node clipping as a deferral. The module
-    /// documentation says the whole of it.
+    /// quad and letting the node's
+    /// [`LayoutState::clip`](crate::layout::LayoutState::clip) cut it: an
+    /// overflowing quad is right only when something clips, and this one is right
+    /// whether or not anything does. The module documentation says the whole of
+    /// it.
     Cover,
     /// The whole image, stretched to the node's rect and to nothing else: the
     /// image's own shape is ignored, and both of its dimensions are fitted

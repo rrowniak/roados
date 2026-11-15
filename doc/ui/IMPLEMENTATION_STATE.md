@@ -10,20 +10,20 @@ task file wins and this file is corrected.
 `IMPLEMENTATION_STATE_DEMO.md` (the `TASK_UI_DEMO_*` sequence) and
 `doc/platform/IMPLEMENTATION_STATE.md` (`TASK_CROSSPLATFORM_*`, deferred).
 
-**Updated:** 2026-10-15.
+**Updated:** 2026-11-15.
 
 ## Current position
 
-**Nothing in flight.** Task 44 (`Icon` + image tint) landed 2026-10-11, early:
-`TASK_UI_DEMO_02.1` needed it and it was self-contained.
+**Nothing in flight.** Task 43 (`Button::selected` + `TabBar`, gap `#7`) landed
+2026-10-19 and moved to `done/` 2026-11-15; its three forced deviations are
+recorded in `doc/ui/done/TASK_UI_PRIM_43.md`.
 
-**Next: task 43** — `doc/ui/TASK_UI_PRIM_43.md`, `TabBar` + `Button::selected`,
-closing gap `#7`. Then 45–50 and 52 in order; **51 waits on the operator** (see
-*Left over*). Nine task files in `doc/ui/` are the queue.
+**Next: task 45** — `doc/ui/TASK_UI_PRIM_45.md`, per-node clipping in `Renderer`
+(gap `#5`). Then 46–50 and 52 in order; **51 waits on the operator** (see *Left
+over*). Eight task files in `doc/ui/` are the queue.
 
-**Suite:** `2121 passing / 1 ignored` as measured 2026-10-11 for tasks 44 +
-DEMO-02.1 (`cargo test --all-features`); the ignored one is `layout_walk_cost`.
-Re-measure before quoting it.
+**Suite:** re-measure before quoting. Last figure `2121 passing / 1 ignored`,
+2026-10-11 (tasks 44 + DEMO-02.1); the ignored one is `layout_walk_cost`.
 
 ## Left over
 
@@ -46,7 +46,7 @@ Re-measure before quoting it.
   another gate) and requirement 21's one-shot capture — **no capture has ever
   shown a backdrop drawing.** Both are in `doc/ui/done/TASK_UI_PRIM_41.md`.
 - **Two `cargo doc` warnings** stand in `ui_core`, pre-existing and unfixed:
-  `render.rs` links the private `IDENTITY_MAT3`, `render/mesh.rs` has a redundant
-  explicit link target. Recorded 2026-10-09, not re-measured since.
+  `render.rs` links the private `IDENTITY_MAT3`, and a redundant `RenderError::Gl`
+  link target. Re-measured 2026-10-19 by task 43.
 
 (End of file - total 61 lines)

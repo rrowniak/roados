@@ -259,6 +259,8 @@ use ui_core::widgets::keyboard::{KeyAction, Keyboard, Palette as KeyboardPalette
 use ui_core::widgets::label::{Label, LayoutOptions, TextAlign, Truncation, WrapMode};
 use ui_core::widgets::progress::{Palette as ProgressPalette, Progress};
 use ui_core::widgets::rotator::Rotator;
+#[cfg(test)]
+use ui_core::widgets::scroll;
 use ui_core::widgets::slider::{Orientation, Palette as SliderPalette, Slider};
 use ui_core::widgets::tab_bar::{TabBar, TabId};
 use ui_core::widgets::text_input::{Palette as TextInputPalette, TextInput};
@@ -695,32 +697,19 @@ const FALLBACK_FONT: f32 = 24.0;
 /// The panel the text is laid out in: the width its wrapping label wraps at,
 /// and the height the text column is given.
 ///
-/// **The height is nominal and the column is not clipped to it, and task 32.1 is
-/// what turned that from a near-miss into a stated fact.** Before this sub-task
-/// the column measured **374** px against a 380 panel — ten lines of 29 plus seven
-/// gaps of [`LABEL_SPACING`] — so it fitted with six pixels to spare and this doc
-/// was right to within the difference. It now measures **456**: the same ten lines
-/// plus the two single-line rows [`TRUNCATION_ROWS`] added, so twelve lines of 29
-/// and nine gaps of 12, `348 + 108`. From [`TEXT_PANEL_ORIGIN`]'s 170 and
-/// [`CONTENT_TOP`]'s 64 the column runs **234 → 690** and the panel's own bottom
-/// is at **614**, which is **76 px** of overflow.
-///
-/// **The number was left alone, and the arithmetic is why.** The panel is a
-/// container with no background, so its height is not on screen and growing it
-/// would move nothing; the height that matters is the column's, and that is
-/// measured from the font's own line height at run time rather than written
-/// down here — `+` moves it and the doc above already says a larger size
-/// overflows the window bottom by design. **What the overflow has to clear is
-/// real and is held down by two tests rather than by this sentence**: the
-/// frame-rate readout's box is at [`FPS_READOUT_ORIGIN`]'s 684 plus
-/// [`CONTENT_TOP`]'s 64, which is **748**, so **58 px** separates the column's
-/// last row from the one box below it, and the window is 1020 tall.
-/// `the_readout_sits_below_the_text_column_and_left_of_the_controls` is the first
-/// and `every_placed_rect_is_inside_the_window` is the second, and both are
-/// measured over the laid-out rects rather than over this paragraph.
+/// **The column is clipped to this panel.** `TASK_UI_PRIM_45` made
+/// [`Renderer::draw_node_clipped`] read each node's
+/// [`ui_core::layout::LayoutState::clip`], so the panel's box is the rectangular
+/// cut every label in the column is drawn through — before that the height was
+/// nominal, and a 380-px panel cut the column's lower rows in any case. **The
+/// panel is therefore as tall as the window**, which changes nothing visible (it
+/// has no background) and leaves the column's own box, measured from the font's
+/// line height at run time, as the thing that bounds the text. The `+` key grows
+/// the column past the window bottom by design; the clip then cuts it at the
+/// window, which is where it already was.
 const TEXT_PANEL: Size = Size {
     width: 900.0,
-    height: 380.0,
+    height: WINDOW.height,
 };
 
 /// Where the text column sits in the window: below the pads, which a `Stack`
@@ -1320,7 +1309,7 @@ const CHART_X_LABEL_GUTTER: f32 = 18.0;
 /// [`CONTENT_TOP`] task 24.2 introduced. The review of this task measured the same
 /// two bands independently and got 742..751 and 763..776.
 ///
-/// `no_node_is_clipped_and_the_chart_keeps_its_geometry_inside_its_own_rect` is
+/// `the_chart_keeps_its_geometry_inside_its_own_rect` is
 /// what holds that claim in the suite: it asserts, over all three shapes and both
 /// ends of a transition, that **the lowest pixel the chart draws is above the
 /// readout's own line**. A brief's rationale becomes the widget's doc comment,
@@ -1564,12 +1553,10 @@ const DATA_CAR_SIZE: Size = Size {
 /// The car's rect in window coordinates: [`DATA_CAR_SIZE`] at [`DATA_CAR_ORIGIN`]
 /// plus [`CONTENT_TOP`].
 ///
-/// The one rect the capture criterion names beside the fps band, the clip
-/// [`Demo::frame_clips`] confines the mesh to, and the box the strip tests
-/// read the mesh's ink as — the scissor is what makes a mesh command's ink
-/// box this rect rather than the window. A `Rect` rather than a second
-/// spelling of the origin and the size, so the three readers cannot disagree
-/// about the box.
+/// The one rect the capture criterion names beside the fps band, the box the
+/// car's own matrix places the model in, and the box the strip tests read the
+/// mesh's ink as. A `Rect` rather than a second spelling of the origin and the
+/// size, so the three readers cannot disagree about the box.
 const CAR_RECT: Rect = Rect {
     x: DATA_CAR_ORIGIN.0,
     y: DATA_CAR_ORIGIN.1 + CONTENT_TOP,
@@ -6310,8 +6297,8 @@ impl Demo {
         //   widget cannot know it, because a `DrawCommand::Text` carries no width.
         //   That one is not bounded here at all: [`CHART_X_LABEL_COUNT`] leaves the
         //   newest sample unlabelled for exactly this reason, and
-        //   `no_node_is_clipped_and_the_chart_keeps_its_geometry_inside_its_own_
-        //   rect` measures the consequence — that nothing is inked in the node's
+        //   `the_chart_keeps_its_geometry_inside_its_own_rect` measures the
+        //   consequence — that nothing is inked in the node's
         //   last two columns.
         {
             if !chart.y_labels.get().is_empty() {
@@ -6349,8 +6336,8 @@ impl Demo {
             // drawn below the plot's own bottom edge, which is the node's bottom
             // less the x labels' gutter, and that gutter is another private
             // constant. **So the claim is measured rather than derived**, in
-            // `no_node_is_clipped_and_the_chart_keeps_its_geometry_inside_its_own_
-            // rect`, and **the rows it measures to are in [`CHART_READOUT_GAP`]'s
+            // `the_chart_keeps_its_geometry_inside_its_own_rect`, and **the
+            // rows it measures to are in [`CHART_READOUT_GAP`]'s
             // own doc** rather than repeated here. An earlier version of this
             // comment quoted them — 670 and 699, then 734 and 763 — and got two of
             // the four wrong, because a figure copied into a second place is a
@@ -10070,8 +10057,8 @@ impl Demo {
             // different things**: the host's node carries no commands at all — every
             // command belongs to the toast that recorded it, which is what keeps
             // one toast's shadow out of the next toast's batch segment — and a
-            // toast's node carries its own, so `Demo::frame_clips` and
-            // `Demo::draw` see one card's commands at a time.
+            // toast's node carries its own, so `Demo::draw` sees one card's
+            // commands at a time.
             if handle == self.toasts.handle() {
                 // Empty and **not dirty**, and the reason is arithmetic rather than
                 // a rendering one: `draw_node_clipped` returns early on a node that
@@ -11198,65 +11185,17 @@ impl Demo {
     /// Scoped here rather than in the frame because it is a renderer state,
     /// not a widget one — and [`Renderer::begin_frame`] resets it every
     /// frame, so a value set here never leaks into the next.
+    ///
+    /// **Each node's clip is its own [`ui_core::layout::LayoutState::clip`]**,
+    /// resolved inside [`Renderer::draw_node`]; the demo supplies no clip table.
     fn draw(&mut self, renderer: &mut Renderer) {
         if (self.page == Page::Data || self.page == Page::Demo) && self.model.is_some() {
             renderer.set_mesh_ambient(CAR_AMBIENT);
         }
-        let clips = self.frame_clips();
         let mut nodes = self.nodes.borrow_mut();
-        for (handle, clip) in self.order.iter().copied().zip(clips) {
-            renderer.draw_node_clipped(handle, &mut nodes, clip);
+        for handle in self.order.iter().copied() {
+            renderer.draw_node(handle, &mut nodes);
         }
-    }
-
-    /// Returns the clip for every node in paint order, positionally matching
-    /// [`Demo::order`].
-    ///
-    /// **The data car is clipped to [`CAR_RECT`] and the pane car to its own
-    /// laid-out rect, and nothing else is clipped.** Task 37's
-    /// `draw_mesh_batch` calls `apply_clip(batch.clip)` — a clip
-    /// that does not exist is no clip — and an unclipped car would draw across
-    /// the tab bar and the chrome, which is both a visible defect and a
-    /// violation of the recording-order contract task 37 recorded. This is the
-    /// first thing in the pipeline that a scissor actually matters to.
-    ///
-    /// **This is the whole of the frame's clipping, in one place, and the frame
-    /// loop uses it rather than deciding inline.** That is not tidiness: an
-    /// earlier version had the loop call a `clip_for` helper itself — since folded
-    /// into this function, so the name resolves to nothing, which is why it is named
-    /// here in the past tense — and a mutation that inlined the same logic into the
-    /// loop instead sailed through every test, because the tests were calling
-    /// `clip_for` and the defect was in a caller of it. A test that exercises a
-    /// helper cannot see a call site that stopped
-    /// using the helper. One function, used by the loop and by the tests, closes
-    /// that.
-    ///
-    /// **The rects are gone with it**, and so is the arena argument this function
-    /// used to take: a clip is a node's own laid-out rect, and a node that is not
-    /// clipped does not need to be looked up to say so. The signature changing is
-    /// the honest consequence — there is nothing left to read from the arena, and
-    /// a parameter kept only so a caller could pass it would be a second thing to
-    /// keep in step.
-    ///
-    /// **The pane car's clip is its laid-out rect**, read from the node the
-    /// pane's column placed below the header — unlike the data car's
-    /// [`CAR_RECT`], no constant can name it. [`Demo::draw`] computes the
-    /// clips before borrowing the arena mutably, so this read never races
-    /// that borrow.
-    fn frame_clips(&self) -> Vec<Option<Rect>> {
-        let pane_clip = self.pane_car_rect();
-        self.order
-            .iter()
-            .map(|handle| {
-                if *handle == self.car.node() {
-                    Some(CAR_RECT)
-                } else if *handle == self.pane_car.node() {
-                    pane_clip
-                } else {
-                    None
-                }
-            })
-            .collect()
     }
 
     /// Switches between the dark and light themes, animated over
@@ -11865,7 +11804,7 @@ impl Demo {
     /// This is what the two collision tests are about, and the word doing the
     /// work in it is *leaf*. The demo's tree is [`Container`]s and widgets, and
     /// a `Container` with no background draws nothing: the band is the whole
-    /// window and the text panel is 900 by 380 of nothing. Two of those
+    /// window and the text panel is 900 by the window of nothing. Two of those
     /// "overlap" everything, so a test over all of them would assert that
     /// everything overlaps everything and prove nothing.
     ///
@@ -17326,13 +17265,12 @@ mod tests {
     /// an absence. The demo records no `Path`.
     ///
     /// [`DrawCommand::Mesh`] is [`CAR_RECT`], and that is a measurement rather
-    /// than a guess: [`Demo::frame_clips`] gives the car's node `Some(CAR_RECT)`
-    /// and task 37's `draw_mesh_batch` calls `apply_clip` on it, so the scissor
-    /// confines every mesh command's ink to that rect whatever the matrix says.
-    /// `the_car_rect_overlaps_nothing_the_gallery_placed` pins the rect against
-    /// the gallery and `the_view_puts_the_orbit_target_on_the_camera_axis`
-    /// pins the matrix, so this arm rests on two assertions rather than on a
-    /// reading of the shader.
+    /// than a guess: the car's own matrix places the model in that box and
+    /// `the_view_puts_the_orbit_target_on_the_camera_axis` pins the matrix, so
+    /// every mesh command's ink lands there. It is read from the constants the
+    /// matrix is built from rather than from the shader, which is the same split
+    /// the `Shadow` arm makes. `the_car_rect_overlaps_nothing_the_gallery_placed`
+    /// pins the rect against the gallery.
     fn inked_box(command: &DrawCommand) -> Rect {
         let box_of = |points: &[(f32, f32)]| {
             let low_x = points.iter().map(|p| p.0).fold(f32::MAX, f32::min);
@@ -17988,36 +17926,134 @@ mod tests {
         );
     }
 
-    /// Nothing is clipped but the car, and the chart's own geometry is what says
-    /// why that is allowed to be true.
+    /// Asserts that the frame needs a bounded number of distinct clips.
+    #[test]
+    fn the_frame_uses_a_bounded_number_of_distinct_clips() {
+        // **The mutation this kills is clipping every node to its own rect**: it
+        // would give nearly one distinct clip per node — 169 in this tree — while
+        // ancestor clipping gives one per *box in the tree*, 26 here. A bounded
+        // number is what keeps the scissor a per-container state change rather
+        // than a per-node one.
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+            let nodes = demo.nodes.borrow();
+            let mut distinct: Vec<Option<Rect>> = Vec::new();
+            for &handle in &demo.order {
+                if let Some(node) = nodes.get(handle) {
+                    let clip = node.layout().clip().map(Rect::from);
+                    if !distinct.contains(&clip) {
+                        distinct.push(clip);
+                    }
+                }
+            }
+            assert!(
+                distinct.len() <= 32,
+                "on {page:?}, {} nodes need {} distinct clips",
+                demo.order.len(),
+                distinct.len()
+            );
+        }
+    }
+
+    #[test]
+    fn the_clip_a_child_will_be_scissored_to_is_its_parents_box() {
+        // **The mutation this kills is taking the grandparent's box**, or the
+        // window, instead of the nearest ancestor: the pad's clip is the card's
+        // own rect, and the card's is the window.
+        let demo = laid_out_on(Page::Pads);
+        let nodes = demo.nodes.borrow();
+        let pad = demo.pads[0].node;
+        let parent = nodes
+            .get(pad)
+            .and_then(|node| node.parent())
+            .expect("a pad is attached to the card");
+        let parent_rect = nodes
+            .get(parent)
+            .and_then(|node| node.layout().rect())
+            .map(Rect::from)
+            .expect("the card is placed");
+        assert_eq!(
+            nodes
+                .get(parent)
+                .and_then(|node| node.layout().clip())
+                .map(Rect::from),
+            Some(Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height)),
+            "the card itself is clipped to the window"
+        );
+        assert_eq!(
+            nodes
+                .get(pad)
+                .and_then(|node| node.layout().clip())
+                .map(Rect::from),
+            Some(parent_rect),
+            "the pad is clipped to the card's box {parent_rect:?}"
+        );
+    }
+
+    /// Asserts that no command a node records is cut by an **interior** edge of
+    /// the clip the layout pass gave it, on every page.
     ///
-    /// **The name is historical, and it is kept on purpose**: the task file
-    /// names this test, so renaming it would make the requirement's own
-    /// checklist un-greppable. What "no node is clipped" means now is in the
-    /// assertion — one `Some` for the car and `None` for everything else.
+    /// **This is the gate requirement 6 runs before the renderer starts reading
+    /// `LayoutState::clip`.** If a command leaves the box its ancestors define at
+    /// an edge that is inside the window — a panel or a viewport — then per-node
+    /// clipping cuts something the widget legitimately drew at a place a reader
+    /// can see, and that is a stop condition, not a renderer change. Only
+    /// commands [`scroll::command_bounds`] can bound are checked; a text run
+    /// carries no width and is measured by its own tests.
     ///
-    /// **The first half is the frame's own list of clips**, which is the one
-    /// `Demo::draw` walks — not a helper called directly, because a test of a
-    /// helper cannot see a call site that stopped using it. That was a real
-    /// survivor: a mutation inlining the clip decision into the loop passed every
-    /// test written against the helper. The function survives with one decision
-    /// left in it — the car's node is offered `Some(CAR_RECT)` — and this is
-    /// what says so: one clip for the car, `None` for every other node in
-    /// paint order, positionally matching, and no node offered a clip of its
-    /// own.
+    /// **A cut at the window's own edge is accepted**, and the one this demo has
+    /// is the newest toast's shadow: it reaches 7.5 px below the 1020 px window on
+    /// `overlays`, where the clip is the window itself. Those pixels are outside
+    /// the window either way, so the scissor changes nothing visible.
     ///
-    /// The list was the only clipped node this demo ever had and the chart took
-    /// its place for one task: a scrolling viewport's rows are drawn half outside
-    /// it *by design*, which is the whole reason a scissor was needed and the
-    /// whole reason nothing needed one until the car. An unclipped car would
-    /// draw across the tab bar and the chrome — a visible defect and a violation
-    /// of the recording-order contract task 37 recorded.
+    /// **The mutation it kills is `intersect(own_clip, Some(node_rect))` in the
+    /// layout pass**, which would clip every node to its own box instead of its
+    /// ancestors' and cut the chart's stroke and the pads' shadows at edges a
+    /// reader can see.
+    #[test]
+    fn no_recorded_command_is_cut_by_its_own_nodes_clip() {
+        let window = Rect::new(0.0, 0.0, WINDOW.width, WINDOW.height);
+        for page in Page::ALL {
+            let demo = laid_out_on(page);
+            let nodes = demo.nodes.borrow();
+            for &handle in &demo.order {
+                let Some(node) = nodes.get(handle) else {
+                    continue;
+                };
+                let Some(clip) = node.layout().clip() else {
+                    continue;
+                };
+                let clip = Rect::from(clip);
+                for command in node.paint().commands() {
+                    let Some(bounds) = scroll::command_bounds(command) else {
+                        continue;
+                    };
+                    // An edge of the clip is interior when it is not the
+                    // window's own; crossing one of those is a cut a reader can
+                    // see, and crossing a window edge is not.
+                    let interior = (bounds.x < clip.x && clip.x > window.x)
+                        || (bounds.y < clip.y && clip.y > window.y)
+                        || (bounds.x + bounds.width > clip.x + clip.width
+                            && clip.x + clip.width < window.x + window.width)
+                        || (bounds.y + bounds.height > clip.y + clip.height
+                            && clip.y + clip.height < window.y + window.height);
+                    assert!(
+                        !interior,
+                        "on {page:?}, a command of node {handle:?} draws at \
+                         {bounds:?}, which crosses an interior edge of its clip \
+                         {clip:?}: {command:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The chart's ink stays inside its own rect, grown by the stroke's reach.
     ///
-    /// **The second half is the load-bearing one**, and it is this file's answer
-    /// to *a draw-command assertion cannot see where a command lands*: the list's
-    /// rows were drawn over the window background above the panel while
-    /// eighty-eight unit tests passed, because every assertion in them asked *what
-    /// was recorded* and not *where it landed*. So this asks the
+    /// **This is the file's answer to *a draw-command assertion cannot see where
+    /// a command lands*:** the list's rows were drawn over the window background
+    /// above the panel while eighty-eight unit tests passed, because every assertion
+    /// in them asked *what was recorded* and not *where it landed*. So this asks the
     /// second question — over **all three** of the chart's shapes, and **twice
     /// each**: once mid-transition, where the drawn series is the glide's and a
     /// command could land anywhere between where it was and where it is going,
@@ -18063,39 +18099,8 @@ mod tests {
     /// reader can check them, and not only in a constant's doc — the constant
     /// this test's allowance used to be is gone.
     #[test]
-    fn no_node_is_clipped_and_the_chart_keeps_its_geometry_inside_its_own_rect() {
+    fn the_chart_keeps_its_geometry_inside_its_own_rect() {
         let mut demo = laid_out_on(Page::Data);
-        let clips = demo.frame_clips();
-        assert_eq!(
-            clips.len(),
-            demo.order.len(),
-            "one clip per node in paint order, positionally matching"
-        );
-        let clipped: Vec<(Handle, Rect)> = demo
-            .order
-            .iter()
-            .zip(clips.iter())
-            .filter_map(|(handle, clip)| clip.map(|rect| (*handle, rect)))
-            .collect();
-        // **Both cars' rows, added rather than the old set loosened**: each
-        // mesh node is clipped to its own laid-out rect, and everything else
-        // keeps the `None` the old assertion named. The data car's rect is the
-        // constant [`CAR_RECT`]; the pane car's is the node's own, read from
-        // the layout pass because the pane's column places it below the
-        // header.
-        let pane_rect = demo
-            .pane_car_rect()
-            .expect("the pane car's node is placed by the layout pass");
-        assert_eq!(
-            clipped,
-            vec![
-                (demo.car.node(), CAR_RECT),
-                (demo.pane_car.node(), pane_rect)
-            ],
-            "the two cars are each clipped to their own rect and no other node \
-             is offered a clip — but these are: {clipped:?}"
-        );
-
         for (shape, name) in CHART_TYPE_NAMES.iter().enumerate() {
             for _ in 0..shape {
                 demo.handle_event(key(Keycode::H));

@@ -194,6 +194,34 @@ impl From<Rect> for paint::Rect {
     }
 }
 
+/// Converts a draw command's rectangle back into the layout pass's rectangle.
+///
+/// The conversion is identity on the four coordinates, and it exists so
+/// [`Renderer::draw_node_clipped`](crate::render::Renderer::draw_node_clipped)
+/// can compose a caller's constraint with [`LayoutState::clip`] in one space.
+///
+/// # Examples
+///
+/// ```
+/// use ui_core::layout::Rect;
+/// use ui_core::paint;
+///
+/// let draw_rect = paint::Rect::new(4.0, 8.0, 20.0, 10.0);
+/// let rect = Rect::from(draw_rect);
+/// assert_eq!(
+///     (rect.origin.x, rect.origin.y, rect.size.width, rect.size.height),
+///     (4.0, 8.0, 20.0, 10.0),
+/// );
+/// ```
+impl From<paint::Rect> for Rect {
+    fn from(rect: paint::Rect) -> Self {
+        Rect::new(
+            Offset::new(rect.x, rect.y),
+            Size::new(rect.width, rect.height),
+        )
+    }
+}
+
 /// The axis a flex container lays its children out along.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FlexDirection {
@@ -1574,7 +1602,14 @@ fn sized(nodes: &Arena<WidgetNode>, handle: Handle, incoming: Constraints) -> Si
 ///
 /// An unset clip means no ancestor clips the node, so the other one — which may
 /// also be unset — passes through.
-fn intersect(a: Option<Rect>, b: Option<Rect>) -> Option<Rect> {
+///
+/// Public because it is the arithmetic
+/// [`Renderer::draw_node_clipped`](crate::render::Renderer::draw_node_clipped)
+/// composes a caller's constraint with the node's own
+/// [`LayoutState::clip`] with: the renderer uses the pass's answer rather than
+/// carrying a second copy of the intersection.
+#[must_use]
+pub fn intersect(a: Option<Rect>, b: Option<Rect>) -> Option<Rect> {
     match (a, b) {
         (Some(a), Some(b)) => Some(Rect::new(
             Offset::new(a.origin.x.max(b.origin.x), a.origin.y.max(b.origin.y)),
@@ -2506,6 +2541,67 @@ mod tests {
             nodes.get(inner).unwrap().layout().clip(),
             Some(Rect::from_parts(0.0, 0.0, 10.0, 10.0)),
             "the inner node is clipped by the stack's own box"
+        );
+    }
+
+    #[test]
+    fn a_node_is_not_clipped_to_its_own_box() {
+        // **The mutation this kills is `intersect(own_clip, Some(node_rect))`**:
+        // a node is clipped to its *ancestors'* boxes, never to its own, because
+        // a stroke or a shadow legitimately reaches past the box it is recorded
+        // in. A 10 by 10 leaf in a 100 by 100 stack is therefore clipped to the
+        // 100 by 100 box, not to itself.
+        let mut nodes = Arena::new();
+        let child = leaf(&mut nodes, 10.0, 10.0);
+        let stack = container(&mut nodes, LayoutMode::Stack, FlexConfig::new(), &[child]);
+
+        layout_in(&mut nodes, stack, Size::new(100.0, 100.0));
+
+        let own_rect = nodes.get(child).unwrap().layout().rect().unwrap();
+        assert_eq!(own_rect, Rect::from_parts(0.0, 0.0, 10.0, 10.0));
+        assert_eq!(
+            nodes.get(child).unwrap().layout().clip(),
+            Some(Rect::from_parts(0.0, 0.0, 100.0, 100.0)),
+            "the leaf inherits its ancestor's box; clipping it to {own_rect:?} \
+             would delete every pixel it inks past its own rect"
+        );
+    }
+
+    #[test]
+    fn a_node_is_clipped_to_the_intersection_of_its_ancestors_and_not_its_parents_own_box() {
+        // **The mutation this kills is using only the nearest ancestor's box.**
+        // The inner stack overflows the outer one, so the leaf's clip is the
+        // *intersection* of the two — 50 by 50 from (50, 50) — and neither the
+        // parent's own 100 by 100 box nor the leaf's own rect.
+        let mut nodes = Arena::new();
+        let child = leaf(&mut nodes, 10.0, 10.0);
+        let inner = container(&mut nodes, LayoutMode::Stack, FlexConfig::new(), &[child]);
+        nodes
+            .get_mut(inner)
+            .unwrap()
+            .layout_mut()
+            .set_constraints(Constraints::tight(Size::new(100.0, 100.0)));
+        nodes
+            .get_mut(inner)
+            .unwrap()
+            .layout_mut()
+            .set_position(Some(Offset::new(50.0, 50.0)));
+        let outer = container(
+            &mut nodes,
+            LayoutMode::Absolute,
+            FlexConfig::new(),
+            &[inner],
+        );
+
+        layout_in(&mut nodes, outer, Size::new(100.0, 100.0));
+
+        let parent_box = nodes.get(inner).unwrap().layout().rect().unwrap();
+        assert_eq!(parent_box, Rect::from_parts(50.0, 50.0, 100.0, 100.0));
+        assert_eq!(
+            nodes.get(child).unwrap().layout().clip(),
+            Some(Rect::from_parts(50.0, 50.0, 50.0, 50.0)),
+            "the clip is the outer box intersected with the inner one, not the \
+             parent's own {parent_box:?}"
         );
     }
 

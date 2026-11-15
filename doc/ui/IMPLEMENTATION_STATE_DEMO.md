@@ -7,7 +7,7 @@ task file wins.
 
 **Sequence:** `doc/ui/TASK_UI_DEMO_01..06.md`, designed by
 `doc/ui/DEMO_APPLICATION.md`. The library sequence beside it is
-`doc/ui/IMPLEMENTATION_STATE.md`. **Updated:** 2026-10-15.
+`doc/ui/IMPLEMENTATION_STATE.md`. **Updated:** 2026-11-15.
 
 ## Current position
 
@@ -20,7 +20,7 @@ closure are not there, so 47's file stays in `doc/ui/`.
 
 **Next: DEMO-05** (`doc/ui/TASK_UI_DEMO_05.md`, skipped when 06 was built), or
 the operator's call. `ui/src/ui_demo/src/main.rs`'s `mod` list already carries
-`controls`; the library queue is `doc/ui/TASK_UI_PRIM_43,45..52.md` **and 47's
+`controls`; the library queue is `doc/ui/TASK_UI_PRIM_45..52.md` **and 47's
 rest**. `PRIM-42` never landed despite its file in `doc/ui/done/` (no `nav.rs`).
 
 ## Left over

@@ -280,6 +280,7 @@ use std::path::Path;
 use crate::arena::{Arena, Handle};
 use crate::batch::{Batch, Batcher, ShaderKind};
 use crate::font::{Font, FontSet, FontWeight, GlyphAtlas, GlyphPlacement, PickedFont};
+use crate::layout;
 use crate::node::WidgetNode;
 use crate::paint::{faded_color, BackdropMode, DrawCommand, FadeRamp, Rect, UvRect};
 use crate::property::Color;
@@ -2379,6 +2380,38 @@ fn image_source(id: crate::paint::TextureId) -> ImageSource {
     }
 }
 
+/// The scissor rectangle the renderer believes is applied to the GPU.
+///
+/// It exists so a frame's worth of batches sets the scissor once per change rather
+/// than once per batch, and it is a separate type rather than an
+/// `Option<Rect>` field for one reason: **the cache can be tested without a GL
+/// context, and `Renderer` cannot.** The tests below pin the two rules the GPU
+/// cannot show — an equal clip asks for no write, and a cleared cache re-applies
+/// a clip it had already applied — while the write itself is `set_scissor`, which
+/// needs a current context and is therefore outside every test in this file.
+#[derive(Clone, Copy, Debug, Default)]
+struct ClipCache {
+    applied: Option<Rect>,
+}
+
+impl ClipCache {
+    /// Returns whether `clip` has to be written to the GPU.
+    #[must_use]
+    fn wants(&self, clip: Option<Rect>) -> bool {
+        clip != self.applied
+    }
+
+    /// Records that `clip` is now the applied scissor.
+    fn record(&mut self, clip: Option<Rect>) {
+        self.applied = clip;
+    }
+
+    /// Forgets what is applied, because some other code wrote the scissor.
+    fn clear(&mut self) {
+        self.applied = None;
+    }
+}
+
 /// Submits batched draw commands to the GPU through OpenGL ES.
 ///
 /// The renderer owns the window and GL context, the shader program, and the
@@ -2417,7 +2450,7 @@ pub struct Renderer {
     atlas: GlyphAtlas,
     /// The scissor rect currently applied to the GPU, so a frame's worth of
     /// batches sets it once per change rather than once per batch.
-    applied_clip: Option<Rect>,
+    clip_cache: ClipCache,
     text_vertex_capacity: usize,
     text_index_capacity: usize,
     image_program: glow::Program,
@@ -2841,7 +2874,7 @@ impl Renderer {
             atlas_texture,
             fonts: FontSet::new(),
             atlas: GlyphAtlas::new(atlas_size, atlas_max_size),
-            applied_clip: None,
+            clip_cache: ClipCache::default(),
             text_vertex_capacity: 0,
             text_index_capacity: 0,
             image_program,
@@ -3259,7 +3292,7 @@ impl Renderer {
         // The scissor is disabled above, so the renderer's idea of what is
         // applied has to be cleared with it or the next clipped batch would be
         // skipped as "unchanged" and drawn unclipped.
-        self.applied_clip = None;
+        self.clip_cache.clear();
     }
 
     /// Records the draw commands of the node `handle` points to.
@@ -3267,6 +3300,10 @@ impl Renderer {
     /// The commands are recorded into this frame's batches only when the
     /// node's [`crate::node::WidgetNode`] paint state is dirty; recording clears
     /// the dirty flag. A stale handle is ignored.
+    ///
+    /// Because the clip is supplied by the node itself, `None` here means the
+    /// node's ancestors' boxes — [`crate::layout::LayoutState::clip`] — rather than
+    /// no clip; see [`Renderer::draw_node_clipped`].
     ///
     /// The order the nodes are drawn in is the order they appear on screen, so
     /// this is the caller's to choose: a widget tree walks itself depth first,
@@ -3285,8 +3322,17 @@ impl Renderer {
     ///
     /// It rides on the batch rather than on the command — see [`Batch::clip`] —
     /// and [`Renderer::end_frame`] sets the scissor when the clip changes between
-    /// batches. `None` means the whole window, which is what every node but a
-    /// scrolling one passes.
+    /// batches.
+    ///
+    /// **The node's own clip is resolved here, and `clip` can only narrow it.**
+    /// The per-node rectangle is [`crate::layout::LayoutState::clip`], the
+    /// intersection of the node's ancestors' boxes that [`layout::Layout`] stores
+    /// during the pass; `clip` is an *additional* constraint, and the two are
+    /// intersected with [`layout::intersect`] so a caller can narrow an ancestor's
+    /// box but never widen past it. `None` therefore means **"no additional
+    /// constraint"** and not **"no clip"** — a node under a container is still
+    /// scissored to that container. Both rectangles are window-space, because
+    /// [`layout::Layout::layout`] starts at [`layout::Offset::ZERO`].
     ///
     /// The commands are recorded into this frame's batches only when the node's
     /// [`crate::node::WidgetNode`] paint state is dirty; recording clears the
@@ -3297,15 +3343,18 @@ impl Renderer {
         nodes: &mut Arena<WidgetNode>,
         clip: Option<Rect>,
     ) {
-        let Some(state) = nodes.get_mut(handle).map(|node| node.paint_mut()) else {
+        let Some(node) = nodes.get_mut(handle) else {
             return;
         };
-        if !state.is_dirty() {
+        if !node.paint().is_dirty() {
             return;
         }
-        let commands = state.take_commands();
+        let extra = clip.map(layout::Rect::from);
+        let own = node.layout().clip();
+        let resolved = layout::intersect(extra, own).map(Rect::from);
+        let commands = node.paint_mut().take_commands();
         for command in commands {
-            self.batcher.add_clipped(command, clip);
+            self.batcher.add_clipped(command, resolved);
         }
     }
 
@@ -3320,12 +3369,11 @@ impl Renderer {
     /// per-node clip is possible at all: draw commands are recorded during
     /// [`Renderer::draw_node`] and submitted together in
     /// [`Renderer::end_frame`], so a scissor set while recording was set for the
-    /// wrong moment and the last one won for the whole frame. The clip rides on
-    /// the **batch** — see [`Batch::clip`](crate::batch::Batch::clip) — and
-    /// `apply_clip` sets it here, once per batch, as a draw call is about to
-    /// happen. [`crate::layout::LayoutState::clip`] carries the per-node rect
-    /// for the layout pass; the renderer's own per-node clip is whatever
-    /// [`Renderer::draw_node_clipped`] was handed.
+    /// wrong moment and the last one won for the whole frame. The clip is the
+    /// node's [`crate::layout::LayoutState::clip`], resolved by
+    /// [`Renderer::draw_node_clipped`] and carried on the **batch** — see
+    /// [`Batch::clip`](crate::batch::Batch::clip) — and `apply_clip` sets it here,
+    /// once per batch, as a draw call is about to happen.
     ///
     /// **A recorded command may carry a box of its own too**, which is how a
     /// truncating label cuts a glyph that overhangs its text: the batcher
@@ -3333,10 +3381,7 @@ impl Renderer {
     /// — and the result is what arrives here. See
     /// [`DrawCommand::Text`]'s `clip`.
     ///
-    /// **This paragraph used to say there was no per-node clip to hook a scissor
-    /// to yet**, and that was true until `TASK_UI_PRIM_32`; a reader arriving now
-    /// would have found it contradicted by the paragraphs above it. The test that
-    /// names the submission order it now rests on is
+    /// The submission order this rests on is named by
     /// `a_faded_text_batch_is_still_drawn_with_blending_on`.
     pub fn set_scissor(&self, rect: Option<Rect>) {
         let gl = self.context.gl();
@@ -3471,12 +3516,10 @@ impl Renderer {
 
     /// Sets the scissor to `clip`, unless it is already set to it.
     ///
-    /// **This is what makes a per-node clip possible at all**, and it is the
-    /// deferral `doc/ui/IMPLEMENTATION_STATE.md` § *Deviations from the spec*
-    /// recorded as unhookable: draw commands are recorded during
-    /// [`Renderer::draw_node`] and submitted together in [`Renderer::end_frame`],
-    /// so setting a scissor while recording set it for the wrong moment and the
-    /// last one won for the whole frame.
+    /// **This is what makes a per-node clip possible at all**: draw commands are
+    /// recorded during [`Renderer::draw_node`] and submitted together in
+    /// [`Renderer::end_frame`], so setting a scissor while recording set it for the
+    /// wrong moment and the last one won for the whole frame.
     ///
     /// The answer is to carry the clip on the **batch** and set it here, at
     /// submission, where a draw call is about to happen — see [`Batch::clip`].
@@ -3485,16 +3528,16 @@ impl Renderer {
     ///
     /// **The cache is only as good as every writer of the GL state it mirrors.**
     /// Anything that changes the scissor behind this function's back has to clear
-    /// [`Self::applied_clip`] too, or the next `apply_clip` with an equal clip
-    /// returns early and the box is never written.
-    /// [`Self::bind_default_target`] is the one such writer — it clears the cache
-    /// and then calls this, which is what makes the shadow's composite clipped
-    /// after the offscreen passes turned the scissor off.
+    /// [`ClipCache`] too, or the next `apply_clip` with an equal clip returns
+    /// early and the box is never written. [`Self::bind_default_target`] is the
+    /// one such writer — it clears the cache and then calls this, which is what
+    /// makes the shadow's composite clipped after the offscreen passes turned the
+    /// scissor off.
     fn apply_clip(&mut self, clip: Option<Rect>) {
-        if clip == self.applied_clip {
+        if !self.clip_cache.wants(clip) {
             return;
         }
-        self.applied_clip = clip;
+        self.clip_cache.record(clip);
         self.set_scissor(clip);
     }
 
@@ -4149,7 +4192,7 @@ impl Renderer {
     ///
     /// It is called with `clip` and re-applies the clip through `apply_clip`
     /// today; the depth restore goes in the same place and does not touch
-    /// `applied_clip`.
+    /// [`ClipCache`].
     fn bind_default_target(&mut self, clip: Option<Rect>) {
         let (width, height) = self.viewport;
         let gl = self.context.gl();
@@ -4165,10 +4208,10 @@ impl Renderer {
         // The cache is invalidated **before** the state is written, and the state
         // is then written through `apply_clip` rather than by calling
         // `set_scissor` here. Those two facts are the same fact: `apply_clip`
-        // compares against `applied_clip` and returns early when they are equal,
-        // so a stale `Some(clip)` would make the re-application a no-op and the
-        // bug would come straight back.
-        self.applied_clip = None;
+        // compares against the cache and returns early when they are equal, so a
+        // stale `Some(clip)` would make the re-application a no-op and the bug
+        // would come straight back.
+        self.clip_cache.clear();
         self.apply_clip(clip);
     }
 
@@ -5007,6 +5050,49 @@ mod tests {
     use crate::font::resolve_slot;
     use crate::paint::{faded_color, ramp_factor, FamilyId, Painter, TextureId};
     use blur::MAX_TAPS;
+
+    #[test]
+    fn the_clip_cache_asks_for_a_write_only_when_the_clip_changed() {
+        // **The mutation this kills is dropping the comparison in `wants`.**
+        // A cache that always answered `true` would write the scissor once per
+        // batch instead of once per change, which no test of recorded commands
+        // can see — it is a GPU state change, not a command.
+        let a = Some(Rect::new(0.0, 0.0, 10.0, 10.0));
+        let b = Some(Rect::new(0.0, 100.0, 10.0, 10.0));
+        let mut cache = ClipCache::default();
+        assert!(cache.wants(a), "a fresh cache has nothing applied yet");
+        cache.record(a);
+        assert!(!cache.wants(a), "the same clip is already on the GPU");
+        assert!(cache.wants(b), "a different clip needs a write");
+        cache.record(b);
+        assert!(!cache.wants(b));
+        assert!(
+            cache.wants(None),
+            "disabling the scissor is a write like any other"
+        );
+        cache.record(None);
+        assert!(!cache.wants(None), "and once disabled it stays disabled");
+        assert!(cache.wants(a), "until something asks for a box again");
+    }
+
+    #[test]
+    fn a_cleared_clip_cache_reapplies_a_clip_it_had_already_applied() {
+        // **The mutation this kills is making `clear` a no-op.** The offscreen
+        // shadow passes turn the scissor test off behind the cache's back, and
+        // `bind_default_target` clears the cache for exactly that reason; without
+        // it the composite would draw unclipped while every call reported success.
+        let a = Some(Rect::new(0.0, 0.0, 10.0, 10.0));
+        let mut cache = ClipCache::default();
+        cache.record(a);
+        assert!(!cache.wants(a), "it is on the GPU");
+        cache.clear();
+        assert!(
+            cache.wants(a),
+            "the cache no longer knows, so the equal clip has to be written again"
+        );
+        cache.record(a);
+        assert!(!cache.wants(a), "and recording restores the short-circuit");
+    }
 
     #[test]
     fn the_glyph_atlas_starts_at_the_documented_size_and_grows_to_the_ceiling() {

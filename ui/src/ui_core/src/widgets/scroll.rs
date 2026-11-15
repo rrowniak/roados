@@ -17,15 +17,14 @@
 //! be checked: by the offset, by the content rect, and by the content node's own
 //! position in the tree, all at once.
 //!
-//! The second decision is clipping, and it is a decision this widget is not free
-//! to make. [`DrawCommand`] has **no scissor state of its own** —
-//! [`Renderer::set_scissor`](crate::render::Renderer::set_scissor) applies to the
-//! whole frame, and `doc/ui/IMPLEMENTATION_STATE.md` § *Deviations from the
-//! spec, and why* records per-node clipping as a deferral. So a scroll cannot
-//! clip at the GL level, and nothing here pretends to. What it can do is the
-//! half that does not need a scissor:
+//! The second decision is clipping. [`DrawCommand`] carries no clip of its own —
+//! a clip belongs to the **node**, not the command — and
+//! `Renderer::apply_clip` sets the node's
+//! [`LayoutState::clip`](crate::layout::LayoutState::clip) as the scissor when
+//! its batch is submitted. So a scroll **is** clipped at the GL level; what this
+//! module does is the half that saves work before a command reaches the GPU:
 //!
-//! - [`Scroll::clip_rect`] hands back the rect a renderer would scissors to, and
+//! - [`Scroll::clip_rect`] hands back the rect the content is scissored to, and
 //!   that rect is **already computed by the layout pass**: it is the content
 //!   node's own [`LayoutState::clip`](crate::layout::LayoutState::clip), which
 //!   the pass fills in as the intersection of every ancestor's box with the
@@ -42,15 +41,15 @@
 //!   cheap.
 //!
 //! [`clip_commands`] **keeps a command that straddles the edge whole** rather
-//! than trimming it, and that is a deliberate choice with a reason. A
+//! than trimming it, and that is a deliberate choice: a command trimmed here
+//! would be a different shape, not a clipped one. A
 //! [`DrawCommand::RoundedRect`] *fills* its rect, so a rounded rectangle trimmed
-//! to part of itself is not a clipped rounded rectangle — it is a smaller one,
-//! with its own corner radii, which is a different shape. The same is true of a
-//! [`DrawCommand::Circle`], whose centre and radius cannot express the part of a
-//! disc that is left, and of a [`DrawCommand::Text`] run, whose width is not in
-//! the command at all. Real clipping needs the scissor; the honest thing for a
-//! function that has none is to drop what is wholly gone and leave what is
-//! partly there for the scissor to cut.
+//! to part of itself is a smaller one, with its own corner radii. The same is
+//! true of a [`DrawCommand::Circle`], whose centre and radius cannot express the
+//! part of a disc that is left, and of a [`DrawCommand::Text`] run, whose width
+//! is not in the command at all. The scissor cuts all four at the node's clip, so
+//! this function drops what is wholly gone and leaves what is partly there for
+//! the GPU to cut.
 //!
 //! # Where the arena is needed
 //!
@@ -595,8 +594,8 @@ impl Scroll {
         true
     }
 
-    /// Returns the rect a renderer would scissors the content to, or `None` if
-    /// the arena no longer holds the content.
+    /// Returns the rect the content is scissored to, or `None` if the arena no
+    /// longer holds the content.
     ///
     /// This is the layout pass's own answer, read off the content node: the
     /// intersection of every ancestor's box with the scroll's own. It is not
@@ -605,13 +604,9 @@ impl Scroll {
     /// scissor in the wrong place, which is a wrong picture rather than a slow
     /// frame.
     ///
-    /// `doc/ui/IMPLEMENTATION_STATE.md` § *Deviations from the spec, and why*
-    /// records that no per-node scissor is applied yet:
-    /// [`Renderer::set_scissor`](crate::render::Renderer::set_scissor) is a
-    /// frame-wide state and a [`DrawCommand`] carries none. **Applying this rect
-    /// is that task's job**, at the point in the render pass where the content
-    /// node's commands are submitted; until then the viewport's own box is the
-    /// only thing keeping a scrolled list inside it.
+    /// The renderer applies it: `Renderer::apply_clip`
+    /// sets the content node's [`LayoutState::clip`](crate::layout::LayoutState::clip)
+    /// as the scissor when the content's batch is submitted.
     #[must_use]
     pub fn clip_rect(&self, nodes: &Arena<WidgetNode>) -> Option<Rect> {
         nodes
@@ -1664,11 +1659,11 @@ pub fn command_bounds(command: &DrawCommand) -> Option<Rect> {
 ///   its own corners — a different shape, not a clipped one. A
 ///   [`DrawCommand::Circle`] has no way to say "all but the bottom of this
 ///   disc" in a centre and a radius, and a [`DrawCommand::Text`] run does not
-///   carry its width at all. Real clipping needs the scissor, and
-///   [`Scroll::clip_rect`] is where the rect for it comes from; until that
-///   scissor is applied, this function is the part of the job that can be done
-///   without one, and doing the other half wrongly would look worse than not
-///   doing it.
+///   carry its width at all. The GPU cuts those at the node's
+///   [`LayoutState::clip`](crate::layout::LayoutState::clip), which
+///   `Renderer::apply_clip` sets as the
+///   scissor; this function is the part of the job that saves work before a
+///   command reaches the GPU.
 ///
 /// A command [`command_bounds`] cannot bound is kept, so a text run on screen is
 /// never dropped for want of a measurement this layer has no way to take.

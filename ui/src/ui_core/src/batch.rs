@@ -974,6 +974,59 @@ mod tests {
         assert_eq!(batched.opaque[2].clip, None, "unclipped is its own batch");
     }
 
+    #[test]
+    fn a_batch_under_a_different_clip_does_not_merge_even_with_the_same_key() {
+        // **The mutation this kills is deleting `&& batch.clip == clip` from the
+        // merge predicate.** Two commands with one key and two clips would then
+        // share a batch, and one draw call has one scissor: one of the two clips
+        // would be applied to both.
+        let a = Some(Rect::new(0.0, 0.0, 10.0, 10.0));
+        let b = Some(Rect::new(0.0, 100.0, 10.0, 10.0));
+        let mut batcher = Batcher::new();
+        batcher.add_clipped(rect(opaque()), a);
+        batcher.add_clipped(rect(opaque()), b);
+
+        let batched = batcher.finish();
+        assert_eq!(
+            batched.opaque.len(),
+            2,
+            "one key and two clips are two draw calls, not one"
+        );
+        assert_eq!(batched.opaque[0].clip, a);
+        assert_eq!(batched.opaque[1].clip, b);
+        assert_eq!(batched.opaque[0].commands.len(), 1);
+        assert_eq!(batched.opaque[1].commands.len(), 1);
+    }
+
+    #[test]
+    fn the_same_clip_after_a_different_one_is_a_third_batch() {
+        // **The mutation this kills is merging across a singleton.** A mesh seals
+        // the segment it ends, so the clip-`a` command recorded after it cannot
+        // join the clip-`a` batch recorded before it: that batch belongs to the
+        // sealed segment and is submitted before the mesh.
+        let a = Some(Rect::new(0.0, 0.0, 10.0, 10.0));
+        let b = Some(Rect::new(0.0, 100.0, 10.0, 10.0));
+        let mut batcher = Batcher::new();
+        batcher.add_clipped(rect(opaque()), a);
+        batcher.add_clipped(mesh(1.0), b);
+        batcher.add_clipped(rect(opaque()), a);
+
+        let batched = batcher.finish();
+        assert_eq!(
+            batched.opaque.len(),
+            3,
+            "the clip-`a` command after the mesh is its own batch: {batched:?}"
+        );
+        assert_eq!(batched.opaque[0].clip, a);
+        assert_eq!(batched.opaque[0].commands.len(), 1);
+        assert_eq!(batched.opaque[1].clip, b);
+        assert_eq!(
+            batched.opaque[2].clip, a,
+            "the same clip, and still a third"
+        );
+        assert_eq!(batched.opaque[2].commands.len(), 1);
+    }
+
     /// A text run of `color` clipped to `clip`, recorded through the painter so
     /// the test builds the command the way production does.
     fn clipped_text(color: Color, clip: Option<Rect>) -> DrawCommand {

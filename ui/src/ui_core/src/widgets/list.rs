@@ -114,16 +114,16 @@
 //!
 //! # Clipping
 //!
-//! [`List::clip_rect`] is the rect a renderer would scissors to, derived from
+//! [`List::clip_rect`] is the rect this list's rows are scissored to, derived from
 //! [`visible_rect`] rather than from a
 //! second piece of intersection arithmetic, and [`List::paint`] drops the
 //! commands that are wholly outside it. That is requirement 5's "items outside
-//! the viewport are not drawn", and it is the half that needs no scissor.
-//! **Real per-node clipping is not here and no scissor is set.** A
-//! [`DrawCommand`] carries no scissor state of its own and
-//! [`Renderer::set_scissor`](crate::render::Renderer::set_scissor) applies to the
-//! whole frame; `doc/ui/IMPLEMENTATION_STATE.md` § *Deviations from the spec, and
-//! why* records that as a deferral.
+//! the viewport are not drawn", and it is the half that saves work before a
+//! command reaches the GPU. **The clip itself is the node's own
+//! [`LayoutState::clip`](crate::layout::LayoutState::clip)**: the layout pass
+//! stores the ancestors' intersection, and
+//! `Renderer::apply_clip` sets it as the
+//! scissor when the rows are submitted.
 //!
 //! # What is deliberately not here
 //!
@@ -867,18 +867,16 @@ impl List {
         )
     }
 
-    /// Returns the rect a renderer would scissors this list to.
+    /// Returns the rect this list's rows are scissored to.
     ///
     /// It is the viewport, shortened to the extent of the content that is left
     /// under the offset — which is [`visible_rect`]'s
     /// own answer about the band, in the window's coordinates rather than the
-    /// content's. It is **not** applied: a [`DrawCommand`] carries no scissor
-    /// state of its own and
-    /// [`Renderer::set_scissor`](crate::render::Renderer::set_scissor) applies to
-    /// the whole frame, which `doc/ui/IMPLEMENTATION_STATE.md` § *Deviations
-    /// from the spec, and why* records as a deferral. What [`paint`](List::paint)
-    /// does with it is the half that needs no scissor, which is dropping the
-    /// commands that are wholly outside it.
+    /// content's. The node's
+    /// [`LayoutState::clip`](crate::layout::LayoutState::clip) is the ancestor
+    /// intersection the renderer applies; this is the widget's own narrowing of
+    /// it, and what [`paint`](List::paint) does with it is drop the commands that
+    /// are wholly outside it.
     ///
     /// # Examples
     ///
